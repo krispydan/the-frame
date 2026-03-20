@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# The Frame
 
-## Getting Started
+Jaxy's internal business operations platform — modular ERP for eyewear brand management.
 
-First, run the development server:
+## Tech Stack
+
+- **Framework:** Next.js 16 (App Router, TypeScript)
+- **UI:** shadcn/ui + Tailwind CSS v4
+- **Database:** SQLite (better-sqlite3) + Drizzle ORM
+- **Auth:** NextAuth v5 (credentials + JWT)
+- **Deployment:** Railway
+
+## Local Development
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev        # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Default login: `daniel@getjaxy.com` / `jaxy2026`
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Project Structure
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+src/
+├── app/              # Next.js pages & API routes
+├── components/ui/    # shadcn/ui components
+├── lib/              # Shared utilities (db, middleware)
+├── modules/          # Feature modules
+│   ├── core/         # Auth, logging, events, jobs, webhooks
+│   ├── catalog/      # Product catalog (migrated from catalog-tool)
+│   ├── sales/        # CRM & pipeline
+│   ├── orders/       # Order management
+│   ├── inventory/    # Stock tracking
+│   ├── finance/      # Xero integration
+│   ├── customers/    # Customer health
+│   ├── marketing/    # Campaigns
+│   └── intelligence/ # AI agents
+└── scripts/          # Migration & utility scripts
+```
 
-## Learn More
+## Railway Deployment
 
-To learn more about Next.js, take a look at the following resources:
+1. Create a Railway project and link this repo
+2. Set environment variables:
+   - `NEXTAUTH_SECRET` — generate with `openssl rand -base64 32`
+   - `NEXTAUTH_URL` — your Railway URL
+   - `DATABASE_URL` — path to SQLite on Railway volume (e.g., `/data/the-frame.db`)
+3. Attach a volume mounted at `/data`
+4. Deploy — Railway uses `railway.toml` config automatically
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Health Check
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+GET /api/health → { status: "ok", version, uptime, modules, database }
+```
 
-## Deploy on Vercel
+### Webhooks
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```
+POST /api/webhooks/{provider}  # provider: shopify, faire, instantly, xero, test
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Database
+
+SQLite with WAL mode. The `data/` directory is gitignored — the DB lives on Railway's persistent volume in production.
+
+To migrate catalog data from the old catalog tool:
+```bash
+npx tsx src/scripts/migrate-catalog.ts
+```
