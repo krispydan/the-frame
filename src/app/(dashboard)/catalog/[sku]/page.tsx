@@ -22,6 +22,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { FACTORY_MAP } from "@/modules/catalog/schema";
+import { ImageManagementTab } from "@/modules/catalog/components/image-management-tab";
+import { CopyManagementTab } from "@/modules/catalog/components/copy-management-tab";
+import { TagManagementTab } from "@/modules/catalog/components/tag-management-tab";
 
 type Product = {
   id: string;
@@ -410,59 +413,19 @@ export default function ProductDetailPage() {
           </Card>
         </TabsContent>
 
-        {/* Images Tab — placeholder, implemented in F4-003 */}
+        {/* Images Tab */}
         <TabsContent value="images">
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-center text-muted-foreground space-y-2">
-                <ImageIcon className="h-12 w-12 mx-auto opacity-50" />
-                <p>{totalImages} images across {skusList.length} SKUs ({approvedImages} approved)</p>
-                <p className="text-sm">Full image management available in the Images tab.</p>
-              </div>
-            </CardContent>
-          </Card>
+          <ImageManagementTab productId={productId!} skus={skusList} onRefresh={loadProduct} />
         </TabsContent>
 
-        {/* Copy Tab — placeholder, implemented in F4-004 */}
+        {/* Copy Tab */}
         <TabsContent value="copy">
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-center text-muted-foreground space-y-2">
-                <FileText className="h-12 w-12 mx-auto opacity-50" />
-                <p>Copy management — generate AI copy for product descriptions, bullet points, SEO.</p>
-              </div>
-            </CardContent>
-          </Card>
+          <CopyManagementTab productId={productId!} product={product} onRefresh={loadProduct} />
         </TabsContent>
 
-        {/* Tags Tab — placeholder, implemented in F4-005 */}
+        {/* Tags Tab */}
         <TabsContent value="tags">
-          <Card>
-            <CardContent className="p-6">
-              {tagsList.length > 0 ? (
-                <div className="space-y-3">
-                  {Object.entries(tagsList.reduce<Record<string, string[]>>((acc, t) => {
-                    const dim = t.dimension || "other";
-                    if (!acc[dim]) acc[dim] = [];
-                    if (t.tagName) acc[dim].push(t.tagName);
-                    return acc;
-                  }, {})).map(([dim, names]) => (
-                    <div key={dim}>
-                      <p className="text-xs text-muted-foreground capitalize mb-1">{dim}</p>
-                      <div className="flex flex-wrap gap-1">
-                        {names.map((n) => <Badge key={n} variant="outline">{n}</Badge>)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center text-muted-foreground space-y-2">
-                  <Tag className="h-12 w-12 mx-auto opacity-50" />
-                  <p>No tags yet. Use AI suggestions to add tags.</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <TagManagementTab productId={productId!} tags={tagsList} onRefresh={loadProduct} />
         </TabsContent>
 
         {/* Export Preview Tab */}
