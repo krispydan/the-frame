@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { sqlite } from "@/lib/db";
 import { CustomerDetail } from "@/modules/customers/components/customer-detail";
 import { notFound } from "next/navigation";

@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 /**
  * F3-007: Reply Inbox
  */

@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 /**
  * F3-006: Campaign Detail + A/B Test Comparison
  */
