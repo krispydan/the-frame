@@ -89,6 +89,11 @@ export const contacts = sqliteTable("contacts", {
 ]);
 
 // ── Smart Lists (Saved Filters) ──
+// Re-export pipeline schema
+export { deals, dealActivities, DEAL_STAGES, DEAL_STAGE_LABELS, DEAL_STAGE_COLORS, DEAL_CHANNELS, ACTIVITY_TYPES } from "./pipeline";
+export type { DealStage, DealChannel, ActivityType } from "./pipeline";
+
+// ── Smart Lists (Saved Filters) ──
 export const smartLists = sqliteTable("smart_lists", {
   id: id(),
   name: text("name").notNull(),
