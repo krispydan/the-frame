@@ -353,27 +353,6 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
-                  <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">Coming Soon</span>
-                </CardTitle>
-                <CardDescription>Wholesale marketplace integration</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Input disabled placeholder="Faire API key" />
-              </CardContent>
-            </Card>
-
-            <Card className="opacity-60">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  Shopify
-                  <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">Coming Soon</span>
-                </CardTitle>
-                <CardDescription>E-commerce store sync</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Input disabled placeholder="Shopify store URL" />
-              </CardContent>
-            </Card>
           </div>
         </TabsContent>
 

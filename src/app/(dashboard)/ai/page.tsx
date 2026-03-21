@@ -307,7 +307,7 @@ export default function AICommandCenter() {
           <div className="flex items-center justify-between">
             <CardTitle>Recent Agent Runs</CardTitle>
             <div className="flex gap-2">
-              <Select value={filterAgent} onValueChange={setFilterAgent}>
+              <Select value={filterAgent} onValueChange={(v) => setFilterAgent(v ?? "all")}>
                 <SelectTrigger className="w-[160px] h-8 text-xs">
                   <SelectValue placeholder="All agents" />
                 </SelectTrigger>
@@ -318,7 +318,7 @@ export default function AICommandCenter() {
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={filterStatus} onValueChange={setFilterStatus}>
+              <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v ?? "all")}>
                 <SelectTrigger className="w-[130px] h-8 text-xs">
                   <SelectValue placeholder="All statuses" />
                 </SelectTrigger>
