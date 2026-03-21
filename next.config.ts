@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  // output: "standalone", // Disabled — using `next start` on Railway
   serverExternalPackages: ["better-sqlite3"],
   typescript: {
     // TODO: Fix remaining type errors in marketing components + MCP tools
