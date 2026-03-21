@@ -7,6 +7,7 @@ export default defineConfig({
     "./src/modules/catalog/schema/index.ts",
     "./src/modules/orders/schema/index.ts",
     "./src/modules/inventory/schema/index.ts",
+    "./src/modules/customers/schema/index.ts",
   ],
   out: "./drizzle/migrations",
   dialect: "sqlite",
