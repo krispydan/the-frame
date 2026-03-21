@@ -25,10 +25,20 @@ interface OrderCreatedEvent {
   userId?: string;
 }
 
+interface OrderConfirmedEvent {
+  orderId: string;
+  companyId: string;
+  total: number;
+}
+
 interface OrderShippedEvent {
   orderId: string;
   trackingNumber?: string;
   carrier?: string;
+}
+
+interface OrderDeliveredEvent {
+  orderId: string;
 }
 
 interface InventoryBelowReorderEvent {
@@ -83,7 +93,9 @@ export interface EventMap {
   "deal.won": DealWonEvent;
   "deal.stage_changed": DealStageChangedEvent;
   "order.created": OrderCreatedEvent;
+  "order.confirmed": OrderConfirmedEvent;
   "order.shipped": OrderShippedEvent;
+  "order.delivered": OrderDeliveredEvent;
   "inventory.below_reorder": InventoryBelowReorderEvent;
   "customer.health_changed": CustomerHealthChangedEvent;
   "po.status_changed": POStatusChangedEvent;
@@ -101,7 +113,9 @@ const eventModuleMap: Record<EventType, string> = {
   "deal.won": "sales",
   "deal.stage_changed": "sales",
   "order.created": "orders",
+  "order.confirmed": "orders",
   "order.shipped": "orders",
+  "order.delivered": "orders",
   "inventory.below_reorder": "inventory",
   "customer.health_changed": "customers",
   "po.status_changed": "inventory",
