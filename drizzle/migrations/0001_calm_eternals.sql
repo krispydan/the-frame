@@ -39,4 +39,4 @@ CREATE TABLE IF NOT EXISTS `marketing_social_posts` (
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `idx_social_post_status` ON `marketing_social_posts` (`status`);--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `idx_social_post_platform` ON `marketing_social_posts` (`platform`);--> statement-breakpoint
-ALTER TABLE `marketing_seo_keywords` ADD `difficulty` integer;
+SELECT 1; -- difficulty column added in db init (ALTER TABLE not idempotent in SQLite)

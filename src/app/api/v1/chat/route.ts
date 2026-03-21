@@ -3,7 +3,7 @@
  * Parses natural language, routes to MCP tools, returns structured response.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { mcpRegistry } from "@/modules/core/mcp/server";
+import { mcpRegistry, ensureAllToolsRegistered } from "@/modules/core/mcp/server";
 
 interface IntentMatch {
   tool: string;
@@ -207,6 +207,7 @@ Ask me things like:
 I can also navigate: "go to catalog", "go to pipeline"`;
 
 export async function POST(req: NextRequest) {
+  ensureAllToolsRegistered();
   try {
     const body = await req.json();
     const message = body.message?.trim();

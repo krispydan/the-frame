@@ -25,6 +25,11 @@ sqlite.pragma("temp_store = MEMORY");
 export const db = drizzle(sqlite);
 export { sqlite };
 
+// Ensure columns that ALTER TABLE can't add idempotently
+try {
+  sqlite.exec("ALTER TABLE marketing_seo_keywords ADD COLUMN difficulty INTEGER");
+} catch { /* column already exists */ }
+
 // Auto-run migrations on startup (idempotent — safe to run every time)
 try {
   const migrationsFolder = path.join(process.cwd(), "drizzle", "migrations");

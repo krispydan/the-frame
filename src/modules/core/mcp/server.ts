@@ -78,33 +78,35 @@ class McpToolRegistry {
 // ── Singleton registry ──
 export const mcpRegistry = new McpToolRegistry();
 
-// ── Register module tools (lazy — imported at registry creation) ──
-import { registerInventoryMcpTools } from "@/modules/inventory/mcp";
-registerInventoryMcpTools();
-
-import { registerFinanceMcpTools } from "@/modules/finance/mcp/tools";
-registerFinanceMcpTools();
-
-// Register marketing tools (array-style registration)
-import { marketingMcpTools } from "@/modules/marketing/mcp/tools";
-for (const tool of marketingMcpTools) {
-  mcpRegistry["tools"].set(tool.name, tool);
+// ── Lazy tool registration (avoids circular imports at module scope) ──
+let _toolsRegistered = false;
+export function ensureAllToolsRegistered() {
+  if (_toolsRegistered) return;
+  _toolsRegistered = true;
+  
+  // These are dynamically required to avoid circular deps during build
+  try {
+    const inv = require("@/modules/inventory/mcp");
+    inv.registerInventoryMcpTools();
+  } catch {}
+  try {
+    const fin = require("@/modules/finance/mcp/tools");
+    fin.registerFinanceMcpTools();
+  } catch {}
+  try {
+    const mkt = require("@/modules/marketing/mcp/tools");
+    for (const tool of mkt.marketingMcpTools) mcpRegistry["tools"].set(tool.name, tool);
+  } catch {}
+  try {
+    const intel = require("@/modules/intelligence/mcp/tools");
+    for (const tool of intel.intelligenceMcpTools) mcpRegistry["tools"].set(tool.name, tool);
+  } catch {}
+  // Side-effect registrations
+  try { require("@/modules/sales/mcp/tools"); } catch {}
+  try { require("@/modules/catalog/mcp/tools"); } catch {}
+  try { require("@/modules/customers/mcp/tools"); } catch {}
+  try { require("@/modules/orders/mcp/tools"); } catch {}
 }
-
-// Register intelligence tools (array-style registration)
-import { intelligenceMcpTools } from "@/modules/intelligence/mcp/tools";
-for (const tool of intelligenceMcpTools) {
-  mcpRegistry["tools"].set(tool.name, tool);
-}
-
-// Register sales tools (imported for side-effects)
-import "@/modules/sales/mcp/tools";
-// Register catalog tools (imported for side-effects)
-import "@/modules/catalog/mcp/tools";
-// Register customer tools (imported for side-effects)
-import "@/modules/customers/mcp/tools";
-// Register order tools (imported for side-effects)
-import "@/modules/orders/mcp/tools";
 
 // ── Register Phase 0 system tools ──
 
@@ -141,14 +143,17 @@ mcpRegistry.register(
   "Lists all registered modules and their status",
   z.object({}),
   async () => {
-    // Dynamic import to avoid circular dependency
-    const { modules } = await import("@/modules");
-    const moduleList = modules.map((m: { name: string; label: string; description: string; routes: unknown[] }) => ({
-      name: m.name,
-      label: m.label,
-      description: m.description,
-      routes: m.routes.length,
-    }));
+    const moduleList = [
+      { name: "core", label: "Core", description: "System management" },
+      { name: "sales", label: "Sales", description: "Prospect & deal management" },
+      { name: "catalog", label: "Catalog", description: "Product catalog" },
+      { name: "orders", label: "Orders", description: "Order processing" },
+      { name: "inventory", label: "Inventory", description: "Stock & POs" },
+      { name: "finance", label: "Finance", description: "Financial operations" },
+      { name: "customers", label: "Customers", description: "Customer success" },
+      { name: "marketing", label: "Marketing", description: "Marketing hub" },
+      { name: "intelligence", label: "Intelligence", description: "Business intelligence" },
+    ];
 
     return {
       content: [
