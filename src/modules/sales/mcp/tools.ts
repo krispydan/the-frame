@@ -272,6 +272,160 @@ mcpRegistry.register(
   }
 );
 
+// ── sales.list_deals ──
+mcpRegistry.register(
+  "sales.list_deals",
+  "List deals filtered by stage, owner, company",
+  z.object({
+    stage: z.string().optional().describe("Filter by stage: outreach, contact_made, interested, order_placed, interested_later, not_interested"),
+    owner_id: z.string().optional().describe("Filter by owner UUID"),
+    company_id: z.string().optional().describe("Filter by company UUID"),
+    tab: z.string().optional().describe("Tab: active, snoozed, reorder (default: active)"),
+  }),
+  async (args) => {
+    const clauses: string[] = [];
+    const vals: unknown[] = [];
+    const tab = args.tab || "active";
+
+    if (tab === "snoozed") {
+      clauses.push("d.snooze_until IS NOT NULL AND d.snooze_until > datetime('now')");
+    } else if (tab === "reorder") {
+      clauses.push("d.reorder_due_at IS NOT NULL AND d.reorder_due_at <= datetime('now', '+14 days')");
+    } else {
+      clauses.push("(d.snooze_until IS NULL OR d.snooze_until <= datetime('now'))");
+    }
+    if (args.stage) { clauses.push("d.stage = ?"); vals.push(args.stage); }
+    if (args.owner_id) { clauses.push("d.owner_id = ?"); vals.push(args.owner_id); }
+    if (args.company_id) { clauses.push("d.company_id = ?"); vals.push(args.company_id); }
+
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const rows = sqlite.prepare(`
+      SELECT d.*, c.name as company_name FROM deals d LEFT JOIN companies c ON c.id = d.company_id ${where} ORDER BY d.last_activity_at DESC LIMIT 100
+    `).all(...vals);
+    return { content: [{ type: "text" as const, text: JSON.stringify(rows, null, 2) }] };
+  }
+);
+
+// ── sales.create_deal ──
+mcpRegistry.register(
+  "sales.create_deal",
+  "Create a new deal",
+  z.object({
+    company_id: z.string().describe("Company UUID"),
+    title: z.string().optional().describe("Deal title (defaults to company name)"),
+    stage: z.string().optional().describe("Initial stage (default: outreach)"),
+    channel: z.string().optional().describe("Channel: shopify, faire, phone, direct, other"),
+    value: z.number().optional().describe("Deal value in USD"),
+    notes: z.string().optional().describe("Initial notes"),
+  }),
+  async (args) => {
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+    const company = sqlite.prepare("SELECT name FROM companies WHERE id = ?").get(args.company_id) as { name: string } | undefined;
+    const title = args.title || company?.name || "New Deal";
+
+    sqlite.prepare(`
+      INSERT INTO deals (id, company_id, title, value, stage, channel, last_activity_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, args.company_id, title, args.value || null, args.stage || "outreach", args.channel || null, now, now, now);
+
+    if (args.notes) {
+      sqlite.prepare(`INSERT INTO deal_activities (id, deal_id, company_id, type, description, created_at) VALUES (?, ?, ?, 'note', ?, ?)`).run(crypto.randomUUID(), id, args.company_id, args.notes, now);
+    }
+
+    return { content: [{ type: "text" as const, text: JSON.stringify({ id, title, stage: args.stage || "outreach", success: true }) }] };
+  }
+);
+
+// ── sales.move_deal ──
+mcpRegistry.register(
+  "sales.move_deal",
+  "Change a deal's stage",
+  z.object({
+    deal_id: z.string().describe("Deal UUID"),
+    stage: z.string().describe("New stage"),
+  }),
+  async ({ deal_id, stage }) => {
+    const deal = sqlite.prepare("SELECT stage, company_id FROM deals WHERE id = ?").get(deal_id) as { stage: string; company_id: string } | undefined;
+    if (!deal) return { content: [{ type: "text" as const, text: "Deal not found" }], isError: true };
+
+    const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+    sqlite.prepare("UPDATE deals SET stage = ?, previous_stage = ?, updated_at = ?, last_activity_at = ? WHERE id = ?").run(stage, deal.stage, now, now, deal_id);
+    sqlite.prepare(`INSERT INTO deal_activities (id, deal_id, company_id, type, description, metadata, created_at) VALUES (?, ?, ?, 'stage_change', ?, ?, ?)`).run(
+      crypto.randomUUID(), deal_id, deal.company_id, `${deal.stage} → ${stage}`, JSON.stringify({ from: deal.stage, to: stage }), now
+    );
+
+    if (stage === "order_placed") {
+      const reorder = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 19).replace("T", " ");
+      sqlite.prepare("UPDATE deals SET closed_at = ?, reorder_due_at = ? WHERE id = ?").run(now, reorder, deal_id);
+    }
+
+    return { content: [{ type: "text" as const, text: JSON.stringify({ success: true, from: deal.stage, to: stage }) }] };
+  }
+);
+
+// ── sales.snooze_deal ──
+mcpRegistry.register(
+  "sales.snooze_deal",
+  "Snooze a deal until a specific date",
+  z.object({
+    deal_id: z.string().describe("Deal UUID"),
+    until: z.string().describe("Snooze until date (YYYY-MM-DD)"),
+    reason: z.string().optional().describe("Reason for snooze"),
+  }),
+  async ({ deal_id, until, reason }) => {
+    const deal = sqlite.prepare("SELECT company_id FROM deals WHERE id = ?").get(deal_id) as { company_id: string } | undefined;
+    if (!deal) return { content: [{ type: "text" as const, text: "Deal not found" }], isError: true };
+
+    const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+    sqlite.prepare("UPDATE deals SET snooze_until = ?, snooze_reason = ?, updated_at = ? WHERE id = ?").run(until, reason || null, now, deal_id);
+    sqlite.prepare(`INSERT INTO deal_activities (id, deal_id, company_id, type, description, created_at) VALUES (?, ?, ?, 'snooze', ?, ?)`).run(
+      crypto.randomUUID(), deal_id, deal.company_id, `Snoozed until ${until}${reason ? `: ${reason}` : ""}`, now
+    );
+
+    return { content: [{ type: "text" as const, text: JSON.stringify({ success: true, snoozed_until: until }) }] };
+  }
+);
+
+// ── sales.enrich_prospect ──
+mcpRegistry.register(
+  "sales.enrich_prospect",
+  "Trigger enrichment for companies via Outscraper",
+  z.object({
+    company_ids: z.array(z.string()).optional().describe("Company UUIDs to enrich (omit for auto-select)"),
+  }),
+  async ({ company_ids }) => {
+    const { batchEnrich, getCompaniesNeedingEnrichment } = await import("@/modules/sales/lib/enrichment");
+    let ids = company_ids;
+    if (!ids || ids.length === 0) {
+      ids = getCompaniesNeedingEnrichment(20).map(c => c.id);
+    }
+    if (ids.length === 0) return { content: [{ type: "text" as const, text: JSON.stringify({ message: "No companies need enrichment" }) }] };
+    const result = await batchEnrich(ids);
+    return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// ── sales.get_reorder_queue ──
+mcpRegistry.register(
+  "sales.get_reorder_queue",
+  "List deals with upcoming reorder dates",
+  z.object({
+    days_ahead: z.number().optional().describe("Look ahead days (default 14)"),
+  }),
+  async ({ days_ahead }) => {
+    const d = days_ahead ?? 14;
+    const rows = sqlite.prepare(`
+      SELECT d.*, c.name as company_name FROM deals d
+      LEFT JOIN companies c ON c.id = d.company_id
+      WHERE d.reorder_due_at IS NOT NULL AND d.reorder_due_at <= datetime('now', '+${d} days')
+      AND d.stage = 'order_placed'
+      ORDER BY d.reorder_due_at ASC
+    `).all();
+    return { content: [{ type: "text" as const, text: JSON.stringify(rows, null, 2) }] };
+  }
+);
+
 // ── sales.get_smart_lists ──
 mcpRegistry.register(
   "sales.get_smart_lists",
