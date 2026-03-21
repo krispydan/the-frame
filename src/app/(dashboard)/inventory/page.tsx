@@ -207,7 +207,7 @@ export default function InventoryPage() {
             className="pl-9"
           />
         </div>
-        <Select value={factoryFilter} onValueChange={setFactoryFilter}>
+        <Select value={factoryFilter} onValueChange={(v) => setFactoryFilter(v || "all")}>
           <SelectTrigger className="w-[150px]">
             <SelectValue placeholder="Factory" />
           </SelectTrigger>
@@ -219,7 +219,7 @@ export default function InventoryPage() {
             <SelectItem value="JX4">JX4 — Brilliant</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={stockFilter} onValueChange={setStockFilter}>
+        <Select value={stockFilter} onValueChange={(v) => setStockFilter(v || "all")}>
           <SelectTrigger className="w-[150px]">
             <SelectValue placeholder="Stock Status" />
           </SelectTrigger>

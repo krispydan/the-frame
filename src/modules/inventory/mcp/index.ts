@@ -1,9 +1,6 @@
 import { mcpRegistry } from "@/modules/core/mcp/server";
 import { z } from "zod";
-import { db, sqlite } from "@/lib/db";
-import { sql } from "drizzle-orm";
-import { calculateSellThrough, getReorderRecommendations } from "@/modules/inventory/lib/sell-through";
-import { runDemandForecast } from "@/modules/inventory/agents/demand-forecaster";
+import { sqlite } from "@/lib/db";
 
 export function registerInventoryMcpTools() {
   // ── inventory.get_stock_levels ──
@@ -29,7 +26,7 @@ export function registerInventoryMcpTools() {
       if (args.sku) { query += " AND s.sku = ?"; params.push(args.sku); }
       if (args.factory) { query += " AND s.sku LIKE ?"; params.push(args.factory + "%"); }
       if (args.lowStockOnly) { query += " AND (i.quantity <= i.reorder_point OR i.quantity = 0)"; }
-      query += " ORDER BY i.days_of_stock ASC";
+      query += " ORDER BY i.days_of_stock ASC LIMIT 50";
 
       const rows = sqlite.prepare(query).all(...params);
       return { content: [{ type: "text" as const, text: JSON.stringify(rows, null, 2) }] };
@@ -39,21 +36,39 @@ export function registerInventoryMcpTools() {
   // ── inventory.get_sell_through ──
   mcpRegistry.register(
     "inventory.get_sell_through",
-    "Calculate sell-through velocity for all SKUs. Shows weekly rate, days of stock, and velocity classification.",
+    "Get sell-through velocity for all SKUs. Shows weekly rate, days of stock, and velocity classification.",
     z.object({
-      windowDays: z.number().optional().describe("Analysis window in days (default 30)"),
+      factory: z.string().optional().describe("Filter by factory code"),
     }),
     async (args) => {
-      const results = calculateSellThrough(args.windowDays || 30);
-      const summary = {
-        total: results.length,
-        fast: results.filter(r => r.velocity === "fast").length,
-        normal: results.filter(r => r.velocity === "normal").length,
-        slow: results.filter(r => r.velocity === "slow").length,
-        dead: results.filter(r => r.velocity === "dead").length,
-        needsReorder: results.filter(r => r.needsReorder).length,
-      };
-      return { content: [{ type: "text" as const, text: JSON.stringify({ summary, items: results.slice(0, 20) }, null, 2) }] };
+      let query = `
+        SELECT s.sku, s.color_name, p.name as product_name,
+               i.quantity, i.sell_through_weekly, i.days_of_stock, i.needs_reorder,
+               CASE
+                 WHEN i.sell_through_weekly >= 10 THEN 'fast'
+                 WHEN i.sell_through_weekly >= 3 THEN 'normal'
+                 WHEN i.sell_through_weekly >= 0.5 THEN 'slow'
+                 ELSE 'dead'
+               END as velocity
+        FROM inventory i
+        JOIN catalog_skus s ON i.sku_id = s.id
+        JOIN catalog_products p ON s.product_id = p.id
+        WHERE 1=1
+      `;
+      const params: unknown[] = [];
+      if (args.factory) { query += " AND s.sku LIKE ?"; params.push(args.factory + "%"); }
+      query += " ORDER BY i.days_of_stock ASC LIMIT 50";
+
+      const rows = sqlite.prepare(query).all(...params);
+      const all = sqlite.prepare(`SELECT COUNT(*) as total,
+        SUM(CASE WHEN sell_through_weekly >= 10 THEN 1 ELSE 0 END) as fast,
+        SUM(CASE WHEN sell_through_weekly >= 3 AND sell_through_weekly < 10 THEN 1 ELSE 0 END) as normal,
+        SUM(CASE WHEN sell_through_weekly >= 0.5 AND sell_through_weekly < 3 THEN 1 ELSE 0 END) as slow,
+        SUM(CASE WHEN sell_through_weekly < 0.5 THEN 1 ELSE 0 END) as dead,
+        SUM(CASE WHEN needs_reorder = 1 THEN 1 ELSE 0 END) as needs_reorder
+        FROM inventory`).get();
+
+      return { content: [{ type: "text" as const, text: JSON.stringify({ summary: all, items: rows }, null, 2) }] };
     }
   );
 
@@ -70,11 +85,9 @@ export function registerInventoryMcpTools() {
       notes: z.string().optional().describe("Optional notes for the PO"),
     }),
     async (args) => {
-      // Get factory
       const factory = sqlite.prepare("SELECT id FROM inventory_factories WHERE code = ?").get(args.factoryCode) as { id: string } | undefined;
       if (!factory) return { content: [{ type: "text" as const, text: `Error: Factory ${args.factoryCode} not found` }], isError: true };
 
-      // Get last PO number
       const lastPo = sqlite.prepare("SELECT po_number FROM inventory_purchase_orders ORDER BY po_number DESC LIMIT 1").get() as { po_number: string } | undefined;
       let nextNum = 1;
       if (lastPo) {
@@ -111,28 +124,32 @@ export function registerInventoryMcpTools() {
   // ── inventory.get_reorder_recommendations ──
   mcpRegistry.register(
     "inventory.get_reorder_recommendations",
-    "Get AI-powered reorder recommendations. Returns SKUs that need reordering with suggested quantities and urgency levels.",
+    "Get reorder recommendations. Returns SKUs that need reordering with suggested quantities and urgency levels.",
     z.object({
       targetStockDays: z.number().optional().describe("Target days of stock to maintain (default 90)"),
     }),
     async (args) => {
-      const forecast = runDemandForecast(args.targetStockDays || 90);
-      const actionable = forecast.filter(r => r.urgencyLevel !== "ok");
-      return { content: [{ type: "text" as const, text: JSON.stringify({
-        actionableCount: actionable.length,
-        items: actionable.map(r => ({
-          sku: r.sku,
-          product: r.productName,
-          color: r.colorName,
-          factory: r.factoryCode,
-          currentStock: r.currentStock,
-          daysUntilStockout: r.daysUntilStockout,
-          recommendedQty: r.recommendedReorderQty,
-          urgency: r.urgencyLevel,
-          trend: r.trendDirection,
-          notes: r.notes,
-        })),
-      }, null, 2) }] };
+      const targetDays = args.targetStockDays || 90;
+      const rows = sqlite.prepare(`
+        SELECT s.sku, s.color_name, p.name as product_name,
+               i.quantity, i.sell_through_weekly, i.days_of_stock, i.needs_reorder,
+               f.code as factory_code, f.production_lead_days, f.transit_lead_days,
+               CASE
+                 WHEN i.quantity = 0 THEN 'critical'
+                 WHEN i.days_of_stock < (f.production_lead_days + f.transit_lead_days) THEN 'critical'
+                 WHEN i.days_of_stock < (f.production_lead_days + f.transit_lead_days + 14) THEN 'urgent'
+                 ELSE 'watch'
+               END as urgency,
+               MAX(CAST(CEIL(i.sell_through_weekly / 7.0 * ?) AS INTEGER), 100) as recommended_qty
+        FROM inventory i
+        JOIN catalog_skus s ON i.sku_id = s.id
+        JOIN catalog_products p ON s.product_id = p.id
+        LEFT JOIN inventory_factories f ON f.code = SUBSTR(s.sku, 1, 3)
+        WHERE i.needs_reorder = 1 OR i.quantity = 0
+        ORDER BY i.days_of_stock ASC
+      `).all(targetDays);
+
+      return { content: [{ type: "text" as const, text: JSON.stringify({ count: rows.length, targetStockDays: targetDays, items: rows }, null, 2) }] };
     }
   );
 
@@ -156,7 +173,6 @@ export function registerInventoryMcpTools() {
       const newQty = Math.max(0, inv.quantity + args.quantityChange);
       sqlite.prepare("UPDATE inventory SET quantity = ?, updated_at = datetime('now') WHERE id = ?").run(newQty, inv.id);
 
-      // Record movement
       sqlite.prepare(`INSERT INTO inventory_movements (id, sku_id, from_location, to_location, quantity, reason, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?)`)
         .run(crypto.randomUUID(), skuRow.id,
           args.quantityChange < 0 ? "warehouse" : null,

@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mcpRegistry } from "@/modules/core/mcp/server";
+import { registerInventoryMcpTools } from "@/modules/inventory/mcp";
 import { db } from "@/lib/db";
+
+// Lazy register module tools
+let toolsRegistered = false;
+function ensureToolsRegistered() {
+  if (toolsRegistered) return;
+  registerInventoryMcpTools();
+  toolsRegistered = true;
+}
 import { apiKeys } from "@/modules/core/schema";
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
@@ -54,6 +63,7 @@ function authenticateApiKey(request: NextRequest): { ok: true; keyHash: string }
  * Supports: initialize, tools/list, tools/call
  */
 export async function POST(request: NextRequest) {
+  ensureToolsRegistered();
   const auth = authenticateApiKey(request);
   if (!auth.ok) {
     return NextResponse.json(

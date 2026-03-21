@@ -1,6 +1,8 @@
 import { sqliteTable, text, integer, real, index } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
-import { skus } from "@/modules/catalog/schema";
+
+// NOTE: We use plain text references to catalog_skus to avoid circular imports.
+// The foreign key constraints are enforced at the SQLite level via the seed script.
 
 const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
 const timestamp = (name: string) => text(name).default(sql`(datetime('now'))`);
@@ -23,7 +25,7 @@ export const factories = sqliteTable("inventory_factories", {
 // ── Inventory ──
 export const inventory = sqliteTable("inventory", {
   id: id(),
-  skuId: text("sku_id").notNull().references(() => skus.id),
+  skuId: text("sku_id").notNull(),
   location: text("location", {
     enum: ["factory", "in_transit", "warehouse", "3pl"],
   }).notNull().default("warehouse"),
@@ -45,7 +47,7 @@ export const inventory = sqliteTable("inventory", {
 // ── Inventory Movements ──
 export const inventoryMovements = sqliteTable("inventory_movements", {
   id: id(),
-  skuId: text("sku_id").notNull().references(() => skus.id),
+  skuId: text("sku_id").notNull(),
   fromLocation: text("from_location"),
   toLocation: text("to_location"),
   quantity: integer("quantity").notNull(),
@@ -86,7 +88,7 @@ export const purchaseOrdersV2 = sqliteTable("inventory_purchase_orders", {
 export const poLineItems = sqliteTable("inventory_po_line_items", {
   id: id(),
   poId: text("po_id").notNull().references(() => purchaseOrdersV2.id, { onDelete: "cascade" }),
-  skuId: text("sku_id").notNull().references(() => skus.id),
+  skuId: text("sku_id").notNull(),
   quantity: integer("quantity").notNull(),
   unitCost: real("unit_cost").notNull().default(0),
   totalCost: real("total_cost").notNull().default(0),

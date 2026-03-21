@@ -40,7 +40,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { signOut, useSession } from "next-auth/react";
 
-const mainNav = [
+const mainNav: Array<{ title: string; href: string; icon: typeof LayoutDashboard; badge?: string }> = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { title: "Prospects", href: "/prospects", icon: Users },
   { title: "Pipeline", href: "/pipeline", icon: Kanban },

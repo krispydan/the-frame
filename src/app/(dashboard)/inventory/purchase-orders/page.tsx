@@ -232,9 +232,7 @@ export default function PurchaseOrdersPage() {
           </div>
         </div>
         <Dialog open={showCreate} onOpenChange={setShowCreate}>
-          <DialogTrigger asChild>
-            <Button className="gap-2"><Plus className="h-4 w-4" /> New PO</Button>
-          </DialogTrigger>
+          <DialogTrigger render={<Button className="gap-2"><Plus className="h-4 w-4" /> New PO</Button>} />
           <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Create Purchase Order</DialogTitle>
@@ -245,8 +243,8 @@ export default function PurchaseOrdersPage() {
                 <Select
                   value={selectedFactory}
                   onValueChange={(v) => {
-                    setSelectedFactory(v);
-                    loadSkus(v);
+                    setSelectedFactory(v || "");
+                    if (v) loadSkus(v);
                     setLineItems([]);
                   }}
                 >
@@ -264,7 +262,7 @@ export default function PurchaseOrdersPage() {
                   <div className="flex gap-2 items-end">
                     <div className="flex-1">
                       <Label>Add SKU</Label>
-                      <Select value={selectedSku} onValueChange={setSelectedSku}>
+                      <Select value={selectedSku} onValueChange={(v) => setSelectedSku(v || "")}>
                         <SelectTrigger><SelectValue placeholder="Select SKU" /></SelectTrigger>
                         <SelectContent>
                           {skuOptions.map((s) => (
@@ -403,7 +401,7 @@ export default function PurchaseOrdersPage() {
                             value=""
                             onValueChange={(v) => {
                               // Prevent row click
-                              updateStatus(po.id, v);
+                              if (v) updateStatus(po.id, v);
                             }}
                           >
                             <SelectTrigger className="w-[110px] h-7 text-xs" onClick={(e) => e.stopPropagation()}>

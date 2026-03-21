@@ -1,5 +1,4 @@
 import { sqlite } from "@/lib/db";
-import { modules } from "@/modules";
 import { z, ZodObject, ZodRawShape } from "zod";
 
 /**
@@ -118,7 +117,9 @@ mcpRegistry.register(
   "Lists all registered modules and their status",
   z.object({}),
   async () => {
-    const moduleList = modules.map((m) => ({
+    // Dynamic import to avoid circular dependency
+    const { modules } = await import("@/modules");
+    const moduleList = modules.map((m: { name: string; label: string; description: string; routes: unknown[] }) => ({
       name: m.name,
       label: m.label,
       description: m.description,
