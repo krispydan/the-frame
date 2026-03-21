@@ -106,7 +106,7 @@ export const qcInspections = sqliteTable("inventory_qc_inspections", {
   defectCount: integer("defect_count").notNull().default(0),
   defectRate: real("defect_rate").notNull().default(0),
   status: text("status", {
-    enum: ["pending", "passed", "failed"],
+    enum: ["pending", "passed", "failed", "conditional"],
   }).notNull().default("pending"),
   notes: text("notes"),
   createdAt: timestamp("created_at"),
