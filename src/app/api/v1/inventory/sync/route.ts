@@ -34,7 +34,7 @@ async function fetchShopifyProducts(): Promise<ShopifyProduct[]> {
   let url: string | null = `https://${domain}/admin/api/2024-01/products.json?limit=250&fields=id,variants`;
 
   while (url) {
-    const res = await fetch(url, {
+    const res: Response = await fetch(url, {
       headers: {
         "X-Shopify-Access-Token": token,
         "Content-Type": "application/json",
@@ -49,9 +49,9 @@ async function fetchShopifyProducts(): Promise<ShopifyProduct[]> {
     allProducts.push(...(data.products || []));
 
     // Pagination via Link header
-    const link = res.headers.get("link");
-    const nextMatch = link?.match(/<([^>]+)>;\s*rel="next"/);
-    url = nextMatch ? nextMatch[1] : null;
+    const link: string | null = res.headers.get("link");
+    const nextMatch: RegExpMatchArray | null | undefined = link?.match(/<([^>]+)>;\s*rel="next"/);
+    url = nextMatch?.[1] ?? null;
   }
 
   return allProducts;

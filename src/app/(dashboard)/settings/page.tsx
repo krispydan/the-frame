@@ -18,7 +18,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { User, Plug, Bell, Database, Info, Save, Trash2, Upload, Download, ExternalLink, Wifi, WifiOff, Loader2 } from "lucide-react";
+import { User, Plug, Bell, Database, Info, Save, Trash2, Upload, Download, ExternalLink, Wifi, WifiOff, Loader2, CheckCircle2, XCircle, Link2 } from "lucide-react";
 
 // ── Helpers ──
 
@@ -93,6 +93,97 @@ function TestConnectionButton({ integration, settings: s }: { integration: strin
         </span>
       )}
     </div>
+  );
+}
+
+// ── Xero Integration Card ──
+
+function XeroIntegrationCard({ settings: s, onReload }: { settings: Record<string, string>; onReload: () => void }) {
+  const [loading, setLoading] = useState(false);
+  const [xeroStatus, setXeroStatus] = useState<{
+    configured: boolean;
+    connected: boolean;
+    tenantName?: string;
+    authUrl?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/v1/finance/xero")
+      .then((r) => r.json())
+      .then(setXeroStatus)
+      .catch(() => {});
+  }, []);
+
+  const handleConnect = () => {
+    if (xeroStatus?.authUrl) {
+      window.location.href = xeroStatus.authUrl;
+    }
+  };
+
+  const handleDisconnect = async () => {
+    setLoading(true);
+    try {
+      await fetch("/api/v1/finance/xero", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "disconnect" }),
+      });
+      toast.success("Disconnected from Xero");
+      onReload();
+      setXeroStatus((prev) => prev ? { ...prev, connected: false, tenantName: undefined } : prev);
+    } catch {
+      toast.error("Failed to disconnect");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between">
+          <span>Xero</span>
+          {xeroStatus?.connected ? (
+            <span className="flex items-center gap-1 text-sm font-normal text-green-600">
+              <CheckCircle2 className="h-4 w-4" /> Connected
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-sm font-normal text-muted-foreground">
+              <XCircle className="h-4 w-4" /> Not connected
+            </span>
+          )}
+        </CardTitle>
+        <CardDescription>
+          Accounting integration — sync settlements, invoices, and chart of accounts
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {xeroStatus?.connected ? (
+          <>
+            {xeroStatus.tenantName && (
+              <p className="text-sm">
+                <span className="text-muted-foreground">Organisation:</span>{" "}
+                <span className="font-medium">{xeroStatus.tenantName}</span>
+              </p>
+            )}
+            <div className="flex gap-2">
+              <Button size="sm" variant="destructive" onClick={handleDisconnect} disabled={loading}>
+                {loading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <XCircle className="h-4 w-4 mr-1" />}
+                Disconnect
+              </Button>
+            </div>
+          </>
+        ) : xeroStatus?.configured ? (
+          <Button size="sm" onClick={handleConnect}>
+            <Link2 className="h-4 w-4 mr-2" /> Connect to Xero
+          </Button>
+        ) : (
+          <div className="text-sm text-muted-foreground">
+            <p>Set <code>XERO_CLIENT_ID</code> and <code>XERO_CLIENT_SECRET</code> environment variables to enable.</p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -353,6 +444,7 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
+            <XeroIntegrationCard settings={settings} onReload={load} />
           </div>
         </TabsContent>
 

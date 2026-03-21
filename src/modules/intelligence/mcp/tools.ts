@@ -4,7 +4,7 @@
 import type { McpTool } from "@/modules/core/mcp/server";
 import { detectTrends } from "../agents/trend-detector";
 import { calculateBusinessHealth } from "../lib/business-health";
-import { generateWeeklyReport } from "../agents/report-generator";
+import { generateReport, getReportHistory } from "../agents/report-generator";
 
 export const intelligenceMcpTools: McpTool[] = [
   {
@@ -17,10 +17,13 @@ export const intelligenceMcpTools: McpTool[] = [
   },
   {
     name: "intelligence.get_trends",
-    description: "Get product trend data — trending up, down, dead stock",
-    inputSchema: { type: "object", properties: {} },
-    handler: async () => {
-      const trends = detectTrends();
+    description: "Get product trend data — trending up, down, dead stock, channel trends",
+    inputSchema: {
+      type: "object",
+      properties: { periodDays: { type: "number", description: "Days per period (default 30)" } },
+    },
+    handler: async (args: any) => {
+      const trends = detectTrends(args?.periodDays || 30);
       return { content: [{ type: "text", text: JSON.stringify(trends, null, 2) }] };
     },
   },
@@ -34,7 +37,7 @@ export const intelligenceMcpTools: McpTool[] = [
   },
   {
     name: "intelligence.get_business_health",
-    description: "Get composite business health score",
+    description: "Get composite business health score with component breakdown",
     inputSchema: { type: "object", properties: {} },
     handler: async () => {
       const health = calculateBusinessHealth();
@@ -43,11 +46,26 @@ export const intelligenceMcpTools: McpTool[] = [
   },
   {
     name: "intelligence.generate_report",
-    description: "Generate weekly business summary report",
-    inputSchema: { type: "object", properties: {} },
-    handler: async () => {
-      const report = generateWeeklyReport();
-      return { content: [{ type: "text", text: report }] };
+    description: "Generate a weekly or monthly business summary report",
+    inputSchema: {
+      type: "object",
+      properties: { period: { type: "string", enum: ["weekly", "monthly"] } },
+    },
+    handler: async (args: any) => {
+      const report = generateReport(args?.period || "weekly");
+      return { content: [{ type: "text", text: report.markdown }] };
+    },
+  },
+  {
+    name: "intelligence.get_report_history",
+    description: "Get previously generated reports",
+    inputSchema: {
+      type: "object",
+      properties: { limit: { type: "number", description: "Max reports to return (default 10)" } },
+    },
+    handler: async (args: any) => {
+      const reports = getReportHistory(args?.limit || 10);
+      return { content: [{ type: "text", text: JSON.stringify(reports, null, 2) }] };
     },
   },
   {
