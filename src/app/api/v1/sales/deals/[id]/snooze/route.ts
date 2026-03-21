@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { logger } from "@/modules/core/lib/logger";

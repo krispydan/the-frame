@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 /**
  * F3-003: Campaign CRUD API
  * GET /api/v1/sales/campaigns — list with filters

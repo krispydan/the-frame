@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { mcpRegistry } from "@/modules/core/mcp/server";
 import { registerInventoryMcpTools } from "@/modules/inventory/mcp";
