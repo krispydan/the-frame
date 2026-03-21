@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1774046767904,
-      "tag": "0000_needy_blockbuster",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1774046838274,
-      "tag": "0001_polite_ikaris",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1774047194562,
-      "tag": "0002_fancy_carmella_unuscione",
+      "when": 1774109298819,
+      "tag": "0000_mature_justin_hammer",
       "breakpoints": true
     }
   ]
