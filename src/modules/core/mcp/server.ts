@@ -79,6 +79,10 @@ class McpToolRegistry {
 // ── Singleton registry ──
 export const mcpRegistry = new McpToolRegistry();
 
+// ── Register module tools (lazy — imported at registry creation) ──
+import { registerInventoryMcpTools } from "@/modules/inventory/mcp";
+registerInventoryMcpTools();
+
 // ── Register Phase 0 system tools ──
 
 mcpRegistry.register(
