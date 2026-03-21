@@ -148,7 +148,7 @@ async function pullCampaigns(): Promise<{ campaigns: number; leads: number; stag
 // ── Full Sync ──
 
 export async function runInstantlySync(): Promise<SyncResult> {
-  logger.info("instantly_sync_start", {});
+  logger.logEvent("instantly_sync_start", "sales");
 
   const pushResult = await pushCampaigns();
   const pullResult = await pullCampaigns();
@@ -159,7 +159,7 @@ export async function runInstantlySync(): Promise<SyncResult> {
     errors: [...pushResult.errors, ...pullResult.errors],
   };
 
-  logger.info("instantly_sync_complete", result);
+  logger.logEvent("instantly_sync_complete", "sales", result as unknown as Record<string, unknown>);
   return result;
 }
 

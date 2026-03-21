@@ -189,11 +189,11 @@ export function CampaignDetail({ campaign }: { campaign: Campaign }) {
           </div>
         </div>
         {campaign.instantly_campaign_id && (
-          <Button variant="outline" size="sm" asChild>
-            <a href={`https://app.instantly.ai/campaigns/${campaign.instantly_campaign_id}`} target="_blank" rel="noopener">
+          <a href={`https://app.instantly.ai/campaigns/${campaign.instantly_campaign_id}`} target="_blank" rel="noopener">
+            <Button variant="outline" size="sm">
               <ExternalLink className="mr-2 h-4 w-4" /> Open in Instantly
-            </a>
-          </Button>
+            </Button>
+          </a>
         )}
       </div>
 

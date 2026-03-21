@@ -106,7 +106,7 @@ export function classifyAndUpdate(campaignLeadId: string, replyText: string): Cl
     }
   }
 
-  logger.info("reply_classified", { campaignLeadId, classification: result.classification, confidence: result.confidence });
+  logger.logEvent("reply_classified", "sales", { campaignLeadId, classification: result.classification, confidence: result.confidence });
   return result;
 }
 

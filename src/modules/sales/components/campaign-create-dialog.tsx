@@ -118,7 +118,7 @@ export function CampaignCreateDialog({ open, onClose }: Props) {
             </div>
             <div>
               <Label>Type</Label>
-              <Select value={type} onValueChange={setType}>
+              <Select value={type} onValueChange={(v) => v && setType(v)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="email_sequence">Email Sequence</SelectItem>
@@ -151,7 +151,7 @@ export function CampaignCreateDialog({ open, onClose }: Props) {
           <div className="space-y-4">
             <div>
               <Label>Target Source</Label>
-              <Select value={targetType} onValueChange={(v) => setTargetType(v as "smart_list" | "segment")}>
+              <Select value={targetType} onValueChange={(v) => v && setTargetType(v as "smart_list" | "segment")}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="smart_list">Smart List</SelectItem>
@@ -162,7 +162,7 @@ export function CampaignCreateDialog({ open, onClose }: Props) {
             {targetType === "smart_list" ? (
               <div>
                 <Label>Select Smart List</Label>
-                <Select value={smartListId} onValueChange={setSmartListId}>
+                <Select value={smartListId} onValueChange={(v) => v && setSmartListId(v)}>
                   <SelectTrigger><SelectValue placeholder="Choose a list..." /></SelectTrigger>
                   <SelectContent>
                     {smartLists.map((sl) => (

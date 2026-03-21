@@ -135,7 +135,7 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
 
       {/* Filters */}
       <div className="flex gap-3">
-        <Select value={typeFilter} onValueChange={setTypeFilter}>
+        <Select value={typeFilter} onValueChange={(v) => v && setTypeFilter(v)}>
           <SelectTrigger className="w-[160px]">
             <SelectValue placeholder="All Types" />
           </SelectTrigger>
@@ -147,7 +147,7 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
             <SelectItem value="ab_test">A/B Test</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <Select value={statusFilter} onValueChange={(v) => v && setStatusFilter(v)}>
           <SelectTrigger className="w-[160px]">
             <SelectValue placeholder="All Statuses" />
           </SelectTrigger>

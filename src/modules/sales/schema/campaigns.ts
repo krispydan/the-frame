@@ -3,7 +3,8 @@
  */
 import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
-import { companies, contacts, smartLists } from "@/modules/sales/schema";
+// Note: FK references omitted from drizzle schema to avoid circular imports.
+// Actual FK constraints exist in the SQLite migration.
 
 const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
 const timestamp = (name: string) => text(name).default(sql`(datetime('now'))`);
@@ -39,7 +40,7 @@ export const campaigns = sqliteTable("campaigns", {
   description: text("description"),
   instantlyCampaignId: text("instantly_campaign_id"),
   targetSegment: text("target_segment"),
-  targetSmartListId: text("target_smart_list_id").references(() => smartLists.id),
+  targetSmartListId: text("target_smart_list_id"),
   variantASubject: text("variant_a_subject"),
   variantBSubject: text("variant_b_subject"),
   // Aggregated stats (synced from Instantly)
@@ -67,9 +68,9 @@ export const campaigns = sqliteTable("campaigns", {
 
 export const campaignLeads = sqliteTable("campaign_leads", {
   id: id(),
-  campaignId: text("campaign_id").notNull().references(() => campaigns.id),
-  companyId: text("company_id").notNull().references(() => companies.id),
-  contactId: text("contact_id").references(() => contacts.id),
+  campaignId: text("campaign_id").notNull(),
+  companyId: text("company_id").notNull(),
+  contactId: text("contact_id"),
   instantlyLeadId: text("instantly_lead_id"),
   email: text("email"),
   status: text("status", { enum: LEAD_STATUSES }).notNull().default("queued"),

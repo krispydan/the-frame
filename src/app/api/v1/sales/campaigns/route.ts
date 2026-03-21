@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
   `).run(id, name, type || "email_sequence", description, target_segment, target_smart_list_id, variant_a_subject, variant_b_subject);
 
   const campaign = sqlite.prepare("SELECT * FROM campaigns WHERE id = ?").get(id);
-  logger.info("campaign_created", { id, name });
+  logger.logEvent("campaign_created", "sales", { id, name });
 
   return NextResponse.json({ data: campaign }, { status: 201 });
 }

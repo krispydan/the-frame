@@ -49,7 +49,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   sqlite.prepare(`UPDATE campaigns SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
   const campaign = sqlite.prepare("SELECT * FROM campaigns WHERE id = ?").get(id);
-  logger.info("campaign_updated", { id });
+  logger.logEvent("campaign_updated", "sales", { id });
 
   return NextResponse.json({ data: campaign });
 }
@@ -58,6 +58,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
   sqlite.prepare("DELETE FROM campaign_leads WHERE campaign_id = ?").run(id);
   sqlite.prepare("DELETE FROM campaigns WHERE id = ?").run(id);
-  logger.info("campaign_deleted", { id });
+  logger.logEvent("campaign_deleted", "sales", { id });
   return NextResponse.json({ success: true });
 }

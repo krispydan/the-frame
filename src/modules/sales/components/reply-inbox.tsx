@@ -66,7 +66,7 @@ export function ReplyInbox({ replies: initialReplies }: { replies: Reply[] }) {
       </div>
 
       <div className="flex gap-3">
-        <Select value={filter} onValueChange={setFilter}>
+        <Select value={filter} onValueChange={(v) => v && setFilter(v)}>
           <SelectTrigger className="w-[180px]">
             <SelectValue placeholder="All" />
           </SelectTrigger>
@@ -113,9 +113,11 @@ export function ReplyInbox({ replies: initialReplies }: { replies: Reply[] }) {
                     <Clock className="mr-1 h-3 w-3" /> Snooze
                   </Button>
                   {r.email && (
-                    <Button size="sm" variant="ghost" asChild>
-                      <a href={`mailto:${r.email}`}><ExternalLink className="mr-1 h-3 w-3" /> Reply</a>
-                    </Button>
+                    <a href={`mailto:${r.email}`}>
+                      <Button size="sm" variant="ghost">
+                        <ExternalLink className="mr-1 h-3 w-3" /> Reply
+                      </Button>
+                    </a>
                   )}
                 </div>
               </div>

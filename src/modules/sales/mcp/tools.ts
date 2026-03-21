@@ -7,8 +7,9 @@ import { sqlite } from "@/lib/db";
 import { z } from "zod";
 import { agentOrchestrator } from "@/modules/core/lib/agent-orchestrator";
 import { getUnscoredCompanyIds } from "@/modules/sales/agents/icp-classifier";
-import { runInstantlySync } from "@/modules/sales/lib/instantly-sync";
-import { classifyReply } from "@/modules/sales/agents/response-classifier";
+// Lazy imports to avoid circular initialization
+const getInstantlySync = () => import("@/modules/sales/lib/instantly-sync");
+const getResponseClassifier = () => import("@/modules/sales/agents/response-classifier");
 
 // ── sales.list_prospects ──
 mcpRegistry.register(
@@ -518,6 +519,7 @@ mcpRegistry.register(
   "Trigger a manual sync between The Frame and Instantly.ai. Pushes new campaigns/leads and pulls analytics.",
   z.object({}),
   async () => {
+    const { runInstantlySync } = await getInstantlySync();
     const result = await runInstantlySync();
     return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
   }
@@ -530,6 +532,7 @@ mcpRegistry.register(
     text: z.string().describe("Email reply text to classify"),
   }),
   async (args) => {
+    const { classifyReply } = await getResponseClassifier();
     const result = classifyReply(args.text);
     return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
   }
