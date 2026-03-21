@@ -6,14 +6,16 @@ describe("Finance", () => {
   beforeEach(() => { db = getTestDb(); resetTestDb(); });
 
   it("settlement net = gross - fees", () => {
-    db.prepare("INSERT INTO settlements (id, channel, gross_amount, fees, net_amount, status) VALUES ('s1', 'shopify_dtc', 5000, 145, 4855, 'received')").run();
+    db.prepare("INSERT INTO settlements (id, channel, period_start, period_end, gross_amount, fees, net_amount, status) VALUES ('s1', 'shopify_dtc', '2026-03-01', '2026-03-07', 5000, 145, 4855, 'received')").run();
     const s = db.prepare("SELECT * FROM settlements WHERE id = 's1'").get() as any;
     expect(s.net_amount).toBe(s.gross_amount - s.fees);
   });
 
   it("expense tracking", () => {
-    db.prepare("INSERT INTO expenses (id, category, description, amount, vendor) VALUES ('e1', 'marketing', 'Facebook Ads', 500, 'Meta')").run();
-    db.prepare("INSERT INTO expenses (id, category, description, amount, vendor) VALUES ('e2', 'operations', 'Shipping', 200, 'UPS')").run();
+    db.prepare("INSERT INTO expense_categories (id, name) VALUES ('cat1', 'marketing')").run();
+    db.prepare("INSERT INTO expense_categories (id, name) VALUES ('cat2', 'operations')").run();
+    db.prepare("INSERT INTO expenses (id, category_id, description, amount, vendor, date) VALUES ('e1', 'cat1', 'Facebook Ads', 500, 'Meta', '2026-03-01')").run();
+    db.prepare("INSERT INTO expenses (id, category_id, description, amount, vendor, date) VALUES ('e2', 'cat2', 'Shipping', 200, 'UPS', '2026-03-01')").run();
     const total = db.prepare("SELECT SUM(amount) as total FROM expenses").get() as any;
     expect(total.total).toBe(700);
   });
