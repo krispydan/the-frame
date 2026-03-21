@@ -208,7 +208,7 @@ export function ReplyInbox({ replies: initialReplies, unreadCount }: { replies: 
                   </div>
                   <div className="flex flex-col gap-1 shrink-0">
                     <Tooltip>
-                      <TooltipTrigger asChild>
+                      <TooltipTrigger >
                         <Button
                           size="sm"
                           variant="default"

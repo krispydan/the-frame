@@ -1,0 +1,1 @@
+ALTER TABLE `campaign_leads` ADD `dismissed` integer DEFAULT 0;

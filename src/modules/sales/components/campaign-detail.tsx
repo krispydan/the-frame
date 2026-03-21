@@ -286,7 +286,7 @@ export function CampaignDetail({ campaign }: { campaign: Campaign }) {
               <TabsTrigger value="replied">Replied ({campaign.reply_count})</TabsTrigger>
             </TabsList>
             <div className="flex gap-2">
-              <Select value={icpFilter} onValueChange={setIcpFilter}>
+              <Select value={icpFilter} onValueChange={(v) => { if (v) setIcpFilter(v); }}>
                 <SelectTrigger className="w-[140px]">
                   <SelectValue placeholder="ICP Tier" />
                 </SelectTrigger>
@@ -298,7 +298,7 @@ export function CampaignDetail({ campaign }: { campaign: Campaign }) {
                   <SelectItem value="D">Tier D</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
+              <Select value={sortBy} onValueChange={(v) => { if (v) setSortBy(v as typeof sortBy); }}>
                 <SelectTrigger className="w-[150px]">
                   <SelectValue placeholder="Sort" />
                 </SelectTrigger>
@@ -366,7 +366,7 @@ function LeadTable({ leads, icpFilter, sortBy }: { leads: Lead[]; icpFilter: str
                   {l.icp_tier ? (
                     <div className="flex items-center gap-1">
                       <Tooltip>
-                        <TooltipTrigger asChild>
+                        <TooltipTrigger >
                           <Badge className={`${ICP_COLORS[l.icp_tier] || ""} cursor-pointer`}>
                             {l.icp_tier}
                           </Badge>

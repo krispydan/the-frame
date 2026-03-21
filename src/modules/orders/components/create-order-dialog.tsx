@@ -83,23 +83,15 @@ export function CreateOrderDialog({
     }
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/v1/sales/prospects?search=${encodeURIComponent(companySearch)}&limit=10&type=companies`);
+        const res = await fetch(`/api/v1/search?q=${encodeURIComponent(companySearch)}&limit=10`);
         const data = await res.json();
-        // The prospects endpoint returns companies - adapt to what's available
         setCompanies(
-          (data.data || data.companies || data || [])
-            .filter((c: any) => c.name)
-            .map((c: any) => ({ id: c.id, name: c.name }))
+          (data.results || [])
+            .filter((r: any) => r.type === "prospect")
+            .map((r: any) => ({ id: r.id, name: r.title }))
         );
       } catch {
-        // Fallback: direct search
-        try {
-          const res = await fetch(`/api/v1/search?q=${encodeURIComponent(companySearch)}&type=company`);
-          const data = await res.json();
-          setCompanies((data.results || []).map((r: any) => ({ id: r.id, name: r.name || r.title })));
-        } catch {
-          setCompanies([]);
-        }
+        setCompanies([]);
       }
     }, 300);
     return () => clearTimeout(t);

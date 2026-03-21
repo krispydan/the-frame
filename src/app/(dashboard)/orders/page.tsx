@@ -140,6 +140,7 @@ function OrdersPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<OrderDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
 
   // Filters
   const page = parseInt(searchParams.get("page") || "1");
@@ -214,11 +215,11 @@ function OrdersPage() {
           <p className="text-sm text-muted-foreground">{total} orders total</p>
         </div>
         <button
-          onClick={() => router.push("/orders/new")}
+          onClick={() => setShowCreateDialog(true)}
           className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90"
         >
           <Plus className="h-4 w-4" />
-          New Order
+          Create Order
         </button>
       </div>
 
@@ -312,6 +313,13 @@ function OrdersPage() {
           </div>
         </div>
       )}
+
+      {/* Create Order Dialog */}
+      <CreateOrderDialog
+        open={showCreateDialog}
+        onClose={() => setShowCreateDialog(false)}
+        onCreated={() => fetchOrders()}
+      />
 
       {/* Order Detail Slide-over */}
       {selectedOrder && (
