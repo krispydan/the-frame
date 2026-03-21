@@ -45,7 +45,7 @@ const mainNav = [
   { title: "Prospects", href: "/prospects", icon: Users },
   { title: "Pipeline", href: "/pipeline", icon: Kanban },
   { title: "Campaigns", href: "/campaigns", icon: Mail },
-  { title: "Orders", href: "/orders", icon: ShoppingCart, badge: "Soon" },
+  { title: "Orders", href: "/orders", icon: ShoppingCart },
   { title: "Catalog", href: "/catalog", icon: Package },
   { title: "Inventory", href: "/inventory", icon: Warehouse },
   { title: "Finance", href: "/finance", icon: DollarSign },
