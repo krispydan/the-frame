@@ -282,7 +282,7 @@ function OrdersPage() {
               <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No orders found</td></tr>
             ) : (
               orders.map((o) => (
-                <tr key={o.id} onClick={() => openDetail(o.id)} className="hover:bg-muted/30 cursor-pointer">
+                <tr key={o.id} onClick={() => router.push(`/orders/${o.id}`)} className="hover:bg-muted/30 cursor-pointer">
                   <td className="px-4 py-3 font-medium">{o.orderNumber}</td>
                   <td className="px-4 py-3 text-muted-foreground">{o.companyName || "—"}</td>
                   <td className="px-4 py-3"><ChannelBadge channel={o.channel} /></td>

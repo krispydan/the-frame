@@ -1,11 +1,12 @@
 export const dynamic = "force-dynamic";
 import { sqlite } from "@/lib/db";
 import { CustomerDetail } from "@/modules/customers/components/customer-detail";
+import { predictReorder } from "@/modules/customers/lib/reorder-engine";
 import { notFound } from "next/navigation";
 
 async function getAccount(id: string) {
   return sqlite.prepare(`
-    SELECT ca.*, c.name as company_name
+    SELECT ca.*, c.name as company_name, c.email as company_email, c.phone as company_phone
     FROM customer_accounts ca
     JOIN companies c ON c.id = ca.company_id
     WHERE ca.id = ?
@@ -53,12 +54,15 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
     getHealthHistory(id),
   ]);
 
+  const reorderPrediction = predictReorder(id);
+
   return (
     <CustomerDetail
       account={account}
       recentOrders={recentOrders}
       activities={activities}
       healthHistory={healthHistory}
+      reorderPrediction={reorderPrediction}
     />
   );
 }

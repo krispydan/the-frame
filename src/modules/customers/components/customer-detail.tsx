@@ -1,10 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { TIER_LABELS, TIER_COLORS, HEALTH_COLORS, type CustomerTier, type HealthStatus } from "@/modules/customers/schema";
 
 interface AccountData {
   id: string;
   company_name: string;
+  company_email: string | null;
+  company_phone: string | null;
   tier: CustomerTier;
   lifetime_value: number;
   total_orders: number;
@@ -17,6 +20,17 @@ interface AccountData {
   payment_terms: string | null;
   discount_rate: number;
   notes: string | null;
+}
+
+interface ReorderPrediction {
+  accountId: string;
+  companyName: string;
+  avgDaysBetweenOrders: number | null;
+  lastOrderAt: string | null;
+  predictedReorderDate: string | null;
+  daysUntilReorder: number | null;
+  reminderStatus: "none" | "14_day" | "7_day" | "overdue";
+  totalOrders: number;
 }
 
 interface OrderRow {
@@ -50,11 +64,13 @@ export function CustomerDetail({
   recentOrders,
   activities,
   healthHistory,
+  reorderPrediction,
 }: {
   account: AccountData;
   recentOrders: OrderRow[];
   activities: ActivityRow[];
   healthHistory: HealthHistoryRow[];
+  reorderPrediction?: ReorderPrediction | null;
 }) {
   const daysUntilReorder = account.next_reorder_estimate
     ? Math.ceil((new Date(account.next_reorder_estimate).getTime() - Date.now()) / 86400000)
@@ -65,14 +81,25 @@ export function CustomerDetail({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">{account.company_name}</h1>
-          <div className="flex gap-2 mt-1">
+          <div className="flex items-center gap-3">
+            <Link href="/customers" className="text-gray-400 hover:text-gray-600">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+            </Link>
+            <h1 className="text-2xl font-bold">{account.company_name}</h1>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-1 ml-8">
             <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${TIER_COLORS[account.tier]}`}>
               {TIER_LABELS[account.tier]}
             </span>
             <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${HEALTH_COLORS[account.health_status]}`}>
               {account.health_score} — {account.health_status.replace("_", " ")}
             </span>
+            {account.company_email && (
+              <span className="text-xs text-gray-500">✉ {account.company_email}</span>
+            )}
+            {account.company_phone && (
+              <span className="text-xs text-gray-500">☎ {account.company_phone}</span>
+            )}
           </div>
         </div>
       </div>
@@ -157,6 +184,53 @@ export function CustomerDetail({
           )}
         </div>
       </div>
+
+      {/* Reorder Prediction */}
+      {reorderPrediction && reorderPrediction.avgDaysBetweenOrders && (
+        <div className="rounded-lg border bg-white p-4">
+          <h2 className="font-semibold mb-3">Reorder Prediction</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div>
+              <p className="text-sm text-gray-500">Avg Days Between Orders</p>
+              <p className="text-lg font-bold">{reorderPrediction.avgDaysBetweenOrders}d</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Predicted Reorder</p>
+              <p className="text-lg font-bold">{reorderPrediction.predictedReorderDate ? formatDate(reorderPrediction.predictedReorderDate) : "—"}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Days Until Reorder</p>
+              <p className={`text-lg font-bold ${
+                reorderPrediction.daysUntilReorder !== null && reorderPrediction.daysUntilReorder < 0
+                  ? "text-red-600"
+                  : reorderPrediction.daysUntilReorder !== null && reorderPrediction.daysUntilReorder <= 7
+                  ? "text-yellow-600"
+                  : ""
+              }`}>
+                {reorderPrediction.daysUntilReorder !== null
+                  ? reorderPrediction.daysUntilReorder < 0
+                    ? `${Math.abs(reorderPrediction.daysUntilReorder)}d overdue`
+                    : `${reorderPrediction.daysUntilReorder}d`
+                  : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Status</p>
+              <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                reorderPrediction.reminderStatus === "overdue"
+                  ? "bg-red-100 text-red-800"
+                  : reorderPrediction.reminderStatus === "7_day"
+                  ? "bg-yellow-100 text-yellow-800"
+                  : reorderPrediction.reminderStatus === "14_day"
+                  ? "bg-blue-100 text-blue-800"
+                  : "bg-gray-100 text-gray-600"
+              }`}>
+                {reorderPrediction.reminderStatus === "none" ? "On Track" : reorderPrediction.reminderStatus.replace("_", " ")}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Health History Chart (simplified table) */}
       {healthHistory.length > 0 && (
