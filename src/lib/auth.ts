@@ -43,18 +43,20 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const email = credentials.email as string;
         const password = credentials.password as string;
 
-        const user = db.select().from(users).where(eq(users.email, email)).get();
-        if (!user || !user.isActive) return null;
+        // Use raw sqlite to avoid Drizzle field mapping issues
+        const { sqlite } = await import("@/lib/db");
+        const user = sqlite.prepare(
+          "SELECT id, email, name, role, password_hash, is_active FROM users WHERE email = ?"
+        ).get(email) as { id: string; email: string; name: string; role: string; password_hash: string | null; is_active: number } | undefined;
 
-        // Check password hash stored in user metadata or dedicated column
-        const passwordHash = (user as Record<string, unknown>).passwordHash as string | undefined;
-        if (!passwordHash) return null;
+        if (!user || !user.is_active) return null;
+        if (!user.password_hash) return null;
 
-        const valid = await bcrypt.compare(password, passwordHash);
+        const valid = await bcrypt.compare(password, user.password_hash);
         if (!valid) return null;
 
         // Update last login
-        db.update(users).set({ lastLoginAt: new Date().toISOString() }).where(eq(users.id, user.id)).run();
+        sqlite.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(new Date().toISOString(), user.id);
 
         return {
           id: user.id,
