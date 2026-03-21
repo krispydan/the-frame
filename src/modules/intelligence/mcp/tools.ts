@@ -12,7 +12,30 @@ export const intelligenceMcpTools: McpTool[] = [
     description: "Get sell-through velocity data for all SKUs",
     inputSchema: { type: "object", properties: { period: { type: "string", enum: ["30d", "60d", "90d"] } } },
     handler: async () => {
-      return { content: [{ type: "text", text: "Sell-through data — wire to real inventory module" }] };
+      const { sqlite } = await import("@/lib/db");
+      const rows = sqlite.prepare(`
+        SELECT s.sku, s.color_name, p.name as product_name,
+               i.quantity, i.sell_through_weekly, i.days_of_stock, i.needs_reorder,
+               CASE
+                 WHEN i.sell_through_weekly >= 10 THEN 'fast'
+                 WHEN i.sell_through_weekly >= 3 THEN 'normal'
+                 WHEN i.sell_through_weekly >= 0.5 THEN 'slow'
+                 ELSE 'dead'
+               END as velocity
+        FROM inventory i
+        JOIN catalog_skus s ON i.sku_id = s.id
+        JOIN catalog_products p ON s.product_id = p.id
+        ORDER BY i.sell_through_weekly DESC LIMIT 50
+      `).all();
+      const summary = sqlite.prepare(`
+        SELECT COUNT(*) as total,
+          SUM(CASE WHEN sell_through_weekly >= 10 THEN 1 ELSE 0 END) as fast,
+          SUM(CASE WHEN sell_through_weekly >= 3 AND sell_through_weekly < 10 THEN 1 ELSE 0 END) as normal,
+          SUM(CASE WHEN sell_through_weekly >= 0.5 AND sell_through_weekly < 3 THEN 1 ELSE 0 END) as slow,
+          SUM(CASE WHEN sell_through_weekly < 0.5 THEN 1 ELSE 0 END) as dead
+        FROM inventory
+      `).get();
+      return { content: [{ type: "text", text: JSON.stringify({ summary, items: rows }, null, 2) }] };
     },
   },
   {
@@ -32,7 +55,26 @@ export const intelligenceMcpTools: McpTool[] = [
     description: "Get pricing and margin analysis for all products",
     inputSchema: { type: "object", properties: {} },
     handler: async () => {
-      return { content: [{ type: "text", text: "Pricing analysis — wire to real catalog + inventory modules" }] };
+      const { sqlite } = await import("@/lib/db");
+      const rows = sqlite.prepare(`
+        SELECT p.name, p.sku_prefix, p.wholesale_price, p.retail_price, p.msrp,
+               s.sku, s.cost_price, s.color_name,
+               CASE WHEN s.cost_price > 0 AND p.wholesale_price > 0
+                 THEN ROUND((p.wholesale_price - s.cost_price) / p.wholesale_price * 100, 1)
+                 ELSE NULL END as wholesale_margin_pct,
+               CASE WHEN s.cost_price > 0 AND p.retail_price > 0
+                 THEN ROUND((p.retail_price - s.cost_price) / p.retail_price * 100, 1)
+                 ELSE NULL END as retail_margin_pct
+        FROM catalog_products p
+        JOIN catalog_skus s ON s.product_id = p.id
+        ORDER BY p.sku_prefix, s.sku
+      `).all();
+      const avgWholesaleMargin = sqlite.prepare(`
+        SELECT ROUND(AVG((p.wholesale_price - s.cost_price) / p.wholesale_price * 100), 1) as avg_margin
+        FROM catalog_products p JOIN catalog_skus s ON s.product_id = p.id
+        WHERE s.cost_price > 0 AND p.wholesale_price > 0
+      `).get();
+      return { content: [{ type: "text", text: JSON.stringify({ summary: avgWholesaleMargin, items: rows }, null, 2) }] };
     },
   },
   {

@@ -1,4 +1,4 @@
-CREATE TABLE `notifications` (
+CREATE TABLE IF NOT EXISTS `notifications` (
 	`id` text PRIMARY KEY NOT NULL,
 	`type` text NOT NULL,
 	`title` text NOT NULL,
@@ -12,7 +12,7 @@ CREATE TABLE `notifications` (
 	`created_at` text DEFAULT (datetime('now'))
 );
 --> statement-breakpoint
-CREATE TABLE `marketing_social_accounts` (
+CREATE TABLE IF NOT EXISTS `marketing_social_accounts` (
 	`id` text PRIMARY KEY NOT NULL,
 	`platform` text NOT NULL,
 	`handle` text,
@@ -24,7 +24,7 @@ CREATE TABLE `marketing_social_accounts` (
 	`created_at` text DEFAULT (datetime('now'))
 );
 --> statement-breakpoint
-CREATE TABLE `marketing_social_posts` (
+CREATE TABLE IF NOT EXISTS `marketing_social_posts` (
 	`id` text PRIMARY KEY NOT NULL,
 	`content` text NOT NULL,
 	`platform` text NOT NULL,
@@ -37,6 +37,6 @@ CREATE TABLE `marketing_social_posts` (
 	`created_at` text DEFAULT (datetime('now'))
 );
 --> statement-breakpoint
-CREATE INDEX `idx_social_post_status` ON `marketing_social_posts` (`status`);--> statement-breakpoint
-CREATE INDEX `idx_social_post_platform` ON `marketing_social_posts` (`platform`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_social_post_status` ON `marketing_social_posts` (`status`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_social_post_platform` ON `marketing_social_posts` (`platform`);--> statement-breakpoint
 ALTER TABLE `marketing_seo_keywords` ADD `difficulty` integer;

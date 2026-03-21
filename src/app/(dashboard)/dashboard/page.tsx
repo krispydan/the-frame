@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+
 
 interface FocusData {
   wakingToday: { id: string; title: string; company_name: string; snooze_reason: string; value: number }[];
@@ -271,13 +271,13 @@ export default function DashboardPage() {
               </div>
             )}
 
-            <div className="flex items-center justify-between p-3 rounded-lg border border-dashed border-gray-200 dark:border-gray-700 opacity-60">
+            <Link href="/prospects?import=1" className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 border border-gray-100 dark:border-gray-700 group">
               <div className="flex items-center gap-3">
-                <Upload className="w-5 h-5 text-gray-400" />
-                <span className="text-sm text-gray-500">Import Leads</span>
+                <Upload className="w-5 h-5 text-green-500" />
+                <span className="text-sm font-medium">Import Leads</span>
               </div>
-              <Badge variant="secondary" className="text-[10px]">Phase 2</Badge>
-            </div>
+              <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-gray-600" />
+            </Link>
           </CardContent>
         </Card>
 
@@ -310,10 +310,14 @@ export default function DashboardPage() {
               </div>
             )}
 
-            <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-dashed border-gray-200 dark:border-gray-700">
-              <p className="text-sm text-gray-500">Re-engagement Queue</p>
-              <p className="text-xs text-gray-400 mt-1">Coming in Phase 2</p>
-            </div>
+            <Link href="/pipeline?filter=stale" className="block p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors">
+              <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
+                Re-engagement Queue
+              </p>
+              <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                View stale deals that need follow-up
+              </p>
+            </Link>
           </CardContent>
         </Card>
 
