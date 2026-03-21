@@ -661,4 +661,128 @@ CREATE INDEX `idx_customer_accounts_company` ON `customer_accounts` (`company_id
 CREATE INDEX `idx_customer_accounts_tier` ON `customer_accounts` (`tier`);--> statement-breakpoint
 CREATE INDEX `idx_customer_accounts_health` ON `customer_accounts` (`health_status`);--> statement-breakpoint
 CREATE INDEX `idx_customer_accounts_ltv` ON `customer_accounts` (`lifetime_value`);--> statement-breakpoint
-CREATE INDEX `idx_customer_accounts_reorder` ON `customer_accounts` (`next_reorder_estimate`);
+CREATE INDEX `idx_customer_accounts_reorder` ON `customer_accounts` (`next_reorder_estimate`);--> statement-breakpoint
+CREATE TABLE `expense_categories` (
+	`id` text PRIMARY KEY NOT NULL,
+	`name` text NOT NULL,
+	`parent_id` text,
+	`budget_monthly` real,
+	`created_at` text DEFAULT (datetime('now'))
+);
+--> statement-breakpoint
+CREATE TABLE `expenses` (
+	`id` text PRIMARY KEY NOT NULL,
+	`category_id` text,
+	`description` text NOT NULL,
+	`amount` real NOT NULL,
+	`vendor` text,
+	`date` text NOT NULL,
+	`recurring` integer DEFAULT false NOT NULL,
+	`frequency` text,
+	`notes` text,
+	`created_at` text DEFAULT (datetime('now')),
+	FOREIGN KEY (`category_id`) REFERENCES `expense_categories`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE INDEX `idx_expenses_category` ON `expenses` (`category_id`);--> statement-breakpoint
+CREATE INDEX `idx_expenses_date` ON `expenses` (`date`);--> statement-breakpoint
+CREATE INDEX `idx_expenses_vendor` ON `expenses` (`vendor`);--> statement-breakpoint
+CREATE INDEX `idx_expenses_recurring` ON `expenses` (`recurring`);--> statement-breakpoint
+CREATE TABLE `settlement_line_items` (
+	`id` text PRIMARY KEY NOT NULL,
+	`settlement_id` text NOT NULL,
+	`order_id` text,
+	`type` text NOT NULL,
+	`description` text,
+	`amount` real DEFAULT 0 NOT NULL,
+	`created_at` text DEFAULT (datetime('now')),
+	FOREIGN KEY (`settlement_id`) REFERENCES `settlements`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `idx_sli_settlement_id` ON `settlement_line_items` (`settlement_id`);--> statement-breakpoint
+CREATE INDEX `idx_sli_order_id` ON `settlement_line_items` (`order_id`);--> statement-breakpoint
+CREATE INDEX `idx_sli_type` ON `settlement_line_items` (`type`);--> statement-breakpoint
+CREATE TABLE `settlements` (
+	`id` text PRIMARY KEY NOT NULL,
+	`channel` text NOT NULL,
+	`period_start` text NOT NULL,
+	`period_end` text NOT NULL,
+	`gross_amount` real DEFAULT 0 NOT NULL,
+	`fees` real DEFAULT 0 NOT NULL,
+	`adjustments` real DEFAULT 0 NOT NULL,
+	`net_amount` real DEFAULT 0 NOT NULL,
+	`currency` text DEFAULT 'USD' NOT NULL,
+	`external_id` text,
+	`status` text DEFAULT 'pending' NOT NULL,
+	`received_at` text,
+	`xero_transaction_id` text,
+	`xero_synced_at` text,
+	`notes` text,
+	`created_at` text DEFAULT (datetime('now'))
+);
+--> statement-breakpoint
+CREATE INDEX `idx_settlements_channel` ON `settlements` (`channel`);--> statement-breakpoint
+CREATE INDEX `idx_settlements_status` ON `settlements` (`status`);--> statement-breakpoint
+CREATE INDEX `idx_settlements_period` ON `settlements` (`period_start`,`period_end`);--> statement-breakpoint
+CREATE INDEX `idx_settlements_external_id` ON `settlements` (`external_id`);--> statement-breakpoint
+CREATE TABLE `marketing_ad_campaigns` (
+	`id` text PRIMARY KEY NOT NULL,
+	`platform` text NOT NULL,
+	`campaign_name` text NOT NULL,
+	`status` text DEFAULT 'active' NOT NULL,
+	`spend` real DEFAULT 0 NOT NULL,
+	`impressions` integer DEFAULT 0 NOT NULL,
+	`clicks` integer DEFAULT 0 NOT NULL,
+	`conversions` integer DEFAULT 0 NOT NULL,
+	`revenue` real DEFAULT 0 NOT NULL,
+	`start_date` text,
+	`end_date` text,
+	`monthly_budget` real,
+	`notes` text,
+	`created_at` text DEFAULT (datetime('now'))
+);
+--> statement-breakpoint
+CREATE INDEX `idx_ad_platform` ON `marketing_ad_campaigns` (`platform`);--> statement-breakpoint
+CREATE TABLE `marketing_content_calendar` (
+	`id` text PRIMARY KEY NOT NULL,
+	`title` text NOT NULL,
+	`type` text NOT NULL,
+	`platform` text NOT NULL,
+	`status` text DEFAULT 'idea' NOT NULL,
+	`scheduled_date` text,
+	`published_date` text,
+	`content` text,
+	`notes` text,
+	`tags` text,
+	`created_at` text DEFAULT (datetime('now'))
+);
+--> statement-breakpoint
+CREATE INDEX `idx_content_status` ON `marketing_content_calendar` (`status`);--> statement-breakpoint
+CREATE INDEX `idx_content_scheduled` ON `marketing_content_calendar` (`scheduled_date`);--> statement-breakpoint
+CREATE INDEX `idx_content_platform` ON `marketing_content_calendar` (`platform`);--> statement-breakpoint
+CREATE TABLE `marketing_influencers` (
+	`id` text PRIMARY KEY NOT NULL,
+	`name` text NOT NULL,
+	`platform` text NOT NULL,
+	`handle` text,
+	`followers` integer,
+	`niche` text,
+	`status` text DEFAULT 'identified' NOT NULL,
+	`cost` real,
+	`posts_delivered` integer DEFAULT 0,
+	`engagement` real,
+	`notes` text,
+	`created_at` text DEFAULT (datetime('now'))
+);
+--> statement-breakpoint
+CREATE INDEX `idx_influencer_status` ON `marketing_influencers` (`status`);--> statement-breakpoint
+CREATE TABLE `marketing_seo_keywords` (
+	`id` text PRIMARY KEY NOT NULL,
+	`keyword` text NOT NULL,
+	`current_rank` integer,
+	`previous_rank` integer,
+	`url` text,
+	`search_volume` integer,
+	`updated_at` text DEFAULT (datetime('now')),
+	`created_at` text DEFAULT (datetime('now'))
+);
