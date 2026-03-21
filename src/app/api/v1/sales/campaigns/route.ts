@@ -56,9 +56,9 @@ export async function POST(request: NextRequest) {
 
   const id = crypto.randomUUID();
   sqlite.prepare(`
-    INSERT INTO campaigns (id, name, type, description, target_segment, target_smart_list_id, variant_a_subject, variant_b_subject)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, name, type || "email_sequence", description, target_segment, target_smart_list_id, variant_a_subject, variant_b_subject);
+    INSERT INTO campaigns (id, name, type, description, target_segment, target_smart_list_id, variant_a_subject, variant_b_subject, instantly_campaign_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, name, type || "email_sequence", description, target_segment, target_smart_list_id, variant_a_subject, variant_b_subject, body.instantly_campaign_id || null);
 
   const campaign = sqlite.prepare("SELECT * FROM campaigns WHERE id = ?").get(id);
   logger.logEvent("campaign_created", "sales", { id, name });

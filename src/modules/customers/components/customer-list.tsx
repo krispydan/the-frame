@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import {
   CUSTOMER_TIERS,
@@ -35,6 +35,24 @@ export function CustomerList({ customers }: { customers: CustomerRow[] }) {
   const [sortBy, setSortBy] = useState<SortField>("lifetime_value");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [search, setSearch] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ created: number; updated: number } | null>(null);
+
+  const handleSync = useCallback(async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch("/api/v1/customers/sync", { method: "POST" });
+      const data = await res.json();
+      setSyncResult({ created: data.created, updated: data.updated });
+      // Reload to show new accounts
+      if (data.created > 0) window.location.reload();
+    } catch (e) {
+      console.error("Sync failed:", e);
+    } finally {
+      setSyncing(false);
+    }
+  }, []);
 
   const filtered = useMemo(() => {
     let list = customers;
@@ -106,6 +124,27 @@ export function CustomerList({ customers }: { customers: CustomerRow[] }) {
           <option value="all">All Health</option>
           {HEALTH_STATUSES.map((s) => <option key={s} value={s}>{s.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}</option>)}
         </select>
+        <div className="ml-auto flex items-center gap-2">
+          {syncResult && (
+            <span className="text-xs text-green-600">
+              {syncResult.created} created, {syncResult.updated} updated
+            </span>
+          )}
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {syncing ? (
+              <>
+                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                Syncing...
+              </>
+            ) : (
+              "Sync Accounts"
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Table */}

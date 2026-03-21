@@ -76,6 +76,7 @@ export const campaignLeads = sqliteTable("campaign_leads", {
   status: text("status", { enum: LEAD_STATUSES }).notNull().default("queued"),
   replyText: text("reply_text"),
   replyClassification: text("reply_classification"),
+  dismissed: integer("dismissed").default(0),
   sentAt: text("sent_at"),
   openedAt: text("opened_at"),
   repliedAt: text("replied_at"),

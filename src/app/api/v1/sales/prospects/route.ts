@@ -110,7 +110,7 @@ export async function GET(request: NextRequest) {
   // Data query
   const rows = sqlite.prepare(`
     SELECT c.id, c.name, c.city, c.state, c.type, c.source, c.phone, c.email, 
-           c.icp_score, c.status, c.tags, c.website, c.domain
+           c.icp_score, c.status, c.tags, c.website, c.domain, c.enrichment_status
     FROM companies c
     ${whereSQL}
     ORDER BY ${sortCol} ${order} NULLS LAST

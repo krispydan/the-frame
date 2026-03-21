@@ -16,6 +16,7 @@ import {
   XCircle,
   ArrowUpDown,
 } from "lucide-react";
+import { CreateOrderDialog } from "@/modules/orders/components/create-order-dialog";
 
 // ── Types ──
 

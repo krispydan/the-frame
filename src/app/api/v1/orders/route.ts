@@ -81,8 +81,8 @@ export async function POST(req: NextRequest) {
     if (!body.items || body.items.length === 0) {
       return NextResponse.json({ error: "At least one item is required" }, { status: 400 });
     }
-    if (!body.channel || !["direct", "phone"].includes(body.channel)) {
-      return NextResponse.json({ error: "Channel must be 'direct' or 'phone'" }, { status: 400 });
+    if (!body.channel || !["direct", "phone", "shopify_dtc", "shopify_wholesale", "faire"].includes(body.channel)) {
+      return NextResponse.json({ error: "Invalid channel" }, { status: 400 });
     }
 
     const newOrder = createManualOrder(body);

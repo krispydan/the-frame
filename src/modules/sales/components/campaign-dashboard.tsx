@@ -53,6 +53,8 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [syncing, setSyncing] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [lastSyncResult, setLastSyncResult] = useState<{ pushed: { campaigns: number; leads: number }; pulled: { campaigns: number; leads: number; stageUpdates: number }; errors: string[] } | null>(null);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
   const filtered = campaigns.filter((c) => {
     if (typeFilter !== "all" && c.type !== typeFilter) return false;
@@ -63,7 +65,10 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
   const handleSync = async () => {
     setSyncing(true);
     try {
-      await fetch("/api/v1/sales/instantly/sync", { method: "POST" });
+      const syncRes = await fetch("/api/v1/sales/instantly/sync", { method: "POST" });
+      const syncData = await syncRes.json();
+      setLastSyncResult(syncData.data);
+      setLastSyncTime(new Date().toLocaleString());
       const res = await fetch("/api/v1/sales/campaigns");
       const data = await res.json();
       setCampaigns(data.data);
@@ -132,6 +137,31 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
           </CardContent>
         </Card>
       </div>
+
+      {/* Sync status bar */}
+      {lastSyncTime && (
+        <div className="flex items-center gap-4 text-sm bg-muted/50 rounded-lg px-4 py-2.5">
+          <span className="text-muted-foreground">Last synced: <span className="font-medium text-foreground">{lastSyncTime}</span></span>
+          {lastSyncResult && (
+            <>
+              <span className="text-muted-foreground">•</span>
+              <span className="text-muted-foreground">
+                Pushed: {lastSyncResult.pushed.campaigns} campaigns, {lastSyncResult.pushed.leads} leads
+              </span>
+              <span className="text-muted-foreground">•</span>
+              <span className="text-muted-foreground">
+                Pulled: {lastSyncResult.pulled.campaigns} campaigns, {lastSyncResult.pulled.stageUpdates} stage updates
+              </span>
+              {lastSyncResult.errors.length > 0 && (
+                <>
+                  <span className="text-muted-foreground">•</span>
+                  <span className="text-red-600">{lastSyncResult.errors.length} error(s)</span>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex gap-3">

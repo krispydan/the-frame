@@ -7,6 +7,7 @@ import {
   Users,
   Kanban,
   Mail,
+  Inbox,
   ShoppingCart,
   Package,
   Warehouse,
@@ -50,6 +51,7 @@ const salesNav: Array<{ title: string; href: string; icon: typeof LayoutDashboar
   { title: "Prospects", href: "/prospects", icon: Users },
   { title: "Pipeline", href: "/pipeline", icon: Kanban },
   { title: "Campaigns", href: "/campaigns", icon: Mail },
+  { title: "Inbox", href: "/campaigns/inbox", icon: Inbox },
   { title: "Customers", href: "/customers", icon: HeartHandshake },
 ];
 

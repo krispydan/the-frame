@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 /**
- * F3-006: Campaign Detail + A/B Test Comparison
+ * F3-006: Campaign Detail + A/B Test Comparison + ICP Classification
  */
 import { sqlite } from "@/lib/db";
 import { notFound } from "next/navigation";
@@ -35,6 +35,7 @@ interface CampaignRow {
 
 interface LeadRow {
   id: string;
+  company_id: string;
   company_name: string;
   first_name: string | null;
   last_name: string | null;
@@ -45,6 +46,9 @@ interface LeadRow {
   sent_at: string | null;
   opened_at: string | null;
   replied_at: string | null;
+  icp_tier: string | null;
+  icp_score: number | null;
+  icp_reasoning: string | null;
 }
 
 async function getCampaign(id: string) {
@@ -58,8 +62,10 @@ async function getCampaign(id: string) {
   if (!campaign) return null;
 
   const leads = sqlite.prepare(`
-    SELECT cl.id, cl.email, cl.status, cl.reply_text, cl.reply_classification, cl.sent_at, cl.opened_at, cl.replied_at,
-      co.name as company_name, ct.first_name, ct.last_name
+    SELECT cl.id, cl.company_id, cl.email, cl.status, cl.reply_text, cl.reply_classification,
+      cl.sent_at, cl.opened_at, cl.replied_at,
+      co.name as company_name, co.icp_tier, co.icp_score, co.icp_reasoning,
+      ct.first_name, ct.last_name
     FROM campaign_leads cl
     LEFT JOIN companies co ON co.id = cl.company_id
     LEFT JOIN contacts ct ON ct.id = cl.contact_id

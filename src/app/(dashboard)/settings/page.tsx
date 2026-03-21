@@ -18,7 +18,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { User, Plug, Bell, Database, Info, Save, Trash2, Upload, Download, ExternalLink } from "lucide-react";
+import { User, Plug, Bell, Database, Info, Save, Trash2, Upload, Download, ExternalLink, Wifi, WifiOff, Loader2 } from "lucide-react";
 
 // ── Helpers ──
 
@@ -40,6 +40,60 @@ async function saveSetting(key: string, value: string) {
   });
   if (!res.ok) throw new Error("Failed to save setting");
   return res.json();
+}
+
+async function testConnection(integration: string): Promise<{ ok: boolean; message: string }> {
+  const res = await fetch("/api/v1/settings/test-connection", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ integration }),
+  });
+  return res.json();
+}
+
+function TestConnectionButton({ integration, settings: s }: { integration: string; settings: Record<string, string> }) {
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  // Show last validation result from settings
+  const validatedAt = s[`${integration}_validated_at`];
+  const lastResult = s[`${integration}_validation_result`];
+
+  const handleTest = async () => {
+    setTesting(true);
+    setResult(null);
+    try {
+      const res = await testConnection(integration);
+      setResult(res);
+      if (res.ok) toast.success(res.message);
+      else toast.error(res.message);
+    } catch {
+      setResult({ ok: false, message: "Connection test failed" });
+      toast.error("Connection test failed");
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <Button size="sm" variant="outline" onClick={handleTest} disabled={testing}>
+        {testing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Wifi className="h-4 w-4 mr-1" />}
+        Test Connection
+      </Button>
+      {result && (
+        <span className={`text-sm flex items-center gap-1 ${result.ok ? "text-green-600" : "text-red-600"}`}>
+          {result.ok ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+          {result.message}
+        </span>
+      )}
+      {!result && validatedAt && lastResult && (
+        <span className={`text-xs ${lastResult === "success" ? "text-green-600" : "text-red-500"}`}>
+          Last tested: {new Date(validatedAt).toLocaleDateString()} — {lastResult}
+        </span>
+      )}
+    </div>
+  );
 }
 
 // ── Main Component ──
@@ -182,9 +236,12 @@ export default function SettingsPage() {
                     placeholder="Enter Instantly API key"
                   />
                 </div>
-                <Button size="sm" onClick={() => save("instantly_api_key")} disabled={saving}>
-                  <Save className="h-4 w-4 mr-2" /> Save
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={() => save("instantly_api_key")} disabled={saving}>
+                    <Save className="h-4 w-4 mr-2" /> Save
+                  </Button>
+                  <TestConnectionButton integration="instantly" settings={settings} />
+                </div>
               </CardContent>
             </Card>
 
@@ -204,16 +261,98 @@ export default function SettingsPage() {
                     placeholder="Enter Outscraper API key"
                   />
                 </div>
-                <Button size="sm" onClick={() => save("outscraper_api_key")} disabled={saving}>
-                  <Save className="h-4 w-4 mr-2" /> Save
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={() => save("outscraper_api_key")} disabled={saving}>
+                    <Save className="h-4 w-4 mr-2" /> Save
+                  </Button>
+                  <TestConnectionButton integration="outscraper" settings={settings} />
+                </div>
               </CardContent>
             </Card>
 
-            <Card className="opacity-60">
+            <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  Faire API
+                <CardTitle>Shopify</CardTitle>
+                <CardDescription>E-commerce store sync — provide store domain and access token</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="shopify_store_domain">Store Domain</Label>
+                  <Input
+                    id="shopify_store_domain"
+                    value={settings.shopify_store_domain ?? ""}
+                    onChange={(e) => update("shopify_store_domain", e.target.value)}
+                    placeholder="your-store.myshopify.com"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="shopify_access_token">Access Token</Label>
+                  <Input
+                    id="shopify_access_token"
+                    type="password"
+                    value={settings.shopify_access_token ?? ""}
+                    onChange={(e) => update("shopify_access_token", e.target.value)}
+                    placeholder="shpat_..."
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={() => saveMultiple(["shopify_store_domain", "shopify_access_token"])} disabled={saving}>
+                    <Save className="h-4 w-4 mr-2" /> Save
+                  </Button>
+                  <TestConnectionButton integration="shopify" settings={settings} />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Faire</CardTitle>
+                <CardDescription>Wholesale marketplace integration</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="faire_api_key">API Key</Label>
+                  <Input
+                    id="faire_api_key"
+                    type="password"
+                    value={settings.faire_api_key ?? ""}
+                    onChange={(e) => update("faire_api_key", e.target.value)}
+                    placeholder="Enter Faire API key"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={() => save("faire_api_key")} disabled={saving}>
+                    <Save className="h-4 w-4 mr-2" /> Save
+                  </Button>
+                  <TestConnectionButton integration="faire" settings={settings} />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Klaviyo</CardTitle>
+                <CardDescription>Email marketing and customer data platform</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="klaviyo_api_key">API Key</Label>
+                  <Input
+                    id="klaviyo_api_key"
+                    type="password"
+                    value={settings.klaviyo_api_key ?? ""}
+                    onChange={(e) => update("klaviyo_api_key", e.target.value)}
+                    placeholder="Enter Klaviyo API key"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={() => save("klaviyo_api_key")} disabled={saving}>
+                    <Save className="h-4 w-4 mr-2" /> Save
+                  </Button>
+                  <TestConnectionButton integration="klaviyo" settings={settings} />
+                </div>
+              </CardContent>
+            </Card>
                   <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">Coming Soon</span>
                 </CardTitle>
                 <CardDescription>Wholesale marketplace integration</CardDescription>

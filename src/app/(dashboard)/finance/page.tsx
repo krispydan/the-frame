@@ -61,10 +61,22 @@ interface PnlSummary {
   comparison: PnlComparison | null;
 }
 
+interface WeeklyProjection {
+  weekOffset: number;
+  weekLabel: string;
+  expectedInflows: number;
+  expectedOutflows: number;
+  projectedBalance: number;
+  risk: "safe" | "tight" | "danger";
+}
+
 interface CashFlowSummary {
   currentPosition: number;
   pendingInflows: number;
   expectedOutflows30d: number;
+  expectedOutflows60d: number;
+  expectedOutflows90d: number;
+  scenario: string;
   forecast: Array<{
     period: string;
     label: string;
@@ -75,6 +87,15 @@ interface CashFlowSummary {
   }>;
   pendingSettlements: Array<{ id: string; channel: string; netAmount: number; periodEnd: string }>;
   upcomingExpenses: Array<{ description: string; amount: number; vendor: string }>;
+  prediction: {
+    currentBalance: number;
+    projections: WeeklyProjection[];
+    alerts: string[];
+    insights: string[];
+    lowPoint: { balance: number; week: string; weekOffset: number } | null;
+    goesNegative: boolean;
+    firstNegativeWeek: { balance: number; week: string; weekOffset: number } | null;
+  };
 }
 
 interface Settlement {
@@ -1292,50 +1313,189 @@ function ExpensesTab({
 
 // ── Cash Flow Tab ──
 
-function CashFlowTab({ cashFlow }: { cashFlow: CashFlowSummary }) {
+function CashFlowTab({ cashFlow: initialCashFlow }: { cashFlow: CashFlowSummary }) {
+  const [scenario, setScenario] = useState<string>("expected");
+  const [cashFlow, setCashFlow] = useState<CashFlowSummary>(initialCashFlow);
+  const [loadingScenario, setLoadingScenario] = useState(false);
+
+  const loadScenario = async (s: string) => {
+    setScenario(s);
+    setLoadingScenario(true);
+    try {
+      const res = await fetch(`/api/v1/finance/cash-flow?scenario=${s}`);
+      const data = await res.json();
+      setCashFlow(data);
+    } finally {
+      setLoadingScenario(false);
+    }
+  };
+
+  const pred = cashFlow.prediction;
+  const projections = pred?.projections || [];
+  const maxBalance = Math.max(...projections.map((p) => Math.max(p.expectedInflows, p.expectedOutflows, Math.abs(p.projectedBalance))), 1);
+
   return (
     <div className="space-y-6">
+      {/* Negative Cash Alert */}
+      {pred?.goesNegative && pred.firstNegativeWeek && (
+        <div className="rounded-lg border border-red-300 bg-red-50 dark:bg-red-950/30 dark:border-red-800 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <h4 className="font-semibold text-red-800 dark:text-red-200">Cash Flow Warning</h4>
+              <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+                Projected to go <strong>negative ({fmt(pred.firstNegativeWeek.balance)})</strong> in{" "}
+                <strong>{pred.firstNegativeWeek.week}</strong> under the <em>{scenario}</em> scenario.
+                Review expenses or accelerate collections.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <SummaryCard title="Cash Position" value={fmt(cashFlow.currentPosition)} icon={Wallet} trend={null} highlight />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <SummaryCard title="Cash Position" value={fmt(pred?.currentBalance ?? cashFlow.currentPosition)} icon={Wallet} trend={null} highlight />
         <SummaryCard title="Pending Inflows" value={fmt(cashFlow.pendingInflows)} icon={TrendingUp} trend={null} />
-        <SummaryCard title="Expected Outflows (30d)" value={fmt(cashFlow.expectedOutflows30d)} icon={TrendingDown} trend={null} negative />
+        <SummaryCard
+          title="Projected Low Point"
+          value={pred?.lowPoint ? fmt(pred.lowPoint.balance) : "—"}
+          subtitle={pred?.lowPoint?.week || ""}
+          icon={TrendingDown}
+          trend={null}
+          negative={pred?.lowPoint ? pred.lowPoint.balance < 0 : false}
+        />
+        <SummaryCard title="Expected Outflows (30d)" value={fmt(cashFlow.expectedOutflows30d)} icon={CreditCard} trend={null} negative />
       </div>
 
-      {/* 30/60/90 Forecast Table */}
-      <div className="rounded-lg border bg-card">
-        <div className="p-4 border-b">
-          <h3 className="font-semibold">Cash Flow Forecast</h3>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/50">
-                <th className="text-left p-3 font-medium">Period</th>
-                <th className="text-right p-3 font-medium">Est. Inflows</th>
-                <th className="text-right p-3 font-medium">Est. Outflows</th>
-                <th className="text-right p-3 font-medium">Net Cash Flow</th>
-                <th className="text-right p-3 font-medium">Projected Balance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cashFlow.forecast.map((f) => (
-                <tr key={f.period} className="border-b hover:bg-muted/30">
-                  <td className="p-3 font-medium">{f.label}</td>
-                  <td className="text-right p-3 text-green-600">{fmt(f.inflows)}</td>
-                  <td className="text-right p-3 text-red-600">{fmt(f.outflows)}</td>
-                  <td className={`text-right p-3 font-medium ${f.netCashFlow >= 0 ? "text-green-600" : "text-red-600"}`}>
-                    {fmt(f.netCashFlow)}
-                  </td>
-                  <td className={`text-right p-3 font-semibold ${f.projectedBalance >= 0 ? "" : "text-red-600"}`}>
-                    {fmt(f.projectedBalance)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {/* Scenario Toggle */}
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium text-muted-foreground">Scenario:</span>
+        {(["optimistic", "expected", "pessimistic"] as const).map((s) => (
+          <button
+            key={s}
+            onClick={() => loadScenario(s)}
+            disabled={loadingScenario}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              scenario === s
+                ? s === "optimistic" ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                  : s === "pessimistic" ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                  : "bg-primary text-primary-foreground"
+                : "border hover:bg-muted"
+            }`}
+          >
+            {s.charAt(0).toUpperCase() + s.slice(1)}
+          </button>
+        ))}
+        {loadingScenario && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground ml-2" />}
       </div>
+
+      {/* 12-Week Bar Chart */}
+      {projections.length > 0 && (
+        <div className="rounded-lg border bg-card">
+          <div className="p-4 border-b">
+            <h3 className="font-semibold">12-Week Cash Flow Projection</h3>
+            <p className="text-xs text-muted-foreground mt-1">
+              <span className="inline-block w-3 h-3 bg-green-500 rounded mr-1 align-middle" /> Inflows
+              <span className="inline-block w-3 h-3 bg-red-400 rounded mr-1 ml-3 align-middle" /> Outflows
+              <span className="inline-block w-3 h-1 bg-blue-600 mr-1 ml-3 align-middle" /> Balance
+            </p>
+          </div>
+          <div className="p-4 overflow-x-auto">
+            <div className="flex items-end gap-1 min-w-[600px]" style={{ height: 200 }}>
+              {projections.map((p) => {
+                const inflowH = maxBalance > 0 ? (p.expectedInflows / maxBalance) * 180 : 0;
+                const outflowH = maxBalance > 0 ? (p.expectedOutflows / maxBalance) * 180 : 0;
+                const balancePct = maxBalance > 0 ? (Math.abs(p.projectedBalance) / maxBalance) * 100 : 0;
+                return (
+                  <div key={p.weekOffset} className="flex-1 flex flex-col items-center gap-0.5 group relative">
+                    {/* Tooltip */}
+                    <div className="absolute bottom-full mb-2 hidden group-hover:block z-10 bg-popover border rounded-md shadow-md p-2 text-xs whitespace-nowrap">
+                      <div className="font-semibold">{p.weekLabel}</div>
+                      <div className="text-green-600">In: {fmt(p.expectedInflows)}</div>
+                      <div className="text-red-600">Out: {fmt(p.expectedOutflows)}</div>
+                      <div className={p.projectedBalance < 0 ? "text-red-700 font-bold" : "text-blue-600 font-bold"}>
+                        Bal: {fmt(p.projectedBalance)}
+                      </div>
+                    </div>
+                    <div className="flex items-end gap-px w-full" style={{ height: 180 }}>
+                      <div className="flex-1 bg-green-500 rounded-t opacity-80" style={{ height: Math.max(2, inflowH) }} />
+                      <div className="flex-1 bg-red-400 rounded-t opacity-80" style={{ height: Math.max(2, outflowH) }} />
+                    </div>
+                    {/* Balance line indicator */}
+                    <div
+                      className={`w-full h-1 rounded ${p.projectedBalance < 0 ? "bg-red-600" : "bg-blue-600"}`}
+                      style={{ opacity: Math.min(1, balancePct / 50 + 0.3) }}
+                    />
+                    <span className="text-[10px] text-muted-foreground mt-0.5">W{p.weekOffset}</span>
+                    {p.risk === "danger" && <span className="text-[9px] text-red-600">⚠</span>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Insights */}
+      {pred?.insights && pred.insights.length > 0 && (
+        <div className="rounded-lg border bg-card p-4">
+          <h4 className="font-semibold text-sm mb-2">Insights</h4>
+          <ul className="space-y-1">
+            {pred.insights.map((ins, i) => (
+              <li key={i} className="text-sm text-muted-foreground">💡 {ins}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Weekly Breakdown Table */}
+      {projections.length > 0 && (
+        <div className="rounded-lg border bg-card">
+          <div className="p-4 border-b">
+            <h3 className="font-semibold">Weekly Breakdown</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50">
+                  <th className="text-left p-3 font-medium">Week</th>
+                  <th className="text-right p-3 font-medium">Opening Balance</th>
+                  <th className="text-right p-3 font-medium">Inflows</th>
+                  <th className="text-right p-3 font-medium">Outflows</th>
+                  <th className="text-right p-3 font-medium">Closing Balance</th>
+                  <th className="text-left p-3 font-medium">Risk</th>
+                </tr>
+              </thead>
+              <tbody>
+                {projections.map((p, i) => {
+                  const openingBalance = i === 0
+                    ? (pred?.currentBalance ?? 0)
+                    : projections[i - 1].projectedBalance;
+                  return (
+                    <tr key={p.weekOffset} className={`border-b hover:bg-muted/30 ${p.risk === "danger" ? "bg-red-50 dark:bg-red-950/20" : p.risk === "tight" ? "bg-yellow-50 dark:bg-yellow-950/20" : ""}`}>
+                      <td className="p-3 font-medium">{p.weekLabel}</td>
+                      <td className="text-right p-3">{fmt(openingBalance)}</td>
+                      <td className="text-right p-3 text-green-600">+{fmt(p.expectedInflows)}</td>
+                      <td className="text-right p-3 text-red-600">-{fmt(p.expectedOutflows)}</td>
+                      <td className={`text-right p-3 font-semibold ${p.projectedBalance < 0 ? "text-red-600" : ""}`}>
+                        {fmt(p.projectedBalance)}
+                      </td>
+                      <td className="p-3">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                          p.risk === "danger" ? "bg-red-100 text-red-800" : p.risk === "tight" ? "bg-yellow-100 text-yellow-800" : "bg-green-100 text-green-800"
+                        }`}>
+                          {p.risk === "danger" ? "⚠ Danger" : p.risk === "tight" ? "⚡ Tight" : "✓ Safe"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Pending Settlements */}
       {cashFlow.pendingSettlements.length > 0 && (

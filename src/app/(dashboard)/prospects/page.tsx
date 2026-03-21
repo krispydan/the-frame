@@ -19,6 +19,7 @@ interface Prospect {
   tags: string[];
   website: string;
   domain: string;
+  enrichment_status: string;
 }
 
 interface FilterOptions {
@@ -605,6 +606,22 @@ function ProspectsPage() {
             )}
           </div>
 
+          {/* Bulk Enrich */}
+          <button onClick={async () => {
+            setBulkLoading(true);
+            try {
+              await fetch("/api/v1/sales/enrich", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ companyIds: Array.from(selected) }),
+              });
+              await refreshProspects();
+            } finally { setBulkLoading(false); }
+          }} disabled={bulkLoading}
+            className="px-3 py-1.5 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700 disabled:opacity-50 font-medium flex items-center gap-1.5">
+            ✨ Enrich
+          </button>
+
           {/* Export CSV */}
           <button onClick={exportSelectedCSV} disabled={bulkLoading}
             className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 font-medium flex items-center gap-1.5">
@@ -773,7 +790,18 @@ function ProspectsPage() {
                   <td className="px-4 py-3">
                     <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleSelect(p.id)} className="rounded" />
                   </td>
-                  <td className="px-4 py-3 font-medium text-gray-900 dark:text-white max-w-[200px] truncate">{p.name}</td>
+                  <td className="px-4 py-3 font-medium text-gray-900 dark:text-white max-w-[200px] truncate flex items-center gap-1.5">
+                    {p.enrichment_status === "enriched" ? (
+                      <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" title="Enriched" />
+                    ) : p.enrichment_status === "failed" ? (
+                      <span className="w-2 h-2 rounded-full bg-red-400 shrink-0" title="Enrichment failed" />
+                    ) : p.enrichment_status === "queued" ? (
+                      <span className="w-2 h-2 rounded-full bg-yellow-400 shrink-0 animate-pulse" title="Enrichment queued" />
+                    ) : (
+                      <span className="w-2 h-2 rounded-full bg-gray-300 shrink-0" title="Not enriched" />
+                    )}
+                    {p.name}
+                  </td>
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{p.city}</td>
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{p.state}</td>
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{p.tags?.[0] || "—"}</td>

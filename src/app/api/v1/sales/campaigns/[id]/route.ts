@@ -33,7 +33,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const body = await req.json();
-  const allowed = ["name", "type", "status", "description", "target_segment", "target_smart_list_id", "variant_a_subject", "variant_b_subject", "meetings_booked", "orders_placed"];
+  const allowed = ["name", "type", "status", "description", "target_segment", "target_smart_list_id", "variant_a_subject", "variant_b_subject", "meetings_booked", "orders_placed", "instantly_campaign_id"];
   const sets: string[] = [];
   const vals: unknown[] = [];
 

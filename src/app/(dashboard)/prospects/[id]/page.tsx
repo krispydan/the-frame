@@ -6,7 +6,7 @@ import Link from "next/link";
 import {
   ArrowLeft, Building2, Globe, Phone, Mail, MapPin, Tag, Star,
   Edit, UserPlus, MessageSquare, Clock, ExternalLink, Plus, Save, X,
-  Briefcase,
+  Briefcase, Sparkles, Loader2, CheckCircle2, AlertCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +43,8 @@ interface Company {
   status: string; source: string; icp_tier: string; icp_score: number; icp_reasoning: string;
   owner_id: string; owner_name: string; tags: string[]; notes: string;
   google_rating: number; google_review_count: number;
+  enrichment_status: string;
+  google_place_id: string;
   created_at: string; updated_at: string;
 }
 
@@ -107,6 +109,25 @@ export default function CompanyDetailPage() {
   const [dealValue, setDealValue] = useState("");
   const [dealNotes, setDealNotes] = useState("");
   const [dealSaving, setDealSaving] = useState(false);
+  const [enriching, setEnriching] = useState(false);
+
+  const enrichCompany = async () => {
+    if (!company) return;
+    setEnriching(true);
+    try {
+      await fetch("/api/v1/sales/enrich", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyIds: [company.id] }),
+      });
+      // Refresh company data
+      const data = await (await fetch(`/api/v1/sales/prospects/${id}`)).json();
+      setCompany(data.company);
+      setActivities(data.activities || []);
+    } finally {
+      setEnriching(false);
+    }
+  };
 
   const createDeal = async () => {
     if (!company) return;
@@ -314,6 +335,23 @@ export default function CompanyDetailPage() {
               </div>
             </DialogContent>
           </Dialog>
+
+          {/* Enrichment status + button */}
+          {company.enrichment_status === "enriched" ? (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-green-100 text-green-700">
+              <CheckCircle2 className="w-4 h-4" /> Enriched
+            </div>
+          ) : (
+            <Button variant="outline" size="sm" onClick={enrichCompany} disabled={enriching || company.enrichment_status === "queued"}>
+              {enriching || company.enrichment_status === "queued" ? (
+                <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Enriching...</>
+              ) : company.enrichment_status === "failed" ? (
+                <><AlertCircle className="w-4 h-4 mr-1 text-red-500" /> Retry Enrich</>
+              ) : (
+                <><Sparkles className="w-4 h-4 mr-1" /> Enrich</>
+              )}
+            </Button>
+          )}
 
           <Button variant="outline" size="sm" onClick={() => { setEditing(!editing); setEditFields({}); }}>
             <Edit className="w-4 h-4 mr-1" /> Edit

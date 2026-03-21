@@ -3,6 +3,7 @@ import { orders, orderItems } from "@/modules/orders/schema";
 import { companies } from "@/modules/sales/schema";
 import { eq } from "drizzle-orm";
 import { eventBus } from "@/modules/core/lib/event-bus";
+import { ensureCustomerAccount } from "@/modules/customers/lib/account-sync";
 
 // ── Faire CSV Import ──
 
@@ -75,6 +76,11 @@ export async function importFaireOrders(csvRows: FaireCsvRow[]): Promise<{ impor
       total: subtotal,
     });
 
+    // Auto-create/update customer account
+    if (company?.id) {
+      try { ensureCustomerAccount(company.id); } catch (e) { console.error("[AccountSync] Faire import error:", e); }
+    }
+
     imported++;
   }
 
@@ -94,8 +100,12 @@ function mapFaireStatus(status: string): "pending" | "confirmed" | "shipped" | "
 
 export interface CreateOrderInput {
   companyId?: string;
-  channel: "direct" | "phone";
+  contactId?: string;
+  channel: "direct" | "phone" | "shopify_dtc" | "shopify_wholesale" | "faire";
+  paymentTerms?: string;
   items: Array<{
+    productId?: string;
+    skuId?: string;
     productName: string;
     sku?: string;
     colorName?: string;
@@ -119,6 +129,7 @@ export function createManualOrder(input: CreateOrderInput) {
   const newOrder = db.insert(orders).values({
     orderNumber,
     companyId: input.companyId || null,
+    contactId: input.contactId || null,
     channel: input.channel,
     status: "pending",
     subtotal,
@@ -135,6 +146,8 @@ export function createManualOrder(input: CreateOrderInput) {
   for (const item of input.items) {
     db.insert(orderItems).values({
       orderId: newOrder.id,
+      productId: item.productId || null,
+      skuId: item.skuId || null,
       sku: item.sku || null,
       productName: item.productName,
       colorName: item.colorName || null,
@@ -149,6 +162,11 @@ export function createManualOrder(input: CreateOrderInput) {
     companyId: input.companyId || "",
     total,
   });
+
+  // Auto-create/update customer account
+  if (input.companyId) {
+    try { ensureCustomerAccount(input.companyId); } catch (e) { console.error("[AccountSync] Manual order error:", e); }
+  }
 
   return newOrder;
 }

@@ -41,6 +41,9 @@ export function CampaignCreateDialog({ open, onClose }: Props) {
   // Step 3 - preview contacts
   const [previewCount, setPreviewCount] = useState(0);
 
+  // Instantly
+  const [instantlyCampaignId, setInstantlyCampaignId] = useState("");
+
   // A/B test fields
   const [variantASubject, setVariantASubject] = useState("");
   const [variantBSubject, setVariantBSubject] = useState("");
@@ -79,6 +82,7 @@ export function CampaignCreateDialog({ open, onClose }: Props) {
           target_smart_list_id: targetType === "smart_list" ? smartListId : undefined,
           variant_a_subject: type === "ab_test" ? variantASubject : undefined,
           variant_b_subject: type === "ab_test" ? variantBSubject : undefined,
+          instantly_campaign_id: instantlyCampaignId || undefined,
         }),
       });
       const data = await res.json();
@@ -140,6 +144,10 @@ export function CampaignCreateDialog({ open, onClose }: Props) {
                 </div>
               </div>
             )}
+            <div>
+              <Label>Instantly Campaign ID <span className="text-muted-foreground text-xs font-normal">(optional)</span></Label>
+              <Input value={instantlyCampaignId} onChange={(e) => setInstantlyCampaignId(e.target.value)} placeholder="Link existing Instantly campaign" />
+            </div>
             <div>
               <Label>Description</Label>
               <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Campaign goals and notes..." rows={3} />
