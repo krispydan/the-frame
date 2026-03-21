@@ -292,8 +292,8 @@ function OrdersPage() {
       )}
 
       {/* Table */}
-      <div className="border rounded-lg overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="border rounded-lg overflow-x-auto">
+        <table className="w-full text-sm min-w-[700px]">
           <thead className="bg-muted/50">
             <tr>
               <th className="text-left px-4 py-3 font-medium">Order #</th>
@@ -307,9 +307,19 @@ function OrdersPage() {
           </thead>
           <tbody className="divide-y">
             {loading ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading...</td></tr>
+              <tr><td colSpan={7} className="px-4 py-12 text-center">
+                <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
+                <p className="text-sm text-muted-foreground mt-2">Loading orders...</p>
+              </td></tr>
             ) : orders.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No orders found</td></tr>
+              <tr><td colSpan={7} className="px-4 py-16 text-center">
+                <ShoppingCart className="h-10 w-10 mx-auto text-muted-foreground/50 mb-3" />
+                <p className="font-medium text-muted-foreground">No orders yet</p>
+                <p className="text-sm text-muted-foreground/70 mt-1">Create your first order or sync from Faire to get started.</p>
+                <button onClick={() => setShowCreateDialog(true)} className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90">
+                  <Plus className="h-4 w-4" /> Create Order
+                </button>
+              </td></tr>
             ) : (
               orders.map((o) => (
                 <tr key={o.id} onClick={() => router.push(`/orders/${o.id}`)} className="hover:bg-muted/30 cursor-pointer">

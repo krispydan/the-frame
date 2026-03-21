@@ -160,8 +160,23 @@ export default function ProductDetailPage() {
     await loadProduct();
   };
 
-  if (loading) return <div className="text-muted-foreground p-4">Loading...</div>;
-  if (!product) return <div className="p-4">Product not found</div>;
+  if (loading) return (
+    <div className="p-6">
+      <div className="animate-pulse space-y-4">
+        <div className="h-8 w-48 bg-muted rounded" />
+        <div className="h-64 bg-muted rounded-lg" />
+      </div>
+    </div>
+  );
+  if (!product) return (
+    <div className="p-6 text-center py-16">
+      <Package className="h-10 w-10 mx-auto text-muted-foreground/50 mb-3" />
+      <p className="font-medium text-muted-foreground">Product not found</p>
+      <Link href="/catalog" className="mt-4 inline-flex items-center gap-2 text-sm text-primary hover:underline">
+        <ArrowLeft className="h-4 w-4" /> Back to Catalog
+      </Link>
+    </div>
+  );
 
   const totalImages = imageStats.reduce((s, i) => s + i.total, 0);
   const approvedImages = imageStats.reduce((s, i) => s + i.approved, 0);

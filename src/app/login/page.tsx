@@ -43,11 +43,18 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
+      <Card className="w-full max-w-md shadow-lg">
+        <CardHeader className="text-center space-y-2">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-lg">
+            TF
+          </div>
           <CardTitle className="text-2xl">The Frame</CardTitle>
-          <CardDescription>Sign in to your account</CardDescription>
+          <CardDescription>
+            <span className="text-xs font-medium tracking-wider uppercase text-muted-foreground">by Jaxy</span>
+            <br />
+            Sign in to your account
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">

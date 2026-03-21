@@ -147,9 +147,15 @@ export default function NotificationsPage() {
       </div>
 
       {loading ? (
-        <p className="text-muted-foreground text-center py-8">Loading...</p>
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        </div>
       ) : notifications.length === 0 ? (
-        <p className="text-muted-foreground text-center py-8">No notifications</p>
+        <div className="text-center py-16">
+          <Bell className="h-10 w-10 mx-auto text-muted-foreground/50 mb-3" />
+          <p className="font-medium text-muted-foreground">All caught up!</p>
+          <p className="text-sm text-muted-foreground/70 mt-1">No notifications to show right now.</p>
+        </div>
       ) : (
         <div className="space-y-3">
           {notifications.map(notif => {

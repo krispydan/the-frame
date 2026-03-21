@@ -224,8 +224,23 @@ export default function CompanyDetailPage() {
     setContactForm({});
   };
 
-  if (loading) return <div className="p-6 text-gray-400">Loading...</div>;
-  if (!company) return <div className="p-6 text-red-500">Company not found</div>;
+  if (loading) return (
+    <div className="p-6">
+      <div className="animate-pulse space-y-4">
+        <div className="h-8 w-48 bg-muted rounded" />
+        <div className="h-64 bg-muted rounded-lg" />
+      </div>
+    </div>
+  );
+  if (!company) return (
+    <div className="p-6 text-center py-16">
+      <AlertCircle className="h-10 w-10 mx-auto text-muted-foreground/50 mb-3" />
+      <p className="font-medium text-muted-foreground">Company not found</p>
+      <Link href="/prospects" className="mt-4 inline-flex items-center gap-2 text-sm text-primary hover:underline">
+        <ArrowLeft className="h-4 w-4" /> Back to Prospects
+      </Link>
+    </div>
+  );
 
   const isSingleStore = stores.length <= 1;
   const primaryStore = stores.find(s => s.is_primary) || stores[0];

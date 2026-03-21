@@ -289,7 +289,14 @@ export function CustomerList({ customers }: { customers: CustomerRow[] }) {
               );
             })}
             {filtered.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No customers found</td></tr>
+              <tr><td colSpan={7} className="px-4 py-16 text-center">
+                <svg className="h-10 w-10 mx-auto text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                <p className="font-medium text-gray-500">No customers found</p>
+                <p className="text-sm text-gray-400 mt-1">Sync accounts from orders to populate your customer list.</p>
+                <button onClick={handleSync} disabled={syncing} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                  {syncing ? "Syncing..." : "Sync Accounts"}
+                </button>
+              </td></tr>
             )}
           </tbody>
         </table>

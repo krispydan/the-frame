@@ -242,8 +242,10 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
             })}
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
-                  No campaigns found
+                <TableCell colSpan={8} className="text-center py-16">
+                  <Mail className="h-10 w-10 mx-auto text-muted-foreground/50 mb-3" />
+                  <p className="font-medium text-muted-foreground">No campaigns yet</p>
+                  <p className="text-sm text-muted-foreground/70 mt-1">Create your first outreach campaign to start generating leads.</p>
                 </TableCell>
               </TableRow>
             )}
