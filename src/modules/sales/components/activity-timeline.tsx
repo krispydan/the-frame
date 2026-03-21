@@ -124,9 +124,9 @@ export function ActivityTimeline({ activities, onAddActivity }: Props) {
                       : ""}
                   </span>
                 </div>
-                {act.description && (
-                  <p className="text-sm mt-0.5">{act.description as string}</p>
-                )}
+                {act.description ? (
+                  <p className="text-sm mt-0.5">{String(act.description)}</p>
+                ) : null}
               </div>
             </div>
           ))}

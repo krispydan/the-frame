@@ -17,7 +17,7 @@ interface DigestStats {
 }
 
 async function gatherStats(): Promise<DigestStats> {
-  const db = sqlite();
+  const db = sqlite;
   const today = new Date().toISOString().split("T")[0];
 
   const totalProspects = (db.prepare("SELECT COUNT(*) as c FROM companies").get() as { c: number }).c;

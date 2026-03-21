@@ -244,10 +244,8 @@ function NewDealDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" className="gap-1.5">
-          <Plus className="h-4 w-4" /> New Deal
-        </Button>
+      <DialogTrigger render={<Button size="sm" className="gap-1.5" />}>
+        <Plus className="h-4 w-4" /> New Deal
       </DialogTrigger>
       <DialogContent className="max-w-md">
         <DialogHeader>
@@ -299,7 +297,7 @@ function NewDealDialog({
             </div>
             <div>
               <Label>Channel</Label>
-              <Select value={channel} onValueChange={setChannel}>
+              <Select value={channel} onValueChange={(v) => setChannel(v || "")}>
                 <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
                 <SelectContent>
                   {DEAL_CHANNELS.map((c) => (
@@ -463,7 +461,7 @@ export function PipelineBoard({ deals: initialDeals, stageSummaries, companies, 
         </div>
         <div className="flex items-center gap-3">
           {users.length > 0 && (
-            <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+            <Select value={ownerFilter} onValueChange={(v) => setOwnerFilter(v || "all")}>
               <SelectTrigger className="w-40">
                 <Filter className="h-3.5 w-3.5 mr-1.5" />
                 <SelectValue />

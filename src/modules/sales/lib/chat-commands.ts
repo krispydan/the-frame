@@ -29,7 +29,7 @@ const commands: ChatCommand[] = [
     description: "Show prospects in a specific state",
     handler: async (match) => {
       const state = match[1].trim().toUpperCase().slice(0, 2);
-      const result = sqlite()
+      const result = sqlite
         .prepare("SELECT COUNT(*) as count FROM companies WHERE UPPER(state) = ?")
         .get(state) as { count: number };
       return {
@@ -48,7 +48,7 @@ const commands: ChatCommand[] = [
     description: "Count prospects by category",
     handler: async (match) => {
       const category = match[1].trim().toLowerCase();
-      const result = sqlite()
+      const result = sqlite
         .prepare("SELECT COUNT(*) as count FROM companies WHERE LOWER(type) LIKE ?")
         .get(`%${category}%`) as { count: number };
       return {
@@ -67,7 +67,7 @@ const commands: ChatCommand[] = [
     ],
     description: "Trigger ICP classification on unscored prospects",
     handler: async () => {
-      const unscored = sqlite()
+      const unscored = sqlite
         .prepare("SELECT COUNT(*) as count FROM companies WHERE icp_tier IS NULL OR icp_tier = ''")
         .get() as { count: number };
       return {
@@ -86,7 +86,7 @@ const commands: ChatCommand[] = [
     ],
     description: "Show prospects ready for outreach",
     handler: async () => {
-      const result = sqlite()
+      const result = sqlite
         .prepare(
           "SELECT COUNT(*) as count FROM companies WHERE status = 'qualified' AND id IN (SELECT company_id FROM contacts WHERE email IS NOT NULL AND email != '')"
         )
@@ -107,7 +107,7 @@ const commands: ChatCommand[] = [
     ],
     description: "Show ICP tier breakdown",
     handler: async () => {
-      const tiers = sqlite()
+      const tiers = sqlite
         .prepare(
           "SELECT icp_tier, COUNT(*) as count FROM companies WHERE icp_tier IS NOT NULL AND icp_tier != '' GROUP BY icp_tier ORDER BY icp_tier"
         )
@@ -129,11 +129,11 @@ const commands: ChatCommand[] = [
     ],
     description: "Show overall prospect stats",
     handler: async () => {
-      const total = sqlite().prepare("SELECT COUNT(*) as c FROM companies").get() as { c: number };
-      const withEmail = sqlite()
+      const total = sqlite.prepare("SELECT COUNT(*) as c FROM companies").get() as { c: number };
+      const withEmail = sqlite
         .prepare("SELECT COUNT(DISTINCT company_id) as c FROM contacts WHERE email IS NOT NULL AND email != ''")
         .get() as { c: number };
-      const withPhone = sqlite()
+      const withPhone = sqlite
         .prepare("SELECT COUNT(DISTINCT company_id) as c FROM contacts WHERE phone IS NOT NULL AND phone != ''")
         .get() as { c: number };
       return {

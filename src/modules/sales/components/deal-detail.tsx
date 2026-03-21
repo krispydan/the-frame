@@ -46,10 +46,41 @@ import {
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 
+interface DealData {
+  id: string;
+  company_id: string;
+  company_name: string;
+  company_city: string;
+  company_state: string;
+  company_email: string | null;
+  company_phone: string | null;
+  company_website: string | null;
+  title: string;
+  value: number | null;
+  stage: string;
+  channel: string | null;
+  owner_id: string | null;
+  snooze_until: string | null;
+  snooze_reason: string | null;
+  last_activity_at: string | null;
+  created_at: string | null;
+  icp_tier: string | null;
+  icp_score: number | null;
+}
+
+interface ContactData {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  title: string | null;
+  email: string | null;
+  phone: string | null;
+}
+
 interface Props {
-  deal: Record<string, unknown>;
+  deal: DealData;
   activities: Record<string, unknown>[];
-  contacts: Record<string, unknown>[];
+  contacts: ContactData[];
   users: { id: string; name: string }[];
 }
 
@@ -118,7 +149,7 @@ export function DealDetail({ deal, activities: initialActivities, contacts, user
     router.push("/pipeline");
   }
 
-  const isSnoozed = deal.snooze_until && new Date(deal.snooze_until as string) > new Date();
+  const isSnoozed = deal.snooze_until ? new Date(deal.snooze_until) > new Date() : false;
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -130,10 +161,10 @@ export function DealDetail({ deal, activities: initialActivities, contacts, user
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold">{deal.company_name as string}</h1>
+          <h1 className="text-2xl font-bold">{deal.company_name}</h1>
           <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
             <MapPin className="h-3.5 w-3.5" />
-            {deal.company_city as string}, {deal.company_state as string}
+            {deal.company_city}, {deal.company_state}
             {deal.value != null && (
               <>
                 <span>·</span>
@@ -172,8 +203,8 @@ export function DealDetail({ deal, activities: initialActivities, contacts, user
           <div className="flex items-center gap-2">
             <Clock className="h-4 w-4 text-amber-600" />
             <span className="text-sm">
-              Snoozed until {format(new Date(deal.snooze_until as string), "MMM d, yyyy")}
-              {deal.snooze_reason && <span className="text-muted-foreground"> — {deal.snooze_reason as string}</span>}
+              Snoozed until {format(new Date(deal.snooze_until!), "MMM d, yyyy")}
+              {deal.snooze_reason && <span className="text-muted-foreground"> — {deal.snooze_reason}</span>}
             </span>
           </div>
           <Button size="sm" variant="outline" onClick={unsnoozeDeal}>Wake Now</Button>
@@ -188,20 +219,20 @@ export function DealDetail({ deal, activities: initialActivities, contacts, user
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Channel</span>
-                <Badge variant="secondary">{(deal.channel as string) || "—"}</Badge>
+                <Badge variant="secondary">{(deal.channel) || "—"}</Badge>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Created</span>
-                <span>{deal.created_at ? format(new Date(deal.created_at as string), "MMM d, yyyy") : "—"}</span>
+                <span>{deal.created_at ? format(new Date(deal.created_at), "MMM d, yyyy") : "—"}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Last Activity</span>
-                <span>{deal.last_activity_at ? formatDistanceToNow(new Date(deal.last_activity_at as string), { addSuffix: true }) : "—"}</span>
+                <span>{deal.last_activity_at ? formatDistanceToNow(new Date(deal.last_activity_at), { addSuffix: true }) : "—"}</span>
               </div>
               {deal.icp_tier && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">ICP</span>
-                  <Badge>{deal.icp_tier as string} ({deal.icp_score as number})</Badge>
+                  <Badge>{deal.icp_tier} ({deal.icp_score})</Badge>
                 </div>
               )}
             </div>
@@ -210,7 +241,7 @@ export function DealDetail({ deal, activities: initialActivities, contacts, user
           {/* Owner */}
           <Card className="p-4 space-y-2">
             <h3 className="font-semibold text-sm">Owner</h3>
-            <Select value={(deal.owner_id as string) || ""} onValueChange={changeOwner}>
+            <Select value={(deal.owner_id) || ""} onValueChange={(v) => v && changeOwner(v)}>
               <SelectTrigger><SelectValue placeholder="Assign owner..." /></SelectTrigger>
               <SelectContent>
                 {users.map((u) => (
@@ -226,17 +257,17 @@ export function DealDetail({ deal, activities: initialActivities, contacts, user
             <div className="space-y-1.5 text-sm">
               {deal.company_email && (
                 <a href={`mailto:${deal.company_email}`} className="flex items-center gap-2 text-blue-600 hover:underline">
-                  <Mail className="h-3.5 w-3.5" /> {deal.company_email as string}
+                  <Mail className="h-3.5 w-3.5" /> {deal.company_email}
                 </a>
               )}
               {deal.company_phone && (
                 <a href={`tel:${deal.company_phone}`} className="flex items-center gap-2 text-blue-600 hover:underline">
-                  <Phone className="h-3.5 w-3.5" /> {deal.company_phone as string}
+                  <Phone className="h-3.5 w-3.5" /> {deal.company_phone}
                 </a>
               )}
               {deal.company_website && (
-                <a href={deal.company_website as string} target="_blank" className="flex items-center gap-2 text-blue-600 hover:underline">
-                  <Globe className="h-3.5 w-3.5" /> {deal.company_website as string}
+                <a href={deal.company_website} target="_blank" className="flex items-center gap-2 text-blue-600 hover:underline">
+                  <Globe className="h-3.5 w-3.5" /> {deal.company_website}
                 </a>
               )}
             </div>
@@ -247,11 +278,11 @@ export function DealDetail({ deal, activities: initialActivities, contacts, user
             <Card className="p-4 space-y-2">
               <h3 className="font-semibold text-sm">Contacts</h3>
               {contacts.map((c) => (
-                <div key={c.id as string} className="text-sm border-b last:border-0 pb-2 last:pb-0">
-                  <p className="font-medium">{c.first_name as string} {c.last_name as string}</p>
-                  {c.title && <p className="text-xs text-muted-foreground">{c.title as string}</p>}
-                  {c.email && <p className="text-xs">{c.email as string}</p>}
-                  {c.phone && <p className="text-xs">{c.phone as string}</p>}
+                <div key={c.id} className="text-sm border-b last:border-0 pb-2 last:pb-0">
+                  <p className="font-medium">{c.first_name} {c.last_name}</p>
+                  {c.title && <p className="text-xs text-muted-foreground">{c.title}</p>}
+                  {c.email && <p className="text-xs">{c.email}</p>}
+                  {c.phone && <p className="text-xs">{c.phone}</p>}
                 </div>
               ))}
             </Card>
@@ -260,10 +291,10 @@ export function DealDetail({ deal, activities: initialActivities, contacts, user
           {/* Quick actions */}
           <div className="flex flex-col gap-2">
             <Dialog open={snoozeOpen} onOpenChange={setSnoozeOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline" size="sm" className="w-full gap-1.5">
-                  <Pause className="h-3.5 w-3.5" /> Snooze
-                </Button>
+              <DialogTrigger
+                render={<Button variant="outline" size="sm" className="w-full gap-1.5" />}
+              >
+                <Pause className="h-3.5 w-3.5" /> Snooze
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader><DialogTitle>Snooze Deal</DialogTitle></DialogHeader>

@@ -10,7 +10,8 @@ async function getDeal(id: string) {
     FROM deals d
     LEFT JOIN companies c ON c.id = d.company_id
     WHERE d.id = ?
-  `).get(id) as Record<string, unknown> | undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  `).get(id) as any;
   return deal;
 }
 
@@ -37,5 +38,6 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
 
   const contacts = await getContacts(deal.company_id as string);
 
-  return <DealDetail deal={deal} activities={activities} contacts={contacts} users={users} />;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return <DealDetail deal={deal as any} activities={activities} contacts={contacts as any[]} users={users} />;
 }
