@@ -93,6 +93,10 @@ export const contacts = sqliteTable("contacts", {
 export { deals, dealActivities, DEAL_STAGES, DEAL_STAGE_LABELS, DEAL_STAGE_COLORS, DEAL_CHANNELS, ACTIVITY_TYPES } from "./pipeline";
 export type { DealStage, DealChannel, ActivityType } from "./pipeline";
 
+// Re-export campaign schema
+export { campaigns, campaignLeads, instantlySync, CAMPAIGN_TYPES, CAMPAIGN_STATUSES, CAMPAIGN_TYPE_LABELS, CAMPAIGN_STATUS_COLORS, LEAD_STATUSES } from "./campaigns";
+export type { CampaignType, CampaignStatus, LeadStatus } from "./campaigns";
+
 // ── Smart Lists (Saved Filters) ──
 export const smartLists = sqliteTable("smart_lists", {
   id: id(),
