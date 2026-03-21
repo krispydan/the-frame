@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   Users, Target, DollarSign, TrendingUp,
   Upload, Eye, Brain, Clock, ArrowRight, Zap, RefreshCw,
+  ShoppingCart, Package, Bell,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,8 +21,14 @@ interface DashboardStats {
   totalProspects: number;
   outreachReady: number;
   pipelineValue: number;
+  activeDeals: number;
   icpABCount: number;
   unscoredCount: number;
+  pendingOrders: number;
+  totalRevenue: number;
+  inventoryUnits: number;
+  inventorySkus: number;
+  unreadNotifications: number;
   recentActivity: Array<{
     id: string;
     event_type: string;
@@ -110,8 +117,8 @@ export default function DashboardPage() {
         <p className="text-sm text-gray-500 mt-1">Sales pipeline overview</p>
       </div>
 
-      {/* Stats cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      {/* Stats cards - row 1 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <StatCard
           title="Total Prospects"
           value={stats?.totalProspects ?? 0}
@@ -120,19 +127,39 @@ export default function DashboardPage() {
           href="/prospects"
         />
         <StatCard
+          title="Active Deals"
+          value={stats?.activeDeals ?? 0}
+          icon={<Target className="w-5 h-5" />}
+          color="green"
+          subtitle={`Pipeline: $${(stats?.pipelineValue ?? 0).toLocaleString()}`}
+          href="/pipeline"
+        />
+        <StatCard
+          title="Pending Orders"
+          value={stats?.pendingOrders ?? 0}
+          icon={<ShoppingCart className="w-5 h-5" />}
+          color="purple"
+          subtitle={`Revenue: $${(stats?.totalRevenue ?? 0).toLocaleString()}`}
+          href="/orders"
+        />
+        <StatCard
+          title="Inventory Units"
+          value={stats?.inventoryUnits ?? 0}
+          icon={<Package className="w-5 h-5" />}
+          color="amber"
+          subtitle={`${stats?.inventorySkus ?? 0} SKUs in warehouse`}
+          href="/inventory"
+        />
+      </div>
+
+      {/* Stats cards - row 2 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <StatCard
           title="Outreach Ready"
           value={stats?.outreachReady ?? 0}
           icon={<Target className="w-5 h-5" />}
           color="green"
           subtitle="Has email + qualified"
-        />
-        <StatCard
-          title="Pipeline Value"
-          value={stats?.pipelineValue ?? 0}
-          icon={<DollarSign className="w-5 h-5" />}
-          color="purple"
-          format="currency"
-          subtitle="Coming in Phase 2"
         />
         <StatCard
           title="ICP A+B Prospects"
@@ -141,6 +168,22 @@ export default function DashboardPage() {
           color="amber"
           subtitle="High-value targets"
         />
+        <StatCard
+          title="Pipeline Value"
+          value={stats?.pipelineValue ?? 0}
+          icon={<DollarSign className="w-5 h-5" />}
+          color="purple"
+          format="currency"
+        />
+        {(stats?.unreadNotifications ?? 0) > 0 && (
+          <StatCard
+            title="Unread Notifications"
+            value={stats?.unreadNotifications ?? 0}
+            icon={<Bell className="w-5 h-5" />}
+            color="blue"
+            href="/notifications"
+          />
+        )}
       </div>
 
       {/* Today's Focus */}
