@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { calculateSellThrough, getReorderRecommendations } from "@/modules/inventory/lib/sell-through";
 

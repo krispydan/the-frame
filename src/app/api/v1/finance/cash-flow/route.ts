@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { calculateCashFlow } from "@/modules/finance/lib/cash-flow";
 

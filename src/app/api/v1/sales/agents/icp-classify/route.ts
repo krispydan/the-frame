@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { agentOrchestrator } from "@/modules/core/lib/agent-orchestrator";
 import "@/modules/sales/agents/icp-classifier"; // registers the agent

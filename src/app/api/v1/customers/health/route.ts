@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 /**
  * F8-003: GET /api/v1/customers/health
  * Returns health summary and optionally recalculates scores.

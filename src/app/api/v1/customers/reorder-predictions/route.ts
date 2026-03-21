@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 /**
  * F8-004: GET /api/v1/customers/reorder-predictions
  */
