@@ -124,6 +124,21 @@ export const agentRuns = sqliteTable("agent_runs", {
 });
 
 // ── Settings (with type column per CTO review) ──
+// ── Notifications ──
+export const notifications = sqliteTable("notifications", {
+  id: id(),
+  type: text("type", { enum: ["inventory", "deal", "customer", "finance", "agent", "order"] }).notNull(),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  severity: text("severity", { enum: ["critical", "high", "medium", "low"] }).notNull(),
+  module: text("module").notNull(),
+  entityId: text("entity_id"),
+  entityType: text("entity_type"),
+  read: integer("read").notNull().default(0),
+  dismissed: integer("dismissed").notNull().default(0),
+  createdAt: timestamp("created_at"),
+});
+
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value"),

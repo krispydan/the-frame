@@ -16,6 +16,21 @@ export async function POST() {
     // Check current tables
     const tablesBefore = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all();
     
+    // Ensure notifications table exists (may not be in drizzle migrations yet)
+    sqlite.exec(`CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      severity TEXT NOT NULL,
+      module TEXT NOT NULL,
+      entity_id TEXT,
+      entity_type TEXT,
+      read INTEGER NOT NULL DEFAULT 0,
+      dismissed INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`);
+
     // Run migrations
     migrate(db, { migrationsFolder });
     
