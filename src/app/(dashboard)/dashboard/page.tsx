@@ -10,6 +10,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
+interface FocusData {
+  wakingToday: { id: string; title: string; company_name: string; snooze_reason: string; value: number }[];
+  reorderDue: { id: string; title: string; company_name: string; reorder_due_at: string; value: number }[];
+  stale: { id: string; title: string; company_name: string; last_activity_at: string; stage: string; value: number }[];
+}
+
 interface DashboardStats {
   totalProspects: number;
   outreachReady: number;
@@ -32,10 +38,19 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [classifying, setClassifying] = useState(false);
   const [classifyResult, setClassifyResult] = useState<string | null>(null);
+  const [focus, setFocus] = useState<FocusData | null>(null);
 
   useEffect(() => {
     fetchStats();
+    fetchFocus();
   }, []);
+
+  const fetchFocus = async () => {
+    try {
+      const res = await fetch("/api/v1/sales/focus");
+      setFocus(await res.json());
+    } catch {}
+  };
 
   const fetchStats = async () => {
     try {
@@ -127,6 +142,54 @@ export default function DashboardPage() {
           subtitle="High-value targets"
         />
       </div>
+
+      {/* Today's Focus */}
+      {focus && (focus.wakingToday.length > 0 || focus.reorderDue.length > 0 || focus.stale.length > 0) && (
+        <Card className="mb-6">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              🎯 Today&apos;s Focus
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {focus.wakingToday.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium text-amber-700 mb-2">⏰ Waking Today ({focus.wakingToday.length})</h4>
+                  {focus.wakingToday.map(d => (
+                    <Link key={d.id} href={`/pipeline/${d.id}`} className="block p-2 rounded hover:bg-amber-50 dark:hover:bg-amber-900/10 text-sm">
+                      <span className="font-medium">{d.company_name}</span>
+                      {d.snooze_reason && <span className="text-xs text-gray-500 block">{d.snooze_reason}</span>}
+                    </Link>
+                  ))}
+                </div>
+              )}
+              {focus.reorderDue.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium text-teal-700 mb-2">🔄 Reorder Due ({focus.reorderDue.length})</h4>
+                  {focus.reorderDue.map(d => (
+                    <Link key={d.id} href={`/pipeline/${d.id}`} className="block p-2 rounded hover:bg-teal-50 dark:hover:bg-teal-900/10 text-sm">
+                      <span className="font-medium">{d.company_name}</span>
+                      {d.value && <span className="text-xs text-green-600 ml-2">${d.value.toLocaleString()}</span>}
+                    </Link>
+                  ))}
+                </div>
+              )}
+              {focus.stale.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium text-red-700 mb-2">💤 Needs Attention ({focus.stale.length})</h4>
+                  {focus.stale.map(d => (
+                    <Link key={d.id} href={`/pipeline/${d.id}`} className="block p-2 rounded hover:bg-red-50 dark:hover:bg-red-900/10 text-sm">
+                      <span className="font-medium">{d.company_name}</span>
+                      <span className="text-xs text-gray-500 block">No activity for 7+ days</span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Quick Actions */}
