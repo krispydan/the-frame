@@ -69,6 +69,37 @@ export const seoKeywords = sqliteTable("marketing_seo_keywords", {
   previousRank: integer("previous_rank"),
   url: text("url"),
   searchVolume: integer("search_volume"),
+  difficulty: integer("difficulty"),
+  updatedAt: timestamp("updated_at"),
+  createdAt: timestamp("created_at"),
+});
+
+// ── Social Media Posts ──
+export const socialPosts = sqliteTable("marketing_social_posts", {
+  id: id(),
+  content: text("content").notNull(),
+  platform: text("platform", { enum: ["instagram", "tiktok", "pinterest", "facebook", "twitter"] }).notNull(),
+  status: text("status", { enum: ["draft", "scheduled", "published"] }).notNull().default("draft"),
+  scheduledDate: text("scheduled_date"),
+  publishedDate: text("published_date"),
+  likes: integer("likes").default(0),
+  comments: integer("comments").default(0),
+  shares: integer("shares").default(0),
+  createdAt: timestamp("created_at"),
+}, (table) => ({
+  statusIdx: index("idx_social_post_status").on(table.status),
+  platformIdx: index("idx_social_post_platform").on(table.platform),
+}));
+
+// ── Social Media Accounts ──
+export const socialAccounts = sqliteTable("marketing_social_accounts", {
+  id: id(),
+  platform: text("platform", { enum: ["instagram", "tiktok", "pinterest", "facebook", "twitter"] }).notNull(),
+  handle: text("handle"),
+  followers: integer("followers").default(0),
+  posts: integer("posts").default(0),
+  engagementRate: real("engagement_rate").default(0),
+  growth: real("growth").default(0),
   updatedAt: timestamp("updated_at"),
   createdAt: timestamp("created_at"),
 });

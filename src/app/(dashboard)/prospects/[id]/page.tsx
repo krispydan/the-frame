@@ -6,12 +6,36 @@ import Link from "next/link";
 import {
   ArrowLeft, Building2, Globe, Phone, Mail, MapPin, Tag, Star,
   Edit, UserPlus, MessageSquare, Clock, ExternalLink, Plus, Save, X,
+  Briefcase,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  DEAL_STAGES,
+  DEAL_STAGE_LABELS,
+  DEAL_CHANNELS,
+  type DealStage,
+} from "@/modules/sales/schema/pipeline";
 
 interface Company {
   id: string; name: string; type: string; website: string; domain: string;
@@ -77,6 +101,41 @@ export default function CompanyDetailPage() {
     else setContactForm(prev => ({ ...prev, [key]: value }));
   };
   const [statusDropdown, setStatusDropdown] = useState(false);
+  const [createDealOpen, setCreateDealOpen] = useState(false);
+  const [dealStage, setDealStage] = useState<DealStage>("outreach");
+  const [dealChannel, setDealChannel] = useState("");
+  const [dealValue, setDealValue] = useState("");
+  const [dealNotes, setDealNotes] = useState("");
+  const [dealSaving, setDealSaving] = useState(false);
+
+  const createDeal = async () => {
+    if (!company) return;
+    setDealSaving(true);
+    const res = await fetch("/api/v1/sales/deals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        company_id: company.id,
+        title: company.name,
+        stage: dealStage,
+        channel: dealChannel || undefined,
+        value: dealValue ? parseFloat(dealValue) : undefined,
+        notes: dealNotes || undefined,
+      }),
+    });
+    if (res.ok) {
+      const { id: dealId } = await res.json();
+      setDealSaving(false);
+      setCreateDealOpen(false);
+      setDealStage("outreach");
+      setDealChannel("");
+      setDealValue("");
+      setDealNotes("");
+      router.push(`/pipeline/${dealId}`);
+    } else {
+      setDealSaving(false);
+    }
+  };
 
   useEffect(() => {
     fetch(`/api/v1/sales/prospects/${id}`)
@@ -207,6 +266,54 @@ export default function CompanyDetailPage() {
               </div>
             )}
           </div>
+
+          <Dialog open={createDealOpen} onOpenChange={setCreateDealOpen}>
+            <DialogTrigger render={<Button variant="outline" size="sm" />}>
+              <Briefcase className="w-4 h-4 mr-1" /> Create Deal
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Create Deal — {company.name}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>Stage</Label>
+                    <Select value={dealStage} onValueChange={(v) => setDealStage(v as DealStage)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {DEAL_STAGES.map((s) => (
+                          <SelectItem key={s} value={s}>{DEAL_STAGE_LABELS[s]}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Channel</Label>
+                    <Select value={dealChannel} onValueChange={(v) => setDealChannel(v || "")}>
+                      <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
+                      <SelectContent>
+                        {DEAL_CHANNELS.map((c) => (
+                          <SelectItem key={c} value={c}>{c}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div>
+                  <Label>Value ($)</Label>
+                  <Input type="number" placeholder="0" value={dealValue} onChange={(e) => setDealValue(e.target.value)} />
+                </div>
+                <div>
+                  <Label>Notes</Label>
+                  <Textarea placeholder="Initial notes..." value={dealNotes} onChange={(e) => setDealNotes(e.target.value)} rows={2} />
+                </div>
+                <Button onClick={createDeal} disabled={dealSaving} className="w-full">
+                  {dealSaving ? "Creating..." : "Create Deal"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
 
           <Button variant="outline" size="sm" onClick={() => { setEditing(!editing); setEditFields({}); }}>
             <Edit className="w-4 h-4 mr-1" /> Edit
