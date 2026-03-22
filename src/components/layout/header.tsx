@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 
 const moduleTitles: Record<string, string> = {
   dashboard: "Dashboard",
@@ -37,6 +38,7 @@ export function AppHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const [unreadCount, setUnreadCount] = useState(0);
+  const { override } = useBreadcrumbOverride();
   const segments = pathname.split("/").filter(Boolean);
   const currentModule = segments[0] || "dashboard";
   const title = moduleTitles[currentModule] || currentModule;
@@ -80,7 +82,7 @@ export function AppHeader() {
                   <BreadcrumbSeparator />
                   <BreadcrumbItem>
                     <BreadcrumbPage>
-                      {segments[segments.length - 1]}
+                      {override || segments[segments.length - 1]}
                     </BreadcrumbPage>
                   </BreadcrumbItem>
                 </>

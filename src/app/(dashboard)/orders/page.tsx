@@ -85,8 +85,9 @@ interface OrderDetail {
 
 const channelConfig: Record<string, { label: string; color: string }> = {
   shopify_dtc: { label: "Shopify DTC", color: "bg-blue-100 text-blue-800" },
-  shopify_wholesale: { label: "Shopify B2B", color: "bg-blue-100 text-blue-700" },
+  shopify_wholesale: { label: "Shopify Wholesale", color: "bg-blue-100 text-blue-700" },
   faire: { label: "Faire", color: "bg-green-100 text-green-800" },
+  amazon: { label: "Amazon", color: "bg-yellow-100 text-yellow-800" },
   direct: { label: "Direct", color: "bg-gray-100 text-gray-700" },
   phone: { label: "Phone", color: "bg-orange-100 text-orange-800" },
 };

@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
+import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import { TIER_LABELS, TIER_COLORS, HEALTH_COLORS, type CustomerTier, type HealthStatus } from "@/modules/customers/schema";
 
 interface AccountData {
@@ -116,6 +118,12 @@ export function CustomerDetail({
   reorderPrediction?: ReorderPrediction | null;
   churnRisk?: ChurnRiskData | null;
 }) {
+  const { setOverride } = useBreadcrumbOverride();
+  useEffect(() => {
+    if (account.company_name) setOverride(account.company_name);
+    return () => setOverride(null);
+  }, [account.company_name, setOverride]);
+
   const daysUntilReorder = account.next_reorder_estimate
     ? Math.ceil((new Date(account.next_reorder_estimate).getTime() - Date.now()) / 86400000)
     : null;

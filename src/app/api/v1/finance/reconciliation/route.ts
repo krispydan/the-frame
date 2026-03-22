@@ -19,10 +19,12 @@ export interface ReconciliationEntry {
 }
 
 const CHANNEL_LABELS: Record<string, string> = {
+  shopify: "Shopify (All)",
   shopify_dtc: "Shopify DTC",
   shopify_wholesale: "Shopify Wholesale",
   faire: "Faire",
   amazon: "Amazon",
+  direct: "Direct",
 };
 
 // GET /api/v1/finance/reconciliation
@@ -51,12 +53,18 @@ export async function GET(req: NextRequest) {
 
     const entries: ReconciliationEntry[] = stlRows.map(s => {
       // Get expected revenue from orders for this settlement period + channel
+      // Settlement channel may be generic (e.g. 'shopify') while orders use specific channels (e.g. 'shopify_dtc', 'shopify_wholesale')
+      const channelMapping: Record<string, string[]> = {
+        shopify: ["shopify_dtc", "shopify_wholesale"],
+      };
+      const orderChannels = channelMapping[s.channel] || [s.channel];
+      const placeholders = orderChannels.map(() => "?").join(", ");
       const orderData = sqlite.prepare(`
         SELECT COUNT(DISTINCT id) as order_count, COALESCE(SUM(total), 0) as revenue
         FROM orders
-        WHERE channel = ? AND placed_at >= ? AND placed_at <= ?
+        WHERE channel IN (${placeholders}) AND placed_at >= ? AND placed_at <= ?
           AND status NOT IN ('cancelled', 'returned')
-      `).get(s.channel, s.period_start, s.period_end + "T23:59:59") as {
+      `).get(...orderChannels, s.period_start, s.period_end + "T23:59:59") as {
         order_count: number; revenue: number;
       } | undefined;
 

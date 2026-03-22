@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import Link from "next/link";
 import {
   ArrowLeft, Building2, Globe, Phone, Mail, MapPin, Tag, Star,
@@ -87,6 +88,7 @@ const tierColors: Record<string, string> = {
 export default function CompanyDetailPage() {
   const { id } = useParams();
   const router = useRouter();
+  const { setOverride } = useBreadcrumbOverride();
   const [company, setCompany] = useState<Company | null>(null);
   const [stores, setStores] = useState<Store[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -167,9 +169,11 @@ export default function CompanyDetailPage() {
         setContacts(data.contacts || []);
         setActivities(data.activities || []);
         setLoading(false);
+        if (data.company?.name) setOverride(data.company.name);
       })
       .catch(() => setLoading(false));
-  }, [id]);
+    return () => setOverride(null);
+  }, [id, setOverride]);
 
   const updateCompany = async (fields: Record<string, unknown>) => {
     await fetch(`/api/v1/sales/prospects/${id}`, {

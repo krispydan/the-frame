@@ -74,8 +74,8 @@ export function predictCashFlow(weeksAhead: number = 12): CashFlowPrediction {
 
   // Pending POs (future outflows)
   const pendingPOs = sqlite.prepare(`
-    SELECT total_cost, expected_delivery FROM inventory_purchase_orders WHERE status IN ('draft', 'pending', 'confirmed', 'in_production')
-  `).all() as Array<{ total_cost: number; expected_delivery: string | null }>;
+    SELECT total_cost, expected_arrival_date FROM inventory_purchase_orders WHERE status IN ('draft', 'pending', 'confirmed', 'in_production')
+  `).all() as Array<{ total_cost: number; expected_arrival_date: string | null }>;
 
   // Project week by week
   let balance = currentBalance;
@@ -92,8 +92,8 @@ export function predictCashFlow(weeksAhead: number = 12): CashFlowPrediction {
 
     // Check if any POs are expected this week
     for (const po of pendingPOs) {
-      if (po.expected_delivery) {
-        const poDate = new Date(po.expected_delivery);
+      if (po.expected_arrival_date) {
+        const poDate = new Date(po.expected_arrival_date);
         const diffDays = (poDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
         if (diffDays >= (w - 1) * 7 && diffDays < w * 7) {
           outflows += po.total_cost;

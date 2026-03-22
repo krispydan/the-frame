@@ -5,6 +5,7 @@ import { AppHeader } from "@/components/layout/header";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { CommandPalette } from "@/components/command-palette";
 import { Providers } from "@/components/providers";
+import { BreadcrumbOverrideProvider } from "@/components/layout/breadcrumb-context";
 
 export default function DashboardLayout({
   children,
@@ -13,6 +14,7 @@ export default function DashboardLayout({
 }) {
   return (
     <Providers>
+      <BreadcrumbOverrideProvider>
       <SidebarProvider>
         <AppSidebar />
         <SidebarInset>
@@ -22,6 +24,7 @@ export default function DashboardLayout({
         <ChatPanel />
         <CommandPalette />
       </SidebarProvider>
+      </BreadcrumbOverrideProvider>
     </Providers>
   );
 }

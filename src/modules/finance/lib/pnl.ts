@@ -140,11 +140,13 @@ function calculatePnlForRange(startDate: string, endDate: string): {
       COALESCE(SUM(
         oi.quantity * COALESCE(
           (SELECT AVG(pli.unit_cost) FROM inventory_po_line_items pli WHERE pli.sku_id = oi.sku_id AND pli.unit_cost > 0),
-          0
+          COALESCE(cs.wholesale_price, cp.wholesale_price, 7.00)
         )
       ), 0) as cogs
     FROM orders o
     LEFT JOIN order_items oi ON oi.order_id = o.id
+    LEFT JOIN catalog_skus cs ON cs.id = oi.sku_id
+    LEFT JOIN catalog_products cp ON cp.id = cs.product_id
     WHERE o.placed_at >= ? AND o.placed_at <= ?
       AND o.status NOT IN ('cancelled', 'returned')
     GROUP BY o.channel

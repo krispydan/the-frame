@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -86,6 +87,11 @@ interface Props {
 
 export function DealDetail({ deal, activities: initialActivities, contacts, users }: Props) {
   const router = useRouter();
+  const { setOverride } = useBreadcrumbOverride();
+  useEffect(() => {
+    if (deal.company_name) setOverride(deal.company_name);
+    return () => setOverride(null);
+  }, [deal.company_name, setOverride]);
   const [activities, setActivities] = useState(initialActivities);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [snoozeDate, setSnoozeDate] = useState("");

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import {
   ArrowLeft,
   Package,
@@ -71,8 +72,9 @@ interface OrderDetail {
 
 const channelConfig: Record<string, { label: string; color: string }> = {
   shopify_dtc: { label: "Shopify DTC", color: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300" },
-  shopify_wholesale: { label: "Shopify B2B", color: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" },
+  shopify_wholesale: { label: "Shopify Wholesale", color: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" },
   faire: { label: "Faire", color: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300" },
+  amazon: { label: "Amazon", color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300" },
   direct: { label: "Direct", color: "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300" },
   phone: { label: "Phone", color: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300" },
 };
@@ -152,6 +154,7 @@ function timelineLabel(eventType: string): { label: string; icon: React.ElementT
 
 export default function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
+  const { setOverride } = useBreadcrumbOverride();
   const [orderId, setOrderId] = useState<string | null>(null);
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -191,6 +194,10 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   }, [orderId]);
 
   useEffect(() => { fetchOrder(); }, [fetchOrder]);
+  useEffect(() => {
+    if (order) setOverride(order.orderNumber);
+    return () => setOverride(null);
+  }, [order, setOverride]);
 
   const updateStatus = async (status: string, extra?: Record<string, string>) => {
     if (!order) return;
