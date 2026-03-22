@@ -29,14 +29,14 @@ export async function POST() {
     // Ensure enrichment_status column exists (may be missing from older migrations)
     try { sqlite.exec("ALTER TABLE companies ADD COLUMN enrichment_status TEXT DEFAULT 'none'"); } catch { /* already exists */ }
 
-    const clearAll = sqlite.transaction(() => {
-      for (const t of tables) {
-        try { sqlite.exec(`DELETE FROM "${t}"`); } catch { /* table may not exist */ }
-      }
-      // Clear FTS tables if they exist
-      try { sqlite.exec(`DELETE FROM companies_fts`); } catch { /* may not exist */ }
-    });
-    clearAll();
+    // Disable FK checks during cleanup to avoid ordering issues
+    sqlite.exec("PRAGMA foreign_keys = OFF");
+    for (const t of tables) {
+      try { sqlite.exec(`DELETE FROM "${t}"`); } catch { /* table may not exist */ }
+    }
+    // Clear FTS tables if they exist
+    try { sqlite.exec(`DELETE FROM companies_fts`); } catch { /* may not exist */ }
+    sqlite.exec("PRAGMA foreign_keys = ON");
 
     const now = new Date().toISOString();
     const passwordHash = bcrypt.hashSync("jaxy2026!", 10);
@@ -183,6 +183,13 @@ export async function POST() {
           skuIds.push(skuId);
           const sku = `${p.prefix}-${color}`;
           insertSku.run(skuId, pId, sku, colorNames[color] || color, 3.50, 7.00, 14.00, 1, 'active', daysAgo(60));
+
+          // Add inventory record for each SKU
+          const qty = 150 + Math.floor(Math.random() * 350); // 150-500 units
+          const sellThrough = +(5 + Math.random() * 15).toFixed(1);
+          const dosVal = +(qty / Math.max(sellThrough, 0.1)).toFixed(1);
+          const needsReorder = qty < 50 ? 1 : 0;
+          insertInventory.run(uid(), skuId, 'warehouse', qty, 0, 50, sellThrough, dosVal, needsReorder, daysAgo(60), now);
 
           // Add 2 images for the first 2 colorways of each product
           if (ci < 2) {
