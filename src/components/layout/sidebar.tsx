@@ -44,7 +44,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { signOut, useSession } from "next-auth/react";
+import { useUser } from "@/hooks/use-user";
 
 const salesNav: Array<{ title: string; href: string; icon: typeof LayoutDashboard; badge?: string }> = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -97,9 +97,8 @@ function filterNavByRole(
 
 export function AppSidebar() {
   const pathname = usePathname();
-  const { data: session } = useSession();
-  const user = session?.user;
-  const role = (user as { role?: string } | undefined)?.role || "support";
+  const { user } = useUser();
+  const role = user?.role || "support";
   const initials = user?.name
     ?.split(" ")
     .map((n) => n[0])
@@ -237,7 +236,7 @@ export function AppSidebar() {
                       {user?.name || "User"}
                     </span>
                     <span className="truncate text-xs text-muted-foreground">
-                      {user?.role || ""}
+                      {role}
                     </span>
                   </div>
                   <ChevronsUpDown className="ml-auto size-4" />
@@ -259,7 +258,10 @@ export function AppSidebar() {
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  onClick={() => signOut({ callbackUrl: "/login" })}
+                  onClick={async () => {
+                    await fetch("/api/v1/auth/logout", { method: "POST" });
+                    window.location.href = "/login";
+                  }}
                 >
                   <LogOut className="mr-2 h-4 w-4" />
                   Sign out

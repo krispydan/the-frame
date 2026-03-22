@@ -1,12 +1,12 @@
 "use client";
 
-import { SessionProvider } from "next-auth/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { UserProvider } from "@/hooks/use-user";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <SessionProvider>
+    <UserProvider>
       <TooltipProvider>{children}</TooltipProvider>
-    </SessionProvider>
+    </UserProvider>
   );
 }
