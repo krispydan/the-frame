@@ -834,7 +834,7 @@ function ProspectsPage() {
               ) : prospects.length === 0 ? (
                 <tr><td colSpan={10} className="px-4 py-12 text-center text-gray-400">No prospects found</td></tr>
               ) : prospects.map(p => (
-                <tr key={p.id} className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer ${selected.has(p.id) ? "bg-blue-50/50 dark:bg-blue-900/10" : ""}`}
+                <tr key={p.id} className={`group hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer ${selected.has(p.id) ? "bg-blue-50/50 dark:bg-blue-900/10" : ""}`}
                   onClick={(e) => {
                     if ((e.target as HTMLElement).tagName === "INPUT") return;
                     // Build filter params to pass to detail page for prev/next navigation
@@ -923,6 +923,23 @@ function ProspectsPage() {
                       p.status === "rejected" ? "bg-red-100 text-red-800" :
                       p.status === "customer" ? "bg-purple-100 text-purple-800" : "bg-gray-100 text-gray-600"
                     }`}>{statusLabels[p.status] || p.status}</span>
+                  </td>
+                  <td className="px-2 py-3">
+                    <button
+                      title="Open in new tab"
+                      className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-opacity"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const navParams = new URLSearchParams();
+                        if (search) navParams.set("search", search);
+                        if (sort !== "name") navParams.set("sort", sort);
+                        if (order !== "asc") navParams.set("order", order);
+                        const qs = navParams.toString();
+                        window.open(`/prospects/${p.id}${qs ? `?${qs}` : ""}`, "_blank");
+                      }}
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </button>
                   </td>
                 </tr>
               ))}
