@@ -28,8 +28,9 @@ export async function POST(request: NextRequest) {
         break;
       }
       case "reject": {
-        const stmt = sqlite.prepare(`UPDATE companies SET status = 'rejected', updated_at = ? WHERE id IN (${placeholders})`);
-        const result = stmt.run(now, ...ids);
+        const reason = (params?.reason as string) || null;
+        const stmt = sqlite.prepare(`UPDATE companies SET status = 'rejected', disqualify_reason = ?, updated_at = ? WHERE id IN (${placeholders})`);
+        const result = stmt.run(reason, now, ...ids);
         affected = result.changes;
         break;
       }

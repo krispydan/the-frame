@@ -46,6 +46,7 @@ interface Company {
   google_rating: number; google_review_count: number;
   enrichment_status: string;
   google_place_id: string;
+  disqualify_reason: string;
   created_at: string; updated_at: string;
 }
 
@@ -75,6 +76,14 @@ const statusColors: Record<string, string> = {
   qualified: "bg-green-100 text-green-700",
   rejected: "bg-red-100 text-red-700",
   customer: "bg-purple-100 text-purple-700",
+};
+
+const statusLabels: Record<string, string> = {
+  new: "New",
+  contacted: "Contacted",
+  qualified: "Qualified",
+  rejected: "Not Qualified",
+  customer: "Customer",
 };
 
 const tierColors: Record<string, string> = {
@@ -112,6 +121,8 @@ export default function CompanyDetailPage() {
   const [dealNotes, setDealNotes] = useState("");
   const [dealSaving, setDealSaving] = useState(false);
   const [enriching, setEnriching] = useState(false);
+  const [showDisqualifyDialog, setShowDisqualifyDialog] = useState(false);
+  const [disqualifyReason, setDisqualifyReason] = useState("");
 
   const enrichCompany = async () => {
     if (!company) return;
@@ -196,8 +207,19 @@ export default function CompanyDetailPage() {
   };
 
   const changeStatus = async (status: string) => {
+    if (status === "rejected") {
+      setStatusDropdown(false);
+      setShowDisqualifyDialog(true);
+      return;
+    }
     await updateCompany({ status });
     setStatusDropdown(false);
+  };
+
+  const confirmDisqualify = async () => {
+    await updateCompany({ status: "rejected", disqualify_reason: disqualifyReason || null });
+    setShowDisqualifyDialog(false);
+    setDisqualifyReason("");
   };
 
   const saveEdit = async () => {
@@ -293,14 +315,14 @@ export default function CompanyDetailPage() {
           <div className="relative">
             <button onClick={() => setStatusDropdown(!statusDropdown)}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium ${statusColors[company.status] || "bg-gray-100"}`}>
-              {company.status}
+              {statusLabels[company.status] || company.status}
             </button>
             {statusDropdown && (
-              <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 border rounded-lg shadow-lg z-50 py-1 w-36">
+              <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 border rounded-lg shadow-lg z-50 py-1 w-40">
                 {["new", "contacted", "qualified", "rejected", "customer"].map(s => (
                   <button key={s} onClick={() => changeStatus(s)}
                     className={`w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 ${s === company.status ? "font-bold" : ""}`}>
-                    {s}
+                    {statusLabels[s] || s}
                   </button>
                 ))}
               </div>
@@ -351,6 +373,37 @@ export default function CompanyDetailPage() {
                 <Button onClick={createDeal} disabled={dealSaving} className="w-full">
                   {dealSaving ? "Creating..." : "Create Deal"}
                 </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Disqualify confirmation dialog */}
+          <Dialog open={showDisqualifyDialog} onOpenChange={setShowDisqualifyDialog}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Disqualify Prospect?</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  This will mark <strong>{company.name}</strong> as Not Qualified and hide them from the default prospect list.
+                </p>
+                <div>
+                  <Label>Reason (optional)</Label>
+                  <Textarea
+                    placeholder="Why is this prospect not qualified?"
+                    value={disqualifyReason}
+                    onChange={(e) => setDisqualifyReason(e.target.value)}
+                    rows={3}
+                  />
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" onClick={() => { setShowDisqualifyDialog(false); setDisqualifyReason(""); }}>
+                    Cancel
+                  </Button>
+                  <Button onClick={confirmDisqualify} className="bg-red-600 hover:bg-red-700 text-white">
+                    Disqualify
+                  </Button>
+                </div>
               </div>
             </DialogContent>
           </Dialog>
@@ -418,6 +471,14 @@ export default function CompanyDetailPage() {
               <CardTitle className="text-base">Company Info</CardTitle>
             </CardHeader>
             <CardContent>
+              {company.status === "rejected" && (
+                <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                  <p className="text-sm font-medium text-red-800 dark:text-red-300">⛔ Not Qualified</p>
+                  {company.disqualify_reason && (
+                    <p className="text-sm text-red-600 dark:text-red-400 mt-1">{company.disqualify_reason}</p>
+                  )}
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <InfoRow icon={<Mail className="w-4 h-4" />} label="Email" value={company.email} />
                 <InfoRow icon={<Phone className="w-4 h-4" />} label="Phone" value={company.phone} />

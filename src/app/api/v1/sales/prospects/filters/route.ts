@@ -49,11 +49,25 @@ export async function GET() {
     .slice(0, 20)
     .map(([category, count]) => ({ category, count }));
 
+  // Get segments with counts
+  const segments = sqlite.prepare(`
+    SELECT segment, count(*) as count FROM companies 
+    WHERE segment IS NOT NULL AND segment != '' 
+    GROUP BY segment ORDER BY count DESC
+  `).all() as { segment: string; count: number }[];
+
+  // Get company categories with counts
+  const companyCategories = sqlite.prepare(`
+    SELECT category, count(*) as count FROM companies 
+    WHERE category IS NOT NULL AND category != '' 
+    GROUP BY category ORDER BY count DESC LIMIT 30
+  `).all() as { category: string; count: number }[];
+
   // ICP score range
   const icpRange = sqlite.prepare(`
     SELECT min(icp_score) as min, max(icp_score) as max 
     FROM companies WHERE icp_score IS NOT NULL
   `).get() as { min: number; max: number };
 
-  return NextResponse.json({ states, statuses, sources, categories, icpRange });
+  return NextResponse.json({ states, statuses, sources, categories, segments, companyCategories, icpRange });
 }

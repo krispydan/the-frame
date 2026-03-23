@@ -79,6 +79,10 @@ export async function PATCH(
     status: "status", owner_id: "owner_id", notes: "notes",
     icp_score: "icp_score", icp_tier: "icp_tier", icp_reasoning: "icp_reasoning",
     tags: "tags",
+    disqualify_reason: "disqualify_reason",
+    segment: "segment",
+    category: "category",
+    lead_source_detail: "lead_source_detail",
   };
 
   const sets: string[] = [];

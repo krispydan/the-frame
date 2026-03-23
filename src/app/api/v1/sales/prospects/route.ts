@@ -19,6 +19,7 @@ export async function GET(request: NextRequest) {
   const statusFilter = params.getAll("status");
   const icpMin = params.get("icp_min");
   const icpMax = params.get("icp_max");
+  const segmentFilter = params.getAll("segment");
   const hasEmail = params.get("has_email");
   const hasPhone = params.get("has_phone");
 
@@ -65,9 +66,17 @@ export async function GET(request: NextRequest) {
     whereParams.push(...sourceFilter.map(s => `%${s}%`));
   }
 
+  if (segmentFilter.length > 0) {
+    whereClauses.push(`c.segment IN (${segmentFilter.map(() => "?").join(",")})`);
+    whereParams.push(...segmentFilter);
+  }
+
   if (statusFilter.length > 0) {
     whereClauses.push(`c.status IN (${statusFilter.map(() => "?").join(",")})`);
     whereParams.push(...statusFilter);
+  } else {
+    // Default: exclude rejected/not-qualified prospects
+    whereClauses.push(`c.status != 'rejected'`);
   }
 
   if (icpMin) {

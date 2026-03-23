@@ -30,6 +30,10 @@ export const companies = sqliteTable("companies", {
   ownerId: text("owner_id").references(() => users.id),
   tags: text("tags", { mode: "json" }).$type<string[]>(),
   notes: text("notes"),
+  disqualifyReason: text("disqualify_reason"),
+  segment: text("segment"),
+  category: text("category"),
+  leadSourceDetail: text("lead_source_detail"),
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 }, (table) => [

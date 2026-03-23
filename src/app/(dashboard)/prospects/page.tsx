@@ -5,6 +5,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ListFilter, Bookmark, Plus, X, ChevronRight, Download, Search, Merge, AlertTriangle, CheckCircle2 } from "lucide-react";
 
+const statusLabels: Record<string, string> = {
+  new: "New",
+  contacted: "Contacted",
+  qualified: "Qualified",
+  rejected: "Not Qualified",
+  customer: "Customer",
+};
+
 interface Prospect {
   id: string;
   name: string;
@@ -27,6 +35,8 @@ interface FilterOptions {
   statuses: { status: string; count: number }[];
   sources: { source: string; count: number }[];
   categories: { category: string; count: number }[];
+  segments: { segment: string; count: number }[];
+  companyCategories: { category: string; count: number }[];
   icpRange: { min: number; max: number };
 }
 
@@ -101,6 +111,7 @@ function ProspectsPage() {
   const categoryFilter = searchParams.getAll("category");
   const sourceFilter = searchParams.getAll("source");
   const statusFilter = searchParams.getAll("status");
+  const segmentFilter = searchParams.getAll("segment");
   const hasEmail = searchParams.get("has_email");
   const hasPhone = searchParams.get("has_phone");
   const icpMin = searchParams.get("icp_min");
@@ -110,6 +121,7 @@ function ProspectsPage() {
   const [selectAll, setSelectAll] = useState(false);
   const [selectAllMatching, setSelectAllMatching] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [notQualifiedCount, setNotQualifiedCount] = useState(0);
   const [searchInput, setSearchInput] = useState(search);
 
   // Bulk action dropdowns
@@ -185,6 +197,7 @@ function ProspectsPage() {
         setAvailableTags(data.categories.map((c: { category: string }) => c.category).filter(Boolean));
       }
     });
+    fetch("/api/v1/sales/prospects?status=rejected&limit=1").then(r => r.json()).then(d => setNotQualifiedCount(d.total || 0));
     fetch("/api/v1/sales/smart-lists").then(r => r.json()).then(d => setSmartLists(d.data || []));
     fetch("/api/v1/sales/campaigns?limit=100").then(r => r.json()).then(d => setCampaigns(d.data || []));
   }, []);
@@ -345,6 +358,11 @@ function ProspectsPage() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Prospects</h1>
           <p className="text-sm text-gray-500 mt-1">
             {total.toLocaleString()} companies{activeFilterCount > 0 ? " (filtered)" : ""}
+            {notQualifiedCount > 0 && statusFilter.length === 0 && (
+              <Link href="/prospects?status=rejected" className="ml-2 text-red-500 hover:text-red-700">
+                · {notQualifiedCount} not qualified (hidden)
+              </Link>
+            )}
             {activeSmartList && smartLists.find(l => l.id === activeSmartList) && (
               <span className="ml-2 text-blue-600">
                 — {smartLists.find(l => l.id === activeSmartList)!.name}
@@ -802,7 +820,26 @@ function ProspectsPage() {
                 <tr><td colSpan={10} className="px-4 py-12 text-center text-gray-400">No prospects found</td></tr>
               ) : prospects.map(p => (
                 <tr key={p.id} className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer ${selected.has(p.id) ? "bg-blue-50/50 dark:bg-blue-900/10" : ""}`}
-                  onClick={(e) => { if ((e.target as HTMLElement).tagName !== "INPUT") router.push(`/prospects/${p.id}`); }}>
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).tagName !== "INPUT") {
+                      // Build filter params to pass to detail page for prev/next navigation
+                      const navParams = new URLSearchParams();
+                      if (search) navParams.set("search", search);
+                      if (sort !== "name") navParams.set("sort", sort);
+                      if (order !== "asc") navParams.set("order", order);
+                      stateFilter.forEach(v => navParams.append("state", v));
+                      categoryFilter.forEach(v => navParams.append("category", v));
+                      sourceFilter.forEach(v => navParams.append("source", v));
+                      statusFilter.forEach(v => navParams.append("status", v));
+                      segmentFilter.forEach(v => navParams.append("segment", v));
+                      if (hasEmail) navParams.set("has_email", hasEmail);
+                      if (hasPhone) navParams.set("has_phone", hasPhone);
+                      if (icpMin) navParams.set("icp_min", icpMin);
+                      if (icpMax) navParams.set("icp_max", icpMax);
+                      const qs = navParams.toString();
+                      router.push(`/prospects/${p.id}${qs ? `?${qs}` : ""}`);
+                    }
+                  }}>
                   <td className="px-4 py-3">
                     <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleSelect(p.id)} className="rounded" />
                   </td>
@@ -839,7 +876,7 @@ function ProspectsPage() {
                       p.status === "contacted" ? "bg-blue-100 text-blue-800" :
                       p.status === "rejected" ? "bg-red-100 text-red-800" :
                       p.status === "customer" ? "bg-purple-100 text-purple-800" : "bg-gray-100 text-gray-600"
-                    }`}>{p.status}</span>
+                    }`}>{statusLabels[p.status] || p.status}</span>
                   </td>
                 </tr>
               ))}
