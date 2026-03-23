@@ -50,6 +50,14 @@ try {
   sqlite.exec("ALTER TABLE companies ADD COLUMN enrichment_status TEXT DEFAULT 'pending'");
 } catch { /* column already exists */ }
 
+try {
+  sqlite.exec("ALTER TABLE users ADD COLUMN password_reset_token TEXT");
+} catch { /* column already exists */ }
+
+try {
+  sqlite.exec("ALTER TABLE users ADD COLUMN password_reset_expires TEXT");
+} catch { /* column already exists */ }
+
 // Auto-run migrations on startup (idempotent — safe to run every time)
 try {
   const migrationsFolder = path.join(process.cwd(), "drizzle", "migrations");
