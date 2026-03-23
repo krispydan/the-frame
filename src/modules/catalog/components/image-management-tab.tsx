@@ -1,5 +1,12 @@
 "use client";
 
+const CATALOG_IMAGE_BASE = "https://catalog.jaxyeyewear.com";
+function catalogImageUrl(filePath: string | null): string | null {
+  if (!filePath) return null;
+  if (filePath.startsWith("http")) return filePath;
+  return `${CATALOG_IMAGE_BASE}/${filePath}`;
+}
+
 import { useEffect, useState, useCallback } from "react";
 import {
   Image as ImageIcon, CheckCircle, XCircle, Star, Upload, Wand2,
@@ -212,7 +219,7 @@ export function ImageManagementTab({
                 onClick={() => setLightbox(idx)}
               >
                 {img.filePath ? (
-                  <img src={img.filePath} alt="" className="object-contain w-full h-full" />
+                  <img src={catalogImageUrl(img.filePath)!} alt="" className="object-contain w-full h-full" />
                 ) : (
                   <ImageIcon className="h-8 w-8 text-muted-foreground" />
                 )}
@@ -265,7 +272,7 @@ export function ImageManagementTab({
           )}
           <div className="max-w-4xl max-h-[80vh]" onClick={(e) => e.stopPropagation()}>
             {filtered[lightbox].filePath ? (
-              <img src={filtered[lightbox].filePath!} alt="" className="max-w-full max-h-[80vh] object-contain" />
+              <img src={catalogImageUrl(filtered[lightbox].filePath)!} alt="" className="max-w-full max-h-[80vh] object-contain" />
             ) : (
               <div className="text-white text-center">No image file</div>
             )}
