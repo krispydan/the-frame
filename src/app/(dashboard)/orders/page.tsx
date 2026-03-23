@@ -221,6 +221,30 @@ function OrdersPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={async () => {
+              setSyncingShopify(true);
+              try {
+                const res = await fetch("/api/v1/orders/shopify-sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+                const data = await res.json();
+                if (data.ok) {
+                  alert(data.message);
+                  fetchOrders();
+                } else {
+                  alert(`Shopify sync error: ${data.error || "Unknown error"}`);
+                }
+              } catch (e) {
+                alert("Shopify sync failed");
+              } finally {
+                setSyncingShopify(false);
+              }
+            }}
+            disabled={syncingShopify}
+            className="inline-flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium hover:bg-muted disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncingShopify ? "animate-spin" : ""}`} />
+            {syncingShopify ? "Syncing..." : "Sync Shopify"}
+          </button>
+          <button
+            onClick={async () => {
               setSyncingFaire(true);
               try {
                 const res = await fetch("/api/v1/orders/faire-sync", { method: "POST" });

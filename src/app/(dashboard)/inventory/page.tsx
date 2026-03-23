@@ -202,12 +202,23 @@ export default function InventoryPage() {
   // Sync state
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
 
   // Forecast state
   const [showForecast, setShowForecast] = useState(false);
   const [forecastItems, setForecastItems] = useState<ForecastItem[]>([]);
   const [forecastSummary, setForecastSummary] = useState<ForecastSummary | null>(null);
   const [forecastLoading, setForecastLoading] = useState(false);
+
+  // Fetch sync status on mount
+  useEffect(() => {
+    fetch("/api/v1/inventory/sync")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.lastSyncAt) setLastSyncAt(data.lastSyncAt);
+      })
+      .catch(() => {});
+  }, []);
 
   const fetchInventory = useCallback(() => {
     const params = new URLSearchParams();
@@ -239,10 +250,15 @@ export default function InventoryPage() {
       const res = await fetch("/api/v1/inventory/sync", { method: "POST" });
       const data = await res.json();
       if (res.ok) {
+        const channelNames = (data.channels || [])
+          .filter((c: any) => !c.error)
+          .map((c: any) => c.channel)
+          .join(", ");
         setSyncResult({
           success: true,
-          message: `Synced ${data.synced} SKUs from Shopify (${data.changes?.length || 0} changed). ${data.alerts?.alertsCreated || 0} new alerts.`,
+          message: `Synced ${data.synced} SKUs from ${channelNames || "Shopify"} (${data.changes?.length || 0} changed, ${data.movementsRecorded || 0} movements). ${data.alerts?.alertsCreated || 0} new alerts.`,
         });
+        setLastSyncAt(data.syncedAt);
         fetchInventory(); // Refresh table
       } else {
         setSyncResult({ success: false, message: data.error || "Sync failed" });
