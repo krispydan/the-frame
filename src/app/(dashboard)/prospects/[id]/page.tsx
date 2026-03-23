@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import Link from "next/link";
 import {
-  ArrowLeft, Building2, Globe, Phone, Mail, MapPin, Tag, Star,
+  ArrowLeft, ArrowRight, Building2, Globe, Phone, Mail, MapPin, Tag, Star,
   Edit, UserPlus, MessageSquare, Clock, ExternalLink, Plus, Save, X,
   Briefcase, Sparkles, Loader2, CheckCircle2, AlertCircle,
 } from "lucide-react";
@@ -47,6 +47,9 @@ interface Company {
   enrichment_status: string;
   google_place_id: string;
   disqualify_reason: string;
+  segment: string;
+  category: string;
+  lead_source_detail: string;
   created_at: string; updated_at: string;
 }
 
@@ -97,7 +100,9 @@ const tierColors: Record<string, string> = {
 export default function CompanyDetailPage() {
   const { id } = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { setOverride } = useBreadcrumbOverride();
+  const [adjacent, setAdjacent] = useState<{ prev: string | null; next: string | null }>({ prev: null, next: null });
   const [company, setCompany] = useState<Company | null>(null);
   const [stores, setStores] = useState<Store[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -183,8 +188,18 @@ export default function CompanyDetailPage() {
         if (data.company?.name) setOverride(data.company.name);
       })
       .catch(() => setLoading(false));
+
+    // Fetch adjacent prospect IDs for prev/next navigation
+    const qs = searchParams.toString();
+    if (qs) {
+      fetch(`/api/v1/sales/prospects/${id}/adjacent?${qs}`)
+        .then(r => r.json())
+        .then(data => setAdjacent(data))
+        .catch(() => {});
+    }
+
     return () => setOverride(null);
-  }, [id, setOverride]);
+  }, [id, setOverride, searchParams]);
 
   const updateCompany = async (fields: Record<string, unknown>) => {
     await fetch(`/api/v1/sales/prospects/${id}`, {
@@ -270,9 +285,41 @@ export default function CompanyDetailPage() {
 
   const isSingleStore = stores.length <= 1;
   const primaryStore = stores.find(s => s.is_primary) || stores[0];
+  const filterQs = searchParams.toString();
+  const navSuffix = filterQs ? `?${filterQs}` : "";
+
+  // Source badge colors
+  const sourceColorMap: Record<string, string> = {
+    "expansion-v1": "bg-blue-100 text-blue-700",
+    "expansion-v2": "bg-blue-100 text-blue-700",
+    "stockist": "bg-purple-100 text-purple-700",
+    "storemapper": "bg-orange-100 text-orange-700",
+    "goodr": "bg-green-100 text-green-700",
+    "car-wash": "bg-red-100 text-red-700",
+    "original": "bg-gray-100 text-gray-600",
+  };
 
   return (
     <div className="p-6 max-w-[1200px] mx-auto">
+      {/* Prev/Next Navigation */}
+      {(adjacent.prev || adjacent.next) && (
+        <div className="flex items-center justify-between mb-3 px-2 py-1.5 bg-gray-50 dark:bg-gray-800/50 rounded-lg text-sm">
+          {adjacent.prev ? (
+            <Link href={`/prospects/${adjacent.prev}${navSuffix}`} className="flex items-center gap-1 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">
+              <ArrowLeft className="w-3.5 h-3.5" /> Previous
+            </Link>
+          ) : <span />}
+          <Link href={`/prospects${filterQs ? `?${filterQs}` : ""}`} className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">
+            Back to List
+          </Link>
+          {adjacent.next ? (
+            <Link href={`/prospects/${adjacent.next}${navSuffix}`} className="flex items-center gap-1 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">
+              Next <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          ) : <span />}
+        </div>
+      )}
+
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
         <Link href="/prospects" className="flex items-center gap-1 hover:text-gray-700">
@@ -614,6 +661,44 @@ export default function CompanyDetailPage() {
 
         {/* Right sidebar */}
         <div className="space-y-6">
+          {/* Lead Source */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Lead Source</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {company.source ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {company.source.split("|").map(s => s.trim()).filter(Boolean).map(s => (
+                    <span key={s} className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${sourceColorMap[s] || "bg-gray-100 text-gray-600"}`}>
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400">Unknown source</p>
+              )}
+              {company.segment && (
+                <div>
+                  <p className="text-xs text-gray-500">Segment</p>
+                  <p className="text-sm text-gray-900 dark:text-gray-100">{company.segment}</p>
+                </div>
+              )}
+              {company.category && (
+                <div>
+                  <p className="text-xs text-gray-500">Category</p>
+                  <p className="text-sm text-gray-900 dark:text-gray-100">{company.category}</p>
+                </div>
+              )}
+              {company.lead_source_detail && (
+                <div>
+                  <p className="text-xs text-gray-500">Detail</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">{company.lead_source_detail}</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Notes */}
           <Card>
             <CardHeader className="pb-3">

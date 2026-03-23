@@ -3,7 +3,7 @@
 import { Suspense, useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ListFilter, Bookmark, Plus, X, ChevronRight, Download, Search, Merge, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { ListFilter, Bookmark, Plus, X, ChevronRight, Download, Search, Merge, AlertTriangle, CheckCircle2, ExternalLink } from "lucide-react";
 
 const statusLabels: Record<string, string> = {
   new: "New",
@@ -142,14 +142,14 @@ function ProspectsPage() {
   const [mergePrimaryId, setMergePrimaryId] = useState<string | null>(null);
   const [mergeSuccess, setMergeSuccess] = useState<string | null>(null);
 
-  const activeFilterCount = stateFilter.length + categoryFilter.length + sourceFilter.length + statusFilter.length 
+  const activeFilterCount = stateFilter.length + categoryFilter.length + sourceFilter.length + statusFilter.length + segmentFilter.length
     + (hasEmail ? 1 : 0) + (hasPhone ? 1 : 0) + (icpMin ? 1 : 0) + (icpMax ? 1 : 0);
 
   const buildUrl = useCallback((overrides: Record<string, string | string[] | null>) => {
     const p = new URLSearchParams();
     const vals: Record<string, string | string[] | null> = {
       page: String(page), search, sort, order,
-      state: stateFilter, category: categoryFilter, source: sourceFilter, status: statusFilter,
+      state: stateFilter, category: categoryFilter, source: sourceFilter, status: statusFilter, segment: segmentFilter,
       has_email: hasEmail, has_phone: hasPhone, icp_min: icpMin, icp_max: icpMax,
       ...overrides,
     };
@@ -159,7 +159,7 @@ function ProspectsPage() {
       else p.set(k, v);
     }
     return `/prospects?${p.toString()}`;
-  }, [page, search, sort, order, stateFilter, categoryFilter, sourceFilter, statusFilter, hasEmail, hasPhone, icpMin, icpMax]);
+  }, [page, search, sort, order, stateFilter, categoryFilter, sourceFilter, statusFilter, segmentFilter, hasEmail, hasPhone, icpMin, icpMax]);
 
   const currentFilters = useCallback(() => {
     const f: Record<string, unknown> = {};
@@ -167,12 +167,13 @@ function ProspectsPage() {
     if (categoryFilter.length) f.category = categoryFilter;
     if (sourceFilter.length) f.source = sourceFilter;
     if (statusFilter.length) f.status = statusFilter;
+    if (segmentFilter.length) f.segment = segmentFilter;
     if (hasEmail) f.has_email = hasEmail;
     if (hasPhone) f.has_phone = hasPhone;
     if (icpMin) f.icp_min = icpMin;
     if (icpMax) f.icp_max = icpMax;
     return f;
-  }, [stateFilter, categoryFilter, sourceFilter, statusFilter, hasEmail, hasPhone, icpMin, icpMax]);
+  }, [stateFilter, categoryFilter, sourceFilter, statusFilter, segmentFilter, hasEmail, hasPhone, icpMin, icpMax]);
 
   // Fetch data
   useEffect(() => {
@@ -321,7 +322,7 @@ function ProspectsPage() {
     setActiveSmartList(null);
   };
   const clearAllFilters = () => {
-    router.push(buildUrl({ state: null, category: null, source: null, status: null, has_email: null, has_phone: null, icp_min: null, icp_max: null, page: "1" }));
+    router.push(buildUrl({ state: null, category: null, source: null, status: null, segment: null, has_email: null, has_phone: null, icp_min: null, icp_max: null, page: "1" }));
     setActiveSmartList(null);
   };
 
@@ -474,7 +475,7 @@ function ProspectsPage() {
 
       {/* Filters panel */}
       {showFilters && filterOptions && (
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-4 grid grid-cols-2 md:grid-cols-5 gap-4">
           <div>
             <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">State</h4>
             <div className="max-h-48 overflow-y-auto space-y-1">
@@ -511,6 +512,20 @@ function ProspectsPage() {
               ))}
             </div>
           </div>
+          {filterOptions.segments?.length > 0 && (
+            <div>
+              <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Segment</h4>
+              <div className="max-h-48 overflow-y-auto space-y-1">
+                {filterOptions.segments.map(s => (
+                  <label key={s.segment} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 px-1 rounded">
+                    <input type="checkbox" checked={segmentFilter.includes(s.segment)} onChange={() => toggleFilterValue("segment", s.segment, segmentFilter)} className="rounded" />
+                    <span className="text-gray-700 dark:text-gray-300">{s.segment}</span>
+                    <span className="text-gray-400 text-xs ml-auto">{s.count.toLocaleString()}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
           <div>
             <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Status</h4>
             <div className="space-y-1 mb-4">
@@ -821,8 +836,39 @@ function ProspectsPage() {
               ) : prospects.map(p => (
                 <tr key={p.id} className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer ${selected.has(p.id) ? "bg-blue-50/50 dark:bg-blue-900/10" : ""}`}
                   onClick={(e) => {
-                    if ((e.target as HTMLElement).tagName !== "INPUT") {
-                      // Build filter params to pass to detail page for prev/next navigation
+                    if ((e.target as HTMLElement).tagName === "INPUT") return;
+                    // Build filter params to pass to detail page for prev/next navigation
+                    const navParams = new URLSearchParams();
+                    if (search) navParams.set("search", search);
+                    if (sort !== "name") navParams.set("sort", sort);
+                    if (order !== "asc") navParams.set("order", order);
+                    stateFilter.forEach(v => navParams.append("state", v));
+                    categoryFilter.forEach(v => navParams.append("category", v));
+                    sourceFilter.forEach(v => navParams.append("source", v));
+                    statusFilter.forEach(v => navParams.append("status", v));
+                    segmentFilter.forEach(v => navParams.append("segment", v));
+                    if (hasEmail) navParams.set("has_email", hasEmail);
+                    if (hasPhone) navParams.set("has_phone", hasPhone);
+                    if (icpMin) navParams.set("icp_min", icpMin);
+                    if (icpMax) navParams.set("icp_max", icpMax);
+                    const qs = navParams.toString();
+                    const url = `/prospects/${p.id}${qs ? `?${qs}` : ""}`;
+                    // Cmd/Ctrl+click or middle-click → new tab
+                    if (e.metaKey || e.ctrlKey || e.button === 1) {
+                      window.open(url, "_blank");
+                    } else {
+                      router.push(url);
+                    }
+                  }}
+                  onMouseDown={(e) => {
+                    // Middle-click support
+                    if (e.button === 1) {
+                      e.preventDefault();
+                    }
+                  }}
+                  onAuxClick={(e) => {
+                    if ((e.target as HTMLElement).tagName === "INPUT") return;
+                    if (e.button === 1) {
                       const navParams = new URLSearchParams();
                       if (search) navParams.set("search", search);
                       if (sort !== "name") navParams.set("sort", sort);
@@ -837,7 +883,7 @@ function ProspectsPage() {
                       if (icpMin) navParams.set("icp_min", icpMin);
                       if (icpMax) navParams.set("icp_max", icpMax);
                       const qs = navParams.toString();
-                      router.push(`/prospects/${p.id}${qs ? `?${qs}` : ""}`);
+                      window.open(`/prospects/${p.id}${qs ? `?${qs}` : ""}`, "_blank");
                     }
                   }}>
                   <td className="px-4 py-3">
