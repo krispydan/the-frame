@@ -74,7 +74,16 @@ interface ShopifyOrder {
 
 // ── Channel Detection ──
 
-function detectChannel(order: ShopifyOrder): "shopify_dtc" | "shopify_wholesale" {
+function detectChannel(order: ShopifyOrder, shopDomain?: string): "shopify_dtc" | "shopify_wholesale" {
+  // Primary: match by shop domain (most reliable — each store has its own domain)
+  const wholesaleDomain = process.env.SHOPIFY_WHOLESALE_STORE_DOMAIN || "";
+  const dtcDomain = process.env.SHOPIFY_DTC_STORE_DOMAIN || "";
+  if (shopDomain) {
+    const domain = shopDomain.toLowerCase().replace(/^https?:\/\//, "");
+    if (wholesaleDomain && domain.includes(wholesaleDomain.toLowerCase())) return "shopify_wholesale";
+    if (dtcDomain && domain.includes(dtcDomain.toLowerCase())) return "shopify_dtc";
+  }
+  // Fallback: tags and source name
   const tags = (order.tags || "").toLowerCase();
   if (tags.includes("wholesale") || tags.includes("b2b")) return "shopify_wholesale";
   if (order.source_name === "wholesale" || order.source_name === "b2b") return "shopify_wholesale";
@@ -83,7 +92,7 @@ function detectChannel(order: ShopifyOrder): "shopify_dtc" | "shopify_wholesale"
 
 // ── Company Matching / Auto-Create ──
 
-async function findOrCreateCompany(order: ShopifyOrder): Promise<string | null> {
+async function findOrCreateCompany(order: ShopifyOrder, shopDomain?: string): Promise<string | null> {
   const email = order.email || order.customer?.email;
   const companyName = order.customer?.default_address?.company;
 
@@ -104,7 +113,7 @@ async function findOrCreateCompany(order: ShopifyOrder): Promise<string | null> 
   }
 
   // For wholesale orders, auto-create a company record
-  const channel = detectChannel(order);
+  const channel = detectChannel(order, shopDomain);
   if (channel === "shopify_wholesale" && (companyName || email)) {
     const newCompany = db.insert(companies).values({
       name: companyName || email || "Unknown",
@@ -194,12 +203,12 @@ function createInventoryMovements(fulfillment: ShopifyFulfillment, orderId: stri
 
 // ── Webhook Handlers ──
 
-async function handleOrderCreate(order: ShopifyOrder) {
+async function handleOrderCreate(order: ShopifyOrder, shopDomain?: string) {
   const existing = db.select().from(orders).where(eq(orders.externalId, String(order.id))).get();
   if (existing) return; // idempotent
 
-  const companyId = await findOrCreateCompany(order);
-  const channel = detectChannel(order);
+  const companyId = await findOrCreateCompany(order, shopDomain);
+  const channel = detectChannel(order, shopDomain);
   const shipping = order.total_shipping_price_set?.shop_money?.amount
     ? parseFloat(order.total_shipping_price_set.shop_money.amount) : 0;
 
@@ -239,10 +248,10 @@ async function handleOrderCreate(order: ShopifyOrder) {
   });
 }
 
-async function handleOrderUpdated(order: ShopifyOrder) {
+async function handleOrderUpdated(order: ShopifyOrder, shopDomain?: string) {
   const existing = db.select().from(orders).where(eq(orders.externalId, String(order.id))).get();
   if (!existing) {
-    await handleOrderCreate(order);
+    await handleOrderCreate(order, shopDomain);
     return;
   }
 
@@ -267,7 +276,7 @@ async function handleOrderUpdated(order: ShopifyOrder) {
   }
 }
 
-async function handleOrderCancelled(order: ShopifyOrder) {
+async function handleOrderCancelled(order: ShopifyOrder, _shopDomain?: string) {
   const existing = db.select().from(orders).where(eq(orders.externalId, String(order.id))).get();
   if (!existing) return;
 
@@ -316,6 +325,8 @@ async function handleFulfillmentCreate(fulfillment: ShopifyFulfillment) {
 
 webhookRegistry.register("shopify", async (payload) => {
   const topic = payload.headers["x-shopify-topic"];
+  // Shopify sends the originating store domain in the webhook headers
+  const shopDomain = payload.headers["x-shopify-shop-domain"] || "";
 
   // Verify HMAC if secret is configured
   const secret = process.env.SHOPIFY_WEBHOOK_SECRET;
@@ -329,17 +340,17 @@ webhookRegistry.register("shopify", async (payload) => {
   switch (topic) {
     case "orders/create": {
       const order = payload.parsedBody as ShopifyOrder;
-      await handleOrderCreate(order);
+      await handleOrderCreate(order, shopDomain);
       break;
     }
     case "orders/updated": {
       const order = payload.parsedBody as ShopifyOrder;
-      await handleOrderUpdated(order);
+      await handleOrderUpdated(order, shopDomain);
       break;
     }
     case "orders/cancelled": {
       const order = payload.parsedBody as ShopifyOrder;
-      await handleOrderCancelled(order);
+      await handleOrderCancelled(order, shopDomain);
       break;
     }
     case "fulfillments/create": {

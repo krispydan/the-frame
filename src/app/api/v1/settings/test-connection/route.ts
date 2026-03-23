@@ -15,16 +15,30 @@ export async function POST(request: NextRequest) {
     const { integration } = await request.json();
 
     const testers: Record<string, () => Promise<{ ok: boolean; message: string }>> = {
-      shopify: async () => {
-        const domain = db.select().from(settings).where(eq(settings.key, "shopify_store_domain")).get();
-        const token = db.select().from(settings).where(eq(settings.key, "shopify_access_token")).get();
-        if (!domain?.value || !token?.value) return { ok: false, message: "Store domain and access token are required" };
+      shopify_dtc: async () => {
+        const domain = db.select().from(settings).where(eq(settings.key, "shopify_dtc_store_domain")).get();
+        const token = db.select().from(settings).where(eq(settings.key, "shopify_dtc_access_token")).get();
+        if (!domain?.value || !token?.value) return { ok: false, message: "DTC store domain and access token are required" };
         const res = await fetch(`https://${domain.value}/admin/api/2024-01/shop.json`, {
           headers: { "X-Shopify-Access-Token": token.value },
         });
         if (res.ok) {
           const data = await res.json();
-          return { ok: true, message: `Connected to ${data.shop?.name || domain.value}` };
+          return { ok: true, message: `Connected to DTC: ${data.shop?.name || domain.value}` };
+        }
+        return { ok: false, message: `HTTP ${res.status}: ${res.statusText}` };
+      },
+
+      shopify_wholesale: async () => {
+        const domain = db.select().from(settings).where(eq(settings.key, "shopify_wholesale_store_domain")).get();
+        const token = db.select().from(settings).where(eq(settings.key, "shopify_wholesale_access_token")).get();
+        if (!domain?.value || !token?.value) return { ok: false, message: "Wholesale store domain and access token are required" };
+        const res = await fetch(`https://${domain.value}/admin/api/2024-01/shop.json`, {
+          headers: { "X-Shopify-Access-Token": token.value },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          return { ok: true, message: `Connected to Wholesale: ${data.shop?.name || domain.value}` };
         }
         return { ok: false, message: `HTTP ${res.status}: ${res.statusText}` };
       },

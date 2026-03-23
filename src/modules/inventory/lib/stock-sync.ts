@@ -89,11 +89,11 @@ function shopifyProductsToStockMap(products: ShopifyProduct[]): Map<string, numb
 // ── Channel Fetchers ──
 
 async function fetchShopifyDTC(): Promise<ChannelStock> {
-  const domain = process.env.SHOPIFY_STORE_DOMAIN;
-  const token = process.env.SHOPIFY_ACCESS_TOKEN;
+  const domain = process.env.SHOPIFY_DTC_STORE_DOMAIN;
+  const token = process.env.SHOPIFY_DTC_ACCESS_TOKEN;
 
   if (!domain || !token) {
-    throw new Error("SHOPIFY_STORE_DOMAIN and SHOPIFY_ACCESS_TOKEN must be set");
+    throw new Error("SHOPIFY_DTC_STORE_DOMAIN and SHOPIFY_DTC_ACCESS_TOKEN must be set");
   }
 
   const products = await fetchShopifyProducts(domain, token);
