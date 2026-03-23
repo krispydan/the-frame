@@ -11,6 +11,10 @@ interface SearchResult {
   href: string;
 }
 
+function safeQuery<T>(fn: () => T[]): T[] {
+  try { return fn(); } catch { return []; }
+}
+
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q")?.trim();
   const limit = Math.min(Number(req.nextUrl.searchParams.get("limit")) || 10, 50);
@@ -23,33 +27,26 @@ export async function GET(req: NextRequest) {
   const results: SearchResult[] = [];
 
   // Companies (prospects)
-  const companies = sqlite
-    .prepare(
-      `SELECT id, name, city, state FROM companies WHERE name LIKE ? OR city LIKE ? OR state LIKE ? LIMIT ?`
-    )
-    .all(pattern, pattern, pattern, limit) as { id: string; name: string; city: string | null; state: string | null }[];
+  const companies = safeQuery(() => sqlite
+    .prepare(`SELECT id, name, city, state FROM companies WHERE name LIKE ? OR city LIKE ? OR state LIKE ? LIMIT ?`)
+    .all(pattern, pattern, pattern, limit) as { id: string; name: string; city: string | null; state: string | null }[]);
 
   for (const c of companies) {
     results.push({
-      type: "prospect",
-      id: c.id,
-      title: c.name,
+      type: "prospect", id: c.id, title: c.name,
       subtitle: [c.city, c.state].filter(Boolean).join(", ") || "Prospect",
       href: `/prospects/${c.id}`,
     });
   }
 
   // Products
-  const products = sqlite
-    .prepare(
-      `SELECT id, sku_prefix, name FROM catalog_products WHERE sku_prefix LIKE ? OR name LIKE ? LIMIT ?`
-    )
-    .all(pattern, pattern, limit) as { id: string; sku_prefix: string | null; name: string | null }[];
+  const products = safeQuery(() => sqlite
+    .prepare(`SELECT id, sku_prefix, name FROM catalog_products WHERE sku_prefix LIKE ? OR name LIKE ? LIMIT ?`)
+    .all(pattern, pattern, limit) as { id: string; sku_prefix: string | null; name: string | null }[]);
 
   for (const p of products) {
     results.push({
-      type: "product",
-      id: p.id,
+      type: "product", id: p.id,
       title: p.name || p.sku_prefix || "Unnamed Product",
       subtitle: p.sku_prefix || "Product",
       href: `/catalog/${p.id}`,
@@ -57,39 +54,31 @@ export async function GET(req: NextRequest) {
   }
 
   // Deals
-  const deals = sqlite
-    .prepare(
-      `SELECT d.id, d.title, c.name as company_name FROM deals d LEFT JOIN companies c ON d.company_id = c.id WHERE d.title LIKE ? OR c.name LIKE ? LIMIT ?`
-    )
-    .all(pattern, pattern, limit) as { id: string; title: string; company_name: string | null }[];
+  const deals = safeQuery(() => sqlite
+    .prepare(`SELECT d.id, d.title, c.name as company_name FROM deals d LEFT JOIN companies c ON d.company_id = c.id WHERE d.title LIKE ? OR c.name LIKE ? LIMIT ?`)
+    .all(pattern, pattern, limit) as { id: string; title: string; company_name: string | null }[]);
 
   for (const d of deals) {
     results.push({
-      type: "deal",
-      id: d.id,
-      title: d.title,
+      type: "deal", id: d.id, title: d.title,
       subtitle: d.company_name || "Deal",
       href: `/pipeline?deal=${d.id}`,
     });
   }
 
   // Orders
-  const orderRows = sqlite
-    .prepare(
-      `SELECT id, order_number FROM orders WHERE order_number LIKE ? OR id LIKE ? LIMIT ?`
-    )
-    .all(pattern, pattern, limit) as { id: string; order_number: string }[];
+  const orderRows = safeQuery(() => sqlite
+    .prepare(`SELECT id, order_number FROM orders WHERE order_number LIKE ? OR id LIKE ? LIMIT ?`)
+    .all(pattern, pattern, limit) as { id: string; order_number: string }[]);
 
   for (const o of orderRows) {
     results.push({
-      type: "order",
-      id: o.id,
+      type: "order", id: o.id,
       title: `Order ${o.order_number}`,
       subtitle: "Order",
       href: `/orders/${o.id}`,
     });
   }
 
-  // Trim to overall limit
   return NextResponse.json({ results: results.slice(0, limit) });
 }
