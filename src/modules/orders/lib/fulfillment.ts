@@ -3,6 +3,7 @@ import { orders } from "@/modules/orders/schema";
 import { changeLogs, activityFeed } from "@/modules/core/schema";
 import { eventBus } from "@/modules/core/lib/event-bus";
 import { eq } from "drizzle-orm";
+import { createShopifyFulfillment, hasShopifyCredentials, type ShopifyStore } from "./shopify-api";
 
 // ── Status Pipeline ──
 
@@ -75,6 +76,15 @@ export function updateOrderStatus(input: StatusUpdateInput) {
   }
   if (input.newStatus === "shipped") {
     eventBus.emit("order.shipped", { orderId: input.orderId, trackingNumber: input.trackingNumber, carrier: input.trackingCarrier });
+
+    // Push fulfillment back to Shopify if this order came from Shopify
+    if (order.externalId && (order.channel === "shopify_dtc" || order.channel === "shopify_wholesale") && input.source !== "webhook") {
+      const store: ShopifyStore = order.channel === "shopify_wholesale" ? "wholesale" : "dtc";
+      if (hasShopifyCredentials(store)) {
+        createShopifyFulfillment(store, order.externalId, input.trackingNumber, input.trackingCarrier)
+          .catch((err) => console.error("[Fulfillment] Shopify push error:", err));
+      }
+    }
   }
 
   return db.select().from(orders).where(eq(orders.id, input.orderId)).get();

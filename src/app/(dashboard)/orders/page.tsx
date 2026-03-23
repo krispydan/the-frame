@@ -144,6 +144,7 @@ function OrdersPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [syncingFaire, setSyncingFaire] = useState(false);
+  const [syncingShopify, setSyncingShopify] = useState(false);
 
   // Filters
   const page = parseInt(searchParams.get("page") || "1");

@@ -200,6 +200,39 @@ export default function DashboardPage() {
         )}
       </div>
 
+      {/* Revenue by Channel */}
+      {stats?.revenueByChannel && stats.revenueByChannel.length > 0 && (
+        <Card className="mb-6">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <DollarSign className="w-4 h-4 text-green-500" /> Revenue by Channel
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {stats.revenueByChannel.map((ch) => {
+                const channelLabels: Record<string, string> = {
+                  shopify_dtc: "Shopify DTC",
+                  shopify_wholesale: "Shopify Wholesale",
+                  faire: "Faire",
+                  direct: "Direct",
+                  phone: "Phone",
+                };
+                return (
+                  <div key={ch.channel} className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                    <p className="text-xs text-gray-500 font-medium">{channelLabels[ch.channel] ?? ch.channel}</p>
+                    <p className="text-lg font-bold text-gray-900 dark:text-white mt-1">
+                      ${ch.revenue.toLocaleString()}
+                    </p>
+                    <p className="text-xs text-gray-400">{ch.orderCount} orders</p>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Today's Focus */}
       {focus && (focus.wakingToday.length > 0 || focus.reorderDue.length > 0 || focus.stale.length > 0) && (
         <Card className="mb-6">
