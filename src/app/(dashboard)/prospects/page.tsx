@@ -622,6 +622,22 @@ function ProspectsPage() {
             ✨ Enrich
           </button>
 
+          {/* Bulk ICP Classify */}
+          <button onClick={async () => {
+            setBulkLoading(true);
+            try {
+              await fetch("/api/v1/sales/agents/icp-classify", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ companyIds: Array.from(selected) }),
+              });
+              await refreshProspects();
+            } finally { setBulkLoading(false); }
+          }} disabled={bulkLoading}
+            className="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium flex items-center gap-1.5">
+            🏷️ Classify ICP
+          </button>
+
           {/* Export CSV */}
           <button onClick={exportSelectedCSV} disabled={bulkLoading}
             className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 font-medium flex items-center gap-1.5">

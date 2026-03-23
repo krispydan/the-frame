@@ -227,6 +227,20 @@ export async function importProspectsFromCSV(
     }
   }
 
+  // Auto-classify ICP for newly imported companies
+  if (stats.companiesCreated > 0) {
+    try {
+      const { getUnscoredCompanyIds } = await import("@/modules/sales/agents/icp-classifier");
+      const unscoredIds = getUnscoredCompanyIds();
+      if (unscoredIds.length > 0) {
+        const { agentOrchestrator } = await import("@/modules/core/lib/agent-orchestrator");
+        await agentOrchestrator.runAgentSync("icp-classifier", { companyIds: unscoredIds });
+      }
+    } catch {
+      // ICP classification is best-effort on import
+    }
+  }
+
   // Rebuild FTS5 index
   try {
     sqlite.exec(`INSERT INTO companies_fts(companies_fts) VALUES('rebuild')`);

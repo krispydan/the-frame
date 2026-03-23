@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Mail, Send, Eye, MessageSquare, Zap, Plus, RefreshCw } from "lucide-react";
+import { Mail, Send, Eye, MessageSquare, Zap, Plus, RefreshCw, Inbox } from "lucide-react";
 import { CampaignCreateDialog } from "./campaign-create-dialog";
 
 const TYPE_BADGES: Record<string, { label: string; className: string }> = {
@@ -88,6 +88,11 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
           <p className="text-muted-foreground">Manage outreach campaigns synced with Instantly</p>
         </div>
         <div className="flex gap-2">
+          <Link href="/campaigns/inbox">
+            <Button variant="outline" size="sm">
+              <Inbox className="mr-2 h-4 w-4" /> Inbox
+            </Button>
+          </Link>
           <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing}>
             <RefreshCw className={`mr-2 h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
             Sync Instantly

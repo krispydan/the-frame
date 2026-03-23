@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   TrendingUp, TrendingDown, BarChart3, RefreshCw, ArrowUpDown,
-  AlertTriangle, Package, Activity, FileText, Zap, Heart,
+  AlertTriangle, Package, Activity, FileText, Zap, Heart, ShoppingCart,
 } from "lucide-react";
 
 // ── Types ──
@@ -73,6 +73,32 @@ interface ReportData {
   healthStatus: string;
   generatedAt: string;
   markdown: string;
+}
+
+interface SellThroughItem {
+  sku: string;
+  productName: string;
+  colorName: string | null;
+  currentStock: number;
+  unitsSold: number;
+  sellThroughRate: number;
+  daysOfStock: number | null;
+  velocity: "fast" | "normal" | "slow" | "dead";
+  needsReorder: boolean;
+}
+
+interface SellThroughData {
+  items: SellThroughItem[];
+  count: number;
+  windowDays: number;
+  summary: {
+    fastMovers: number;
+    normalMovers: number;
+    slowMovers: number;
+    deadStock: number;
+    needsReorder: number;
+    outOfStock: number;
+  };
 }
 
 function fmt(n: number): string {
