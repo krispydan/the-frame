@@ -28,6 +28,8 @@ interface DashboardStats {
   totalRevenue: number;
   inventoryUnits: number;
   inventorySkus: number;
+  inventoryValue: number;
+  revenueByChannel: Array<{ channel: string; revenue: number; orderCount: number }>;
   unreadNotifications: number;
   recentActivity: Array<{
     id: string;
@@ -112,9 +114,20 @@ export default function DashboardPage() {
   return (
     <div className="p-6 max-w-[1200px] mx-auto">
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-        <p className="text-sm text-gray-500 mt-1">Sales pipeline overview</p>
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
+          <p className="text-sm text-gray-500 mt-1">Business overview</p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => { setLoading(true); fetchStats(); fetchFocus(); }}
+          disabled={loading}
+        >
+          <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </Button>
       </div>
 
       {/* Stats cards - row 1 */}
@@ -143,11 +156,12 @@ export default function DashboardPage() {
           href="/orders"
         />
         <StatCard
-          title="Inventory Units"
-          value={stats?.inventoryUnits ?? 0}
+          title="Inventory"
+          value={stats?.inventoryValue ?? 0}
           icon={<Package className="w-5 h-5" />}
           color="amber"
-          subtitle={`${stats?.inventorySkus ?? 0} SKUs in warehouse`}
+          format="currency"
+          subtitle={`${(stats?.inventoryUnits ?? 0).toLocaleString()} units · ${stats?.inventorySkus ?? 0} SKUs`}
           href="/inventory"
         />
       </div>

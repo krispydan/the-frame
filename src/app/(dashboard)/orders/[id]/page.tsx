@@ -286,7 +286,11 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               {order.externalId && (
                 <span className="inline-flex items-center gap-1 font-mono text-xs">
                   <ExternalLink className="h-3 w-3" />
-                  {order.externalId}
+                  {order.channel === "faire" ? (
+                    <a href={`https://www.faire.com/brand-portal/orders/${order.externalId}`} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                      {order.externalId.slice(0, 12)}…
+                    </a>
+                  ) : order.externalId}
                 </span>
               )}
             </div>
@@ -619,6 +623,69 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               )}
             </ol>
           </div>
+
+          {/* Faire Details */}
+          {order.channel === "faire" && (
+            <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
+              <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                <span className="text-green-600">●</span> Faire Details
+              </h2>
+              <div className="space-y-3 text-sm">
+                {order.externalId && (
+                  <div>
+                    <p className="text-muted-foreground">Faire Order ID</p>
+                    <p className="font-mono text-xs font-medium">{order.externalId}</p>
+                  </div>
+                )}
+                {order.notes && (
+                  <>
+                    {order.notes.includes("Net ") && (
+                      <div>
+                        <p className="text-muted-foreground">Payment Terms</p>
+                        <p className="font-medium">
+                          {order.notes.match(/Net \d+/)?.[0] || (order.notes.includes("Prepaid") ? "Prepaid" : "—")}
+                        </p>
+                      </div>
+                    )}
+                    {order.notes.includes("Prepaid") && !order.notes.includes("Net ") && (
+                      <div>
+                        <p className="text-muted-foreground">Payment Terms</p>
+                        <p className="font-medium">Prepaid</p>
+                      </div>
+                    )}
+                    {order.notes.includes("Opening Order") && (
+                      <div>
+                        <p className="text-muted-foreground">Order Type</p>
+                        <p className="font-medium">🆕 Opening Order</p>
+                      </div>
+                    )}
+                    {order.notes.includes("Ship by:") && (
+                      <div>
+                        <p className="text-muted-foreground">Ship By</p>
+                        <p className="font-medium">{order.notes.match(/Ship by: (.+?)(?:\s*\||$)/)?.[1] || "—"}</p>
+                      </div>
+                    )}
+                  </>
+                )}
+                {order.discount > 0 && (
+                  <div>
+                    <p className="text-muted-foreground">Faire Commission</p>
+                    <p className="font-medium text-red-600">-${order.discount.toFixed(2)}</p>
+                  </div>
+                )}
+                <div className="pt-2 border-t">
+                  <a
+                    href={`https://www.faire.com/brand-portal/orders/${order.externalId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-blue-600 hover:underline inline-flex items-center gap-1"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" /> View on Faire
+                  </a>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Notes */}
           {order.notes && (

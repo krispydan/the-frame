@@ -36,6 +36,22 @@ export async function GET() {
     "SELECT coalesce(sum(quantity), 0) as totalUnits, count(*) as skuCount FROM inventory WHERE location = 'warehouse'"
   ).get() as { totalUnits: number; skuCount: number });
 
+  // Inventory value: join inventory with catalog_skus to get cost_price * quantity
+  const inventoryValue = (sqlite.prepare(
+    `SELECT coalesce(sum(i.quantity * coalesce(s.cost_price, 0)), 0) as totalValue
+     FROM inventory i
+     LEFT JOIN catalog_skus s ON i.sku_id = s.id
+     WHERE i.location IN ('warehouse', '3pl')`
+  ).get() as { totalValue: number }).totalValue;
+
+  // Revenue by channel
+  const revenueByChannel = sqlite.prepare(
+    `SELECT channel, coalesce(sum(total), 0) as revenue, count(*) as orderCount
+     FROM orders
+     WHERE status NOT IN ('cancelled', 'returned')
+     GROUP BY channel`
+  ).all() as Array<{ channel: string; revenue: number; orderCount: number }>;
+
   // Unread notifications
   const unreadNotifications = (sqlite.prepare(
     "SELECT count(*) as c FROM notifications WHERE read = 0 AND dismissed = 0"
@@ -56,6 +72,8 @@ export async function GET() {
     totalRevenue,
     inventoryUnits: inventoryStats.totalUnits,
     inventorySkus: inventoryStats.skuCount,
+    inventoryValue,
+    revenueByChannel,
     unreadNotifications,
     recentActivity,
   });
