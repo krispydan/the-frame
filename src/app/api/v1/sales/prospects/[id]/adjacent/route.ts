@@ -84,13 +84,16 @@ export async function GET(
     SELECT c.id FROM companies c ${whereSQL} ORDER BY ${sortCol} ${order} NULLS LAST
   `).all(...whereParams) as { id: string }[];
 
+  const total = rows.length;
   const idx = rows.findIndex(r => r.id === id);
   if (idx === -1) {
-    return NextResponse.json({ prev: null, next: null });
+    return NextResponse.json({ prev: null, next: null, position: null, total });
   }
 
   return NextResponse.json({
     prev: idx > 0 ? rows[idx - 1].id : null,
     next: idx < rows.length - 1 ? rows[idx + 1].id : null,
+    position: idx + 1,
+    total,
   });
 }

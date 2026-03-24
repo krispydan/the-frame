@@ -102,7 +102,7 @@ export default function CompanyDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { setOverride } = useBreadcrumbOverride();
-  const [adjacent, setAdjacent] = useState<{ prev: string | null; next: string | null }>({ prev: null, next: null });
+  const [adjacent, setAdjacent] = useState<{ prev: string | null; next: string | null; position: number | null; total: number | null }>({ prev: null, next: null, position: null, total: null });
   const [company, setCompany] = useState<Company | null>(null);
   const [stores, setStores] = useState<Store[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -200,6 +200,28 @@ export default function CompanyDetailPage() {
 
     return () => setOverride(null);
   }, [id, setOverride, searchParams]);
+
+  // Keyboard shortcuts: Left/Right arrow for prev/next navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if user is typing in an input/textarea/select or contentEditable
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (e.target as HTMLElement)?.isContentEditable) return;
+
+      const qs = searchParams.toString();
+      const suffix = qs ? `?${qs}` : "";
+
+      if (e.key === "ArrowLeft" && adjacent.prev) {
+        e.preventDefault();
+        router.push(`/prospects/${adjacent.prev}${suffix}`);
+      } else if (e.key === "ArrowRight" && adjacent.next) {
+        e.preventDefault();
+        router.push(`/prospects/${adjacent.next}${suffix}`);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [adjacent, searchParams, router]);
 
   const updateCompany = async (fields: Record<string, unknown>) => {
     await fetch(`/api/v1/sales/prospects/${id}`, {
@@ -302,21 +324,32 @@ export default function CompanyDetailPage() {
   return (
     <div className="p-6 max-w-[1200px] mx-auto">
       {/* Prev/Next Navigation */}
-      {(adjacent.prev || adjacent.next) && (
-        <div className="flex items-center justify-between mb-3 px-2 py-1.5 bg-gray-50 dark:bg-gray-800/50 rounded-lg text-sm">
+      {(adjacent.prev || adjacent.next || adjacent.position) && (
+        <div className="flex items-center justify-between mb-3 px-3 py-1.5 bg-gray-50 dark:bg-gray-800/50 rounded-lg text-sm">
           {adjacent.prev ? (
-            <Link href={`/prospects/${adjacent.prev}${navSuffix}`} className="flex items-center gap-1 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">
-              <ArrowLeft className="w-3.5 h-3.5" /> Previous
+            <Link href={`/prospects/${adjacent.prev}${navSuffix}`} className="flex items-center gap-1 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors">
+              <ArrowLeft className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Previous</span>
             </Link>
-          ) : <span />}
-          <Link href={`/prospects${filterQs ? `?${filterQs}` : ""}`} className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">
-            Back to List
-          </Link>
+          ) : (
+            <span className="flex items-center gap-1 text-gray-300 dark:text-gray-600 cursor-not-allowed">
+              <ArrowLeft className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Previous</span>
+            </span>
+          )}
+          <span className="text-gray-500 dark:text-gray-400 tabular-nums">
+            {adjacent.position && adjacent.total
+              ? `Lead ${adjacent.position.toLocaleString()} of ${adjacent.total.toLocaleString()}`
+              : <Link href={`/prospects${filterQs ? `?${filterQs}` : ""}`} className="hover:text-gray-800 dark:hover:text-gray-200">Back to List</Link>
+            }
+          </span>
           {adjacent.next ? (
-            <Link href={`/prospects/${adjacent.next}${navSuffix}`} className="flex items-center gap-1 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">
-              Next <ArrowRight className="w-3.5 h-3.5" />
+            <Link href={`/prospects/${adjacent.next}${navSuffix}`} className="flex items-center gap-1 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors">
+              <span className="hidden sm:inline">Next</span> <ArrowRight className="w-3.5 h-3.5" />
             </Link>
-          ) : <span />}
+          ) : (
+            <span className="flex items-center gap-1 text-gray-300 dark:text-gray-600 cursor-not-allowed">
+              <span className="hidden sm:inline">Next</span> <ArrowRight className="w-3.5 h-3.5" />
+            </span>
+          )}
         </div>
       )}
 

@@ -850,191 +850,6 @@ function ProspectsPage() {
       {drawerProspectId && (
         <>
           {/* Backdrop */}
-          <div className={`fixed inset-0 bg-black/30 z-40 transition-opacity duration-300 ${drawerOpen ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-            onClick={closeDrawer} />
-          {/* Drawer panel */}
-          <div className={`fixed top-0 right-0 h-full w-[430px] bg-white dark:bg-gray-800 shadow-2xl z-50 transform transition-transform duration-300 ease-in-out ${
-            drawerOpen ? "translate-x-0" : "translate-x-full"
-          } flex flex-col`}>
-            {drawerLoading ? (
-              <div className="flex-1 flex items-center justify-center text-gray-400">
-                <div className="text-center">
-                  <div className="w-8 h-8 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin mx-auto mb-3" />
-                  Loading...
-                </div>
-              </div>
-            ) : drawerData?.company ? (() => {
-              const c = drawerData.company;
-              const name = String(c.name || "");
-              const city = String(c.city || "");
-              const state = String(c.state || "");
-              const zip = String(c.zip || "");
-              const address = String(c.address || "");
-              const email = String(c.email || "");
-              const phone = String(c.phone || "");
-              const website = String(c.website || "");
-              const domain = String(c.domain || "");
-              const source = String(c.source || "");
-              const status = String(c.status || "new");
-              const icpTier = String(c.icp_tier || "");
-              const icpScore = c.icp_score as number | null;
-              const googleRating = c.google_rating as number | null;
-              const reviewCount = c.google_review_count as number | null;
-              const tags = (c.tags || []) as string[];
-              const googleSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(`${name} ${city} ${state}`)}`;
-
-              return (
-                <>
-                  {/* Header */}
-                  <div className="flex items-start justify-between p-5 border-b border-gray-200 dark:border-gray-700 shrink-0">
-                    <div className="flex items-start gap-3 min-w-0">
-                      <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-lg font-bold shrink-0">
-                        {name.charAt(0)}
-                      </div>
-                      <div className="min-w-0">
-                        <h2 className="text-lg font-bold text-gray-900 dark:text-white truncate">{name}</h2>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                            status === "qualified" ? "bg-green-100 text-green-800" :
-                            status === "contacted" ? "bg-blue-100 text-blue-800" :
-                            status === "rejected" ? "bg-red-100 text-red-800" :
-                            status === "customer" ? "bg-purple-100 text-purple-800" : "bg-gray-100 text-gray-600"
-                          }`}>{statusLabels[status] || status}</span>
-                          {icpTier && (
-                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold ${
-                              icpTier === "A" ? "bg-green-500 text-white" :
-                              icpTier === "B" ? "bg-yellow-500 text-white" :
-                              icpTier === "C" ? "bg-orange-500 text-white" : "bg-gray-500 text-white"
-                            }`}>ICP {icpTier}{icpScore != null ? ` · ${icpScore}` : ""}</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <button onClick={closeDrawer} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 shrink-0">
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  {/* Content */}
-                  <div className="flex-1 overflow-y-auto p-5 space-y-5">
-                    {/* Website / Google Search */}
-                    {website ? (
-                      <div className="space-y-1.5">
-                        <a href={website.startsWith("http") ? website : `https://${website}`} target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-2 text-sm text-blue-600 hover:underline font-medium">
-                          <Globe className="w-4 h-4 shrink-0" />
-                          {domain || website}
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                        <a href={googleSearchUrl} target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 ml-6">
-                          <Search className="w-3 h-3" /> Google it
-                        </a>
-                      </div>
-                    ) : (
-                      <a href={googleSearchUrl} target="_blank" rel="noopener noreferrer"
-                        className="flex items-center gap-2 px-3 py-2.5 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 font-medium">
-                        <Search className="w-4 h-4" />
-                        🔍 Search Google for this company
-                      </a>
-                    )}
-
-                    {/* Contact info */}
-                    <div className="space-y-3">
-                      {email && (
-                        <div className="flex items-center gap-2.5 text-sm">
-                          <Mail className="w-4 h-4 text-gray-400 shrink-0" />
-                          <a href={`mailto:${email}`} className="text-gray-900 dark:text-white hover:text-blue-600">{email}</a>
-                        </div>
-                      )}
-                      {phone && (
-                        <div className="flex items-center gap-2.5 text-sm">
-                          <Phone className="w-4 h-4 text-gray-400 shrink-0" />
-                          <a href={`tel:${phone}`} className="text-gray-900 dark:text-white hover:text-blue-600">{phone}</a>
-                        </div>
-                      )}
-                      {(address || city) && (
-                        <div className="flex items-center gap-2.5 text-sm">
-                          <MapPin className="w-4 h-4 text-gray-400 shrink-0" />
-                          <span className="text-gray-700 dark:text-gray-300">
-                            {[address, city, state, zip].filter(Boolean).join(", ")}
-                          </span>
-                        </div>
-                      )}
-                      {googleRating != null && (
-                        <div className="flex items-center gap-2.5 text-sm">
-                          <Star className="w-4 h-4 text-amber-400 shrink-0" />
-                          <span className="text-gray-700 dark:text-gray-300">
-                            {googleRating}★ {reviewCount ? `(${reviewCount} reviews)` : ""}
-                          </span>
-                        </div>
-                      )}
-                      {source && (
-                        <div className="flex items-center gap-2.5 text-sm">
-                          <Tag className="w-4 h-4 text-gray-400 shrink-0" />
-                          <span className="text-gray-500 text-xs">{source.split("|")[0]}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Tags */}
-                    {tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {tags.map((t: string) => (
-                          <span key={t} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
-                            {t}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Contacts */}
-                    {drawerData.contacts && drawerData.contacts.length > 0 && (
-                      <div>
-                        <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Contacts ({drawerData.contacts.length})</h3>
-                        <div className="space-y-2">
-                          {drawerData.contacts.map((contact, i) => (
-                            <div key={i} className="flex items-center gap-3 py-2 px-3 rounded-lg bg-gray-50 dark:bg-gray-700/50">
-                              <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center text-xs font-medium text-gray-600 dark:text-gray-300">
-                                {(contact.first_name?.[0] || "?")}{(contact.last_name?.[0] || "")}
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                                  {[contact.first_name, contact.last_name].filter(Boolean).join(" ") || "Unknown"}
-                                  {contact.is_primary && <span className="ml-1.5 text-[10px] bg-blue-100 text-blue-700 px-1 rounded">Primary</span>}
-                                </p>
-                                <div className="flex items-center gap-2 text-xs text-gray-500">
-                                  {contact.title && <span>{contact.title}</span>}
-                                  {contact.email && <span className="truncate">{contact.email}</span>}
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Footer */}
-                  <div className="p-4 border-t border-gray-200 dark:border-gray-700 shrink-0">
-                    <button onClick={() => { closeDrawer(); router.push(`/prospects/${drawerProspectId}`); }}
-                      className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium flex items-center justify-center gap-2">
-                      Open Full View <ChevronRight className="w-4 h-4" />
-                    </button>
-                  </div>
-                </>
-              );
-            })() : (
-              <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Failed to load</div>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* Side Drawer */}
-      {drawerProspectId && (
-        <>
-          {/* Backdrop */}
           <div
             className={`fixed inset-0 bg-black/30 z-40 transition-opacity duration-300 ${drawerOpen ? "opacity-100" : "opacity-0 pointer-events-none"}`}
             onClick={closeDrawer}
@@ -1124,6 +939,10 @@ function ProspectsPage() {
                       <div className="flex items-center gap-2 text-sm">
                         <Tag className="w-4 h-4 text-gray-400" />
                         <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 px-2 py-0.5 rounded">{String(drawerData.company.source).split("|")[0]}</span>
+                        <button
+                          onClick={() => { closeDrawer(); router.push(`/prospects?source=${encodeURIComponent(String(drawerData.company.source).split("|")[0])}`); }}
+                          className="text-xs text-blue-500 hover:text-blue-700 hover:underline ml-1"
+                        >View all →</button>
                       </div>
                     )}
                   </div>
@@ -1173,6 +992,30 @@ function ProspectsPage() {
                     </div>
                   )}
 
+                  {/* Enrichment Bio */}
+                  {drawerData.company.enrichment_bio && (
+                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+                      <h4 className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase mb-1">Bio</h4>
+                      <p className="text-sm text-amber-900 dark:text-amber-300 line-clamp-3 whitespace-pre-wrap">{String(drawerData.company.enrichment_bio)}</p>
+                    </div>
+                  )}
+
+                  {/* Category / Segment */}
+                  {(drawerData.company.category || drawerData.company.segment) && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {drawerData.company.category && (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400">
+                          {String(drawerData.company.category)}
+                        </span>
+                      )}
+                      {drawerData.company.segment && (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400">
+                          {String(drawerData.company.segment)}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   {/* Notes preview */}
                   {drawerData.company.notes && (
                     <div>
@@ -1183,7 +1026,57 @@ function ProspectsPage() {
                 </div>
 
                 {/* Drawer Footer */}
-                <div className="px-5 py-4 border-t border-gray-200 dark:border-gray-700">
+                <div className="px-5 py-4 border-t border-gray-200 dark:border-gray-700 space-y-2">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={async () => {
+                        try {
+                          await fetch(`/api/v1/sales/prospects/${drawerProspectId}`, {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ status: "qualified" }),
+                          });
+                          // Auto-advance to next prospect
+                          const currentIdx = prospects.findIndex(p => p.id === drawerProspectId);
+                          const nextProspect = prospects[currentIdx + 1];
+                          if (nextProspect) {
+                            openDrawer(nextProspect.id);
+                          } else {
+                            closeDrawer();
+                          }
+                          // Update local list
+                          setProspects(prev => prev.map(p => p.id === drawerProspectId ? { ...p, status: "qualified" } : p));
+                        } catch (e) { console.error("Failed to qualify", e); }
+                      }}
+                      className="flex-1 px-3 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 flex items-center justify-center gap-1.5"
+                    >
+                      ✓ Qualify
+                    </button>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await fetch(`/api/v1/sales/prospects/${drawerProspectId}`, {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ status: "rejected" }),
+                          });
+                          // Auto-advance to next prospect
+                          const currentIdx = prospects.findIndex(p => p.id === drawerProspectId);
+                          const nextProspect = prospects[currentIdx + 1];
+                          if (nextProspect) {
+                            openDrawer(nextProspect.id);
+                          } else {
+                            closeDrawer();
+                          }
+                          // Update local list
+                          setProspects(prev => prev.map(p => p.id === drawerProspectId ? { ...p, status: "rejected" } : p));
+                        } catch (e) { console.error("Failed to reject", e); }
+                      }}
+                      className="flex-1 px-3 py-2.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 flex items-center justify-center gap-1.5"
+                    >
+                      ✗ Not Qualified
+                    </button>
+                  </div>
                   <button
                     onClick={() => { closeDrawer(); router.push(`/prospects/${drawerProspectId}`); }}
                     className="w-full px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2">
