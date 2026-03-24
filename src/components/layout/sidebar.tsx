@@ -35,6 +35,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuBadge,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -100,6 +101,7 @@ function filterNavByRole(
 export function AppSidebar() {
   const pathname = usePathname();
   const { user } = useUser();
+  const { setOpenMobile } = useSidebar();
   const role = user?.role || "support";
   const initials = user?.name
     ?.split(" ")
@@ -118,7 +120,7 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton
               size="lg"
-              render={<Link href="/dashboard" />}
+              render={<Link href="/dashboard" onClick={() => setOpenMobile(false)} />}
             >
               <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
                 TF
@@ -142,7 +144,7 @@ export function AppSidebar() {
               {filteredSales.map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
-                    render={<Link href={item.href} />}
+                    render={<Link href={item.href} onClick={() => setOpenMobile(false)} />}
                     isActive={pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href))}
                     tooltip={item.title}
                   >
@@ -169,7 +171,7 @@ export function AppSidebar() {
               {filteredOps.map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
-                    render={<Link href={item.href} />}
+                    render={<Link href={item.href} onClick={() => setOpenMobile(false)} />}
                     isActive={pathname.startsWith(item.href)}
                     tooltip={item.title}
                   >
@@ -189,7 +191,7 @@ export function AppSidebar() {
               {filteredInsights.map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
-                    render={<Link href={item.href} />}
+                    render={<Link href={item.href} onClick={() => setOpenMobile(false)} />}
                     isActive={pathname.startsWith(item.href)}
                     tooltip={item.title}
                   >
@@ -208,7 +210,7 @@ export function AppSidebar() {
               {bottomNav.map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
-                    render={<Link href={item.href} />}
+                    render={<Link href={item.href} onClick={() => setOpenMobile(false)} />}
                     isActive={pathname.startsWith(item.href)}
                     tooltip={item.title}
                   >
