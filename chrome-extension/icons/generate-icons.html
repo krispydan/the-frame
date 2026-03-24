@@ -1,0 +1,25 @@
+<!-- Open in browser to save icons, or use as placeholders -->
+<canvas id="c"></canvas>
+<script>
+[16, 48, 128].forEach(size => {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  // Dark background circle
+  ctx.fillStyle = '#1a1a2e';
+  ctx.beginPath();
+  ctx.arc(size/2, size/2, size/2, 0, Math.PI*2);
+  ctx.fill();
+  // White "F" letter
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `bold ${size*0.6}px -apple-system, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('F', size/2, size/2 + size*0.03);
+  // Save
+  const link = document.createElement('a');
+  link.download = `icon-${size}.png`;
+  link.href = c.toDataURL();
+  link.click();
+});
+</script>

@@ -34,6 +34,20 @@ export const companies = sqliteTable("companies", {
   segment: text("segment"),
   category: text("category"),
   leadSourceDetail: text("lead_source_detail"),
+  sourceType: text("source_type", { enum: ["storemapper", "outscraper", "manual", "csv", "chrome-ext"] }),
+  sourceId: text("source_id"),
+  sourceQuery: text("source_query"),
+  ownerName: text("owner_name"),
+  businessHours: text("business_hours", { mode: "json" }).$type<Record<string, string>>(),
+  facebookUrl: text("facebook_url"),
+  instagramUrl: text("instagram_url"),
+  twitterUrl: text("twitter_url"),
+  linkedinUrl: text("linkedin_url"),
+  yelpUrl: text("yelp_url"),
+  enrichedAt: text("enriched_at"),
+  enrichmentSource: text("enrichment_source"),
+  socials: text("socials"),  // JSON: {"instagram": "...", "facebook": "..."}
+  contactFormUrl: text("contact_form_url"),
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 }, (table) => [
@@ -42,6 +56,8 @@ export const companies = sqliteTable("companies", {
   index("idx_companies_state").on(table.state),
   index("idx_companies_owner").on(table.ownerId),
   index("idx_companies_domain").on(table.domain),
+  index("idx_companies_source_type").on(table.sourceType),
+  index("idx_companies_source_id").on(table.sourceId),
 ]);
 
 // ── Stores ──

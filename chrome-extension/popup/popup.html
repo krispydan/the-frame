@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: -apple-system, sans-serif; width: 260px; padding: 16px; font-size: 13px; color: #1a1a2e; }
+    .title { font-weight: 600; font-size: 14px; margin-bottom: 8px; }
+    .status { padding: 8px; border-radius: 6px; margin-bottom: 8px; font-size: 12px; }
+    .connected { background: #ecfdf5; color: #065f46; }
+    .disconnected { background: #fef2f2; color: #991b1b; }
+    .btn { display: block; width: 100%; padding: 8px; background: #1a1a2e; color: #fff; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; text-align: center; }
+    .btn:hover { background: #2d2d4e; }
+  </style>
+</head>
+<body>
+  <div class="title">⬡ The Frame</div>
+  <div id="status" class="status disconnected">Checking...</div>
+  <button id="btn-settings" class="btn">⚙️ Settings</button>
+  <script src="popup.js"></script>
+</body>
+</html>

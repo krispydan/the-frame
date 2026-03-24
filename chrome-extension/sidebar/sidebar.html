@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Frame — Lead Capture</title>
+  <link rel="stylesheet" href="sidebar.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <div class="header">
+      <div class="header-title">
+        <span class="logo">⬡</span>
+        <span>The Frame</span>
+      </div>
+      <button id="btn-settings" class="icon-btn" title="Settings">⚙️</button>
+    </div>
+
+    <!-- Not Configured State -->
+    <div id="state-unconfigured" class="state hidden">
+      <div class="empty-state">
+        <p>Extension not configured</p>
+        <button id="btn-open-settings" class="btn btn-primary">Open Settings</button>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div id="state-loading" class="state hidden">
+      <div class="empty-state">
+        <div class="spinner"></div>
+        <p>Extracting data...</p>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div id="state-main" class="state hidden">
+      <!-- Domain + Match -->
+      <div class="section">
+        <div class="domain-bar">
+          <span class="domain-icon">🌐</span>
+          <span id="domain-name" class="domain-text">—</span>
+        </div>
+        <div id="match-status" class="match-status hidden"></div>
+      </div>
+
+      <!-- Extracted Data -->
+      <div class="section">
+        <div class="section-title">Extracted Data</div>
+
+        <!-- Emails -->
+        <div id="group-emails" class="data-group hidden">
+          <div class="group-label">📧 Emails</div>
+          <div id="list-emails" class="checkbox-list"></div>
+        </div>
+
+        <!-- Phones -->
+        <div id="group-phones" class="data-group hidden">
+          <div class="group-label">📞 Phones</div>
+          <div id="list-phones" class="checkbox-list"></div>
+        </div>
+
+        <!-- Socials -->
+        <div id="group-socials" class="data-group hidden">
+          <div class="group-label">🔗 Social Media</div>
+          <div id="list-socials" class="checkbox-list"></div>
+        </div>
+
+        <!-- Contact Form -->
+        <div id="group-contact-form" class="data-group hidden">
+          <div class="group-label">📋 Contact Form</div>
+          <div id="list-contact-form" class="checkbox-list"></div>
+        </div>
+
+        <!-- Address -->
+        <div id="group-address" class="data-group hidden">
+          <div class="group-label">📍 Address</div>
+          <div id="text-address" class="address-text"></div>
+        </div>
+
+        <!-- No Data -->
+        <div id="no-data" class="empty-msg hidden">No data found on this page.</div>
+      </div>
+
+      <!-- Search / Link Prospect -->
+      <div id="section-search" class="section hidden">
+        <div class="section-title">Link to Prospect</div>
+        <input id="search-input" type="text" placeholder="Search prospects..." class="input" />
+        <div id="search-results" class="search-results"></div>
+      </div>
+
+      <!-- Note -->
+      <div class="section">
+        <textarea id="note-input" class="input textarea" placeholder="Add a note (optional)..." rows="2"></textarea>
+      </div>
+
+      <!-- Actions -->
+      <div class="actions">
+        <button id="btn-save" class="btn btn-primary btn-full" disabled>
+          💾 Save to Lead
+        </button>
+      </div>
+
+      <!-- Success -->
+      <div id="state-success" class="success-banner hidden">
+        ✅ Saved! <a id="link-prospect" href="#" target="_blank">View in The Frame →</a>
+      </div>
+
+      <!-- Error -->
+      <div id="state-error" class="error-banner hidden"></div>
+    </div>
+  </div>
+
+  <script src="sidebar.js"></script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 
-const publicPaths = ["/login", "/api/auth", "/api/webhooks", "/api/health", "/api/seed", "/api/migrate", "/api/debug-auth", "/api/auth/manual-login", "/api/admin", "/reset-password"];
+const publicPaths = ["/login", "/api/auth", "/api/webhooks", "/api/health", "/api/seed", "/api/migrate", "/api/debug-auth", "/api/auth/manual-login", "/api/admin", "/reset-password", "/api/v1/ext"];
 
 function isPublicPath(pathname: string): boolean {
   return publicPaths.some((p) => pathname.startsWith(p));
