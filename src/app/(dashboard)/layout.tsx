@@ -6,6 +6,7 @@ import { ChatPanel } from "@/components/chat/chat-panel";
 import { CommandPalette } from "@/components/command-palette";
 import { Providers } from "@/components/providers";
 import { BreadcrumbOverrideProvider } from "@/components/layout/breadcrumb-context";
+import { Toaster } from "sonner";
 
 export default function DashboardLayout({
   children,
@@ -23,6 +24,7 @@ export default function DashboardLayout({
         </SidebarInset>
         <ChatPanel />
         <CommandPalette />
+        <Toaster position="bottom-right" richColors />
       </SidebarProvider>
       </BreadcrumbOverrideProvider>
     </Providers>

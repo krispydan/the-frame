@@ -422,6 +422,10 @@ function ProspectsPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <Link href="/prospects/review"
+            className="px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-blue-700 shadow-sm">
+            ⚡ Review Queue
+          </Link>
           <Link href="/prospects/sources"
             className="px-4 py-2.5 border border-blue-300 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-blue-100 dark:bg-blue-900/20 dark:border-blue-700 dark:text-blue-400">
             <Tag className="w-4 h-4" />

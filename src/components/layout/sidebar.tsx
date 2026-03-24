@@ -22,6 +22,7 @@ import {
   Bell,
   User,
   Database,
+  Search,
 } from "lucide-react";
 import {
   Sidebar,
@@ -51,6 +52,7 @@ import { useUser } from "@/hooks/use-user";
 const salesNav: Array<{ title: string; href: string; icon: typeof LayoutDashboard; badge?: string }> = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { title: "Prospects", href: "/prospects", icon: Users },
+  { title: "Review Queue", href: "/prospects/review", icon: Search },
   { title: "Lead Sources", href: "/prospects/sources", icon: Database },
   { title: "Pipeline", href: "/pipeline", icon: Kanban },
   { title: "Campaigns", href: "/campaigns", icon: Mail },
@@ -80,7 +82,7 @@ const bottomNav = [
 
 const ROLE_ALLOWED_HREFS: Record<string, string[]> = {
   owner: ["*"],
-  sales_manager: ["/dashboard", "/prospects", "/prospects/sources", "/pipeline", "/campaigns", "/campaigns/inbox", "/customers"],
+  sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/pipeline", "/campaigns", "/campaigns/inbox", "/customers"],
   warehouse: ["/dashboard", "/orders", "/catalog", "/inventory"],
   finance: ["/dashboard", "/orders", "/finance"],
   marketing: ["/dashboard", "/marketing", "/catalog", "/campaigns"],
