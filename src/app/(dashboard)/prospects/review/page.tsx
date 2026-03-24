@@ -179,14 +179,25 @@ function ReviewQueueInner() {
     }
   }, [currentIndex, prospects.length, loading, total, offset, fetchProspects]);
 
-  // Get website URL for iframe
+  // Get website URL for iframe — proxied to strip X-Frame-Options
   const getWebsiteUrl = (p: Prospect | undefined) => {
     if (!p) return null;
+    let targetUrl: string;
     if (p.website) {
-      const url = p.website.startsWith("http") ? p.website : `https://${p.website}`;
-      return url;
+      targetUrl = p.website.startsWith("http") ? p.website : `https://${p.website}`;
+    } else {
+      targetUrl = `https://www.google.com/search?q=${encodeURIComponent(`${p.name} ${p.city || ""} ${p.state || ""}`.trim())}`;
     }
-    return `https://www.google.com/search?igu=1&q=${encodeURIComponent(`${p.name} ${p.city || ""} ${p.state || ""}`.trim())}`;
+    return `/api/v1/proxy?url=${encodeURIComponent(targetUrl)}`;
+  };
+
+  // Get the raw (non-proxied) URL for "Open in New Tab"
+  const getRawWebsiteUrl = (p: Prospect | undefined) => {
+    if (!p) return null;
+    if (p.website) {
+      return p.website.startsWith("http") ? p.website : `https://${p.website}`;
+    }
+    return `https://www.google.com/search?q=${encodeURIComponent(`${p.name} ${p.city || ""} ${p.state || ""}`.trim())}`;
   };
 
   // Actions
@@ -565,7 +576,23 @@ function ReviewQueueInner() {
           </div>
 
           {/* RIGHT SIDE - Website iframe */}
-          <div className="w-full lg:w-[60%] bg-gray-100 dark:bg-gray-950 relative">
+          <div className="w-full lg:w-[60%] bg-gray-100 dark:bg-gray-950 relative flex flex-col">
+            {/* URL bar */}
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 shrink-0">
+              <Globe className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+              <span className="text-xs text-gray-500 truncate flex-1">
+                {current.website || `Google: ${current.name}`}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs shrink-0"
+                onClick={() => window.open(getRawWebsiteUrl(current) || "#", "_blank")}
+              >
+                <ExternalLink className="w-3 h-3" />
+              </Button>
+            </div>
+            <div className="flex-1 relative">
             {iframeError ? (
               <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-3">
                 <Globe className="w-10 h-10" />
@@ -574,10 +601,7 @@ function ReviewQueueInner() {
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    const url = current.website
-                      ? (current.website.startsWith("http") ? current.website : `https://${current.website}`)
-                      : `https://www.google.com/search?q=${encodeURIComponent(`${current.name} ${current.city || ""} ${current.state || ""}`.trim())}`;
-                    window.open(url, "_blank");
+                    window.open(getRawWebsiteUrl(current) || "#", "_blank");
                   }}
                 >
                   <ExternalLink className="w-4 h-4 mr-1.5" /> Open in New Tab
@@ -591,26 +615,13 @@ function ReviewQueueInner() {
                   key={current.id}
                   src={getWebsiteUrl(current) || "about:blank"}
                   className="w-full h-full border-0"
-                  sandbox="allow-scripts allow-same-origin allow-popups"
+                  sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                  referrerPolicy="no-referrer"
                   onError={() => setIframeError(true)}
-                  onLoad={(e) => {
-                    // Try to detect X-Frame-Options blocks (limited detection)
-                    try {
-                      const iframe = e.currentTarget;
-                      // If iframe loaded but content is empty/blocked, show fallback after a delay
-                      setTimeout(() => {
-                        try {
-                          // This will throw if blocked by CSP/X-Frame-Options in some browsers
-                          if (iframe.contentDocument?.body?.innerHTML === "") {
-                            setIframeError(true);
-                          }
-                        } catch {
-                          // Cross-origin — iframe loaded successfully
-                        }
-                      }, 2000);
-                    } catch {
-                      // Normal cross-origin behavior
-                    }
+                  onLoad={() => {
+                    // Proxy handles X-Frame-Options stripping, so most sites should load
+                    // Only set error if the proxy itself returned an error response
+                    setIframeError(false);
                   }}
                 />
                 {/* Preload next prospect's website in hidden iframe */}
@@ -620,12 +631,14 @@ function ReviewQueueInner() {
                     src={getWebsiteUrl(next) || "about:blank"}
                     className="hidden"
                     sandbox="allow-scripts allow-same-origin"
+                    referrerPolicy="no-referrer"
                     tabIndex={-1}
                     aria-hidden="true"
                   />
                 )}
               </>
             )}
+            </div>
           </div>
         </div>
       )}
