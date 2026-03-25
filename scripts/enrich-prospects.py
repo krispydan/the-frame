@@ -10,6 +10,7 @@ Scrapes prospect websites to extract:
 - Website title + meta description
 - CMS detection (Shopify, WordPress, Squarespace, Wix, BigCommerce, etc.)
 - Domain status (live, redirect, dead, parked)
+- Shopify product catalog: sells_sunglasses, sunglass_brands, product_types, product_count
 
 Usage:
   # Test on 20 sites first
@@ -38,6 +39,9 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from datetime import datetime
 from typing import Optional
+import warnings
+from bs4 import XMLParsedAsHTMLWarning
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 # ─── Config ───────────────────────────────────────────────────────────────
 DEFAULT_CONCURRENCY = 30
@@ -55,9 +59,11 @@ PHONE_RE = re.compile(
 )
 # Skip junk emails
 EMAIL_BLACKLIST = {
-    'sentry.io', 'wixpress.com', 'example.com', 'email.com',
+    'sentry.io', 'ingest.us.sentry.io', 'ingest.sentry.io',
+    'wixpress.com', 'example.com', 'email.com',
     'yourdomain.com', 'domain.com', 'yoursite.com', 'test.com',
     'placeholder.com', 'squarespace.com', 'shopify.com',
+    'klaviyo.com', 'mailchimp.com', 'sendgrid.net',
 }
 EMAIL_BLACKLIST_PREFIXES = [
     'no-reply', 'noreply', 'donotreply', 'mailer-daemon',
@@ -133,6 +139,12 @@ def clean_email(email: str) -> Optional[str]:
     domain = email.split('@')[-1]
     if domain in EMAIL_BLACKLIST:
         return None
+    # Also check parent domains (e.g. x.ingest.us.sentry.io → sentry.io)
+    parts = domain.split('.')
+    for i in range(len(parts) - 1):
+        parent = '.'.join(parts[i:])
+        if parent in EMAIL_BLACKLIST:
+            return None
     if any(email.startswith(p) for p in EMAIL_BLACKLIST_PREFIXES):
         return None
     if len(email) > 80 or len(email) < 6:
@@ -378,6 +390,91 @@ async def fetch_page(session: aiohttp.ClientSession, url: str) -> tuple:
         return (url, '', -2)
 
 
+SUNGLASS_KEYWORDS = [
+    'sunglass', 'sunglasses', 'eyewear', 'shades', 'aviator',
+    'wayfarer', 'polarized lens', 'uv400', 'uv protection',
+]
+EYEWEAR_BRANDS = [
+    'ray-ban', 'rayban', 'oakley', 'maui jim', 'costa', 'quay',
+    'goodr', 'blenders', 'pit viper', 'knockaround', 'sunski',
+    'prada', 'gucci', 'versace', 'tom ford', 'persol', 'carrera',
+    'smith optics', 'spy optic', 'electric', 'vonzipper', 'dragon',
+    'diff', 'krewe', 'warby parker', 'izipizi', 'le specs',
+    'aj morgan', 'fossil', 'kate spade', 'coach', 'michael kors',
+    'tory burch', 'jimmy choo', 'celine', 'fendi', 'dior',
+    'dolce', 'burberry', 'armani', 'boss', 'lacoste',
+    'nike vision', 'under armour', 'columbia', 'zeal', 'native',
+    'julbo', 'kaenon', 'bolle', 'serengeti', 'revo', 'costa del mar',
+]
+
+async def scan_shopify_products(session: aiohttp.ClientSession, base_url: str) -> Optional[dict]:
+    """Scan Shopify /products.json for sunglasses and catalog info."""
+    url = f"{base_url.rstrip('/')}/products.json?limit=250"
+    try:
+        async with session.get(
+            url,
+            timeout=aiohttp.ClientTimeout(total=8),
+            ssl=False,
+        ) as resp:
+            if resp.status != 200:
+                return None
+            ct = resp.headers.get('content-type', '')
+            if 'json' not in ct:
+                return None
+            data = await resp.json(content_type=None)
+    except Exception:
+        return None
+    
+    products = data.get('products', [])
+    if not products:
+        return None
+    
+    product_types = set()
+    vendors = set()
+    sunglass_products = []
+    sunglass_brands = set()
+    
+    for p in products:
+        pt = (p.get('product_type') or '').strip()
+        vendor = (p.get('vendor') or '').strip()
+        title = (p.get('title') or '')
+        tags = ' '.join(p.get('tags', [])) if isinstance(p.get('tags'), list) else (p.get('tags') or '')
+        
+        if pt:
+            product_types.add(pt)
+        if vendor:
+            vendors.add(vendor)
+        
+        # Check if this product is sunglasses/eyewear
+        all_text = f'{pt} {title} {tags}'.lower()
+        is_sunglass = any(kw in all_text for kw in SUNGLASS_KEYWORDS)
+        
+        if is_sunglass:
+            sunglass_products.append({
+                'title': title,
+                'vendor': vendor,
+                'type': pt,
+            })
+            if vendor:
+                sunglass_brands.add(vendor)
+    
+    # Also check if any known eyewear brands appear as vendors
+    for vendor in vendors:
+        if any(brand in vendor.lower() for brand in EYEWEAR_BRANDS):
+            sunglass_brands.add(vendor)
+    
+    return {
+        'product_count': len(products),
+        'product_types': sorted(product_types)[:20],
+        'top_vendors': sorted(vendors)[:20],
+        'sells_sunglasses': len(sunglass_products) > 0,
+        'sunglass_count': len(sunglass_products),
+        'sunglass_brands': sorted(sunglass_brands),
+        'sunglass_products': sunglass_products[:10],  # Sample
+        'has_more_products': len(products) >= 250,
+    }
+
+
 async def enrich_one(session: aiohttp.ClientSession, company: dict) -> dict:
     """Enrich a single company by scraping its website."""
     result = {
@@ -390,6 +487,7 @@ async def enrich_one(session: aiohttp.ClientSession, company: dict) -> dict:
         'cms': None,
         'domain_status': 'unknown',
         'contact_page_url': None,
+        'shopify_catalog': None,
     }
     
     url = normalize_url(company['website'])
@@ -462,6 +560,10 @@ async def enrich_one(session: aiohttp.ClientSession, company: dict) -> dict:
                 if not result['emails']:
                     result['contact_form'] = extract_form_info(contact_soup, contact_url)
     
+    # ── Step 3: If Shopify, scan product catalog ──
+    if result['cms'] == 'shopify':
+        result['shopify_catalog'] = await scan_shopify_products(session, final_url)
+    
     # Deduplicate
     result['emails'] = list(dict.fromkeys(result['emails']))[:5]  # Keep max 5
     result['phones'] = list(dict.fromkeys(result['phones']))[:3]
@@ -496,12 +598,38 @@ def get_prospects(db_path: str, limit: Optional[int] = None, resume: bool = Fals
     return [dict(r) for r in rows]
 
 
+def ensure_columns(conn: sqlite3.Connection):
+    """Add enrichment columns if they don't exist."""
+    new_cols = [
+        ('shopify_product_count', 'INTEGER'),
+        ('sells_sunglasses', 'INTEGER DEFAULT 0'),
+        ('sunglass_brands', 'TEXT'),
+        ('product_types', 'TEXT'),
+        ('shopify_data', 'TEXT'),
+        ('page_title', 'TEXT'),
+        ('meta_description', 'TEXT'),
+        ('cms', 'TEXT'),
+        ('domain_status', 'TEXT'),
+    ]
+    for col, col_type in new_cols:
+        try:
+            conn.execute(f"ALTER TABLE companies ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass  # Column already exists
+
+
+_columns_ensured = False
+
 def save_results(db_path: str, results: list, dry_run: bool = False):
     """Save enrichment results to database."""
     if dry_run:
         return
     
+    global _columns_ensured
     conn = sqlite3.connect(db_path)
+    if not _columns_ensured:
+        ensure_columns(conn)
+        _columns_ensured = True
     
     for r in results:
         updates = {
@@ -543,33 +671,35 @@ def save_results(db_path: str, results: list, dry_run: bool = False):
             existing = (existing_notes[0] or '') if existing_notes else ''
             updates['notes'] = f"{form_note}\n{existing}" if existing else form_note
         
-        # Meta
+        # Meta — dedicated columns
         if r['meta'].get('title'):
-            # Store in notes (no dedicated column yet)
-            meta_note = f"[Page Title] {r['meta']['title']}"
-            if r['meta'].get('meta_description'):
-                meta_note += f"\n[Meta Desc] {r['meta']['meta_description']}"
-            existing_notes = conn.execute(
-                "SELECT notes FROM companies WHERE id = ?", (r['id'],)
-            ).fetchone()
-            existing = (existing_notes[0] or '') if existing_notes else ''
-            if '[Page Title]' not in existing:
-                updates['notes'] = f"{meta_note}\n{updates.get('notes', existing)}" if updates.get('notes') or existing else meta_note
+            updates['page_title'] = r['meta']['title'][:200]
+        if r['meta'].get('meta_description'):
+            updates['meta_description'] = r['meta']['meta_description'][:500]
         
-        # CMS
+        # CMS — dedicated column + category
         if r['cms']:
-            updates['category'] = r['cms']  # Use category field for CMS
+            updates['cms'] = r['cms']
+            updates['category'] = r['cms']  # Keep category for backwards compat
         
-        # Domain status — store in notes, keep enrichment_status within allowed values
+        # Shopify catalog data
+        if r.get('shopify_catalog'):
+            cat = r['shopify_catalog']
+            updates['shopify_product_count'] = cat['product_count']
+            updates['sells_sunglasses'] = 1 if cat['sells_sunglasses'] else 0
+            updates['sunglass_brands'] = json.dumps(cat['sunglass_brands']) if cat['sunglass_brands'] else None
+            updates['product_types'] = json.dumps(cat['product_types']) if cat['product_types'] else None
+            updates['shopify_data'] = json.dumps({
+                'top_vendors': cat['top_vendors'],
+                'sunglass_count': cat['sunglass_count'],
+                'sunglass_products': cat['sunglass_products'],
+                'has_more_products': cat['has_more_products'],
+            })
+        
+        # Domain status
+        updates['domain_status'] = r['domain_status'][:50]
         if r['domain_status'] in ('dead', 'parked', 'timeout'):
             updates['enrichment_status'] = 'failed'
-            # Append domain status to notes
-            status_note = f"[Domain Status] {r['domain_status']}"
-            existing_notes = conn.execute(
-                "SELECT notes FROM companies WHERE id = ?", (r['id'],)
-            ).fetchone()
-            existing = (existing_notes[0] or '') if existing_notes else ''
-            updates['notes'] = f"{status_note}\n{updates.get('notes', existing)}" if updates.get('notes') or existing else status_note
         elif r['domain_status'].startswith('redirect:'):
             updates['domain'] = r['domain_status'].split(':')[1]
         
@@ -615,6 +745,7 @@ async def run_enrichment(
     stats = {
         'processed': 0, 'emails_found': 0, 'phones_found': 0,
         'socials_found': 0, 'forms_found': 0, 'cms_detected': 0,
+        'shopify_stores': 0, 'sells_sunglasses': 0,
         'dead': 0, 'parked': 0, 'timeout': 0, 'live': 0,
         'errors': 0, 'start_time': time.time(),
     }
@@ -661,6 +792,10 @@ async def run_enrichment(
                     stats['forms_found'] += 1
                 if r['cms']:
                     stats['cms_detected'] += 1
+                if r['cms'] == 'shopify':
+                    stats['shopify_stores'] += 1
+                if r.get('shopify_catalog') and r['shopify_catalog'].get('sells_sunglasses'):
+                    stats['sells_sunglasses'] += 1
                 
                 ds = r['domain_status']
                 if ds == 'live' or ds.startswith('redirect'):
@@ -686,6 +821,7 @@ async def run_enrichment(
                 f"📧 {stats['emails_found']:,} emails  "
                 f"📱 {stats['phones_found']:,} phones  "
                 f"🔗 {stats['socials_found']:,} socials  "
+                f"🕶️ {stats['sells_sunglasses']:,} sell sunglasses  "
                 f"📝 {stats['forms_found']:,} forms  "
                 f"🏷️ {stats['cms_detected']:,} CMS  "
                 f"| ⚡ {rate:.1f}/s  "
@@ -703,6 +839,8 @@ async def run_enrichment(
     print(f"  Social links: {stats['socials_found']:,}")
     print(f"  Contact forms: {stats['forms_found']:,}")
     print(f"  CMS detected: {stats['cms_detected']:,}")
+    print(f"  Shopify stores: {stats['shopify_stores']:,}")
+    print(f"  🕶️ Sell sunglasses: {stats['sells_sunglasses']:,}")
     print(f"  Domain status: {stats['live']:,} live, {stats['dead']:,} dead, {stats['parked']:,} parked, {stats['timeout']:,} timeout")
     print(f"  Errors: {stats['errors']:,}")
     print(f"{'='*60}\n")
@@ -767,6 +905,13 @@ def main():
                     print(f"        Service: {svc}")
                 if fields:
                     print(f"        Fields: {', '.join(fields)}")
+            if result.get('shopify_catalog'):
+                cat = result['shopify_catalog']
+                print(f"     🛍️ Shopify: {cat['product_count']} products, {len(cat['product_types'])} types")
+                if cat['sells_sunglasses']:
+                    print(f"     🕶️ SELLS SUNGLASSES! {cat['sunglass_count']} products")
+                    if cat['sunglass_brands']:
+                        print(f"     🏷️ Brands: {', '.join(cat['sunglass_brands'])}")
             if not result['emails'] and not result['contact_form'] and result['domain_status'] == 'live':
                 print(f"     ⚠️  No email or form found")
             
