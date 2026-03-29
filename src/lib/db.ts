@@ -93,6 +93,44 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN enrichment_source TEXT"); } 
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN socials TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN contact_form_url TEXT"); } catch { /* exists */ }
 
+// Ensure brand_accounts + company_brand_links + magic_link_tokens exist (idempotent)
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS brand_accounts (
+    id TEXT PRIMARY KEY NOT NULL,
+    external_id TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    website TEXT,
+    sector TEXT,
+    relevance TEXT NOT NULL DEFAULT 'needs_review',
+    brand_type TEXT NOT NULL DEFAULT 'unknown',
+    us_locations INTEGER DEFAULT 0,
+    total_locations INTEGER DEFAULT 0,
+    top_country TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS brand_accounts_external_id_unique ON brand_accounts (external_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_brand_accounts_relevance ON brand_accounts (relevance)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_brand_accounts_sector ON brand_accounts (sector)`);
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS company_brand_links (
+    id TEXT PRIMARY KEY NOT NULL,
+    company_id TEXT NOT NULL REFERENCES companies(id),
+    brand_account_id TEXT NOT NULL REFERENCES brand_accounts(id),
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cbl_company ON company_brand_links (company_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cbl_brand ON company_brand_links (brand_account_id)`);
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS magic_link_tokens (
+    id TEXT PRIMARY KEY NOT NULL,
+    email TEXT NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    expires_at TEXT NOT NULL,
+    used INTEGER DEFAULT 0 NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS magic_link_tokens_token_unique ON magic_link_tokens (token)`);
+} catch (e) { console.error("[db] Table ensure error:", e); }
+
 // Auto-run migrations on startup (idempotent — safe to run every time)
 try {
   const migrationsFolder = path.join(process.cwd(), "drizzle", "migrations");
