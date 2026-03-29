@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,10 +9,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
+  const [sent, setSent] = useState(false);
+  const searchParams = useSearchParams();
+  const expiredError = searchParams.get("error") === "expired";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -20,26 +21,29 @@ export default function LoginPage() {
     setError("");
 
     try {
-      const res = await fetch("/api/auth/manual-login", {
+      const res = await fetch("/api/auth/magic-link/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email }),
       });
 
-      const data = await res.json();
-
       if (!res.ok) {
-        setError(data.error || "Invalid email or password");
+        setError("Something went wrong. Please try again.");
         setLoading(false);
         return;
       }
 
-      router.push("/dashboard");
-      router.refresh();
+      setSent(true);
+      setLoading(false);
     } catch {
-      setError("Login failed. Please try again.");
+      setError("Something went wrong. Please try again.");
       setLoading(false);
     }
+  }
+
+  function handleSendAgain() {
+    setSent(false);
+    setError("");
   }
 
   return (
@@ -57,35 +61,52 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="daniel@getjaxy.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoComplete="email"
-              />
+          {expiredError && !sent && (
+            <p className="text-sm text-amber-600 mb-4">
+              That link has expired or already been used. Please request a new one.
+            </p>
+          )}
+
+          {sent ? (
+            <div className="text-center space-y-4">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-100">
+                <svg className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-lg font-semibold text-gray-900">Check your email</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  We sent a sign-in link to <span className="font-medium text-gray-900">{email}</span>
+                </p>
+              </div>
+              <button
+                onClick={handleSendAgain}
+                className="text-sm text-muted-foreground hover:text-gray-900 underline underline-offset-4"
+              >
+                Didn&apos;t receive it? Send again
+              </button>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                autoComplete="current-password"
-              />
-            </div>
-            {error && <p className="text-sm text-red-500">{error}</p>}
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Signing in..." : "Sign In"}
-            </Button>
-          </form>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="daniel@getjaxy.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  autoComplete="email"
+                />
+              </div>
+              {error && <p className="text-sm text-red-500">{error}</p>}
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? "Sending..." : "Send Magic Link"}
+              </Button>
+            </form>
+          )}
         </CardContent>
       </Card>
     </div>

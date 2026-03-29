@@ -1,3 +1,4 @@
+/** @deprecated Use /api/auth/magic-link/send + /verify instead. Will be removed in a future release. */
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";

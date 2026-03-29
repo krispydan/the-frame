@@ -123,6 +123,16 @@ export const agentRuns = sqliteTable("agent_runs", {
   completedAt: text("completed_at"),
 });
 
+// ── Magic Link Tokens ──
+export const magicLinkTokens = sqliteTable("magic_link_tokens", {
+  id: id(),
+  email: text("email").notNull(),
+  token: text("token").notNull().unique().$defaultFn(() => crypto.randomUUID()),
+  expiresAt: text("expires_at").notNull(),
+  used: integer("used", { mode: "boolean" }).notNull().default(false),
+  createdAt: timestamp("created_at"),
+});
+
 // ── Settings (with type column per CTO review) ──
 // ── Notifications ──
 export const notifications = sqliteTable("notifications", {
