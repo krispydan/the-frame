@@ -104,7 +104,8 @@ export default function BrandDetailPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const updateRelevance = async (relevance: string) => {
+  const updateRelevance = async (relevance: string | null) => {
+    if (!relevance) return;
     await fetch(`/api/v1/brands/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
