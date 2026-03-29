@@ -17,6 +17,7 @@ import {
   LogOut,
   ChevronsUpDown,
   HeartHandshake,
+  Building,
   Megaphone,
   BarChart3,
   Bell,
@@ -58,6 +59,7 @@ const salesNav: Array<{ title: string; href: string; icon: typeof LayoutDashboar
   { title: "Campaigns", href: "/campaigns", icon: Mail },
   { title: "Inbox", href: "/campaigns/inbox", icon: Inbox },
   { title: "Customers", href: "/customers", icon: HeartHandshake },
+  { title: "Brand Accounts", href: "/brands", icon: Building },
 ];
 
 const operationsNav: Array<{ title: string; href: string; icon: typeof LayoutDashboard; badge?: string }> = [
@@ -82,7 +84,7 @@ const bottomNav = [
 
 const ROLE_ALLOWED_HREFS: Record<string, string[]> = {
   owner: ["*"],
-  sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/pipeline", "/campaigns", "/campaigns/inbox", "/customers"],
+  sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/pipeline", "/campaigns", "/campaigns/inbox", "/customers", "/brands"],
   warehouse: ["/dashboard", "/orders", "/catalog", "/inventory"],
   finance: ["/dashboard", "/orders", "/finance"],
   marketing: ["/dashboard", "/marketing", "/catalog", "/campaigns"],

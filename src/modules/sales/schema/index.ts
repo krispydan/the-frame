@@ -108,6 +108,37 @@ export const contacts = sqliteTable("contacts", {
   index("idx_contacts_email").on(table.email),
 ]);
 
+// ── Brand Accounts ──
+export const brandAccounts = sqliteTable("brand_accounts", {
+  id: id(),
+  externalId: text("external_id").notNull().unique(),
+  name: text("name").notNull(),
+  website: text("website"),
+  sector: text("sector"),
+  relevance: text("relevance", { enum: ["relevant", "irrelevant", "needs_review"] }).notNull().default("needs_review"),
+  brandType: text("brand_type", { enum: ["wholesale", "own_store", "unknown"] }).notNull().default("unknown"),
+  usLocations: integer("us_locations").default(0),
+  totalLocations: integer("total_locations").default(0),
+  topCountry: text("top_country"),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  uniqueIndex("idx_brand_accounts_external_id").on(table.externalId),
+  index("idx_brand_accounts_relevance").on(table.relevance),
+  index("idx_brand_accounts_sector").on(table.sector),
+]);
+
+// ── Company-Brand Links ──
+export const companyBrandLinks = sqliteTable("company_brand_links", {
+  id: id(),
+  companyId: text("company_id").notNull().references(() => companies.id),
+  brandAccountId: text("brand_account_id").notNull().references(() => brandAccounts.id),
+  createdAt: timestamp("created_at"),
+}, (table) => [
+  index("idx_cbl_company").on(table.companyId),
+  index("idx_cbl_brand").on(table.brandAccountId),
+]);
+
 // ── Smart Lists (Saved Filters) ──
 // Re-export pipeline schema
 export { deals, dealActivities, DEAL_STAGES, DEAL_STAGE_LABELS, DEAL_STAGE_COLORS, DEAL_CHANNELS, ACTIVITY_TYPES } from "./pipeline";
