@@ -1402,7 +1402,7 @@ function CashFlowTab({ cashFlow: initialCashFlow }: { cashFlow: CashFlowSummary 
             </p>
           </div>
           <div className="p-4 overflow-x-auto">
-            <div className="flex items-end gap-1 min-w-[600px]" style={{ height: 200 }}>
+            <div className="flex items-end gap-1 min-w-full lg:min-w-[600px]" style={{ height: 200 }}>
               {projections.map((p) => {
                 const inflowH = maxBalance > 0 ? (p.expectedInflows / maxBalance) * 180 : 0;
                 const outflowH = maxBalance > 0 ? (p.expectedOutflows / maxBalance) * 180 : 0;

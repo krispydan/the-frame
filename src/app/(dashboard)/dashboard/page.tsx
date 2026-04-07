@@ -110,7 +110,7 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="p-6 max-w-[1200px] mx-auto">
+      <div className="p-4 md:p-6 max-w-full xl:max-w-[1200px] mx-auto">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           {[1, 2, 3, 4].map(i => (
             <Card key={i} className="animate-pulse">
@@ -123,7 +123,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="p-6 max-w-[1200px] mx-auto">
+    <div className="p-4 md:p-6 max-w-full xl:max-w-[1200px] mx-auto">
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div>
@@ -259,7 +259,7 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
               {stats.lowStockAlerts.map((item) => {
                 const ratio = item.reorder_point > 0 ? item.quantity / item.reorder_point : 0;
                 const severity = item.quantity === 0 ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800" :

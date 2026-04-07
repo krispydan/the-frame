@@ -612,7 +612,7 @@ export function PipelineBoard({ deals: initialDeals, stageSummaries, companies, 
               const totalValue = stageDeals.reduce((s, d) => s + (d.value || 0), 0);
 
               return (
-                <div key={stage} className="flex-shrink-0 w-72">
+                <div key={stage} className="flex-shrink-0 w-64 xl:w-72">
                   {/* Column header */}
                   <div className="mb-3 px-1">
                     <div className="flex items-center justify-between">
@@ -650,7 +650,7 @@ export function PipelineBoard({ deals: initialDeals, stageSummaries, companies, 
           </div>
           <DragOverlay>
             {activeDragId ? (
-              <div className="w-72">
+              <div className="w-64 xl:w-72">
                 <DealCardContent
                   deal={deals.find((d) => d.id === activeDragId)!}
                   isDragging

@@ -341,7 +341,7 @@ export default function CompanyDetailPage() {
   };
 
   return (
-    <div className="p-6 max-w-[1200px] mx-auto">
+    <div className="p-4 md:p-6 max-w-full xl:max-w-[1200px] mx-auto">
       {/* Prev/Next Navigation */}
       {(adjacent.prev || adjacent.next || adjacent.position) && (
         <div className="flex items-center justify-between mb-3 px-3 py-1.5 bg-gray-50 dark:bg-gray-800/50 rounded-lg text-sm">
