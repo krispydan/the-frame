@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   TrendingUp, TrendingDown, BarChart3, RefreshCw, ArrowUpDown,
-  AlertTriangle, Package, Activity, FileText, Zap, Heart, ShoppingCart,
+  AlertTriangle, Package, Activity, FileText, Zap, Heart, ShoppingCart, Kanban, Target,
 } from "lucide-react";
 
 // ── Types ──
@@ -73,6 +73,32 @@ interface ReportData {
   healthStatus: string;
   generatedAt: string;
   markdown: string;
+}
+
+interface PipelineStage {
+  stage: string;
+  count: number;
+  total_value: number;
+  avg_days: number;
+}
+
+interface PipelineFunnel {
+  stage: string;
+  count: number;
+  rate: number;
+}
+
+interface PipelineData {
+  byStage: PipelineStage[];
+  funnel: PipelineFunnel[];
+  stageTransitions: { from_stage: string; to_stage: string; transition_count: number; avg_days_between: number }[];
+  summary: {
+    totalDeals: number;
+    dealsCreatedLast30: number;
+    dealsWonLast30: number;
+    dealsLostLast30: number;
+    winRate: number;
+  };
 }
 
 interface SellThroughItem {
@@ -179,7 +205,8 @@ export default function IntelligencePage() {
   const [reports, setReports] = useState<ReportData[]>([]);
   const [activeReport, setActiveReport] = useState<ReportData | null>(null);
   const [sellThrough, setSellThrough] = useState<SellThroughData | null>(null);
-  const [loading, setLoading] = useState({ trends: false, health: false, report: false, sellThrough: false });
+  const [pipelineData, setPipelineData] = useState<PipelineData | null>(null);
+  const [loading, setLoading] = useState({ trends: false, health: false, report: false, sellThrough: false, pipeline: false });
   const [periodDays, setPeriodDays] = useState(30);
   const [sellThroughSort, setSellThroughSort] = useState<"velocity" | "sellThrough" | "stock">("velocity");
 
@@ -213,6 +240,16 @@ export default function IntelligencePage() {
     }
   }, [periodDays]);
 
+  const loadPipeline = useCallback(async () => {
+    setLoading((l) => ({ ...l, pipeline: true }));
+    try {
+      const res = await fetch("/api/v1/intelligence/pipeline");
+      setPipelineData(await res.json());
+    } catch {} finally {
+      setLoading((l) => ({ ...l, pipeline: false }));
+    }
+  }, []);
+
   const loadReports = useCallback(async () => {
     try {
       const res = await fetch("/api/v1/intelligence/reports?limit=10");
@@ -242,7 +279,8 @@ export default function IntelligencePage() {
     loadTrends();
     loadSellThrough();
     loadReports();
-  }, [loadHealth, loadTrends, loadSellThrough, loadReports]);
+    loadPipeline();
+  }, [loadHealth, loadTrends, loadSellThrough, loadReports, loadPipeline]);
 
   useEffect(() => { loadTrends(); loadSellThrough(); }, [periodDays, loadTrends, loadSellThrough]);
 
@@ -303,6 +341,9 @@ export default function IntelligencePage() {
       {/* Tabs */}
       <Tabs defaultValue="trends">
         <TabsList>
+          <TabsTrigger value="pipeline">
+            <Kanban className="h-4 w-4 mr-1" /> Pipeline
+          </TabsTrigger>
           <TabsTrigger value="trends">
             <Activity className="h-4 w-4 mr-1" /> Product Trends
           </TabsTrigger>
@@ -316,6 +357,144 @@ export default function IntelligencePage() {
             <FileText className="h-4 w-4 mr-1" /> Reports
           </TabsTrigger>
         </TabsList>
+
+        {/* ── Pipeline Analytics ── */}
+        <TabsContent value="pipeline">
+          {pipelineData ? (
+            <div className="space-y-4">
+              {/* Summary cards */}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold">{pipelineData.summary.totalDeals}</p><p className="text-xs text-muted-foreground">Total Deals</p></CardContent></Card>
+                <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold text-blue-600">{pipelineData.summary.dealsCreatedLast30}</p><p className="text-xs text-muted-foreground">Created (30d)</p></CardContent></Card>
+                <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold text-green-600">{pipelineData.summary.dealsWonLast30}</p><p className="text-xs text-muted-foreground">Won (30d)</p></CardContent></Card>
+                <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold text-red-600">{pipelineData.summary.dealsLostLast30}</p><p className="text-xs text-muted-foreground">Lost (30d)</p></CardContent></Card>
+                <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold"><Target className="h-5 w-5 inline mr-1" />{pipelineData.summary.winRate}%</p><p className="text-xs text-muted-foreground">Win Rate</p></CardContent></Card>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Deals by stage — horizontal bar chart */}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Kanban className="h-4 w-4" /> Deals by Stage
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {pipelineData.byStage.map((s) => {
+                        const maxCount = Math.max(...pipelineData.byStage.map((x) => x.count), 1);
+                        const pct = (s.count / maxCount) * 100;
+                        const stageLabels: Record<string, string> = {
+                          outreach: "Outreach", contact_made: "Contact Made", interested: "Interested",
+                          order_placed: "Order Placed", interested_later: "Later", not_interested: "Not Interested",
+                        };
+                        const stageColors: Record<string, string> = {
+                          outreach: "bg-blue-500", contact_made: "bg-yellow-500", interested: "bg-green-500",
+                          order_placed: "bg-emerald-500", interested_later: "bg-orange-500", not_interested: "bg-red-500",
+                        };
+                        return (
+                          <div key={s.stage} className="space-y-1">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="font-medium">{stageLabels[s.stage] || s.stage}</span>
+                              <span className="text-muted-foreground">{s.count} deals · {fmt(s.total_value)} · {s.avg_days}d avg</span>
+                            </div>
+                            <div className="h-3 bg-muted rounded-full overflow-hidden">
+                              <div className={`h-full rounded-full ${stageColors[s.stage] || "bg-gray-500"}`} style={{ width: `${pct}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Conversion funnel */}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4" /> Conversion Funnel
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {pipelineData.funnel.map((f, i) => {
+                        const maxCount = Math.max(...pipelineData.funnel.map((x) => x.count), 1);
+                        const pct = (f.count / maxCount) * 100;
+                        const stageLabels: Record<string, string> = {
+                          outreach: "Outreach", contact_made: "Contact Made", interested: "Interested", order_placed: "Order Placed",
+                        };
+                        return (
+                          <div key={f.stage}>
+                            <div className="flex items-center justify-between text-sm mb-1">
+                              <span className="font-medium">{stageLabels[f.stage] || f.stage}</span>
+                              <span>
+                                <span className="font-bold">{f.count}</span>
+                                {i > 0 && (
+                                  <span className={`ml-2 text-xs ${f.rate >= 50 ? "text-green-600" : f.rate >= 25 ? "text-yellow-600" : "text-red-600"}`}>
+                                    {f.rate}% from prev
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                            <div className="h-8 bg-muted rounded overflow-hidden flex items-center">
+                              <div
+                                className="h-full bg-primary/70 rounded flex items-center justify-center text-xs text-primary-foreground font-medium transition-all"
+                                style={{ width: `${Math.max(pct, 5)}%` }}
+                              >
+                                {pct > 15 ? f.count : ""}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Stage transitions */}
+              {pipelineData.stageTransitions.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Stage Transitions (avg days between)</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>From</TableHead>
+                          <TableHead>To</TableHead>
+                          <TableHead className="text-right">Count</TableHead>
+                          <TableHead className="text-right">Avg Days</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pipelineData.stageTransitions.map((t) => {
+                          const labels: Record<string, string> = {
+                            outreach: "Outreach", contact_made: "Contact Made", interested: "Interested",
+                            order_placed: "Order Placed", interested_later: "Later", not_interested: "Not Interested",
+                          };
+                          return (
+                            <TableRow key={`${t.from_stage}-${t.to_stage}`}>
+                              <TableCell>{labels[t.from_stage] || t.from_stage}</TableCell>
+                              <TableCell>{labels[t.to_stage] || t.to_stage}</TableCell>
+                              <TableCell className="text-right">{t.transition_count}</TableCell>
+                              <TableCell className="text-right font-medium">{t.avg_days_between}d</TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          ) : (
+            <p className="text-center text-muted-foreground py-8">
+              {loading.pipeline ? "Loading pipeline analytics..." : "No pipeline data available"}
+            </p>
+          )}
+        </TabsContent>
 
         {/* ── Product Trends ── */}
         <TabsContent value="trends">
