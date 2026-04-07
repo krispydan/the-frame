@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -24,6 +25,7 @@ import {
   User,
   Database,
   Search,
+  ChevronRight,
 } from "lucide-react";
 import {
   Sidebar,
@@ -37,6 +39,9 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuBadge,
+  SidebarMenuSub,
+  SidebarMenuSubItem,
+  SidebarMenuSubButton,
   useSidebar,
 } from "@/components/ui/sidebar";
 import {
@@ -50,26 +55,38 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useUser } from "@/hooks/use-user";
 
-const salesNav: Array<{ title: string; href: string; icon: typeof LayoutDashboard; badge?: string }> = [
+type NavItem = {
+  title: string;
+  href: string;
+  icon: typeof LayoutDashboard;
+  badge?: string;
+  children?: Array<{ title: string; href: string; icon: typeof LayoutDashboard }>;
+};
+
+const salesNav: NavItem[] = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { title: "Prospects", href: "/prospects", icon: Users },
-  { title: "Review Queue", href: "/prospects/review", icon: Search },
-  { title: "Lead Sources", href: "/prospects/sources", icon: Database },
+  {
+    title: "Prospects", href: "/prospects", icon: Users,
+    children: [
+      { title: "Review Queue", href: "/prospects/review", icon: Search },
+      { title: "Lead Sources", href: "/prospects/sources", icon: Database },
+      { title: "Brand Accounts", href: "/brands", icon: Building },
+    ],
+  },
   { title: "Pipeline", href: "/pipeline", icon: Kanban },
   { title: "Campaigns", href: "/campaigns", icon: Mail },
   { title: "Inbox", href: "/campaigns/inbox", icon: Inbox },
   { title: "Customers", href: "/customers", icon: HeartHandshake },
-  { title: "Brand Accounts", href: "/brands", icon: Building },
 ];
 
-const operationsNav: Array<{ title: string; href: string; icon: typeof LayoutDashboard; badge?: string }> = [
+const operationsNav: NavItem[] = [
   { title: "Orders", href: "/orders", icon: ShoppingCart },
   { title: "Catalog", href: "/catalog", icon: Package },
   { title: "Inventory", href: "/inventory", icon: Warehouse },
   { title: "Finance", href: "/finance", icon: DollarSign },
 ];
 
-const insightsNav: Array<{ title: string; href: string; icon: typeof LayoutDashboard; badge?: string }> = [
+const insightsNav: NavItem[] = [
   { title: "Marketing", href: "/marketing", icon: Megaphone },
   { title: "Intelligence", href: "/intelligence", icon: BarChart3 },
   { title: "AI Center", href: "/ai", icon: Brain },
@@ -93,13 +110,18 @@ const ROLE_ALLOWED_HREFS: Record<string, string[]> = {
 };
 
 function filterNavByRole(
-  items: typeof salesNav,
+  items: NavItem[],
   role: string
-): typeof salesNav {
+): NavItem[] {
   const allowed = ROLE_ALLOWED_HREFS[role];
   if (!allowed) return [];
   if (allowed.includes("*")) return items;
-  return items.filter((item) => allowed.includes(item.href));
+  return items
+    .filter((item) => allowed.includes(item.href) || item.children?.some((c) => allowed.includes(c.href)))
+    .map((item) => ({
+      ...item,
+      children: item.children?.filter((c) => allowed.includes(c.href)),
+    }));
 }
 
 export function AppSidebar() {
@@ -116,6 +138,9 @@ export function AppSidebar() {
   const filteredSales = filterNavByRole(salesNav, role);
   const filteredOps = filterNavByRole(operationsNav, role);
   const filteredInsights = filterNavByRole(insightsNav, role);
+
+  const prospectsExpanded = pathname.startsWith("/prospects") || pathname.startsWith("/brands");
+  const [prospectsOpen, setProspectsOpen] = useState(prospectsExpanded);
 
   return (
     <Sidebar collapsible="icon">
@@ -145,25 +170,60 @@ export function AppSidebar() {
           <SidebarGroupLabel>Sales</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {filteredSales.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    render={<Link href={item.href} onClick={() => setOpenMobile(false)} />}
-                    isActive={pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href))}
-                    tooltip={item.title}
-                  >
-                    <item.icon />
-                    <span>{item.title}</span>
-                  </SidebarMenuButton>
-                  {item.badge && (
-                    <SidebarMenuBadge>
-                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                        {item.badge}
-                      </Badge>
-                    </SidebarMenuBadge>
-                  )}
-                </SidebarMenuItem>
-              ))}
+              {filteredSales.map((item) =>
+                item.children && item.children.length > 0 ? (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      render={<Link href={item.href} onClick={() => setOpenMobile(false)} />}
+                      isActive={pathname === item.href}
+                      tooltip={item.title}
+                    >
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </SidebarMenuButton>
+                    <button
+                      onClick={() => setProspectsOpen(!prospectsOpen)}
+                      className="absolute right-1 top-1.5 flex h-5 w-5 items-center justify-center rounded-md hover:bg-sidebar-accent"
+                    >
+                      <ChevronRight className={`h-3.5 w-3.5 transition-transform ${prospectsOpen ? "rotate-90" : ""}`} />
+                    </button>
+                    {prospectsOpen && (
+                      <SidebarMenuSub>
+                        {item.children.map((child) => (
+                          <SidebarMenuSubItem key={child.href}>
+                            <SidebarMenuSubButton
+                              render={<Link href={child.href} onClick={() => setOpenMobile(false)} />}
+                              isActive={pathname === child.href || pathname.startsWith(child.href)}
+                              size="sm"
+                            >
+                              <child.icon className="h-3.5 w-3.5" />
+                              <span>{child.title}</span>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
+                      </SidebarMenuSub>
+                    )}
+                  </SidebarMenuItem>
+                ) : (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      render={<Link href={item.href} onClick={() => setOpenMobile(false)} />}
+                      isActive={pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href))}
+                      tooltip={item.title}
+                    >
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </SidebarMenuButton>
+                    {item.badge && (
+                      <SidebarMenuBadge>
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                          {item.badge}
+                        </Badge>
+                      </SidebarMenuBadge>
+                    )}
+                  </SidebarMenuItem>
+                )
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

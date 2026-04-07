@@ -11,8 +11,7 @@ async function getDeal(id: string) {
     FROM deals d
     LEFT JOIN companies c ON c.id = d.company_id
     WHERE d.id = ?
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  `).get(id) as any;
+  `).get(id) as Record<string, unknown>;
   return deal;
 }
 

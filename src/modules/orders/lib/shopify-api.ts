@@ -60,6 +60,65 @@ export async function shopifyAdminRequest(
   return res.json();
 }
 
+// ── Product Create / Update ──
+
+interface ShopifyProductPayload {
+  title: string;
+  body_html: string;
+  vendor: string;
+  product_type: string;
+  tags: string;
+  variants: Array<{
+    sku: string;
+    price: string;
+    compare_at_price?: string;
+    option1: string;
+    inventory_management?: string;
+    barcode?: string;
+  }>;
+  images?: Array<{ src: string; alt?: string }>;
+  options?: Array<{ name: string; values: string[] }>;
+}
+
+export async function createShopifyProduct(
+  store: ShopifyStore,
+  product: ShopifyProductPayload,
+) {
+  const data = (await shopifyAdminRequest(store, "POST", "/products.json", {
+    product,
+  })) as { product: { id: number; handle: string; variants: Array<{ id: number; sku: string }> } };
+  return data.product;
+}
+
+export async function updateShopifyProduct(
+  store: ShopifyStore,
+  shopifyProductId: string,
+  product: Partial<ShopifyProductPayload>,
+) {
+  const data = (await shopifyAdminRequest(store, "PUT", `/products/${shopifyProductId}.json`, {
+    product,
+  })) as { product: { id: number; handle: string; variants: Array<{ id: number; sku: string }> } };
+  return data.product;
+}
+
+export async function findShopifyProductBySku(
+  store: ShopifyStore,
+  skuPrefix: string,
+): Promise<{ id: number; title: string; variants: Array<{ id: number; sku: string }> } | null> {
+  // Search by SKU via the product listing endpoint
+  const data = (await shopifyAdminRequest(
+    store,
+    "GET",
+    `/products.json?limit=250&fields=id,title,variants`,
+  )) as { products: Array<{ id: number; title: string; variants: Array<{ id: number; sku: string }> }> };
+
+  // Match by SKU prefix (any variant SKU starts with the prefix)
+  const match = data.products.find((p) =>
+    p.variants.some((v) => v.sku?.startsWith(skuPrefix))
+  );
+  return match || null;
+}
+
 // ── Webhook Registration ──
 
 const WEBHOOK_TOPICS = [

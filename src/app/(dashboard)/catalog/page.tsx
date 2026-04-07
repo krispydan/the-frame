@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import {
   Search, Package, LayoutGrid, List, Filter, ChevronDown, Image as ImageIcon,
-  CheckSquare, XSquare, Download, MoreHorizontal,
+  CheckSquare, XSquare, Download, MoreHorizontal, Plus, Upload, Loader2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -135,6 +135,31 @@ export default function CatalogPage() {
     setLoading(false);
   };
 
+  const [pushingToShopify, setPushingToShopify] = useState(false);
+  const [shopifyResult, setShopifyResult] = useState<{ created: number; updated: number; errors: number } | null>(null);
+
+  const handleShopifyPush = async (stores: string[]) => {
+    setPushingToShopify(true);
+    setShopifyResult(null);
+    try {
+      const res = await fetch("/api/v1/catalog/shopify-push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productIds: [...selected], stores }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setShopifyResult({ created: 0, updated: 0, errors: 1 });
+      } else {
+        setShopifyResult({ created: data.created, updated: data.updated, errors: data.errors });
+      }
+    } catch {
+      setShopifyResult({ created: 0, updated: 0, errors: 1 });
+    } finally {
+      setPushingToShopify(false);
+    }
+  };
+
   const stats = useMemo(() => ({
     total: products.length,
     approved: products.filter((p) => p.status === "approved").length,
@@ -160,6 +185,9 @@ export default function CatalogPage() {
           <p className="text-muted-foreground">{stats.total} products · {stats.approved} approved · {stats.avgCompleteness}% avg completeness</p>
         </div>
         <div className="flex items-center gap-2">
+          <Link href="/catalog/intake">
+            <Button><Plus className="h-4 w-4 mr-2" />Add Product</Button>
+          </Link>
           <Button variant={view === "grid" ? "default" : "outline"} size="icon" onClick={() => setView("grid")}><LayoutGrid className="h-4 w-4" /></Button>
           <Button variant={view === "list" ? "default" : "outline"} size="icon" onClick={() => setView("list")}><List className="h-4 w-4" /></Button>
         </div>
@@ -225,12 +253,34 @@ export default function CatalogPage() {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger>
+              <Button variant="outline" size="sm" disabled={pushingToShopify}>
+                {pushingToShopify ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Upload className="mr-1 h-3 w-3" />}
+                Push to Shopify <ChevronDown className="ml-1 h-3 w-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => handleShopifyPush(["dtc"])}>DTC Store</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleShopifyPush(["wholesale"])}>Wholesale Store</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => handleShopifyPush(["dtc", "wholesale"])}>Both Stores</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Link href={`/catalog/export?ids=${[...selected].join(",")}`}>
             <Button variant="outline" size="sm">
               <Download className="mr-1 h-3 w-3" /> Export Selected
             </Button>
           </Link>
           <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>Clear</Button>
+          {shopifyResult && (
+            <span className={`text-xs ${shopifyResult.errors > 0 ? "text-red-600" : "text-green-600"}`}>
+              {shopifyResult.created > 0 && `${shopifyResult.created} created`}
+              {shopifyResult.created > 0 && shopifyResult.updated > 0 && ", "}
+              {shopifyResult.updated > 0 && `${shopifyResult.updated} updated`}
+              {shopifyResult.errors > 0 && ` (${shopifyResult.errors} errors)`}
+            </span>
+          )}
         </div>
       )}
 
