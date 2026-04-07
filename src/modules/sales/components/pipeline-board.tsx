@@ -2,6 +2,17 @@
 
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import {
+  DndContext,
+  DragOverlay,
+  useDraggable,
+  useDroppable,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragStartEvent,
+  type DragEndEvent,
+} from "@dnd-kit/core";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -103,15 +114,15 @@ function formatCurrency(val: number) {
   }).format(val);
 }
 
-// ── Deal Card ──
-function DealCard({
+// ── Deal Card Content (shared between draggable and overlay) ──
+function DealCardContent({
   deal,
   onMoveStage,
-  onOpenDetail,
+  isDragging,
 }: {
   deal: Deal;
-  onMoveStage: (dealId: string, newStage: DealStage) => void;
-  onOpenDetail: (dealId: string) => void;
+  onMoveStage?: (dealId: string, newStage: DealStage) => void;
+  isDragging?: boolean;
 }) {
   const daysInStage = differenceInDays(new Date(), new Date(deal.created_at));
   const isSnoozed =
@@ -119,19 +130,21 @@ function DealCard({
 
   return (
     <Card
-      className="p-3 cursor-pointer hover:shadow-md transition-shadow border-l-4 group"
+      className={`p-3 transition-shadow border-l-4 group ${isDragging ? "shadow-lg ring-2 ring-primary/20 opacity-90" : "hover:shadow-md"}`}
       style={{
         borderLeftColor: isSnoozed ? "#f59e0b" : undefined,
       }}
-      onClick={() => onOpenDetail(deal.id)}
     >
       <div className="space-y-2">
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <p className="font-medium text-sm truncate">{deal.company_name}</p>
-            <p className="text-xs text-muted-foreground truncate">
-              {deal.company_city}, {deal.company_state}
-            </p>
+          <div className="flex items-start gap-1.5 min-w-0 flex-1">
+            <GripVertical className="h-4 w-4 mt-0.5 text-muted-foreground/50 shrink-0 cursor-grab" />
+            <div className="min-w-0">
+              <p className="font-medium text-sm truncate">{deal.company_name}</p>
+              <p className="text-xs text-muted-foreground truncate">
+                {deal.company_city}, {deal.company_state}
+              </p>
+            </div>
           </div>
           {deal.value != null && deal.value > 0 && (
             <span className="text-sm font-semibold text-green-700 whitespace-nowrap">
@@ -173,24 +186,78 @@ function DealCard({
         </div>
 
         {/* Quick move buttons - show on hover */}
-        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          {DEAL_STAGES.filter((s) => s !== deal.stage)
-            .slice(0, 3)
-            .map((s) => (
-              <button
-                key={s}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onMoveStage(deal.id, s);
-                }}
-                className={`text-[10px] px-1.5 py-0.5 rounded ${DEAL_STAGE_COLORS[s]} hover:opacity-80`}
-              >
-                {DEAL_STAGE_LABELS[s]}
-              </button>
-            ))}
-        </div>
+        {onMoveStage && (
+          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            {DEAL_STAGES.filter((s) => s !== deal.stage)
+              .slice(0, 3)
+              .map((s) => (
+                <button
+                  key={s}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMoveStage(deal.id, s);
+                  }}
+                  className={`text-[10px] px-1.5 py-0.5 rounded ${DEAL_STAGE_COLORS[s]} hover:opacity-80`}
+                >
+                  {DEAL_STAGE_LABELS[s]}
+                </button>
+              ))}
+          </div>
+        )}
       </div>
     </Card>
+  );
+}
+
+// ── Draggable Deal Card ──
+function DealCard({
+  deal,
+  onMoveStage,
+  onOpenDetail,
+}: {
+  deal: Deal;
+  onMoveStage: (dealId: string, newStage: DealStage) => void;
+  onOpenDetail: (dealId: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: deal.id,
+    data: { deal },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      onClick={() => !isDragging && onOpenDetail(deal.id)}
+      className={`cursor-pointer ${isDragging ? "opacity-30" : ""}`}
+    >
+      <DealCardContent deal={deal} onMoveStage={onMoveStage} />
+    </div>
+  );
+}
+
+// ── Droppable Stage Column ──
+function StageColumn({
+  stage,
+  children,
+  isOver,
+}: {
+  stage: string;
+  children: React.ReactNode;
+  isOver: boolean;
+}) {
+  const { setNodeRef } = useDroppable({ id: stage });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`space-y-2 min-h-[200px] rounded-lg p-2 transition-colors ${
+        isOver ? "bg-primary/10 ring-2 ring-primary/20" : "bg-muted/30"
+      }`}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -405,6 +472,12 @@ export function PipelineBoard({ deals: initialDeals, stageSummaries, companies, 
   const [deals, setDeals] = useState(initialDeals);
   const [activeTab, setActiveTab] = useState<"active" | "snoozed" | "reorder">("active");
   const [ownerFilter, setOwnerFilter] = useState<string>("all");
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [overStage, setOverStage] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
 
   const filteredDeals = ownerFilter === "all" ? deals : deals.filter((d) => d.owner_id === ownerFilter);
 
@@ -437,6 +510,29 @@ export function PipelineBoard({ deals: initialDeals, stageSummaries, companies, 
       }),
     });
     refreshDeals();
+  }
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveDragId(event.active.id as string);
+  }
+
+  function handleDragOver(event: { over: { id: string | number } | null }) {
+    setOverStage(event.over ? String(event.over.id) : null);
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    setActiveDragId(null);
+    setOverStage(null);
+
+    if (!over) return;
+    const dealId = active.id as string;
+    const newStage = over.id as DealStage;
+    const deal = deals.find((d) => d.id === dealId);
+    if (!deal || deal.stage === newStage) return;
+
+    // Optimistic update
+    moveStage(dealId, newStage);
   }
 
   function openDetail(dealId: string) {
@@ -502,50 +598,67 @@ export function PipelineBoard({ deals: initialDeals, stageSummaries, companies, 
 
       {/* Content */}
       {activeTab === "active" && (
-        <div className="flex gap-3 overflow-x-auto pb-4">
-          {DEAL_STAGES.map((stage) => {
-            const stageDeals = filteredDeals.filter(
-              (d) => d.stage === stage && (!d.snooze_until || new Date(d.snooze_until) <= new Date())
-            );
-            const totalValue = stageDeals.reduce((s, d) => s + (d.value || 0), 0);
+        <DndContext
+          sensors={sensors}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+        >
+          <div className="flex gap-3 overflow-x-auto pb-4">
+            {DEAL_STAGES.map((stage) => {
+              const stageDeals = filteredDeals.filter(
+                (d) => d.stage === stage && (!d.snooze_until || new Date(d.snooze_until) <= new Date())
+              );
+              const totalValue = stageDeals.reduce((s, d) => s + (d.value || 0), 0);
 
-            return (
-              <div key={stage} className="flex-shrink-0 w-72">
-                {/* Column header */}
-                <div className="mb-3 px-1">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${DEAL_STAGE_COLORS[stage]}`}>
-                        {DEAL_STAGE_LABELS[stage]}
-                      </span>
-                      <span className="text-sm text-muted-foreground">{stageDeals.length}</span>
+              return (
+                <div key={stage} className="flex-shrink-0 w-72">
+                  {/* Column header */}
+                  <div className="mb-3 px-1">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${DEAL_STAGE_COLORS[stage]}`}>
+                          {DEAL_STAGE_LABELS[stage]}
+                        </span>
+                        <span className="text-sm text-muted-foreground">{stageDeals.length}</span>
+                      </div>
                     </div>
+                    {totalValue > 0 && (
+                      <p className="text-xs text-muted-foreground mt-1">{formatCurrency(totalValue)}</p>
+                    )}
                   </div>
-                  {totalValue > 0 && (
-                    <p className="text-xs text-muted-foreground mt-1">{formatCurrency(totalValue)}</p>
-                  )}
-                </div>
 
-                {/* Cards */}
-                <div className="space-y-2 min-h-[200px] bg-muted/30 rounded-lg p-2">
-                  {stageDeals.map((deal) => (
-                    <DealCard
-                      key={deal.id}
-                      deal={deal}
-                      onMoveStage={moveStage}
-                      onOpenDetail={openDetail}
-                    />
-                  ))}
-                  {stageDeals.length === 0 && (
-                    <p className="text-xs text-muted-foreground text-center py-8">
-                      No deals
-                    </p>
-                  )}
+                  {/* Cards */}
+                  <StageColumn stage={stage} isOver={overStage === stage}>
+                    {stageDeals.map((deal) => (
+                      <DealCard
+                        key={deal.id}
+                        deal={deal}
+                        onMoveStage={moveStage}
+                        onOpenDetail={openDetail}
+                      />
+                    ))}
+                    {stageDeals.length === 0 && (
+                      <p className="text-xs text-muted-foreground text-center py-8">
+                        No deals
+                      </p>
+                    )}
+                  </StageColumn>
                 </div>
+              );
+            })}
+          </div>
+          <DragOverlay>
+            {activeDragId ? (
+              <div className="w-72">
+                <DealCardContent
+                  deal={deals.find((d) => d.id === activeDragId)!}
+                  isDragging
+                />
               </div>
-            );
-          })}
-        </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
       )}
 
       {activeTab === "snoozed" && (
