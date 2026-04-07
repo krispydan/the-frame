@@ -22,11 +22,19 @@ export async function GET(req: NextRequest) {
   const pattern = `%${q}%`;
   const results: SearchResult[] = [];
 
-  // Companies (prospects)
+  // Companies (prospects) — use FTS5 with fallback to LIKE
   try {
-    const companies = sqlite
-      .prepare(`SELECT id, name, city, state FROM companies WHERE name LIKE ? OR city LIKE ? OR state LIKE ? LIMIT ?`)
-      .all(pattern, pattern, pattern, limit) as { id: string; name: string; city: string | null; state: string | null }[];
+    let companies: { id: string; name: string; city: string | null; state: string | null }[];
+    try {
+      const ftsQuery = q.replace(/[^\w\s]/g, "") + "*";
+      companies = sqlite
+        .prepare(`SELECT c.id, c.name, c.city, c.state FROM companies_fts fts JOIN companies c ON c.rowid = fts.rowid WHERE companies_fts MATCH ? LIMIT ?`)
+        .all(ftsQuery, limit) as typeof companies;
+    } catch {
+      companies = sqlite
+        .prepare(`SELECT id, name, city, state FROM companies WHERE name LIKE ? OR city LIKE ? OR state LIKE ? LIMIT ?`)
+        .all(pattern, pattern, pattern, limit) as typeof companies;
+    }
     for (const c of companies) {
       results.push({ type: "prospect", id: c.id, title: c.name, subtitle: [c.city, c.state].filter(Boolean).join(", ") || "Prospect", href: `/prospects/${c.id}` });
     }
@@ -38,7 +46,7 @@ export async function GET(req: NextRequest) {
       .prepare(`SELECT id, sku_prefix, name FROM catalog_products WHERE sku_prefix LIKE ? OR name LIKE ? LIMIT ?`)
       .all(pattern, pattern, limit) as { id: string; sku_prefix: string | null; name: string | null }[];
     for (const p of products) {
-      results.push({ type: "product", id: p.id, title: p.name || p.sku_prefix || "Unnamed Product", subtitle: p.sku_prefix || "Product", href: `/catalog/${p.id}` });
+      results.push({ type: "product", id: p.id, title: p.name || p.sku_prefix || "Unnamed Product", subtitle: p.sku_prefix || "Product", href: `/catalog/${p.sku_prefix || p.id}` });
     }
   } catch { /* table may not exist */ }
 
@@ -48,7 +56,7 @@ export async function GET(req: NextRequest) {
       .prepare(`SELECT d.id, d.title, c.name as company_name FROM deals d LEFT JOIN companies c ON d.company_id = c.id WHERE d.title LIKE ? OR c.name LIKE ? LIMIT ?`)
       .all(pattern, pattern, limit) as { id: string; title: string; company_name: string | null }[];
     for (const d of deals) {
-      results.push({ type: "deal", id: d.id, title: d.title, subtitle: d.company_name || "Deal", href: `/pipeline?deal=${d.id}` });
+      results.push({ type: "deal", id: d.id, title: d.title, subtitle: d.company_name || "Deal", href: `/pipeline/${d.id}` });
     }
   } catch { /* table may not exist */ }
 
