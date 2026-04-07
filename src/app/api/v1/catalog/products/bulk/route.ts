@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { products } from "@/modules/catalog/schema";
+import { activityFeed } from "@/modules/core/schema";
 import { inArray, sql } from "drizzle-orm";
 
 export async function PATCH(request: NextRequest) {
@@ -21,6 +22,13 @@ export async function PATCH(request: NextRequest) {
     .update(products)
     .set({ status: status as typeof products.$inferSelect["status"], updatedAt: sql`(datetime('now'))` })
     .where(inArray(products.id, ids));
+
+  db.insert(activityFeed).values({
+    eventType: "product.status_changed",
+    module: "catalog",
+    entityType: "product",
+    data: { count: ids.length, status },
+  }).run();
 
   return NextResponse.json({ updated: ids.length });
 }

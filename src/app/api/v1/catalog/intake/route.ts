@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { products, skus, purchaseOrders } from "@/modules/catalog/schema";
+import { activityFeed } from "@/modules/core/schema";
 import { eq, sql } from "drizzle-orm";
 
 /**
@@ -80,6 +81,17 @@ export async function POST(request: NextRequest) {
     } catch (e: any) {
       errors.push({ skuPrefix: item.skuPrefix, error: e.message });
     }
+  }
+
+  // Log to activity feed
+  if (created.length > 0) {
+    db.insert(activityFeed).values({
+      eventType: "product.created",
+      module: "catalog",
+      entityType: "product",
+      entityId: created[0],
+      data: { count: created.length, skuPrefixes: created },
+    }).run();
   }
 
   return NextResponse.json({

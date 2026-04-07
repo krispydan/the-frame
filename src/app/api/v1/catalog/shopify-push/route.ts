@@ -1,5 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { activityFeed } from "@/modules/core/schema";
 import { loadExportProducts } from "@/modules/catalog/lib/export/load-products";
 import {
   createShopifyProduct,
@@ -140,6 +142,16 @@ export async function POST(request: NextRequest) {
   const created = results.filter((r) => r.action === "created").length;
   const updated = results.filter((r) => r.action === "updated").length;
   const errors = results.filter((r) => r.action === "error").length;
+
+  // Log to activity feed
+  if (created + updated > 0) {
+    db.insert(activityFeed).values({
+      eventType: "product.shopify_pushed",
+      module: "catalog",
+      entityType: "product",
+      data: { stores, created, updated, errors, count: productIds.length },
+    }).run();
+  }
 
   return NextResponse.json({ created, updated, errors, results }, { status: 200 });
 }

@@ -5,7 +5,8 @@ import Link from "next/link";
 import {
   Users, Target, DollarSign, TrendingUp,
   Upload, Eye, Brain, Clock, ArrowRight, Zap, RefreshCw,
-  ShoppingCart, Package, Bell,
+  ShoppingCart, Package, Bell, Kanban, Truck, AlertTriangle,
+  Heart, CreditCard, BarChart3, Bot, Boxes,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,8 @@ interface DashboardStats {
     entity_id: string;
     data: string;
     created_at: string;
+    entity_name: string | null;
+    entity_href: string | null;
   }>;
 }
 
@@ -281,7 +284,7 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
         {/* Quick Actions */}
         <Card className="lg:col-span-1">
           <CardHeader className="pb-3">
@@ -367,45 +370,118 @@ export default function DashboardPage() {
             </Link>
           </CardContent>
         </Card>
-
-        {/* Recent Activity */}
-        <Card className="lg:col-span-1">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Recent Activity</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!stats?.recentActivity?.length ? (
-              <p className="text-sm text-gray-400">No recent activity</p>
-            ) : (
-              <div className="space-y-3 max-h-64 overflow-y-auto">
-                {stats.recentActivity.slice(0, 10).map(a => {
-                  let description = a.event_type.replace(/_/g, " ");
-                  try {
-                    const data = JSON.parse(a.data);
-                    if (data.fields) description += `: ${data.fields.join(", ")}`;
-                    if (data.name) description += `: ${data.name}`;
-                    if (data.count !== undefined) description += ` (${data.count})`;
-                  } catch {}
-                  return (
-                    <div key={a.id} className="flex gap-3 text-sm">
-                      <div className="w-2 h-2 rounded-full bg-blue-400 mt-1.5 shrink-0" />
-                      <div>
-                        <p className="text-gray-700 dark:text-gray-300 capitalize">{description}</p>
-                        <p className="text-xs text-gray-400 flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {a.created_at ? new Date(a.created_at).toLocaleString() : "—"}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
       </div>
+
+      {/* Activity Feed — full width */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Clock className="w-4 h-4 text-gray-500" /> Recent Activity
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!stats?.recentActivity?.length ? (
+            <p className="text-sm text-gray-400">No recent activity yet. Events will appear here as you use the system.</p>
+          ) : (
+            <div className="space-y-1 max-h-[480px] overflow-y-auto">
+              {stats.recentActivity.map(a => {
+                const { icon, color, label } = getActivityMeta(a.event_type, a.module);
+                let detail = "";
+                try {
+                  const data = typeof a.data === "string" ? JSON.parse(a.data) : a.data;
+                  if (data.toStage) detail = `→ ${data.toStage.replace(/_/g, " ")}`;
+                  else if (data.value) detail = `$${Number(data.value).toLocaleString()}`;
+                  else if (data.count !== undefined) detail = `(${data.count} items)`;
+                  else if (data.total) detail = `$${Number(data.total).toLocaleString()}`;
+                  else if (data.stores) detail = `→ ${(data.stores as string[]).join(", ")}`;
+                  else if (data.status) detail = `→ ${data.status}`;
+                } catch {}
+                const entityLabel = a.entity_name || a.entity_id?.slice(0, 8) || "";
+                return (
+                  <div key={a.id} className="flex items-start gap-3 py-2 px-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                    <div className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${color}`}>
+                      {icon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-gray-800 dark:text-gray-200">
+                        <span className="font-medium">{label}</span>
+                        {entityLabel && (
+                          a.entity_href ? (
+                            <Link href={a.entity_href} className="ml-1 text-blue-600 dark:text-blue-400 hover:underline">{entityLabel}</Link>
+                          ) : (
+                            <span className="ml-1 text-gray-600 dark:text-gray-400">{entityLabel}</span>
+                          )
+                        )}
+                        {detail && <span className="ml-1 text-gray-500">{detail}</span>}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {a.created_at ? formatRelativeTime(a.created_at) : "—"}
+                        <span className="mx-1.5">·</span>
+                        <span className="capitalize">{a.module}</span>
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
+}
+
+const MODULE_ICONS: Record<string, { icon: React.ReactNode; color: string }> = {
+  sales: { icon: <Users className="w-4 h-4" />, color: "bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" },
+  orders: { icon: <ShoppingCart className="w-4 h-4" />, color: "bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" },
+  inventory: { icon: <Boxes className="w-4 h-4" />, color: "bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" },
+  catalog: { icon: <Package className="w-4 h-4" />, color: "bg-teal-50 text-teal-600 dark:bg-teal-900/30 dark:text-teal-400" },
+  finance: { icon: <CreditCard className="w-4 h-4" />, color: "bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400" },
+  customers: { icon: <Heart className="w-4 h-4" />, color: "bg-pink-50 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400" },
+  intelligence: { icon: <Bot className="w-4 h-4" />, color: "bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400" },
+};
+
+const EVENT_LABELS: Record<string, { icon?: React.ReactNode; label: string }> = {
+  "deal.won": { icon: <Target className="w-4 h-4" />, label: "Deal won" },
+  "deal.stage_changed": { icon: <Kanban className="w-4 h-4" />, label: "Deal stage changed" },
+  "order.created": { icon: <ShoppingCart className="w-4 h-4" />, label: "New order" },
+  "order.confirmed": { label: "Order confirmed" },
+  "order.shipped": { icon: <Truck className="w-4 h-4" />, label: "Order shipped" },
+  "order.delivered": { label: "Order delivered" },
+  "inventory.below_reorder": { icon: <AlertTriangle className="w-4 h-4" />, label: "Low stock alert" },
+  "customer.health_changed": { label: "Customer health changed" },
+  "po.status_changed": { label: "PO status changed" },
+  "agent.completed": { icon: <Bot className="w-4 h-4" />, label: "Agent completed" },
+  "agent.error": { label: "Agent error" },
+  "payment.received": { icon: <DollarSign className="w-4 h-4" />, label: "Payment received" },
+  "product.trend_change": { icon: <BarChart3 className="w-4 h-4" />, label: "Product trend" },
+  "product.created": { icon: <Package className="w-4 h-4" />, label: "Product created" },
+  "product.status_changed": { label: "Product status changed" },
+  "product.shopify_pushed": { icon: <Upload className="w-4 h-4" />, label: "Pushed to Shopify" },
+};
+
+function getActivityMeta(eventType: string, module: string) {
+  const eventMeta = EVENT_LABELS[eventType];
+  const moduleMeta = MODULE_ICONS[module] || MODULE_ICONS.sales;
+  return {
+    icon: eventMeta?.icon || moduleMeta.icon,
+    color: moduleMeta.color,
+    label: eventMeta?.label || eventType.replace(/[._]/g, " "),
+  };
+}
+
+function formatRelativeTime(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffMs = now - then;
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 7) return `${diffDay}d ago`;
+  return new Date(dateStr).toLocaleDateString();
 }
 
 function StatCard({ title, value, icon, color, subtitle, href, format }: {

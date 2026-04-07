@@ -57,9 +57,34 @@ export async function GET() {
     "SELECT count(*) as c FROM notifications WHERE read = 0 AND dismissed = 0"
   ).get() as { c: number }).c;
 
-  const recentActivity = sqlite.prepare(
-    "SELECT * FROM activity_feed ORDER BY created_at DESC LIMIT 20"
-  ).all();
+  // Enriched activity feed with entity names
+  const recentActivity = sqlite.prepare(`
+    SELECT
+      af.*,
+      CASE af.entity_type
+        WHEN 'deal' THEN (SELECT title FROM deals WHERE id = af.entity_id)
+        WHEN 'order' THEN (SELECT 'Order #' || external_id FROM orders WHERE id = af.entity_id)
+        WHEN 'company' THEN (SELECT name FROM companies WHERE id = af.entity_id)
+        WHEN 'product' THEN (SELECT coalesce(name, sku_prefix) FROM catalog_products WHERE id = af.entity_id)
+        WHEN 'customer' THEN (SELECT name FROM companies WHERE id = af.entity_id)
+        WHEN 'inventory' THEN (SELECT sku FROM catalog_skus WHERE id = af.entity_id)
+        WHEN 'po' THEN (SELECT po_number FROM purchase_orders WHERE id = af.entity_id)
+        WHEN 'payment' THEN (SELECT 'Payment' || CASE WHEN entity_id IS NOT NULL THEN ' #' || substr(af.entity_id, 1, 8) ELSE '' END)
+      END as entity_name,
+      CASE af.entity_type
+        WHEN 'deal' THEN '/pipeline/' || af.entity_id
+        WHEN 'order' THEN '/orders/' || af.entity_id
+        WHEN 'company' THEN '/prospects/' || af.entity_id
+        WHEN 'product' THEN '/catalog/' || (SELECT sku_prefix FROM catalog_products WHERE id = af.entity_id)
+        WHEN 'customer' THEN '/customers'
+        WHEN 'inventory' THEN '/inventory'
+        WHEN 'po' THEN '/inventory/purchase-orders'
+        ELSE NULL
+      END as entity_href
+    FROM activity_feed af
+    ORDER BY af.created_at DESC
+    LIMIT 20
+  `).all();
 
   return NextResponse.json({
     totalProspects,
