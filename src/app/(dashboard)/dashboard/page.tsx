@@ -32,6 +32,14 @@ interface DashboardStats {
   inventoryValue: number;
   revenueByChannel: Array<{ channel: string; revenue: number; orderCount: number }>;
   unreadNotifications: number;
+  lowStockAlerts: Array<{
+    quantity: number;
+    reorder_point: number;
+    sku: string;
+    color_name: string | null;
+    product_name: string;
+    sku_prefix: string;
+  }>;
   recentActivity: Array<{
     id: string;
     event_type: string;
@@ -229,6 +237,44 @@ export default function DashboardPage() {
                     </p>
                     <p className="text-xs text-gray-400">{ch.orderCount} orders</p>
                   </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Low Stock Alerts */}
+      {stats?.lowStockAlerts && stats.lowStockAlerts.length > 0 && (
+        <Card className="mb-6 border-amber-200 dark:border-amber-800">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-500" /> Low Stock Alerts
+                <span className="text-xs font-normal text-gray-500">({stats.lowStockAlerts.length} items)</span>
+              </CardTitle>
+              <Link href="/inventory">
+                <Button variant="ghost" size="sm" className="text-xs">View Inventory <ArrowRight className="w-3 h-3 ml-1" /></Button>
+              </Link>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+              {stats.lowStockAlerts.map((item) => {
+                const ratio = item.reorder_point > 0 ? item.quantity / item.reorder_point : 0;
+                const severity = item.quantity === 0 ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800" :
+                  ratio <= 0.25 ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800" :
+                  ratio <= 0.5 ? "bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800" :
+                  "bg-yellow-50 border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-800";
+                return (
+                  <Link key={item.sku} href={`/catalog/${item.sku_prefix}`} className={`block p-3 rounded-lg border ${severity} hover:shadow-sm transition-shadow`}>
+                    <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{item.product_name}</p>
+                    <p className="text-xs text-gray-500 truncate">{item.sku}{item.color_name ? ` · ${item.color_name}` : ""}</p>
+                    <div className="mt-2 flex items-baseline gap-1">
+                      <span className={`text-lg font-bold ${item.quantity === 0 ? "text-red-600" : "text-amber-600"}`}>{item.quantity}</span>
+                      <span className="text-xs text-gray-400">/ {item.reorder_point} reorder pt</span>
+                    </div>
+                  </Link>
                 );
               })}
             </div>

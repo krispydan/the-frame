@@ -57,6 +57,17 @@ export async function GET() {
     "SELECT count(*) as c FROM notifications WHERE read = 0 AND dismissed = 0"
   ).get() as { c: number }).c;
 
+  // Low-stock alerts
+  const lowStockAlerts = sqlite.prepare(`
+    SELECT i.quantity, i.reorder_point, s.sku, s.color_name, p.name as product_name, p.sku_prefix
+    FROM inventory i
+    JOIN catalog_skus s ON i.sku_id = s.id
+    JOIN catalog_products p ON s.product_id = p.id
+    WHERE i.quantity <= i.reorder_point AND i.reorder_point > 0 AND i.location = 'warehouse'
+    ORDER BY CAST(i.quantity AS REAL) / NULLIF(i.reorder_point, 0) ASC
+    LIMIT 10
+  `).all() as Array<{ quantity: number; reorder_point: number; sku: string; color_name: string | null; product_name: string; sku_prefix: string }>;
+
   // Enriched activity feed with entity names
   const recentActivity = sqlite.prepare(`
     SELECT
@@ -100,6 +111,7 @@ export async function GET() {
     inventoryValue,
     revenueByChannel,
     unreadNotifications,
+    lowStockAlerts,
     recentActivity,
   });
 }
