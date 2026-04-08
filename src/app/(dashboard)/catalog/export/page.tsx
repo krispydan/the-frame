@@ -8,6 +8,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -43,6 +45,12 @@ export default function ExportPage() {
   const [loading, setLoading] = useState(false);
   const [exportHistory, setExportHistory] = useState<ExportRecord[]>([]);
 
+  // PDF settings
+  const [pdfSeason, setPdfSeason] = useState("Spring 2026");
+  const [showPreorder, setShowPreorder] = useState(true);
+  const [showOrderForm, setShowOrderForm] = useState(true);
+  const [showTerms, setShowTerms] = useState(true);
+
   // Get pre-selected IDs from URL
   const [selectedIds, setSelectedIds] = useState<string>("");
   useEffect(() => {
@@ -67,8 +75,13 @@ export default function ExportPage() {
   };
 
   const handlePdfExport = () => {
-    const idsParam = selectedIds ? `?ids=${selectedIds}` : "";
-    window.open(`/api/v1/catalog/export/pdf${idsParam}`, "_blank");
+    const params = new URLSearchParams();
+    if (selectedIds) params.set("ids", selectedIds);
+    params.set("season", pdfSeason);
+    params.set("preorder", String(showPreorder));
+    params.set("orderForm", String(showOrderForm));
+    params.set("terms", String(showTerms));
+    window.open(`/api/v1/catalog/export/pdf?${params}`, "_blank");
   };
 
   const stats = {
@@ -92,35 +105,75 @@ export default function ExportPage() {
         </div>
       </div>
 
-      {/* Platform Selection */}
-      <div className="flex items-center gap-3">
-        <Select value={platform} onValueChange={(v) => v && setPlatform(v)}>
-          <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="shopify">Shopify</SelectItem>
-            <SelectItem value="faire">Faire</SelectItem>
-            <SelectItem value="amazon">Amazon</SelectItem>
-          </SelectContent>
-        </Select>
-        {platform === "shopify" && (
-          <Select value={channel} onValueChange={(v) => v && setChannel(v)}>
-            <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="retail">Retail (DTC)</SelectItem>
-              <SelectItem value="wholesale">Wholesale</SelectItem>
-            </SelectContent>
-          </Select>
-        )}
-        <Button onClick={handleValidate} disabled={loading}>
-          {loading ? "Validating..." : "Validate Products"}
-        </Button>
-        <Button variant="outline" onClick={handleExport}>
-          <FileSpreadsheet className="h-4 w-4 mr-1" /> Export {platform === "amazon" ? "TSV" : "CSV"}
-        </Button>
-        <Button variant="outline" onClick={handlePdfExport}>
-          <FileText className="h-4 w-4 mr-1" /> PDF Catalog
-        </Button>
-      </div>
+      {/* CSV/TSV Export */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <FileSpreadsheet className="h-4 w-4" /> Platform Export (CSV / TSV)
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-3">
+            <Select value={platform} onValueChange={(v) => v && setPlatform(v)}>
+              <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="shopify">Shopify</SelectItem>
+                <SelectItem value="faire">Faire</SelectItem>
+                <SelectItem value="amazon">Amazon</SelectItem>
+              </SelectContent>
+            </Select>
+            {platform === "shopify" && (
+              <Select value={channel} onValueChange={(v) => v && setChannel(v)}>
+                <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="retail">Retail (DTC)</SelectItem>
+                  <SelectItem value="wholesale">Wholesale</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+            <Button onClick={handleValidate} disabled={loading}>
+              {loading ? "Validating..." : "Validate Products"}
+            </Button>
+            <Button variant="outline" onClick={handleExport}>
+              <FileSpreadsheet className="h-4 w-4 mr-1" /> Export {platform === "amazon" ? "TSV" : "CSV"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* PDF Catalog Generator */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <FileText className="h-4 w-4" /> Wholesale PDF Catalog
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-end gap-4">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Season</label>
+              <Input value={pdfSeason} onChange={(e) => setPdfSeason(e.target.value)} className="w-[180px]" />
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={showPreorder} onCheckedChange={(v) => setShowPreorder(!!v)} />
+                Pre-Order Page
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={showOrderForm} onCheckedChange={(v) => setShowOrderForm(!!v)} />
+                Order Form
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={showTerms} onCheckedChange={(v) => setShowTerms(!!v)} />
+                Terms Page
+              </label>
+            </div>
+            <Button onClick={handlePdfExport}>
+              <Download className="h-4 w-4 mr-1" /> Generate PDF
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Validation Results */}
       {validations.length > 0 && (
