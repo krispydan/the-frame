@@ -1,8 +1,25 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import PDFDocument from "pdfkit";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 import { loadExportProducts } from "@/modules/catalog/lib/export/load-products";
 import type { ExportProduct } from "@/modules/catalog/lib/export/types";
+
+function loadImageBuffer(imgUrl: string): Buffer | null {
+  const candidates = [
+    imgUrl,
+    join(/* turbopackIgnore: true */ process.cwd(), imgUrl),
+    join(/* turbopackIgnore: true */ process.cwd(), "data", imgUrl),
+    join("/data/images", imgUrl),
+  ];
+  for (const fp of candidates) {
+    if (existsSync(fp)) {
+      return readFileSync(fp);
+    }
+  }
+  return null;
+}
 
 // ── Design System ──
 
@@ -201,25 +218,13 @@ function drawProductPages(state: PdfState, products: CatalogProduct[], settings:
       const imgUrl = prod.imageUrls[i];
       if (imgUrl) {
         try {
-          const { existsSync, readFileSync } = require("fs");
-          const path = require("path");
-          // Try multiple possible paths
-          const candidates = [
-            imgUrl,
-            path.join(process.cwd(), imgUrl),
-            path.join(process.cwd(), "data", imgUrl),
-            path.join("/data/images", imgUrl),
-          ];
-          for (const fp of candidates) {
-            if (existsSync(fp)) {
-              const buf = readFileSync(fp);
-              state.doc.image(buf, imgX + 3, state.y + 3, {
-                fit: [imgW - 6, imgH - 6],
-                align: "center",
-                valign: "center",
-              });
-              break;
-            }
+          const imgBuf = loadImageBuffer(imgUrl);
+          if (imgBuf) {
+            state.doc.image(imgBuf, imgX + 3, state.y + 3, {
+              fit: [imgW - 6, imgH - 6],
+              align: "center",
+              valign: "center",
+            });
           }
         } catch { /* image not available, show placeholder */ }
       }
