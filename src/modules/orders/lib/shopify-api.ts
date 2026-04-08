@@ -119,6 +119,50 @@ export async function findShopifyProductBySku(
   return match || null;
 }
 
+// ── Metafields ──
+
+export interface ShopifyMetafield {
+  id?: number;
+  namespace: string;
+  key: string;
+  value: string;
+  type: string; // e.g. "single_line_text_field", "list.metaobject_reference", "boolean"
+  description?: string;
+}
+
+export async function getProductMetafields(
+  store: ShopifyStore,
+  shopifyProductId: string,
+): Promise<ShopifyMetafield[]> {
+  const data = (await shopifyAdminRequest(
+    store,
+    "GET",
+    `/products/${shopifyProductId}/metafields.json`,
+  )) as { metafields: ShopifyMetafield[] };
+  return data.metafields || [];
+}
+
+export async function setProductMetafield(
+  store: ShopifyStore,
+  shopifyProductId: string,
+  metafield: ShopifyMetafield,
+): Promise<ShopifyMetafield> {
+  const data = (await shopifyAdminRequest(
+    store,
+    "POST",
+    `/products/${shopifyProductId}/metafields.json`,
+    { metafield },
+  )) as { metafield: ShopifyMetafield };
+  return data.metafield;
+}
+
+export async function deleteProductMetafield(
+  store: ShopifyStore,
+  metafieldId: number,
+): Promise<void> {
+  await shopifyAdminRequest(store, "DELETE", `/metafields/${metafieldId}.json`);
+}
+
 // ── Webhook Registration ──
 
 const WEBHOOK_TOPICS = [
