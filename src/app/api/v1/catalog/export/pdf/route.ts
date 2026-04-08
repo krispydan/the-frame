@@ -7,9 +7,19 @@ import { loadExportProducts } from "@/modules/catalog/lib/export/load-products";
  * Generates a print-optimized HTML document with @media print styles.
  * Open in browser and Print → Save as PDF for a clean line sheet.
  */
+export async function GET(request: NextRequest) {
+  const idsParam = request.nextUrl.searchParams.get("ids");
+  const productIds = idsParam ? idsParam.split(",").filter(Boolean) : undefined;
+  return generatePdfHtml(productIds);
+}
+
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const productIds = body.ids as string[] | undefined;
+  return generatePdfHtml(productIds);
+}
+
+async function generatePdfHtml(productIds: string[] | undefined) {
 
   const exportProducts = await loadExportProducts(productIds);
 

@@ -188,6 +188,9 @@ export default function CatalogPage() {
           <Link href="/catalog/intake">
             <Button><Plus className="h-4 w-4 mr-2" />Add Product</Button>
           </Link>
+          <Link href="/catalog/export">
+            <Button variant="outline"><Download className="h-4 w-4 mr-2" />Export</Button>
+          </Link>
           <Button variant={view === "grid" ? "default" : "outline"} size="icon" onClick={() => setView("grid")}><LayoutGrid className="h-4 w-4" /></Button>
           <Button variant={view === "list" ? "default" : "outline"} size="icon" onClick={() => setView("list")}><List className="h-4 w-4" /></Button>
         </div>

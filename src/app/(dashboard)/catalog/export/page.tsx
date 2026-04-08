@@ -66,16 +66,9 @@ export default function ExportPage() {
     window.open(`/api/v1/catalog/export/${platform}${idsParam}${channelParam}`, "_blank");
   };
 
-  const handlePdfExport = async () => {
-    const res = await fetch("/api/v1/catalog/export/pdf", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: selectedIds ? selectedIds.split(",") : undefined }),
-    });
-    const data = await res.json();
-    if (data.stub) {
-      alert(`PDF data prepared for ${data.productCount} products. Full PDF rendering requires pdfkit.`);
-    }
+  const handlePdfExport = () => {
+    const idsParam = selectedIds ? `?ids=${selectedIds}` : "";
+    window.open(`/api/v1/catalog/export/pdf${idsParam}`, "_blank");
   };
 
   const stats = {
