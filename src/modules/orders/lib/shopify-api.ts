@@ -130,6 +130,71 @@ export interface ShopifyMetafield {
   description?: string;
 }
 
+export async function shopifyGraphqlRequest<T = unknown>(
+  store: ShopifyStore,
+  query: string,
+  variables?: Record<string, unknown>,
+): Promise<T> {
+  const cfg = getShopifyConfig(store);
+  if (!cfg.domain || !cfg.accessToken) {
+    throw new Error(`Shopify ${store} credentials not configured`);
+  }
+  const url = `https://${cfg.domain}/admin/api/${API_VERSION}/graphql.json`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": cfg.accessToken,
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Shopify GraphQL ${res.status}: ${text}`);
+  }
+  const json = (await res.json()) as { data?: T; errors?: unknown };
+  if (json.errors) {
+    throw new Error(`Shopify GraphQL errors: ${JSON.stringify(json.errors)}`);
+  }
+  return json.data as T;
+}
+
+export interface ShopifyMetafieldDefinition {
+  id: string;
+  name: string;
+  namespace: string;
+  key: string;
+  description: string | null;
+  type: { name: string };
+  ownerType: string;
+}
+
+export async function getMetafieldDefinition(
+  store: ShopifyStore,
+  definitionId: string, // numeric ID from admin URL
+): Promise<ShopifyMetafieldDefinition | null> {
+  const gid = `gid://shopify/MetafieldDefinition/${definitionId}`;
+  const query = `
+    query($id: ID!) {
+      metafieldDefinition(id: $id) {
+        id
+        name
+        namespace
+        key
+        description
+        type { name }
+        ownerType
+      }
+    }
+  `;
+  const data = await shopifyGraphqlRequest<{ metafieldDefinition: ShopifyMetafieldDefinition | null }>(
+    store,
+    query,
+    { id: gid },
+  );
+  return data.metafieldDefinition;
+}
+
 export async function getProductMetafields(
   store: ShopifyStore,
   shopifyProductId: string,
