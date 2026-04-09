@@ -119,6 +119,115 @@ export async function findShopifyProductBySku(
   return match || null;
 }
 
+// ── Metafields ──
+
+export interface ShopifyMetafield {
+  id?: number;
+  namespace: string;
+  key: string;
+  value: string;
+  type: string; // e.g. "single_line_text_field", "list.metaobject_reference", "boolean"
+  description?: string;
+}
+
+export async function shopifyGraphqlRequest<T = unknown>(
+  store: ShopifyStore,
+  query: string,
+  variables?: Record<string, unknown>,
+): Promise<T> {
+  const cfg = getShopifyConfig(store);
+  if (!cfg.domain || !cfg.accessToken) {
+    throw new Error(`Shopify ${store} credentials not configured`);
+  }
+  const url = `https://${cfg.domain}/admin/api/${API_VERSION}/graphql.json`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": cfg.accessToken,
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Shopify GraphQL ${res.status}: ${text}`);
+  }
+  const json = (await res.json()) as { data?: T; errors?: unknown };
+  if (json.errors) {
+    throw new Error(`Shopify GraphQL errors: ${JSON.stringify(json.errors)}`);
+  }
+  return json.data as T;
+}
+
+export interface ShopifyMetafieldDefinition {
+  id: string;
+  name: string;
+  namespace: string;
+  key: string;
+  description: string | null;
+  type: { name: string };
+  ownerType: string;
+}
+
+export async function getMetafieldDefinition(
+  store: ShopifyStore,
+  definitionId: string, // numeric ID from admin URL
+): Promise<ShopifyMetafieldDefinition | null> {
+  const gid = `gid://shopify/MetafieldDefinition/${definitionId}`;
+  const query = `
+    query($id: ID!) {
+      metafieldDefinition(id: $id) {
+        id
+        name
+        namespace
+        key
+        description
+        type { name }
+        ownerType
+      }
+    }
+  `;
+  const data = await shopifyGraphqlRequest<{ metafieldDefinition: ShopifyMetafieldDefinition | null }>(
+    store,
+    query,
+    { id: gid },
+  );
+  return data.metafieldDefinition;
+}
+
+export async function getProductMetafields(
+  store: ShopifyStore,
+  shopifyProductId: string,
+): Promise<ShopifyMetafield[]> {
+  const data = (await shopifyAdminRequest(
+    store,
+    "GET",
+    `/products/${shopifyProductId}/metafields.json`,
+  )) as { metafields: ShopifyMetafield[] };
+  return data.metafields || [];
+}
+
+export async function setProductMetafield(
+  store: ShopifyStore,
+  shopifyProductId: string,
+  metafield: ShopifyMetafield,
+): Promise<ShopifyMetafield> {
+  const data = (await shopifyAdminRequest(
+    store,
+    "POST",
+    `/products/${shopifyProductId}/metafields.json`,
+    { metafield },
+  )) as { metafield: ShopifyMetafield };
+  return data.metafield;
+}
+
+export async function deleteProductMetafield(
+  store: ShopifyStore,
+  metafieldId: number,
+): Promise<void> {
+  await shopifyAdminRequest(store, "DELETE", `/metafields/${metafieldId}.json`);
+}
+
 // ── Webhook Registration ──
 
 const WEBHOOK_TOPICS = [

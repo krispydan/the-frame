@@ -51,6 +51,7 @@ interface PdfState {
   doc: PDFKit.PDFDocument;
   y: number;
   pageNum: number;
+  expectedPages: number;
 }
 
 interface CatalogProduct {
@@ -85,7 +86,17 @@ function drawPageNumber(state: PdfState) {
 }
 
 function newPage(state: PdfState) {
-  state.doc.addPage();
+  // When text overflows, pdfkit auto-adds a page. Detect and reuse it
+  // instead of calling addPage() again (which would create a blank page).
+  const range = state.doc.bufferedPageRange();
+  const actualPages = range.start + range.count;
+  if (actualPages > state.expectedPages) {
+    state.doc.switchToPage(actualPages - 1);
+    state.expectedPages = actualPages;
+  } else {
+    state.doc.addPage();
+    state.expectedPages++;
+  }
   state.pageNum++;
 }
 
@@ -127,7 +138,6 @@ function drawCover(state: PdfState, settings: CatalogSettings) {
   newPage(state);
   state.doc.rect(0, 0, PAGE_W, PAGE_H).fill("white");
 
-  // Brand name
   state.doc.font("Helvetica-Bold").fontSize(36).fillColor(DARK);
   centerText(state.doc, "JAXY", PAGE_H / 2 - 80);
 
@@ -450,7 +460,7 @@ function generateCatalogPDF(
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    const state: PdfState = { doc, y: 0, pageNum: 0 };
+    const state: PdfState = { doc, y: 0, pageNum: 0, expectedPages: 0 };
 
     drawCover(state, settings);
     drawProductPages(state, products, settings);
