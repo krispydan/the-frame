@@ -255,83 +255,85 @@ function padTitle(title: string, name: string): string {
 // ── Description Builder ──
 
 /**
- * Build a keyword-stuffed Faire description following the CRUSHBOOK structure:
- * 1. Retailer margin callout (first line)
- * 2. Product-specific copy with keywords
- * 3. Features & UV info
- * 4. Target customer callout (helps Faire SEO matching)
- * 5. SEO keyword block (natural-language list of top Faire search terms)
+ * Build a Faire description using the real catalog description and appending
+ * a keyword block. Structure:
+ *
+ * 1. Real product description (from ep.product.description, HTML stripped).
+ *    Falls back to a minimal one-liner only if the catalog description is empty.
+ * 2. Tag sentence — the product's tags expressed as a natural sentence
+ *    ("Features vintage, cat-eye, and polarized styling.")
+ * 3. Keywords: plain comma-separated list of top Faire search terms for this
+ *    product, matched against Jaxy's Faire search-trend data.
  *
  * TODO: Add bridge/lens-width/temple sizing measurements once we capture that
  * data in the catalog. Faire rep (3/5/26) confirmed sizing info is essential
  * for eyewear listings.
  */
 export function buildFaireDescription(ep: ExportProduct): string {
+  const parts: string[] = [];
+
+  // 1. Real product description (HTML stripped), with fallback
+  const real = ep.product.description
+    ? stripHtml(ep.product.description)
+    : ep.product.shortDescription
+      ? stripHtml(ep.product.shortDescription)
+      : "";
+  parts.push(
+    real ||
+      "Jaxy sunglasses featuring UV400 lens protection and impact-resistant polycarbonate lenses. Cases sold separately.",
+  );
+
+  // 2. Tags as a natural sentence (not a list)
+  const tagSentence = buildTagSentence(ep);
+  if (tagSentence) parts.push(tagSentence);
+
+  // 3. Keywords — plain comma-separated list
+  parts.push(buildKeywordLine(ep));
+
+  return parts.join("\n\n");
+}
+
+function buildTagSentence(ep: ExportProduct): string {
+  const tagSet = getTagSet(ep);
+  if (tagSet.size === 0) return "";
+  const tags = Array.from(tagSet);
+  if (tags.length === 1) return `Features ${tags[0]} styling.`;
+  if (tags.length === 2) return `Features ${tags[0]} and ${tags[1]} styling.`;
+  const rest = tags.slice(0, -1).join(", ");
+  const last = tags[tags.length - 1];
+  return `Features ${rest}, and ${last} styling.`;
+}
+
+function buildKeywordLine(ep: ExportProduct): string {
   const tagSet = getTagSet(ep);
   const style = detectStyleAdjective(tagSet);
   const shape = detectFrameShape(ep, tagSet);
   const polar = isPolarized(ep, tagSet);
   const gender = ep.product.gender?.toLowerCase().trim();
 
-  const who =
-    gender === "women" || gender === "womens" || gender === "women's"
-      ? "women"
-      : gender === "men" || gender === "mens" || gender === "men's"
-        ? "men"
-        : "women and men";
-
-  const styleWord = style ? `${style}-inspired ` : "";
-  const shapeWord = shape ? `${shape} ` : "";
-  const polarWord = polar ? "polarized " : "";
-
-  // Line 1: Retailer margin callout (CRUSHBOOK #11)
-  const marginLine = `Retailer margin: 3.5x markup. Wholesale $${JAXY_WHOLESALE_PRICE} → MSRP $${JAXY_RETAIL_PRICE}. Your customers pay $${JAXY_RETAIL_PRICE}, you pocket $20 per unit.`;
-
-  // Paragraph 1: Product-specific copy
-  const productCopy = `${capitalize(styleWord)}${polarWord}${shapeWord}sunglasses for ${who} featuring UV400 lens protection and impact-resistant polycarbonate lenses. Jaxy blends old-Hollywood cool with California street style — perfect for beach days, festivals, road trips, poolside, and everyday wear.`;
-
-  // Features (plus any bullet points the product already has)
-  const features = ep.product.bulletPoints
-    ? stripHtml(ep.product.bulletPoints)
-    : "UV400 protection, impact-resistant polycarbonate lenses, lightweight frame, comfortable fit. Cases sold separately.";
-
-  // Target customers (CRUSHBOOK — helps Faire matching)
-  const targetCustomers = `Perfect for: gift shops, hotel boutiques, beach resort stores, bookstores, pharmacies, airport retail, boutiques, independent eyewear shops, and accessories stores.`;
-
-  // Keyword block — pulled from Jaxy's top Faire search-trend data (March 2026)
-  const keywordBlock = buildKeywordBlock({ shape, polar, gender, style });
-
-  // Zero-risk closer
-  const closer = `✅ Same-day shipping ✅ Free returns on opening orders ✅ Net-60 terms ✅ Free countertop display with 24+ units`;
-
-  return [marginLine, productCopy, features, targetCustomers, keywordBlock, closer]
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-function buildKeywordBlock(opts: {
-  shape: string | null;
-  polar: boolean;
-  gender: string | null | undefined;
-  style: string | null;
-}): string {
-  const g = opts.gender?.toLowerCase().trim();
-  const base = ["sunglasses", "wholesale sunglasses", "designer sunglasses", "trendy sunglasses", "boutique eyewear"];
-  if (g === "women" || g === "womens" || g === "women's") {
+  const base = [
+    "sunglasses",
+    "wholesale sunglasses",
+    "designer sunglasses",
+    "trendy sunglasses",
+    "boutique eyewear",
+  ];
+  if (gender === "women" || gender === "womens" || gender === "women's") {
     base.push("womens sunglasses", "sunglasses women", "women's sunglasses");
-  } else if (g === "men" || g === "mens" || g === "men's") {
+  } else if (gender === "men" || gender === "mens" || gender === "men's") {
     base.push("mens sunglasses", "sunglasses men", "men's sunglasses");
   } else {
     base.push("womens sunglasses", "mens sunglasses", "unisex sunglasses");
   }
-  if (opts.shape) {
-    const s = opts.shape === "cat-eye" ? "cat eye" : opts.shape;
+  if (shape) {
+    const s = shape === "cat-eye" ? "cat eye" : shape;
     base.push(`${s} sunglasses`, `${s} sunglasses women`);
   }
-  if (opts.polar) base.push("polarized sunglasses", "polarized sunglasses women");
-  if (opts.style) base.push(`${opts.style} sunglasses`);
-  // Always include a few evergreen high-volume terms from the Faire search trends data
+  if (polar) base.push("polarized sunglasses", "polarized sunglasses women");
+  if (style) base.push(`${style} sunglasses`);
+  // Evergreen high-volume Faire search terms
   base.push("retro sunglasses", "vintage sunglasses", "aviator sunglasses", "oversized sunglasses");
+
   // Dedupe while preserving order
   const seen = new Set<string>();
   const out = base.filter((k) => {
