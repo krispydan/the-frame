@@ -1,8 +1,10 @@
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { images } from "@/modules/catalog/schema";
 import { eq } from "drizzle-orm";
+import { deleteImage } from "@/lib/storage/local";
 
 export async function GET(
   _request: NextRequest,
@@ -45,6 +47,18 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const row = await db
+    .select({ filePath: images.filePath })
+    .from(images)
+    .where(eq(images.id, id))
+    .get();
   await db.delete(images).where(eq(images.id, id));
+  if (row?.filePath) {
+    try {
+      await deleteImage(row.filePath);
+    } catch (err) {
+      console.warn("[images/:id] disk cleanup failed", row.filePath, err);
+    }
+  }
   return NextResponse.json({ deleted: true });
 }

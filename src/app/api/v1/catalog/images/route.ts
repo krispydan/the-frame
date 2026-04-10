@@ -32,6 +32,10 @@ export async function GET(request: NextRequest) {
       id: images.id,
       skuId: images.skuId,
       filePath: images.filePath,
+      url: images.url,
+      fileSize: images.fileSize,
+      mimeType: images.mimeType,
+      checksum: images.checksum,
       imageTypeId: images.imageTypeId,
       position: images.position,
       altText: images.altText,
@@ -40,6 +44,7 @@ export async function GET(request: NextRequest) {
       aiModelUsed: images.aiModelUsed,
       status: images.status,
       isBest: images.isBest,
+      uploadedBy: images.uploadedBy,
       createdAt: images.createdAt,
     })
     .from(images)
