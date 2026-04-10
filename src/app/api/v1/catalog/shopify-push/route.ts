@@ -1,7 +1,9 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { products } from "@/modules/catalog/schema";
 import { activityFeed } from "@/modules/core/schema";
+import { eq, inArray } from "drizzle-orm";
 import { loadExportProducts } from "@/modules/catalog/lib/export/load-products";
 import {
   createShopifyProduct,
@@ -10,6 +12,9 @@ import {
   hasShopifyCredentials,
   type ShopifyStore,
 } from "@/modules/orders/lib/shopify-api";
+import { categorizeProduct } from "@/modules/catalog/lib/shopify-metafields/ai-categorize";
+import { syncProductMetafields } from "@/modules/catalog/lib/shopify-metafields/sync";
+import type { AiCategorizationOutput } from "@/modules/catalog/lib/shopify-metafields/handles";
 
 /**
  * POST /api/v1/catalog/shopify-push
@@ -23,9 +28,11 @@ import {
  */
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { productIds, stores } = body as {
+  const { productIds, stores, syncMetafields = false, force = false } = body as {
     productIds: string[];
     stores: ShopifyStore[];
+    syncMetafields?: boolean;
+    force?: boolean; // force re-run AI categorization
   };
 
   if (!productIds?.length) {
@@ -57,7 +64,65 @@ export async function POST(request: NextRequest) {
     action: "created" | "updated" | "error";
     shopifyId?: number;
     error?: string;
+    metafieldsSynced?: number;
+    metafieldsErrors?: string[];
   }> = [];
+
+  // Pre-fetch cached AI categorization for each product if metafield sync
+  // is enabled. We run the AI once per product (store-agnostic) before
+  // looping through stores.
+  const categorizationByProductId = new Map<string, AiCategorizationOutput>();
+  if (syncMetafields) {
+    const rawRows = await db
+      .select()
+      .from(products)
+      .where(inArray(products.id, productIds));
+
+    for (const raw of rawRows) {
+      let cached: AiCategorizationOutput | null = null;
+      if (!force && raw.aiCategorization) {
+        try {
+          cached = JSON.parse(raw.aiCategorization) as AiCategorizationOutput;
+        } catch {
+          cached = null;
+        }
+      }
+      if (cached) {
+        categorizationByProductId.set(raw.id, cached);
+        continue;
+      }
+
+      const ep = exportProducts.find((p) => p.product.id === raw.id);
+      if (!ep) continue;
+      const firstSku = ep.skus[0];
+      const catResult = await categorizeProduct({
+        productId: ep.product.id,
+        name: ep.product.name || ep.product.skuPrefix,
+        colorName: firstSku?.colorName || null,
+        description: ep.product.description,
+        frameShape: ep.product.frameShape,
+        gender: ep.product.gender,
+        imageUrl: null, // TODO: pass primary image URL once image pipeline is live
+      });
+      if (catResult.output) {
+        categorizationByProductId.set(raw.id, catResult.output);
+        await db
+          .update(products)
+          .set({
+            aiCategorization: JSON.stringify(catResult.output),
+            aiCategorizedAt: new Date().toISOString(),
+            aiCategorizationModel: catResult.model,
+          })
+          .where(eq(products.id, raw.id));
+      } else {
+        console.warn(
+          `[shopify-push] AI categorization failed for ${raw.id}:`,
+          catResult.error,
+          catResult.problems,
+        );
+      }
+    }
+  }
 
   for (const ep of exportProducts) {
     for (const store of stores) {
@@ -107,26 +172,55 @@ export async function POST(request: NextRequest) {
 
         // Check if product already exists on this store
         const existing = await findShopifyProductBySku(store, ep.product.skuPrefix);
-
+        let shopifyId: number;
+        let action: "created" | "updated";
         if (existing) {
           const updated = await updateShopifyProduct(store, String(existing.id), productPayload);
-          results.push({
-            productId: ep.product.id,
-            name: ep.product.name || ep.product.skuPrefix,
-            store,
-            action: "updated",
-            shopifyId: updated.id,
-          });
+          shopifyId = updated.id;
+          action = "updated";
         } else {
           const created = await createShopifyProduct(store, productPayload);
-          results.push({
-            productId: ep.product.id,
-            name: ep.product.name || ep.product.skuPrefix,
-            store,
-            action: "created",
-            shopifyId: created.id,
-          });
+          shopifyId = created.id;
+          action = "created";
         }
+
+        // Optional: sync taxonomy category + metafields after create/update
+        let metafieldsSynced: number | undefined;
+        let metafieldsErrors: string[] | undefined;
+        if (syncMetafields) {
+          const categorization = categorizationByProductId.get(ep.product.id);
+          if (!categorization) {
+            metafieldsErrors = ["No AI categorization available"];
+          } else {
+            try {
+              const syncRes = await syncProductMetafields({
+                store,
+                shopifyProductId: String(shopifyId),
+                categorization,
+              });
+              metafieldsSynced = syncRes.metafieldsWritten;
+              if (!syncRes.ok) {
+                metafieldsErrors = [
+                  ...(syncRes.categoryError ? [`category: ${syncRes.categoryError}`] : []),
+                  ...syncRes.metafieldErrors.map((e) => e.message),
+                  ...syncRes.problems,
+                ];
+              }
+            } catch (e) {
+              metafieldsErrors = [String(e)];
+            }
+          }
+        }
+
+        results.push({
+          productId: ep.product.id,
+          name: ep.product.name || ep.product.skuPrefix,
+          store,
+          action,
+          shopifyId,
+          metafieldsSynced,
+          metafieldsErrors,
+        });
       } catch (e) {
         results.push({
           productId: ep.product.id,

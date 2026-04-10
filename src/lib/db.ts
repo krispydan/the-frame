@@ -93,6 +93,11 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN enrichment_source TEXT"); } 
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN socials TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN contact_form_url TEXT"); } catch { /* exists */ }
 
+// Shopify category metafield sync: cached AI categorization per product
+try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN ai_categorization TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN ai_categorized_at TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN ai_categorization_model TEXT"); } catch { /* exists */ }
+
 // Ensure brand_accounts + company_brand_links + magic_link_tokens exist (idempotent)
 try {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS brand_accounts (
