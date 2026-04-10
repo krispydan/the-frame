@@ -2,6 +2,7 @@
 
 import { catalogImageUrl } from "@/lib/storage/image-url";
 import { useEffect, useState, useCallback } from "react";
+import { UppyUploader } from "./uppy-uploader";
 import {
   Image as ImageIcon, CheckCircle, XCircle, Star, Upload, Wand2,
   Maximize2, X, ChevronLeft, ChevronRight,
@@ -54,6 +55,7 @@ export function ImageManagementTab({
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [lightbox, setLightbox] = useState<number | null>(null);
+  const [showUploader, setShowUploader] = useState(false);
 
   const loadImages = useCallback(async () => {
     const res = await fetch(`/api/v1/catalog/images?productId=${productId}`);
@@ -172,10 +174,27 @@ export function ImageManagementTab({
         )}
 
         <div className="flex-1" />
+        <Button size="sm" variant={showUploader ? "default" : "outline"} onClick={() => setShowUploader((v) => !v)}>
+          <Upload className="h-3 w-3 mr-1" /> {showUploader ? "Close uploader" : "Upload images"}
+        </Button>
         <Button size="sm" variant="outline" onClick={() => skus[0] && handleGenerate(skus[0].id)}>
           <Wand2 className="h-3 w-3 mr-1" /> AI Generate
         </Button>
       </div>
+
+      {showUploader && (
+        <Card>
+          <CardContent className="p-4">
+            <UppyUploader
+              skus={skus.map((s) => ({ id: s.id, sku: s.sku, colorName: s.colorName }))}
+              onUploadComplete={() => {
+                loadImages();
+                onRefresh();
+              }}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Image Grid */}
       {loading ? (
