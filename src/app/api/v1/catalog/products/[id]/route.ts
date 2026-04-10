@@ -49,6 +49,7 @@ export async function PATCH(
     "frameShape", "frameMaterial", "gender", "lensType",
     "wholesalePrice", "retailPrice", "msrp", "factoryName", "factorySku",
     "seoTitle", "metaDescription", "status",
+    "aiCategorization", "aiCategorizedAt", "aiCategorizationModel",
   ];
 
   const updates: Record<string, unknown> = { updatedAt: sql`(datetime('now'))` };

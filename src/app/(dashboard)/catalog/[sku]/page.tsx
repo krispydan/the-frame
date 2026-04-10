@@ -26,6 +26,7 @@ import { ImageManagementTab } from "@/modules/catalog/components/image-managemen
 import { CopyManagementTab } from "@/modules/catalog/components/copy-management-tab";
 import { TagManagementTab } from "@/modules/catalog/components/tag-management-tab";
 import { KeywordsTab } from "@/modules/catalog/components/keywords-tab";
+import { MetafieldsTab } from "@/modules/catalog/components/metafields-tab";
 
 type Product = {
   id: string;
@@ -47,6 +48,9 @@ type Product = {
   seoTitle: string | null;
   metaDescription: string | null;
   status: string | null;
+  aiCategorization: string | null;
+  aiCategorizedAt: string | null;
+  aiCategorizationModel: string | null;
 };
 
 type Sku = {
@@ -232,6 +236,7 @@ export default function ProductDetailPage() {
           <TabsTrigger value="copy">Copy</TabsTrigger>
           <TabsTrigger value="tags">Tags ({tagsList.length})</TabsTrigger>
           <TabsTrigger value="keywords">Keywords</TabsTrigger>
+          <TabsTrigger value="metafields">Metafields</TabsTrigger>
           <TabsTrigger value="export">Export Preview</TabsTrigger>
         </TabsList>
 
@@ -451,6 +456,18 @@ export default function ProductDetailPage() {
         </TabsContent>
 
         {/* Export Preview Tab */}
+        <TabsContent value="metafields">
+          {productId && product && (
+            <MetafieldsTab
+              productId={productId}
+              aiCategorization={product.aiCategorization}
+              aiCategorizedAt={product.aiCategorizedAt}
+              aiCategorizationModel={product.aiCategorizationModel}
+              onRefresh={loadProduct}
+            />
+          )}
+        </TabsContent>
+
         <TabsContent value="export">
           <Card>
             <CardContent className="p-6">
