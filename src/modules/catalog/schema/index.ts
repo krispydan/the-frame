@@ -37,6 +37,10 @@ export const products = sqliteTable("catalog_products", {
   seoTitle: text("seo_title"),
   metaDescription: text("meta_description"),
   status: text("status", { enum: ["intake", "processing", "review", "approved", "published"] }).default("intake"),
+  // AI category + metafield categorization (JSON blob matching the sync spec)
+  aiCategorization: text("ai_categorization"),
+  aiCategorizedAt: text("ai_categorized_at"),
+  aiCategorizationModel: text("ai_categorization_model"),
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 });

@@ -101,6 +101,11 @@ try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN checksum TEXT"); } catc
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN uploaded_by TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_catalog_images_checksum ON catalog_images (checksum)"); } catch { /* exists */ }
 
+// Shopify category metafield sync: cached AI categorization per product
+try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN ai_categorization TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN ai_categorized_at TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN ai_categorization_model TEXT"); } catch { /* exists */ }
+
 // Ensure brand_accounts + company_brand_links + magic_link_tokens exist (idempotent)
 try {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS brand_accounts (

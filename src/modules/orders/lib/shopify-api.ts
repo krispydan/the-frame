@@ -228,6 +228,111 @@ export async function deleteProductMetafield(
   await shopifyAdminRequest(store, "DELETE", `/metafields/${metafieldId}.json`);
 }
 
+// ── GraphQL helpers for Shopify category + taxonomy metafields ──
+//
+// These power the categorizer sync: they set the Shopify taxonomy category on
+// a product, resolve taxonomy metaobject handles to per-store GIDs, and write
+// a batch of metafields in a single mutation.
+
+/**
+ * Set the Shopify taxonomy category on a product.
+ * @param productGid e.g. "gid://shopify/Product/9177987711125"
+ * @param categoryGid e.g. "gid://shopify/TaxonomyCategory/aa-2-27" (Sunglasses)
+ */
+export async function setProductCategory(
+  store: ShopifyStore,
+  productGid: string,
+  categoryGid: string,
+): Promise<{ ok: boolean; userErrors: Array<{ field: string[] | null; message: string }> }> {
+  const mutation = `
+    mutation setCategory($input: ProductInput!) {
+      productUpdate(input: $input) {
+        product { id category { id } }
+        userErrors { field message }
+      }
+    }
+  `;
+  const data = await shopifyGraphqlRequest<{
+    productUpdate: {
+      product: { id: string; category: { id: string } | null } | null;
+      userErrors: Array<{ field: string[] | null; message: string }>;
+    };
+  }>(store, mutation, { input: { id: productGid, category: categoryGid } });
+  const errs = data.productUpdate.userErrors || [];
+  return { ok: errs.length === 0, userErrors: errs };
+}
+
+/**
+ * Resolve a taxonomy metaobject handle (e.g. "black" in type
+ * "shopify--color-pattern") to its per-store GID.
+ * Returns null if the handle doesn't exist on this store.
+ */
+export async function resolveMetaobjectHandle(
+  store: ShopifyStore,
+  type: string,
+  handle: string,
+): Promise<string | null> {
+  const query = `
+    query($handle: MetaobjectHandleInput!) {
+      metaobjectByHandle(handle: $handle) { id }
+    }
+  `;
+  try {
+    const data = await shopifyGraphqlRequest<{
+      metaobjectByHandle: { id: string } | null;
+    }>(store, query, { handle: { type, handle } });
+    return data.metaobjectByHandle?.id || null;
+  } catch (e) {
+    // A bad handle or unknown type returns as null rather than throwing so
+    // the caller can log and skip the field without crashing the whole sync.
+    console.warn(`[shopify] resolveMetaobjectHandle(${type}, ${handle}) failed:`, e);
+    return null;
+  }
+}
+
+export interface MetafieldsSetInput {
+  ownerId: string; // product GID
+  namespace: string;
+  key: string;
+  type: string; // e.g. "list.metaobject_reference", "single_line_text_field"
+  value: string; // for list.* types this must be a JSON-encoded string, NOT a JSON array literal
+}
+
+/**
+ * Batch upsert metafields on one or more owner resources in a single call.
+ * `metafieldsSet` is always an upsert — safe to re-run.
+ */
+export async function metafieldsSet(
+  store: ShopifyStore,
+  metafields: MetafieldsSetInput[],
+): Promise<{
+  ok: boolean;
+  written: Array<{ id: string; namespace: string; key: string }>;
+  userErrors: Array<{ field: string[] | null; message: string; code: string | null }>;
+}> {
+  if (metafields.length === 0) return { ok: true, written: [], userErrors: [] };
+  const mutation = `
+    mutation SetMetafields($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        metafields { id namespace key }
+        userErrors { field message code }
+      }
+    }
+  `;
+  const data = await shopifyGraphqlRequest<{
+    metafieldsSet: {
+      metafields: Array<{ id: string; namespace: string; key: string }>;
+      userErrors: Array<{ field: string[] | null; message: string; code: string | null }>;
+    };
+  }>(store, mutation, { metafields });
+  const errs = data.metafieldsSet.userErrors || [];
+  return {
+    ok: errs.length === 0,
+    written: data.metafieldsSet.metafields || [],
+    userErrors: errs,
+  };
+}
+
 // ── Webhook Registration ──
 
 const WEBHOOK_TOPICS = [
