@@ -93,6 +93,14 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN enrichment_source TEXT"); } 
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN socials TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN contact_form_url TEXT"); } catch { /* exists */ }
 
+// Image upload system: new columns on catalog_images
+try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN url TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN file_size INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN mime_type TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN checksum TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN uploaded_by TEXT"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_catalog_images_checksum ON catalog_images (checksum)"); } catch { /* exists */ }
+
 // Ensure brand_accounts + company_brand_links + magic_link_tokens exist (idempotent)
 try {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS brand_accounts (

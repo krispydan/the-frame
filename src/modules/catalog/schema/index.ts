@@ -83,6 +83,10 @@ export const images = sqliteTable("catalog_images", {
   id: id(),
   skuId: text("sku_id").references(() => skus.id).notNull(),
   filePath: text("file_path"),
+  url: text("url"),
+  fileSize: integer("file_size"),
+  mimeType: text("mime_type"),
+  checksum: text("checksum"),
   imageTypeId: text("image_type_id").references(() => imageTypes.id),
   position: integer("position").default(0),
   altText: text("alt_text"),
@@ -92,6 +96,7 @@ export const images = sqliteTable("catalog_images", {
   aiPrompt: text("ai_prompt"),
   status: text("status", { enum: ["draft", "review", "approved", "rejected"] }).default("draft"),
   isBest: integer("is_best", { mode: "boolean" }).default(false),
+  uploadedBy: text("uploaded_by"),
   createdAt: timestamp("created_at"),
 });
 
