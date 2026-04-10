@@ -16,58 +16,16 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import {
+  matchSkuFromFilename,
+  type UploaderSku,
+} from "@/modules/catalog/lib/match-sku-filename";
 
 // CSS is loaded via <link> tags on the client to avoid SSR import issues
 const UPPY_CSS = [
   "https://releases.transloadit.com/uppy/v4.16.1/uppy.min.css",
 ];
-
-export type UploaderSku = {
-  id: string;
-  sku: string | null;
-  colorName: string | null;
-};
-
-/**
- * Given a filename and a list of SKUs, try to find a matching SKU.
- * Pattern: "<sku>-<colorName>-<angle>.jpg" where sku is like "84002"
- * and colorName is like "Beige". Match is case-insensitive. Returns
- * the SKU id, or null if no unique match.
- *
- * Examples:
- *   "84002-Beige-front.jpg"  → sku 84002 + colorName Beige
- *   "84002-beige.jpg"        → sku 84002 + colorName beige
- *   "84002_Beige_side.jpg"   → normalized to 84002-Beige-side
- */
-export function matchSkuFromFilename(
-  filename: string,
-  skus: UploaderSku[],
-): string | null {
-  const stem = filename.replace(/\.[a-z0-9]+$/i, "");
-  // Normalize separators: "_" and spaces → "-"
-  const normalized = stem.replace(/[_\s]+/g, "-").toLowerCase();
-
-  // Try each SKU; match if the normalized filename starts with
-  // "<sku>-<color>" (color optional for SKUs without a color).
-  const candidates = skus
-    .map((s) => {
-      if (!s.sku) return null;
-      const sku = s.sku.toLowerCase();
-      const color = (s.colorName ?? "").toLowerCase().replace(/\s+/g, "-");
-      const prefix = color ? `${sku}-${color}` : sku;
-      return { id: s.id, prefix, sku, color };
-    })
-    .filter((s): s is { id: string; prefix: string; sku: string; color: string } => s !== null);
-
-  // Prefer longest prefix match (so "84002-Beige" wins over "84002")
-  const matches = candidates
-    .filter((c) => normalized === c.prefix || normalized.startsWith(`${c.prefix}-`))
-    .sort((a, b) => b.prefix.length - a.prefix.length);
-
-  return matches[0]?.id ?? null;
-}
 
 export function UppyUploader({
   skus,

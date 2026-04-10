@@ -11,9 +11,17 @@
 import { mkdir, writeFile, unlink, stat, readFile } from "fs/promises";
 import path from "path";
 
-const IMAGES_ROOT =
-  process.env.IMAGES_PATH ||
-  path.join(process.cwd(), "data", "images");
+/**
+ * Read IMAGES_PATH at call time, not module load time. This keeps
+ * tests deterministic: they can set process.env.IMAGES_PATH before
+ * any test runs without worrying about import hoisting.
+ */
+function imagesRootFn(): string {
+  return (
+    process.env.IMAGES_PATH ||
+    path.join(process.cwd(), "data", "images")
+  );
+}
 
 /**
  * Resolve a relative path against IMAGES_ROOT and verify the result is
@@ -22,7 +30,7 @@ const IMAGES_ROOT =
 export function getFullPath(relPath: string): string {
   // Strip any leading slashes so path.join treats it as relative
   const normalized = relPath.replace(/^[/\\]+/, "");
-  const resolvedRoot = path.resolve(IMAGES_ROOT);
+  const resolvedRoot = path.resolve(imagesRootFn());
   const resolvedFull = path.resolve(resolvedRoot, normalized);
 
   // Verify the resolved path is inside the root
@@ -75,4 +83,10 @@ export async function imageStat(relPath: string): Promise<{ size: number; exists
   }
 }
 
-export const imagesRoot = IMAGES_ROOT;
+/**
+ * Current IMAGES_ROOT resolved from env. Function form (not const)
+ * so tests can override process.env.IMAGES_PATH at runtime.
+ */
+export function imagesRoot(): string {
+  return imagesRootFn();
+}
