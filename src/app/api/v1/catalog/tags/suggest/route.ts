@@ -71,21 +71,5 @@ export async function POST(request: NextRequest) {
     addIfNew(tag, "style");
   }
 
-  // Face shape recommendations
-  const faceShapes: Record<string, string[]> = {
-    round: ["oval face", "square face"],
-    square: ["round face", "oval face"],
-    aviator: ["oval face", "heart face"],
-    "cat-eye": ["round face", "heart face"],
-    oval: ["any face shape"],
-  };
-
-  const shapeKey = p.frameShape?.toLowerCase() || "";
-  for (const [key, faces] of Object.entries(faceShapes)) {
-    if (shapeKey.includes(key)) {
-      for (const face of faces) addIfNew(face, "face_shape");
-    }
-  }
-
   return NextResponse.json({ suggestions });
 }

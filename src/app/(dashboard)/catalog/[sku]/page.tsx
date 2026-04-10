@@ -353,7 +353,7 @@ export default function ProductDetailPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>SKU</TableHead>
-                    <TableHead>Color</TableHead>
+                    <TableHead>Frame Color</TableHead>
                     <TableHead>Size</TableHead>
                     <TableHead>UPC</TableHead>
                     <TableHead className="text-right">Cost</TableHead>

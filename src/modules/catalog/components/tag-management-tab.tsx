@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Wand2, Plus, X, Tag } from "lucide-react";
+import { Wand2, Plus, X, Tag, Zap } from "lucide-react";
+import { TAG_PRESETS } from "@/modules/catalog/lib/tag-presets";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,8 +14,8 @@ import {
 type TagItem = { id: string; tagName: string | null; dimension: string | null; source: string | null };
 
 const DIMENSIONS = [
-  "frame_shape", "style", "occasion", "face_shape", "material",
-  "lens_type", "gender", "activity", "season", "other",
+  "frame_shape", "style", "occasion", "material",
+  "lens_type", "gender", "season", "other",
 ];
 
 export function TagManagementTab({
@@ -137,12 +138,34 @@ export function TagManagementTab({
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {Object.entries(grouped).map(([dim, items]) => (
+          {/* Show preset-only cards for dimensions that have presets but no tags yet */}
+          {DIMENSIONS.filter((d) => TAG_PRESETS[d] && !grouped[d]).map((dim) => (
             <Card key={dim}>
               <CardHeader>
                 <CardTitle className="text-sm capitalize">{dim.replace("_", " ")}</CardTitle>
               </CardHeader>
               <CardContent>
+                <div className="flex flex-wrap gap-1.5">
+                  {TAG_PRESETS[dim].map((preset) => (
+                    <Badge
+                      key={preset}
+                      variant="outline"
+                      className="cursor-pointer hover:bg-primary/10 text-[10px]"
+                      onClick={() => handleAcceptSuggestion(preset, dim)}
+                    >
+                      <Zap className="h-2.5 w-2.5 mr-0.5" /> {preset}
+                    </Badge>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+          {Object.entries(grouped).map(([dim, items]) => (
+            <Card key={dim}>
+              <CardHeader>
+                <CardTitle className="text-sm capitalize">{dim.replace("_", " ")}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
                 <div className="flex flex-wrap gap-2">
                   {items.map((t) => (
                     <Badge key={t.id} variant={t.source === "ai" ? "secondary" : "default"} className="pr-1">
@@ -156,6 +179,25 @@ export function TagManagementTab({
                     </Badge>
                   ))}
                 </div>
+                {TAG_PRESETS[dim] && (() => {
+                  const existing = new Set(items.map((t) => t.tagName?.toLowerCase()));
+                  const available = TAG_PRESETS[dim].filter((p) => !existing.has(p.toLowerCase()));
+                  if (available.length === 0) return null;
+                  return (
+                    <div className="flex flex-wrap gap-1.5 pt-1 border-t">
+                      {available.map((preset) => (
+                        <Badge
+                          key={preset}
+                          variant="outline"
+                          className="cursor-pointer hover:bg-primary/10 text-[10px]"
+                          onClick={() => handleAcceptSuggestion(preset, dim)}
+                        >
+                          <Zap className="h-2.5 w-2.5 mr-0.5" /> {preset}
+                        </Badge>
+                      ))}
+                    </div>
+                  );
+                })()}
               </CardContent>
             </Card>
           ))}

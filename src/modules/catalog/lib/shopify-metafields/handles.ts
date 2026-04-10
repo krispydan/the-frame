@@ -163,7 +163,6 @@ export const EYEWEAR_FRAME_DESIGN_HANDLES = [
   "oval",
   "aviator",
   "cat-eye",
-  "wayfarer",
   "wraparound",
   "shield",
   "geometric",

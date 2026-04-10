@@ -141,7 +141,7 @@ function absoluteImageUrl(filePath: string | null): string {
 
 const SHAPE_TAGS = [
   "cat-eye", "cat eye", "aviator", "round", "square", "rectangle", "rectangular",
-  "oval", "wayfarer", "shield", "oversized", "rimless", "geometric", "hexagonal",
+  "oval", "shield", "oversized", "rimless", "geometric", "hexagonal",
   "butterfly", "browline",
 ];
 
