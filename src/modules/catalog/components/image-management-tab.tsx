@@ -1,12 +1,6 @@
 "use client";
 
-const CATALOG_IMAGE_BASE = "https://catalog.jaxyeyewear.com";
-function catalogImageUrl(filePath: string | null): string | null {
-  if (!filePath) return null;
-  if (filePath.startsWith("http")) return filePath;
-  return `${CATALOG_IMAGE_BASE}/${filePath}`;
-}
-
+import { catalogImageUrl } from "@/lib/storage/image-url";
 import { useEffect, useState, useCallback } from "react";
 import {
   Image as ImageIcon, CheckCircle, XCircle, Star, Upload, Wand2,

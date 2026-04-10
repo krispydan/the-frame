@@ -23,10 +23,10 @@
  * predictable URL; then swap this in.
  */
 import type { ExportProduct, ProductValidationResult, ValidationIssue } from "./types";
+import { catalogImageUrl } from "@/lib/storage/image-url";
 
 // ── Constants ──
 
-const CATALOG_IMAGE_BASE = "https://catalog.jaxyeyewear.com";
 const JAXY_WHOLESALE_PRICE = "8.00";
 const JAXY_RETAIL_PRICE = "28.00";
 const JAXY_CASE_SIZE = "3";
@@ -134,10 +134,7 @@ function capitalize(s: string): string {
 }
 
 function absoluteImageUrl(filePath: string | null): string {
-  if (!filePath) return "";
-  if (filePath.startsWith("http://") || filePath.startsWith("https://")) return filePath;
-  const clean = filePath.startsWith("/") ? filePath.slice(1) : filePath;
-  return `${CATALOG_IMAGE_BASE}/${clean}`;
+  return catalogImageUrl(filePath) ?? "";
 }
 
 // ── Tag/attribute extraction ──
