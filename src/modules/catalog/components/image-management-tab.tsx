@@ -1,16 +1,11 @@
 "use client";
 
-const CATALOG_IMAGE_BASE = "https://catalog.jaxyeyewear.com";
-function catalogImageUrl(filePath: string | null): string | null {
-  if (!filePath) return null;
-  if (filePath.startsWith("http")) return filePath;
-  return `${CATALOG_IMAGE_BASE}/${filePath}`;
-}
-
+import { catalogImageUrl } from "@/lib/storage/image-url";
 import { useEffect, useState, useCallback } from "react";
+import { UppyUploader } from "./uppy-uploader";
 import {
   Image as ImageIcon, CheckCircle, XCircle, Star, Upload, Wand2,
-  Maximize2, X, ChevronLeft, ChevronRight,
+  Maximize2, X, ChevronLeft, ChevronRight, Copy,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,14 +19,26 @@ type ImageItem = {
   id: string;
   skuId: string;
   filePath: string | null;
+  url: string | null;
+  fileSize: number | null;
+  mimeType: string | null;
+  checksum: string | null;
   imageTypeId: string | null;
   status: string | null;
   isBest: boolean | null;
   width: number | null;
   height: number | null;
   aiModelUsed: string | null;
+  uploadedBy: string | null;
   createdAt: string | null;
 };
+
+function formatFileSize(bytes: number | null): string {
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
 
 type Sku = {
   id: string;
@@ -60,6 +67,7 @@ export function ImageManagementTab({
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [lightbox, setLightbox] = useState<number | null>(null);
+  const [showUploader, setShowUploader] = useState(false);
 
   const loadImages = useCallback(async () => {
     const res = await fetch(`/api/v1/catalog/images?productId=${productId}`);
@@ -69,6 +77,21 @@ export function ImageManagementTab({
   }, [productId]);
 
   useEffect(() => { loadImages(); }, [loadImages]);
+
+  // Keyboard navigation for the lightbox: ← → Esc
+  useEffect(() => {
+    if (lightbox === null) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightbox(null);
+      if (e.key === "ArrowLeft" && lightbox > 0) setLightbox(lightbox - 1);
+      if (e.key === "ArrowRight") {
+        setLightbox((prev) => (prev !== null && prev + 1 < filtered.length ? prev + 1 : prev));
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lightbox]);
 
   const filtered = imageList.filter((img) => {
     if (selectedSku !== "all" && img.skuId !== selectedSku) return false;
@@ -102,6 +125,38 @@ export function ImageManagementTab({
     });
     setSelected(new Set());
     await loadImages();
+  };
+
+  const handleBulkReassign = async (newSkuId: string) => {
+    if (!newSkuId) return;
+    await fetch("/api/v1/catalog/images/bulk", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [...selected], skuId: newSkuId }),
+    });
+    setSelected(new Set());
+    await loadImages();
+  };
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Delete ${selected.size} image${selected.size === 1 ? "" : "s"}? This cannot be undone.`)) return;
+    await fetch("/api/v1/catalog/images/bulk", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [...selected] }),
+    });
+    setSelected(new Set());
+    await loadImages();
+  };
+
+  const handleCopyUrl = async (img: ImageItem) => {
+    const url = img.url ?? catalogImageUrl(img.filePath);
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      // ignore
+    }
   };
 
   const handleGenerate = async (skuId: string) => {
@@ -174,14 +229,42 @@ export function ImageManagementTab({
             <Button size="sm" variant="outline" onClick={() => handleBulkAction("rejected")}>
               <XCircle className="h-3 w-3 mr-1" /> Reject
             </Button>
+            <Select value="" onValueChange={(v) => handleBulkReassign(v)}>
+              <SelectTrigger className="w-[160px] h-8"><SelectValue placeholder="Reassign SKU…" /></SelectTrigger>
+              <SelectContent>
+                {skus.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>{s.sku} — {s.colorName}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button size="sm" variant="outline" onClick={handleBulkDelete}>
+              Delete
+            </Button>
           </>
         )}
 
         <div className="flex-1" />
+        <Button size="sm" variant={showUploader ? "default" : "outline"} onClick={() => setShowUploader((v) => !v)}>
+          <Upload className="h-3 w-3 mr-1" /> {showUploader ? "Close uploader" : "Upload images"}
+        </Button>
         <Button size="sm" variant="outline" onClick={() => skus[0] && handleGenerate(skus[0].id)}>
           <Wand2 className="h-3 w-3 mr-1" /> AI Generate
         </Button>
       </div>
+
+      {showUploader && (
+        <Card>
+          <CardContent className="p-4">
+            <UppyUploader
+              skus={skus.map((s) => ({ id: s.id, sku: s.sku, colorName: s.colorName }))}
+              onUploadComplete={() => {
+                loadImages();
+                onRefresh();
+              }}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Image Grid */}
       {loading ? (
@@ -217,6 +300,7 @@ export function ImageManagementTab({
               <div
                 className="aspect-square bg-muted flex items-center justify-center cursor-pointer"
                 onClick={() => setLightbox(idx)}
+                title={`${img.width ?? "?"}×${img.height ?? "?"}${img.fileSize ? ` · ${formatFileSize(img.fileSize)}` : ""}${img.mimeType ? ` · ${img.mimeType}` : ""}`}
               >
                 {img.filePath ? (
                   <img src={catalogImageUrl(img.filePath)!} alt="" className="object-contain w-full h-full" />
@@ -246,6 +330,9 @@ export function ImageManagementTab({
                   </Button>
                   <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => setLightbox(idx)} title="View full size">
                     <Maximize2 className="h-3 w-3" />
+                  </Button>
+                  <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => handleCopyUrl(img)} title="Copy CDN URL">
+                    <Copy className="h-3 w-3" />
                   </Button>
                 </div>
               </div>

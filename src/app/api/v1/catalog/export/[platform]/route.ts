@@ -6,6 +6,7 @@ import { loadExportProducts } from "@/modules/catalog/lib/export/load-products";
 import { generateShopifyCSV, validateProductsForShopify } from "@/modules/catalog/lib/export/shopify";
 import { generateFaireCsv, validateForFaire } from "@/modules/catalog/lib/export/faire";
 import { generateAmazonTsv, validateForAmazon } from "@/modules/catalog/lib/export/amazon";
+import { findProductsMissingApprovedImages } from "@/modules/catalog/lib/export/image-precheck";
 
 export async function GET(
   request: NextRequest,
@@ -18,7 +19,10 @@ export async function GET(
   const channel = (searchParams.get("channel") as "retail" | "wholesale") || "retail";
 
   const productIds = idsParam ? idsParam.split(",").filter(Boolean) : undefined;
+  const force = searchParams.get("force") === "true";
   const exportProducts = await loadExportProducts(productIds);
+
+  const imageBlockers = findProductsMissingApprovedImages(exportProducts);
 
   if (validateOnly) {
     let validations;
@@ -28,7 +32,18 @@ export async function GET(
       case "amazon": validations = exportProducts.map(validateForAmazon); break;
       default: return NextResponse.json({ error: "Invalid platform" }, { status: 400 });
     }
-    return NextResponse.json({ validations, platform });
+    return NextResponse.json({ validations, platform, imageBlockers });
+  }
+
+  if (imageBlockers.length > 0 && !force) {
+    return NextResponse.json(
+      {
+        error: "Image precheck failed",
+        message: `${imageBlockers.length} product${imageBlockers.length === 1 ? "" : "s"} have no approved images. Approve images in the Image Management tab, or retry with ?force=true to export anyway.`,
+        imageBlockers,
+      },
+      { status: 422 },
+    );
   }
 
   let csv: string;
