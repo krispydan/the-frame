@@ -26,6 +26,7 @@ import {
   Database,
   Search,
   ChevronRight,
+  ImageIcon,
 } from "lucide-react";
 import {
   Sidebar,
@@ -82,6 +83,7 @@ const salesNav: NavItem[] = [
 const operationsNav: NavItem[] = [
   { title: "Orders", href: "/orders", icon: ShoppingCart },
   { title: "Catalog", href: "/catalog", icon: Package },
+  { title: "Media Center", href: "/media", icon: ImageIcon },
   { title: "Inventory", href: "/inventory", icon: Warehouse },
   { title: "Finance", href: "/finance", icon: DollarSign },
 ];
@@ -102,9 +104,9 @@ const bottomNav = [
 const ROLE_ALLOWED_HREFS: Record<string, string[]> = {
   owner: ["*"],
   sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/pipeline", "/campaigns", "/campaigns/inbox", "/customers", "/brands"],
-  warehouse: ["/dashboard", "/orders", "/catalog", "/inventory"],
+  warehouse: ["/dashboard", "/orders", "/catalog", "/media", "/inventory"],
   finance: ["/dashboard", "/orders", "/finance"],
-  marketing: ["/dashboard", "/marketing", "/catalog", "/campaigns"],
+  marketing: ["/dashboard", "/marketing", "/catalog", "/media", "/campaigns"],
   support: ["/dashboard", "/orders", "/customers"],
   ai: ["/dashboard", "/ai"],
 };
