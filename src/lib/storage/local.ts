@@ -90,3 +90,29 @@ export async function imageStat(relPath: string): Promise<{ size: number; exists
 export function imagesRoot(): string {
   return imagesRootFn();
 }
+
+// ── Image Editor path helpers ──
+
+/**
+ * Returns relative path for a pipeline stage artifact.
+ * e.g. `<skuId>/no_bg/<checksum>.png`
+ */
+export function getStagePath(skuId: string, stage: string, checksum: string, ext: string): string {
+  return `${skuId}/${stage}/${checksum}.${ext}`;
+}
+
+/**
+ * Returns relative path for a variation artifact.
+ * e.g. `<skuId>/variations/<checksum>_<label>.png`
+ */
+export function getVariationPath(skuId: string, checksum: string, label: string, ext: string): string {
+  return `${skuId}/variations/${checksum}_${label}.${ext}`;
+}
+
+/**
+ * Returns relative path for a collection image.
+ * e.g. `collections/<productId>/<checksum>.jpg`
+ */
+export function getCollectionPath(productId: string, checksum: string, ext: string): string {
+  return `collections/${productId}/${checksum}.${ext}`;
+}

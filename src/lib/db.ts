@@ -101,6 +101,116 @@ try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN checksum TEXT"); } catc
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN uploaded_by TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_catalog_images_checksum ON catalog_images (checksum)"); } catch { /* exists */ }
 
+// Image editor: new columns on catalog_images
+try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN source TEXT DEFAULT 'upload'"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN pipeline_status TEXT DEFAULT 'none'"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN parent_image_id TEXT REFERENCES catalog_images(id)"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN preset_id TEXT REFERENCES catalog_processing_presets(id)"); } catch { /* exists */ }
+
+// Image editor: new tables (idempotent via IF NOT EXISTS)
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS catalog_processing_presets (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    bg_removal_method TEXT DEFAULT 'gemini',
+    bg_removal_params TEXT,
+    shadow_method TEXT DEFAULT 'none',
+    shadow_params TEXT,
+    canvas_size INTEGER DEFAULT 2048,
+    canvas_bg TEXT DEFAULT '#F8F9FA',
+    canvas_padding REAL DEFAULT 0.0,
+    output_quality INTEGER DEFAULT 95,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS catalog_image_pipelines (
+    id TEXT PRIMARY KEY NOT NULL,
+    image_id TEXT NOT NULL REFERENCES catalog_images(id) ON DELETE CASCADE,
+    stage TEXT NOT NULL,
+    method TEXT,
+    method_params TEXT,
+    file_path TEXT NOT NULL,
+    file_size INTEGER,
+    width INTEGER,
+    height INTEGER,
+    checksum TEXT,
+    status TEXT DEFAULT 'completed',
+    error_message TEXT,
+    processing_time_ms INTEGER,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_pipeline_image_stage ON catalog_image_pipelines(image_id, stage)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_pipeline_image ON catalog_image_pipelines(image_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_pipeline_stage ON catalog_image_pipelines(stage)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS catalog_image_variations (
+    id TEXT PRIMARY KEY NOT NULL,
+    image_id TEXT NOT NULL REFERENCES catalog_images(id) ON DELETE CASCADE,
+    stage TEXT NOT NULL,
+    method TEXT NOT NULL,
+    method_params TEXT,
+    file_path TEXT NOT NULL,
+    file_size INTEGER,
+    width INTEGER,
+    height INTEGER,
+    label TEXT,
+    is_selected INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_variation_image_stage ON catalog_image_variations(image_id, stage)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS catalog_collection_images (
+    id TEXT PRIMARY KEY NOT NULL,
+    product_id TEXT NOT NULL REFERENCES catalog_products(id) ON DELETE CASCADE,
+    file_path TEXT NOT NULL,
+    file_size INTEGER,
+    width INTEGER,
+    height INTEGER,
+    layout TEXT,
+    variant_count INTEGER,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_collection_product ON catalog_collection_images(product_id)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS catalog_collection_image_skus (
+    id TEXT PRIMARY KEY NOT NULL,
+    collection_image_id TEXT NOT NULL REFERENCES catalog_collection_images(id) ON DELETE CASCADE,
+    sku_id TEXT NOT NULL REFERENCES catalog_skus(id) ON DELETE CASCADE,
+    position INTEGER DEFAULT 0
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_collection_sku ON catalog_collection_image_skus(collection_image_id, sku_id)`);
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS catalog_product_listing_images (
+    id TEXT PRIMARY KEY NOT NULL,
+    product_id TEXT NOT NULL REFERENCES catalog_products(id) ON DELETE CASCADE,
+    image_id TEXT NOT NULL REFERENCES catalog_images(id) ON DELETE CASCADE,
+    platform TEXT DEFAULT 'all',
+    position INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_listing_product_image_platform ON catalog_product_listing_images(product_id, image_id, platform)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_listing_product_platform ON catalog_product_listing_images(product_id, platform)`);
+} catch (e) { console.error("[db] Image editor table creation error:", e); }
+
+// Image editor: seed angle-based image types
+try {
+  const angleTypes = [
+    "front", "side", "other-side", "top", "back-crossed",
+    "crossed", "inside", "name", "closed", "above",
+  ];
+  const insertType = sqlite.prepare(
+    `INSERT OR IGNORE INTO catalog_image_types (id, slug, label, active, sort_order)
+     VALUES (lower(hex(randomblob(16))), ?, ?, 1, ?)`
+  );
+  for (let i = 0; i < angleTypes.length; i++) {
+    const slug = angleTypes[i];
+    const label = slug.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    insertType.run(slug, label, i);
+  }
+} catch (e) { console.error("[db] Image type seed error:", e); }
+
 // Shopify category metafield sync: cached AI categorization per product
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN ai_categorization TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN ai_categorized_at TEXT"); } catch { /* exists */ }
@@ -146,6 +256,38 @@ try {
   // Ensure notes column on brand_accounts
   try { sqlite.exec("ALTER TABLE brand_accounts ADD COLUMN notes TEXT"); } catch { /* exists */ }
 } catch (e) { console.error("[db] Table ensure error:", e); }
+
+// ── ONE-TIME: Clear all old product images (pre-pipeline uploads) ──
+// Safe: checks a flag row so it only runs once per database.
+try {
+  const flag = sqlite.prepare(
+    "SELECT 1 FROM catalog_processing_presets WHERE name = '__images_reset_v1'"
+  ).get();
+  if (!flag) {
+    console.log("[db] Running one-time image reset migration...");
+    sqlite.exec("DELETE FROM catalog_product_listing_images");
+    sqlite.exec("DELETE FROM catalog_collection_image_skus");
+    sqlite.exec("DELETE FROM catalog_collection_images");
+    sqlite.exec("DELETE FROM catalog_image_variations");
+    sqlite.exec("DELETE FROM catalog_image_pipelines");
+    sqlite.exec("DELETE FROM catalog_images");
+    // Insert flag so this never runs again
+    sqlite.prepare(
+      `INSERT INTO catalog_processing_presets (id, name, description, created_at)
+       VALUES (lower(hex(randomblob(16))), '__images_reset_v1', 'Migration flag — old images cleared', datetime('now'))`
+    ).run();
+    // Clean up image files from disk
+    const imagesDir = process.env.IMAGES_PATH || path.join(process.cwd(), "data", "images");
+    if (fs.existsSync(imagesDir)) {
+      for (const entry of fs.readdirSync(imagesDir)) {
+        const entryPath = path.join(imagesDir, entry);
+        try { fs.rmSync(entryPath, { recursive: true, force: true }); } catch {}
+      }
+      console.log("[db] Cleared image files from", imagesDir);
+    }
+    console.log("[db] Image reset complete — all old images removed");
+  }
+} catch (e) { console.error("[db] Image reset error:", e); }
 
 // Auto-run migrations on startup (idempotent — safe to run every time)
 try {

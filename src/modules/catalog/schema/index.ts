@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, uniqueIndex, index } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
@@ -101,6 +101,10 @@ export const images = sqliteTable("catalog_images", {
   status: text("status", { enum: ["draft", "review", "approved", "rejected"] }).default("draft"),
   isBest: integer("is_best", { mode: "boolean" }).default(false),
   uploadedBy: text("uploaded_by"),
+  source: text("source").default("upload"),
+  pipelineStatus: text("pipeline_status").default("none"),
+  parentImageId: text("parent_image_id"),
+  presetId: text("preset_id"),
   createdAt: timestamp("created_at"),
 });
 
@@ -151,6 +155,102 @@ export const copyVersions = sqliteTable("catalog_copy_versions", {
   aiModel: text("ai_model"),
   createdAt: timestamp("created_at"),
 });
+
+// ── Processing Presets ──
+export const processingPresets = sqliteTable("catalog_processing_presets", {
+  id: id(),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  bgRemovalMethod: text("bg_removal_method").default("gemini"),
+  bgRemovalParams: text("bg_removal_params"),
+  shadowMethod: text("shadow_method").default("none"),
+  shadowParams: text("shadow_params"),
+  canvasSize: integer("canvas_size").default(2048),
+  canvasBg: text("canvas_bg").default("#F8F9FA"),
+  canvasPadding: real("canvas_padding").default(0.0),
+  outputQuality: integer("output_quality").default(95),
+  createdAt: timestamp("created_at"),
+});
+
+// ── Image Pipelines ──
+export const imagePipelines = sqliteTable("catalog_image_pipelines", {
+  id: id(),
+  imageId: text("image_id").references(() => images.id, { onDelete: "cascade" }).notNull(),
+  stage: text("stage").notNull(),
+  method: text("method"),
+  methodParams: text("method_params"),
+  filePath: text("file_path").notNull(),
+  fileSize: integer("file_size"),
+  width: integer("width"),
+  height: integer("height"),
+  checksum: text("checksum"),
+  status: text("status", { enum: ["completed", "failed", "pending"] }).default("completed"),
+  errorMessage: text("error_message"),
+  processingTimeMs: integer("processing_time_ms"),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  uniqueIndex("uq_pipeline_image_stage").on(table.imageId, table.stage),
+  index("idx_pipeline_image").on(table.imageId),
+  index("idx_pipeline_stage").on(table.stage),
+]);
+
+// ── Image Variations ──
+export const imageVariations = sqliteTable("catalog_image_variations", {
+  id: id(),
+  imageId: text("image_id").references(() => images.id, { onDelete: "cascade" }).notNull(),
+  stage: text("stage").notNull(),
+  method: text("method").notNull(),
+  methodParams: text("method_params"),
+  filePath: text("file_path").notNull(),
+  fileSize: integer("file_size"),
+  width: integer("width"),
+  height: integer("height"),
+  label: text("label"),
+  isSelected: integer("is_selected").default(0),
+  createdAt: timestamp("created_at"),
+}, (table) => [
+  index("idx_variation_image_stage").on(table.imageId, table.stage),
+]);
+
+// ── Collection Images ──
+export const collectionImages = sqliteTable("catalog_collection_images", {
+  id: id(),
+  productId: text("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
+  filePath: text("file_path").notNull(),
+  fileSize: integer("file_size"),
+  width: integer("width"),
+  height: integer("height"),
+  layout: text("layout"),
+  variantCount: integer("variant_count"),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  uniqueIndex("uq_collection_product").on(table.productId),
+]);
+
+// ── Collection Image SKUs (junction table) ──
+export const collectionImageSkus = sqliteTable("catalog_collection_image_skus", {
+  id: id(),
+  collectionImageId: text("collection_image_id").references(() => collectionImages.id, { onDelete: "cascade" }).notNull(),
+  skuId: text("sku_id").references(() => skus.id, { onDelete: "cascade" }).notNull(),
+  position: integer("position").default(0),
+}, (table) => [
+  uniqueIndex("uq_collection_sku").on(table.collectionImageId, table.skuId),
+]);
+
+// ── Product Listing Images (3-6 curated images per product for Shopify/Faire/Amazon) ──
+export const productListingImages = sqliteTable("catalog_product_listing_images", {
+  id: id(),
+  productId: text("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
+  imageId: text("image_id").references(() => images.id, { onDelete: "cascade" }).notNull(),
+  platform: text("platform").default("all"),
+  position: integer("position").default(0),
+  createdAt: timestamp("created_at"),
+}, (table) => [
+  uniqueIndex("uq_listing_product_image_platform").on(table.productId, table.imageId, table.platform),
+  index("idx_listing_product_platform").on(table.productId, table.platform),
+]);
 
 // Factory map
 export const FACTORY_MAP: Record<string, string> = {

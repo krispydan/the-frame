@@ -104,6 +104,7 @@ export function ensureAllToolsRegistered() {
   // Side-effect registrations
   try { require("@/modules/sales/mcp/tools"); } catch {}
   try { require("@/modules/catalog/mcp/tools"); } catch {}
+  try { require("@/modules/catalog/mcp/image-tools"); } catch {}
   try { require("@/modules/customers/mcp/tools"); } catch {}
   try { require("@/modules/orders/mcp/tools"); } catch {}
 }
