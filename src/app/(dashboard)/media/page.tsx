@@ -108,6 +108,22 @@ interface ImageTypeFilter {
   label: string;
 }
 
+interface SourceFilter {
+  source: string;
+  count: number;
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  raw: "Original",
+  no_bg: "No Background",
+  white_bg: "White BG",
+  cropped: "Cropped",
+  square: "Square (Shopify)",
+  collection: "Collection (Faire)",
+  pipeline: "Pipeline",
+  upload: "Upload",
+};
+
 // ── Helpers ──
 
 function formatBytes(bytes: number): string {
@@ -149,6 +165,7 @@ export default function MediaCenterPage() {
   const [stats, setStats] = useState<MediaStats | null>(null);
   const [products, setProducts] = useState<ProductFilter[]>([]);
   const [imageTypes, setImageTypes] = useState<ImageTypeFilter[]>([]);
+  const [sources, setSources] = useState<SourceFilter[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
@@ -157,6 +174,7 @@ export default function MediaCenterPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [productFilter, setProductFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState("all");
   const [sortBy, setSortBy] = useState("newest");
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 60;
@@ -175,6 +193,7 @@ export default function MediaCenterPage() {
     if (statusFilter !== "all") params.set("status", statusFilter);
     if (productFilter !== "all") params.set("productId", productFilter);
     if (typeFilter !== "all") params.set("imageType", typeFilter);
+    if (sourceFilter !== "all") params.set("source", sourceFilter);
     params.set("sort", sortBy);
     params.set("limit", String(PAGE_SIZE));
     params.set("offset", String(page * PAGE_SIZE));
@@ -187,12 +206,13 @@ export default function MediaCenterPage() {
       setStats(data.stats || null);
       setProducts(data.filters?.products || []);
       setImageTypes(data.filters?.imageTypes || []);
+      setSources(data.filters?.sources || []);
     } catch (e) {
       console.error("Failed to fetch media:", e);
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter, productFilter, typeFilter, sortBy, page]);
+  }, [search, statusFilter, productFilter, typeFilter, sourceFilter, sortBy, page]);
 
   useEffect(() => {
     const timer = setTimeout(fetchImages, search ? 300 : 0);
@@ -202,7 +222,7 @@ export default function MediaCenterPage() {
   // Reset page when filters change
   useEffect(() => {
     setPage(0);
-  }, [search, statusFilter, productFilter, typeFilter, sortBy]);
+  }, [search, statusFilter, productFilter, typeFilter, sourceFilter, sortBy]);
 
   // ── Selection ──
 
@@ -359,6 +379,20 @@ export default function MediaCenterPage() {
             </SelectContent>
           </Select>
 
+          <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v ?? "all")}>
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="Version" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Versions</SelectItem>
+              {sources.map((s) => (
+                <SelectItem key={s.source} value={s.source}>
+                  {SOURCE_LABELS[s.source] || s.source} ({s.count})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           <Select value={sortBy} onValueChange={(v) => setSortBy(v ?? "newest")}>
             <SelectTrigger className="w-[130px]">
               <SelectValue placeholder="Sort" />
@@ -476,9 +510,16 @@ export default function MediaCenterPage() {
                     {img.status}
                   </Badge>
                 </div>
-                {img.image_type_label && (
-                  <span className="text-[10px] text-muted-foreground">{img.image_type_label}</span>
-                )}
+                <div className="flex items-center gap-1">
+                  {img.image_type_label && (
+                    <span className="text-[10px] text-muted-foreground">{img.image_type_label}</span>
+                  )}
+                  {img.source && img.source !== "upload" && (
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 ml-auto">
+                      {SOURCE_LABELS[img.source] || img.source}
+                    </Badge>
+                  )}
+                </div>
               </div>
             </div>
           ))}

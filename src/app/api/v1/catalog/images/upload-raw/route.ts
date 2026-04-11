@@ -7,8 +7,9 @@
  *
  * multipart/form-data:
  *   file      — required, image/*
- *   skuId     — required, must reference an existing SKU
+ *   skuId     — required, must reference an existing SKU (UUID or string like "JX1001-BLK")
  *   imageType — optional, slug like "front", "side", "other-side" etc.
+ *   variant   — optional, pipeline variant: "raw", "no_bg", "white_bg", "cropped", "square", "collection"
  *   position  — optional, sort order (default 0)
  *   source    — optional, defaults to "pipeline"
  *
@@ -40,6 +41,7 @@ export async function POST(request: NextRequest) {
   const file = formData.get("file");
   const skuId = formData.get("skuId") as string | null;
   const imageType = formData.get("imageType") as string | null;
+  const variant = (formData.get("variant") as string) || "";
   const position = parseInt((formData.get("position") as string) || "0", 10);
   const source = (formData.get("source") as string) || "pipeline";
 
@@ -78,12 +80,15 @@ export async function POST(request: NextRequest) {
   const ext = meta.format === "png" ? "png" : "jpg";
   const mimeType = ext === "png" ? "image/png" : "image/jpeg";
 
-  const relPath = `${resolvedSkuId}/${checksum}.${ext}`;
+  // Store in variant subfolder if specified (e.g. skuId/square/abc123.jpg)
+  const relPath = variant
+    ? `${resolvedSkuId}/${variant}/${checksum}.${ext}`
+    : `${resolvedSkuId}/${checksum}.${ext}`;
 
-  // Dedupe: if sku+checksum already exists, return it
+  // Dedupe: if sku+checksum+source already exists, return it
   const existing = sqlite.prepare(
-    "SELECT id, file_path, file_size, width, height, checksum FROM catalog_images WHERE sku_id = ? AND checksum = ?"
-  ).get(resolvedSkuId, checksum) as Record<string, unknown> | undefined;
+    "SELECT id, file_path, file_size, width, height, checksum FROM catalog_images WHERE sku_id = ? AND checksum = ? AND source = ?"
+  ).get(resolvedSkuId, checksum, source) as Record<string, unknown> | undefined;
 
   if (existing) {
     return NextResponse.json({

@@ -16,6 +16,7 @@ export async function GET(request: NextRequest) {
   const productId = searchParams.get("productId") || "";
   const imageType = searchParams.get("imageType") || "";
   const pipelineStatus = searchParams.get("pipelineStatus") || "";
+  const source = searchParams.get("source") || "";
   const limit = Math.min(200, parseInt(searchParams.get("limit") || "60", 10));
   const offset = parseInt(searchParams.get("offset") || "0", 10);
   const sort = searchParams.get("sort") || "newest"; // newest, oldest, name, size
@@ -42,6 +43,10 @@ export async function GET(request: NextRequest) {
   if (pipelineStatus) {
     clauses.push("ci.pipeline_status = ?");
     params.push(pipelineStatus);
+  }
+  if (source) {
+    clauses.push("ci.source = ?");
+    params.push(source);
   }
 
   // Only show images that have a file
@@ -116,12 +121,21 @@ export async function GET(request: NextRequest) {
     "SELECT slug, label FROM catalog_image_types WHERE active = 1 ORDER BY sort_order"
   ).all();
 
+  // Sources for filter dropdown
+  const sources = sqlite.prepare(`
+    SELECT ci.source, COUNT(*) as count
+    FROM catalog_images ci
+    WHERE ci.file_path IS NOT NULL AND ci.source IS NOT NULL
+    GROUP BY ci.source
+    ORDER BY ci.source
+  `).all();
+
   return NextResponse.json({
     images,
     total: totalRow.count,
     limit,
     offset,
     stats,
-    filters: { products, imageTypes },
+    filters: { products, imageTypes, sources },
   });
 }
