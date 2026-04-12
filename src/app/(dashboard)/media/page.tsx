@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Image as ImageIcon,
   Search,
   LayoutGrid,
   List,
-  Upload,
   Download,
   Trash2,
   Check,
@@ -19,13 +18,24 @@ import {
   Copy,
   MoreHorizontal,
   RefreshCw,
-  Filter,
-  SlidersHorizontal,
+  Star,
+  ZoomIn,
+  ZoomOut,
+  Keyboard,
+  ExternalLink,
+  RotateCw,
+  Tag,
+  ArrowLeft,
+  ArrowRight,
+  ThumbsUp,
+  ThumbsDown,
+  SkipForward,
+  Maximize2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -33,12 +43,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,6 +59,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Separator } from "@/components/ui/separator";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 // ── Types ──
 
@@ -250,7 +261,7 @@ export default function MediaCenterPage() {
   const updateImageStatus = async (imageIds: string[], newStatus: string) => {
     for (const id of imageIds) {
       await fetch(`/api/v1/catalog/images/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus }),
       });
@@ -652,99 +663,630 @@ export default function MediaCenterPage() {
         </div>
       )}
 
-      {/* Preview Dialog */}
-      <Dialog open={!!previewImage} onOpenChange={() => setPreviewImage(null)}>
-        <DialogContent className="max-w-4xl">
-          {previewImage && (
-            <>
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  {previewImage.sku}
-                  {previewImage.image_type_label && (
-                    <Badge variant="outline">{previewImage.image_type_label}</Badge>
-                  )}
-                  <Badge variant="outline" className={statusColors[previewImage.status] || ""}>
-                    {previewImage.status}
-                  </Badge>
-                </DialogTitle>
-              </DialogHeader>
+      {/* ── Full-Screen Image Review Editor ── */}
+      {previewImage && (
+        <ImageReviewEditor
+          images={images}
+          initialImage={previewImage}
+          onClose={() => setPreviewImage(null)}
+          onStatusChange={(id, status) => {
+            updateImageStatus([id], status);
+          }}
+          onDelete={(id) => {
+            deleteImages([id]);
+            setPreviewImage(null);
+          }}
+          onToggleBest={(id, isBest) => {
+            fetch(`/api/v1/catalog/images/${id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ isBest }),
+            }).then(() => fetchImages());
+          }}
+          onNavigateEnd={() => {
+            // When user hits the end of current page, load next page
+            if (page < totalPages - 1) {
+              setPage((p) => p + 1);
+            }
+          }}
+          currentPage={page}
+          totalImages={total}
+          pageSize={PAGE_SIZE}
+        />
+      )}
+    </div>
+  );
+}
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Large preview */}
-                <div className="md:col-span-2 bg-[#F8F9FA] rounded-lg overflow-hidden">
-                  <img
-                    src={getImageUrl(previewImage)}
-                    alt={previewImage.alt_text || previewImage.sku}
-                    className="w-full h-auto object-contain max-h-[500px]"
-                  />
-                </div>
+// ── Image Review Editor (full-screen overlay) ──
 
-                {/* Details sidebar */}
-                <div className="space-y-4">
-                  <div>
-                    <h4 className="text-sm font-medium text-muted-foreground mb-1">Product</h4>
-                    <p className="text-sm">{previewImage.sku_prefix} &mdash; {previewImage.product_name}</p>
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-medium text-muted-foreground mb-1">SKU</h4>
-                    <p className="text-sm">{previewImage.sku} ({previewImage.color_name})</p>
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-medium text-muted-foreground mb-1">Dimensions</h4>
-                    <p className="text-sm">{previewImage.width} x {previewImage.height}</p>
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-medium text-muted-foreground mb-1">File Size</h4>
-                    <p className="text-sm">{formatBytes(previewImage.file_size)}</p>
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-medium text-muted-foreground mb-1">Pipeline</h4>
-                    <p className="text-sm">{previewImage.pipeline_status}</p>
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-medium text-muted-foreground mb-1">Source</h4>
-                    <p className="text-sm">{previewImage.source || "upload"}</p>
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-medium text-muted-foreground mb-1">Created</h4>
-                    <p className="text-sm">{formatDate(previewImage.created_at)}</p>
-                  </div>
-                  {previewImage.alt_text && (
-                    <div>
-                      <h4 className="text-sm font-medium text-muted-foreground mb-1">Alt Text</h4>
-                      <p className="text-sm">{previewImage.alt_text}</p>
-                    </div>
-                  )}
+interface ImageReviewEditorProps {
+  images: MediaImage[];
+  initialImage: MediaImage;
+  onClose: () => void;
+  onStatusChange: (id: string, status: string) => void;
+  onDelete: (id: string) => void;
+  onToggleBest: (id: string, isBest: boolean) => void;
+  onNavigateEnd: () => void;
+  currentPage: number;
+  totalImages: number;
+  pageSize: number;
+}
 
-                  <div className="pt-2 space-y-2">
-                    <Button className="w-full" size="sm" onClick={() => copyUrl(previewImage)}>
-                      <Copy className="h-4 w-4 mr-2" /> Copy URL
-                    </Button>
+function ImageReviewEditor({
+  images,
+  initialImage,
+  onClose,
+  onStatusChange,
+  onDelete,
+  onToggleBest,
+  onNavigateEnd,
+  currentPage,
+  totalImages,
+  pageSize,
+}: ImageReviewEditorProps) {
+  const [currentIndex, setCurrentIndex] = useState(() =>
+    images.findIndex((img) => img.id === initialImage.id)
+  );
+  const [zoom, setZoom] = useState(1);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [bgMode, setBgMode] = useState<"light" | "dark" | "checker">("light");
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const current = images[currentIndex] || initialImage;
+  const globalIndex = currentPage * pageSize + currentIndex + 1;
+
+  // Navigation
+  const canPrev = currentIndex > 0;
+  const canNext = currentIndex < images.length - 1;
+
+  const goNext = useCallback(() => {
+    if (canNext) {
+      setCurrentIndex((i) => i + 1);
+      setZoom(1);
+    } else {
+      onNavigateEnd();
+    }
+  }, [canNext, onNavigateEnd]);
+
+  const goPrev = useCallback(() => {
+    if (canPrev) {
+      setCurrentIndex((i) => i - 1);
+      setZoom(1);
+    }
+  }, [canPrev]);
+
+  // Approve + advance
+  const approveAndNext = useCallback(() => {
+    onStatusChange(current.id, "approved");
+    goNext();
+  }, [current.id, onStatusChange, goNext]);
+
+  const rejectAndNext = useCallback(() => {
+    onStatusChange(current.id, "rejected");
+    goNext();
+  }, [current.id, onStatusChange, goNext]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Don't handle if user is in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      switch (e.key) {
+        case "ArrowRight":
+        case "j":
+          e.preventDefault();
+          goNext();
+          break;
+        case "ArrowLeft":
+        case "k":
+          e.preventDefault();
+          goPrev();
+          break;
+        case "a":
+          e.preventDefault();
+          onStatusChange(current.id, "approved");
+          break;
+        case "r":
+          e.preventDefault();
+          onStatusChange(current.id, "rejected");
+          break;
+        case "w":
+          e.preventDefault();
+          onStatusChange(current.id, "review");
+          break;
+        case "b":
+          e.preventDefault();
+          onToggleBest(current.id, current.is_best !== 1);
+          break;
+        case "f":
+          e.preventDefault();
+          approveAndNext();
+          break;
+        case "x":
+          e.preventDefault();
+          rejectAndNext();
+          break;
+        case "+":
+        case "=":
+          e.preventDefault();
+          setZoom((z) => Math.min(z + 0.25, 4));
+          break;
+        case "-":
+          e.preventDefault();
+          setZoom((z) => Math.max(z - 0.25, 0.25));
+          break;
+        case "0":
+          e.preventDefault();
+          setZoom(1);
+          break;
+        case "c":
+          e.preventDefault();
+          navigator.clipboard.writeText(getImageUrl(current));
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+          break;
+        case "d":
+          e.preventDefault();
+          setBgMode((m) => m === "light" ? "dark" : m === "dark" ? "checker" : "light");
+          break;
+        case "?":
+          e.preventDefault();
+          setShowShortcuts((s) => !s);
+          break;
+        case "Escape":
+          e.preventDefault();
+          if (showShortcuts) setShowShortcuts(false);
+          else onClose();
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [current, goNext, goPrev, onStatusChange, onToggleBest, approveAndNext, rejectAndNext, onClose, showShortcuts]);
+
+  // Focus container on mount
+  useEffect(() => {
+    containerRef.current?.focus();
+  }, []);
+
+  const bgClass = bgMode === "dark"
+    ? "bg-neutral-900"
+    : bgMode === "checker"
+    ? "bg-[length:20px_20px] bg-[image:linear-gradient(45deg,#e5e5e5_25%,transparent_25%,transparent_75%,#e5e5e5_75%),linear-gradient(45deg,#e5e5e5_25%,transparent_25%,transparent_75%,#e5e5e5_75%)] bg-[position:0_0,10px_10px] bg-white"
+    : "bg-[#F8F9FA]";
+
+  return (
+    <TooltipProvider delay={300}>
+      <div
+        ref={containerRef}
+        tabIndex={-1}
+        className="fixed inset-0 z-50 bg-white flex flex-col outline-none"
+      >
+        {/* ── Top Bar ── */}
+        <div className="flex items-center justify-between px-4 py-2 border-b bg-white shrink-0">
+          {/* Left: close + nav */}
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="sm" onClick={onClose}>
+              <X className="h-4 w-4 mr-1" /> Close
+            </Button>
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger>
+                  <Button variant="outline" size="sm" disabled={!canPrev} onClick={goPrev}>
+                    <ArrowLeft className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Previous (← or K)</TooltipContent>
+              </Tooltip>
+              <span className="text-sm text-muted-foreground px-2 min-w-[80px] text-center">
+                {globalIndex} of {totalImages}
+              </span>
+              <Tooltip>
+                <TooltipTrigger>
+                  <Button variant="outline" size="sm" disabled={!canNext} onClick={goNext}>
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Next (→ or J)</TooltipContent>
+              </Tooltip>
+            </div>
+          </div>
+
+          {/* Center: image info */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold">{current.sku}</span>
+            {current.image_type_label && (
+              <Badge variant="outline" className="text-xs">{current.image_type_label}</Badge>
+            )}
+            <Badge variant="outline" className="text-xs">
+              {SOURCE_LABELS[current.source] || current.source}
+            </Badge>
+            <Badge className={`text-xs ${statusColors[current.status] || ""}`}>
+              {current.status}
+            </Badge>
+            {current.is_best === 1 && (
+              <Badge className="bg-amber-500 text-white text-xs">
+                <Star className="h-3 w-3 mr-0.5 fill-current" /> BEST
+              </Badge>
+            )}
+          </div>
+
+          {/* Right: tools */}
+          <div className="flex items-center gap-1">
+            {/* Zoom controls */}
+            <Tooltip>
+              <TooltipTrigger>
+                <Button variant="ghost" size="sm" onClick={() => setZoom((z) => Math.max(z - 0.25, 0.25))}>
+                  <ZoomOut className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Zoom Out (−)</TooltipContent>
+            </Tooltip>
+            <button
+              className="text-xs text-muted-foreground hover:text-foreground px-1 min-w-[40px] text-center"
+              onClick={() => setZoom(1)}
+              title="Reset zoom (0)"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <Tooltip>
+              <TooltipTrigger>
+                <Button variant="ghost" size="sm" onClick={() => setZoom((z) => Math.min(z + 0.25, 4))}>
+                  <ZoomIn className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Zoom In (+)</TooltipContent>
+            </Tooltip>
+
+            <Separator orientation="vertical" className="h-6 mx-1" />
+
+            {/* Background toggle */}
+            <Tooltip>
+              <TooltipTrigger>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setBgMode((m) => m === "light" ? "dark" : m === "dark" ? "checker" : "light")}
+                >
+                  <Maximize2 className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Toggle Background (D)</TooltipContent>
+            </Tooltip>
+
+            {/* Keyboard shortcuts help */}
+            <Tooltip>
+              <TooltipTrigger>
+                <Button variant="ghost" size="sm" onClick={() => setShowShortcuts((s) => !s)}>
+                  <Keyboard className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Shortcuts (?)</TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
+
+        {/* ── Main Content ── */}
+        <div className="flex-1 flex min-h-0">
+          {/* ── Image Area ── */}
+          <div className="flex-1 flex items-center justify-center overflow-auto relative">
+            {/* Prev overlay button */}
+            {canPrev && (
+              <button
+                onClick={goPrev}
+                className="absolute left-3 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-black/20 hover:bg-black/40 text-white flex items-center justify-center transition-colors"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+            )}
+
+            <div className={`w-full h-full flex items-center justify-center ${bgClass} overflow-auto`}>
+              <img
+                src={getImageUrl(current)}
+                alt={current.alt_text || current.sku}
+                className="max-w-full max-h-full object-contain transition-transform duration-200"
+                style={{ transform: `scale(${zoom})`, transformOrigin: "center center" }}
+                draggable={false}
+              />
+            </div>
+
+            {/* Next overlay button */}
+            {canNext && (
+              <button
+                onClick={goNext}
+                className="absolute right-3 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-black/20 hover:bg-black/40 text-white flex items-center justify-center transition-colors"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+            )}
+          </div>
+
+          {/* ── Right Sidebar ── */}
+          <div className="w-[320px] border-l bg-white flex flex-col shrink-0 overflow-y-auto">
+            {/* Quick Actions */}
+            <div className="p-4 space-y-2 border-b">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Quick Actions</h3>
+
+              <div className="grid grid-cols-2 gap-2">
+                <Tooltip>
+                  <TooltipTrigger>
                     <Button
-                      variant="outline"
-                      className="w-full"
                       size="sm"
-                      onClick={() => window.open(getImageUrl(previewImage), "_blank")}
+                      className={`w-full ${current.status === "approved" ? "bg-green-600 hover:bg-green-700 text-white" : ""}`}
+                      variant={current.status === "approved" ? "default" : "outline"}
+                      onClick={() => onStatusChange(current.id, "approved")}
                     >
-                      <Download className="h-4 w-4 mr-2" /> Open Full Size
+                      <ThumbsUp className="h-3.5 w-3.5 mr-1.5" /> Approve
                     </Button>
-                    {previewImage.status !== "approved" && (
-                      <Button
-                        variant="outline"
-                        className="w-full"
-                        size="sm"
-                        onClick={() => { updateImageStatus([previewImage.id], "approved"); setPreviewImage(null); }}
-                      >
-                        <Check className="h-4 w-4 mr-2" /> Approve
-                      </Button>
-                    )}
-                  </div>
+                  </TooltipTrigger>
+                  <TooltipContent>Approve (A)</TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Button
+                      size="sm"
+                      className={`w-full ${current.status === "rejected" ? "bg-red-600 hover:bg-red-700 text-white" : ""}`}
+                      variant={current.status === "rejected" ? "default" : "outline"}
+                      onClick={() => onStatusChange(current.id, "rejected")}
+                    >
+                      <ThumbsDown className="h-3.5 w-3.5 mr-1.5" /> Reject
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Reject (R)</TooltipContent>
+                </Tooltip>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`w-full ${current.status === "review" ? "border-yellow-400 bg-yellow-50" : ""}`}
+                      onClick={() => onStatusChange(current.id, "review")}
+                    >
+                      <Eye className="h-3.5 w-3.5 mr-1.5" /> Review
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Send to Review (W)</TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`w-full ${current.is_best === 1 ? "border-amber-400 bg-amber-50" : ""}`}
+                      onClick={() => onToggleBest(current.id, current.is_best !== 1)}
+                    >
+                      <Star className={`h-3.5 w-3.5 mr-1.5 ${current.is_best === 1 ? "fill-amber-500 text-amber-500" : ""}`} />
+                      {current.is_best === 1 ? "Unset Best" : "Set Best"}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Toggle Best (B)</TooltipContent>
+                </Tooltip>
+              </div>
+
+              <Separator className="my-2" />
+
+              {/* Approve + Next / Reject + Next */}
+              <div className="grid grid-cols-2 gap-2">
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Button size="sm" className="w-full bg-green-600 hover:bg-green-700 text-white" onClick={approveAndNext}>
+                      <Check className="h-3.5 w-3.5 mr-1" /> Approve + Next
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Approve &amp; Next (F)</TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Button size="sm" variant="destructive" className="w-full" onClick={rejectAndNext}>
+                      <X className="h-3.5 w-3.5 mr-1" /> Reject + Next
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Reject &amp; Next (X)</TooltipContent>
+                </Tooltip>
+              </div>
+
+              <Tooltip>
+                <TooltipTrigger>
+                  <Button size="sm" variant="outline" className="w-full" onClick={goNext} disabled={!canNext}>
+                    <SkipForward className="h-3.5 w-3.5 mr-1.5" /> Skip
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Skip to Next (→)</TooltipContent>
+              </Tooltip>
+            </div>
+
+            {/* Image Details */}
+            <div className="p-4 space-y-3 border-b">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Details</h3>
+
+              <div className="grid grid-cols-2 gap-y-2.5 gap-x-4 text-sm">
+                <div>
+                  <span className="text-muted-foreground text-xs">Product</span>
+                  <p className="font-medium truncate">{current.sku_prefix}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">SKU</span>
+                  <p className="font-medium">{current.sku}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">Color</span>
+                  <p className="font-medium">{current.color_name || "—"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">Angle</span>
+                  <p className="font-medium">{current.image_type_label || "—"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">Dimensions</span>
+                  <p className="font-medium">{current.width && current.height ? `${current.width} × ${current.height}` : "—"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">File Size</span>
+                  <p className="font-medium">{formatBytes(current.file_size)}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">Format</span>
+                  <p className="font-medium">{current.mime_type?.split("/")[1]?.toUpperCase() || "—"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">Pipeline</span>
+                  <p className="font-medium">{current.pipeline_status}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">Source</span>
+                  <p className="font-medium">{SOURCE_LABELS[current.source] || current.source || "upload"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">Created</span>
+                  <p className="font-medium">{formatDate(current.created_at)}</p>
                 </div>
               </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+
+              {current.product_name && (
+                <div className="text-sm">
+                  <span className="text-muted-foreground text-xs">Product Name</span>
+                  <p className="font-medium">{current.product_name}</p>
+                </div>
+              )}
+
+              {current.alt_text && (
+                <div className="text-sm">
+                  <span className="text-muted-foreground text-xs">Alt Text</span>
+                  <p className="font-medium">{current.alt_text}</p>
+                </div>
+              )}
+            </div>
+
+            {/* File Actions */}
+            <div className="p-4 space-y-2 border-b">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">File Actions</h3>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full justify-start"
+                onClick={() => {
+                  navigator.clipboard.writeText(getImageUrl(current));
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                }}
+              >
+                <Copy className="h-3.5 w-3.5 mr-2" />
+                {copied ? "Copied!" : "Copy URL"}
+                <kbd className="ml-auto text-[10px] bg-muted px-1.5 py-0.5 rounded">C</kbd>
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full justify-start"
+                onClick={() => window.open(getImageUrl(current), "_blank")}
+              >
+                <ExternalLink className="h-3.5 w-3.5 mr-2" /> Open Full Size
+              </Button>
+
+              <a
+                href={getImageUrl(current)}
+                download={`${current.sku}-${current.image_type_slug || "image"}-${current.source}.${current.mime_type?.split("/")[1] || "jpg"}`}
+                className="inline-flex items-center justify-start w-full"
+              >
+                <Button variant="outline" size="sm" className="w-full justify-start">
+                  <Download className="h-3.5 w-3.5 mr-2" /> Download
+                </Button>
+              </a>
+            </div>
+
+            {/* Danger Zone */}
+            <div className="p-4 mt-auto">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                onClick={() => onDelete(current.id)}
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete Image
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Keyboard Shortcuts Overlay ── */}
+        {showShortcuts && (
+          <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center" onClick={() => setShowShortcuts(false)}>
+            <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold">Keyboard Shortcuts</h3>
+                <Button variant="ghost" size="sm" onClick={() => setShowShortcuts(false)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="space-y-3">
+                <ShortcutSection title="Navigation">
+                  <ShortcutRow keys={["←", "K"]} label="Previous image" />
+                  <ShortcutRow keys={["→", "J"]} label="Next image" />
+                  <ShortcutRow keys={["Esc"]} label="Close editor" />
+                </ShortcutSection>
+                <ShortcutSection title="Review">
+                  <ShortcutRow keys={["A"]} label="Approve" />
+                  <ShortcutRow keys={["R"]} label="Reject" />
+                  <ShortcutRow keys={["W"]} label="Send to review" />
+                  <ShortcutRow keys={["B"]} label="Toggle best" />
+                  <ShortcutRow keys={["F"]} label="Approve + next" />
+                  <ShortcutRow keys={["X"]} label="Reject + next" />
+                </ShortcutSection>
+                <ShortcutSection title="View">
+                  <ShortcutRow keys={["+", "="]} label="Zoom in" />
+                  <ShortcutRow keys={["−"]} label="Zoom out" />
+                  <ShortcutRow keys={["0"]} label="Reset zoom" />
+                  <ShortcutRow keys={["D"]} label="Toggle background" />
+                </ShortcutSection>
+                <ShortcutSection title="Other">
+                  <ShortcutRow keys={["C"]} label="Copy URL" />
+                  <ShortcutRow keys={["?"]} label="Toggle shortcuts" />
+                </ShortcutSection>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </TooltipProvider>
+  );
+}
+
+function ShortcutSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">{title}</h4>
+      <div className="space-y-1">{children}</div>
+    </div>
+  );
+}
+
+function ShortcutRow({ keys, label }: { keys: string[]; label: string }) {
+  return (
+    <div className="flex items-center justify-between text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <div className="flex items-center gap-1">
+        {keys.map((key, i) => (
+          <span key={i}>
+            {i > 0 && <span className="text-muted-foreground text-xs mx-0.5">/</span>}
+            <kbd className="inline-flex items-center justify-center min-w-[24px] h-6 px-1.5 text-xs font-medium bg-muted border rounded">
+              {key}
+            </kbd>
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
