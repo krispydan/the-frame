@@ -58,12 +58,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Too large: ${file.size} bytes` }, { status: 413 });
   }
 
-  // Verify SKU exists — support both UUID and SKU string (e.g. "JX1001-BLK")
+  // Verify SKU exists — support UUID, exact SKU string, or extract from messy filenames
   let resolvedSkuId = skuId;
   let skuRow = sqlite.prepare("SELECT id FROM catalog_skus WHERE id = ?").get(skuId) as { id: string } | undefined;
   if (!skuRow) {
-    // Try by SKU string
+    // Try by exact SKU string
     skuRow = sqlite.prepare("SELECT id FROM catalog_skus WHERE sku = ?").get(skuId) as { id: string } | undefined;
+    if (!skuRow) {
+      // Try extracting JX####-XXX pattern from the input (handles messy filenames)
+      const skuMatch = skuId.match(/JX\d{4}-[A-Z]{2,4}/i);
+      if (skuMatch) {
+        const extracted = skuMatch[0].toUpperCase();
+        skuRow = sqlite.prepare("SELECT id FROM catalog_skus WHERE sku = ?").get(extracted) as { id: string } | undefined;
+      }
+    }
     if (skuRow) {
       resolvedSkuId = skuRow.id;
     } else {
