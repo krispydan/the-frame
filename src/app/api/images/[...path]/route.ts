@@ -48,12 +48,12 @@ export async function GET(
     fileStat = await stat(full);
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
-      return new NextResponse("Not found", { status: 404 });
+      return new NextResponse("Not found", { status: 404, headers: { "Cache-Control": "no-store, no-cache, must-revalidate", "CDN-Cache-Control": "no-store" } });
     }
     throw err;
   }
   if (!fileStat.isFile()) {
-    return new NextResponse("Not found", { status: 404 });
+    return new NextResponse("Not found", { status: 404, headers: { "Cache-Control": "no-store, no-cache, must-revalidate", "CDN-Cache-Control": "no-store" } });
   }
 
   const buffer = await readFile(full);
