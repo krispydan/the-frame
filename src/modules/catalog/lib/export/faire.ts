@@ -498,7 +498,7 @@ export function generateFaireCsv(exportProducts: ExportProduct[]): string {
     //     then 1 front per color variant, then other angles
     //   option_image = best cropped/square image for this specific variant
     const faireProductImages = buildFaireImageList(ep);
-    const productImagesStr = faireProductImages.join(";");
+    const productImagesStr = faireProductImages.join(" ");
 
     for (const sku of ep.skus) {
       // Best image for this specific variant — prefer cropped, then square, then any
@@ -559,7 +559,7 @@ export function generateFaireXlsx(exportProducts: ExportProduct[]): Buffer {
     const description = buildFaireDescription(ep);
     const productType = mapFaireProductType(ep.product.gender);
     const faireProductImages = buildFaireImageList(ep);
-    const productImagesStr = faireProductImages.join(";");
+    const productImagesStr = faireProductImages.join(" ");
 
     for (const sku of ep.skus) {
       const variantImg = pickVariantImage(ep.images, sku.id);
