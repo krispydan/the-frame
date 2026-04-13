@@ -518,7 +518,7 @@ export function generateFaireCsv(exportProducts: ExportProduct[]): string {
       row.product_images = productImagesStr || optionImageUrl;
       row.made_in_country = JAXY_MADE_IN;
       row.has_customization = "No";
-      row.continue_selling_when_out_of_stock = "Yes";
+      row.continue_selling_when_out_of_stock = "No";
       row.on_hand_inventory = JAXY_ON_HAND;
       row.tariff_code = JAXY_HS6;
 

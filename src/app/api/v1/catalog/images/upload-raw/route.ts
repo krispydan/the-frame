@@ -93,12 +93,14 @@ export async function POST(request: NextRequest) {
     ? `${resolvedSkuId}/${variant}/${checksum}.${ext}`
     : `${resolvedSkuId}/${checksum}.${ext}`;
 
-  // Dedupe: if sku+checksum+source already exists, return it
+  // Dedupe: if sku+checksum+source already exists, ensure file is on disk and return it
   const existing = sqlite.prepare(
     "SELECT id, file_path, file_size, width, height, checksum FROM catalog_images WHERE sku_id = ? AND checksum = ? AND source = ?"
   ).get(resolvedSkuId, checksum, source) as Record<string, unknown> | undefined;
 
   if (existing) {
+    // Always re-save the file — it may have been wiped by a migration/deploy
+    await saveImage(buffer, existing.file_path as string);
     return NextResponse.json({
       id: existing.id,
       skuId: resolvedSkuId,
