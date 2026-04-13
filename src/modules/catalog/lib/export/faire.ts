@@ -24,6 +24,7 @@
  */
 import type { ExportProduct, ProductValidationResult, ValidationIssue } from "./types";
 import { catalogImageUrl } from "@/lib/storage/image-url";
+import * as XLSX from "xlsx";
 
 // ── Constants ──
 
@@ -530,6 +531,68 @@ export function generateFaireCsv(exportProducts: ExportProduct[]): string {
   }
 
   return lines.join("\n");
+}
+
+/**
+ * Generate Faire import as XLSX (Faire only accepts .xlsx/.xls, not CSV).
+ * Matches the official Faire bulk upload template: 3 header rows + data.
+ */
+export function generateFaireXlsx(exportProducts: ExportProduct[]): Buffer {
+  const wb = XLSX.utils.book_new();
+
+  // Build rows: 3 headers + data
+  const allRows: string[][] = [
+    FAIRE_HEADER_ROW_1,
+    FAIRE_HEADER_ROW_2,
+    FAIRE_FIELD_KEYS,
+  ];
+
+  for (const ep of exportProducts) {
+    if (ep.skus.length === 0) continue;
+
+    const title = buildFaireTitle(ep);
+    const description = buildFaireDescription(ep);
+    const productType = mapFaireProductType(ep.product.gender);
+    const faireProductImages = buildFaireImageList(ep);
+    const productImagesStr = faireProductImages.join(";");
+
+    for (const sku of ep.skus) {
+      const variantImg = pickVariantImage(ep.images, sku.id);
+      const optionImageUrl = absoluteImageUrl(variantImg?.filePath || null);
+
+      const row = blankRow();
+      row.product_name_english = title;
+      row.info_status_v2 = "Draft";
+      row.info_product_token = "";
+      row.info_product_type = productType;
+      row.product_description_english = description;
+      row.selling_method = "By the case";
+      row.case_quantity = JAXY_CASE_SIZE;
+      row.minimum_order_quantity = JAXY_MOQ;
+      row.item_weight = JAXY_WEIGHT;
+      row.item_weight_unit = JAXY_WEIGHT_UNIT;
+      row.option_status = "Published";
+      row.sku = sku.sku || "";
+      row.gtin = sku.upc || "";
+      row.option_1_name = "Color";
+      row.option_1_value = sku.colorName || "Default";
+      row.price_wholesale = JAXY_WHOLESALE_PRICE;
+      row.price_retail = JAXY_RETAIL_PRICE;
+      row.option_image = optionImageUrl;
+      row.product_images = productImagesStr || optionImageUrl;
+      row.made_in_country = JAXY_MADE_IN;
+      row.has_customization = "No";
+      row.continue_selling_when_out_of_stock = "No";
+      row.on_hand_inventory = JAXY_ON_HAND;
+      row.tariff_code = JAXY_HS6;
+
+      allRows.push(rowToValues(row));
+    }
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(allRows);
+  XLSX.utils.book_append_sheet(wb, ws, "Products");
+  return Buffer.from(XLSX.write(wb, { type: "buffer", bookType: "xlsx" }));
 }
 
 /**

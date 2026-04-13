@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { exports_ } from "@/modules/catalog/schema";
 import { loadExportProducts } from "@/modules/catalog/lib/export/load-products";
 import { generateShopifyCSV, validateProductsForShopify } from "@/modules/catalog/lib/export/shopify";
-import { generateFaireCsv, validateForFaire } from "@/modules/catalog/lib/export/faire";
+import { generateFaireCsv, generateFaireXlsx, validateForFaire } from "@/modules/catalog/lib/export/faire";
 import { generateAmazonTsv, validateForAmazon } from "@/modules/catalog/lib/export/amazon";
 import { findProductsMissingApprovedImages } from "@/modules/catalog/lib/export/image-precheck";
 
@@ -46,44 +46,55 @@ export async function GET(
     );
   }
 
-  let csv: string;
-  let contentType: string;
-  let ext: string;
+  // Save export record
+  const exportId = crypto.randomUUID();
+  const datestamp = new Date().toISOString().split("T")[0];
 
   switch (platform) {
-    case "shopify":
-      csv = generateShopifyCSV(exportProducts, channel);
-      contentType = "text/csv";
-      ext = "csv";
-      break;
-    case "faire":
-      csv = generateFaireCsv(exportProducts);
-      contentType = "text/csv";
-      ext = "csv";
-      break;
-    case "amazon":
-      csv = generateAmazonTsv(exportProducts);
-      contentType = "text/tab-separated-values";
-      ext = "tsv";
-      break;
+    case "shopify": {
+      const csv = generateShopifyCSV(exportProducts, channel);
+      await db.insert(exports_).values({
+        id: exportId, platform: platform as any,
+        filePath: `exports/shopify_${Date.now()}.csv`,
+        productCount: exportProducts.length, createdBy: "admin",
+      });
+      return new NextResponse(csv, {
+        headers: {
+          "Content-Type": "text/csv",
+          "Content-Disposition": `attachment; filename="jaxy_shopify_${datestamp}.csv"`,
+        },
+      });
+    }
+    case "faire": {
+      // Faire only accepts XLSX uploads — generate Excel workbook
+      const xlsxBuf = generateFaireXlsx(exportProducts);
+      await db.insert(exports_).values({
+        id: exportId, platform: platform as any,
+        filePath: `exports/faire_${Date.now()}.xlsx`,
+        productCount: exportProducts.length, createdBy: "admin",
+      });
+      return new NextResponse(new Uint8Array(xlsxBuf), {
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="jaxy_faire_${datestamp}.xlsx"`,
+        },
+      });
+    }
+    case "amazon": {
+      const tsv = generateAmazonTsv(exportProducts);
+      await db.insert(exports_).values({
+        id: exportId, platform: platform as any,
+        filePath: `exports/amazon_${Date.now()}.tsv`,
+        productCount: exportProducts.length, createdBy: "admin",
+      });
+      return new NextResponse(tsv, {
+        headers: {
+          "Content-Type": "text/tab-separated-values",
+          "Content-Disposition": `attachment; filename="jaxy_amazon_${datestamp}.tsv"`,
+        },
+      });
+    }
     default:
       return NextResponse.json({ error: "Invalid platform. Use: shopify, faire, amazon" }, { status: 400 });
   }
-
-  // Save export record
-  const exportId = crypto.randomUUID();
-  await db.insert(exports_).values({
-    id: exportId,
-    platform: platform as any,
-    filePath: `exports/${platform}_${Date.now()}.${ext}`,
-    productCount: exportProducts.length,
-    createdBy: "admin",
-  });
-
-  return new NextResponse(csv, {
-    headers: {
-      "Content-Type": contentType,
-      "Content-Disposition": `attachment; filename="jaxy_${platform}_${new Date().toISOString().split("T")[0]}.${ext}"`,
-    },
-  });
 }
