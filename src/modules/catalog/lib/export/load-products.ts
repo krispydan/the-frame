@@ -2,6 +2,7 @@
  * Load products from DB in ExportProduct format.
  */
 import { db } from "@/lib/db";
+import { sqlite } from "@/lib/db";
 import { products, skus, images, imageTypes, tags } from "@/modules/catalog/schema";
 import { eq, inArray } from "drizzle-orm";
 import type { ExportProduct } from "./types";
@@ -37,6 +38,18 @@ export async function loadExportProducts(productIds?: string[]): Promise<ExportP
   const tagsByProduct = new Map<string, typeof allTags>();
   for (const t of allTags) { const arr = tagsByProduct.get(t.productId) || []; arr.push(t); tagsByProduct.set(t.productId, arr); }
 
+  // Load warehouse inventory quantities for all SKUs
+  const inventoryBySku = new Map<string, number>();
+  if (allSkuIds.length > 0) {
+    const invStmt = sqlite.prepare(
+      `SELECT sku_id, SUM(quantity) as total_qty FROM inventory WHERE location = 'warehouse' GROUP BY sku_id`
+    );
+    const invRows = invStmt.all() as { sku_id: string; total_qty: number }[];
+    for (const row of invRows) {
+      inventoryBySku.set(row.sku_id, row.total_qty);
+    }
+  }
+
   return allProducts.map((p): ExportProduct => {
     const productSkus = skusByProduct.get(p.id) || [];
     const productImages = productSkus.flatMap((s) => imgsBySku.get(s.id) || []);
@@ -51,6 +64,7 @@ export async function loadExportProducts(productIds?: string[]): Promise<ExportP
       skus: productSkus.map((s) => ({
         id: s.id, sku: s.sku, colorName: s.colorName, colorHex: s.colorHex,
         size: s.size, upc: s.upc, inStock: s.inStock,
+        inventoryQuantity: inventoryBySku.get(s.id) ?? 0,
       })),
       images: productImages.map((i) => ({
         id: i.id, skuId: i.skuId, filePath: i.filePath, width: i.width,

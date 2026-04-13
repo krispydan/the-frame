@@ -36,7 +36,7 @@ const JAXY_WEIGHT = "0.10";
 const JAXY_WEIGHT_UNIT = "lb";
 const JAXY_MADE_IN = "China";
 const JAXY_HS6 = "900410"; // HS6 code for sunglasses
-const JAXY_ON_HAND = "100";
+// Inventory is now loaded from the database per-SKU (ExportProduct.skus[].inventoryQuantity)
 
 // Faire SEO rule: 35–60 chars
 const TITLE_MIN = 35;
@@ -528,7 +528,7 @@ export function generateFaireCsv(exportProducts: ExportProduct[]): string {
       row.made_in_country = JAXY_MADE_IN;
       row.has_customization = "No";
       row.continue_selling_when_out_of_stock = "No";
-      row.on_hand_inventory = JAXY_ON_HAND;
+      row.on_hand_inventory = String(sku.inventoryQuantity ?? 0);
       row.tariff_code = JAXY_HS6;
 
       lines.push(rowToValues(row).map(escapeCsvField).join(","));
@@ -588,7 +588,7 @@ export function generateFaireXlsx(exportProducts: ExportProduct[]): Buffer {
       row.made_in_country = JAXY_MADE_IN;
       row.has_customization = "No";
       row.continue_selling_when_out_of_stock = "No";
-      row.on_hand_inventory = JAXY_ON_HAND;
+      row.on_hand_inventory = String(sku.inventoryQuantity ?? 0);
       row.tariff_code = JAXY_HS6;
 
       allRows.push(rowToValues(row));
