@@ -138,7 +138,13 @@ export async function POST(request: NextRequest) {
 
         const approvedImages = ep.images
           .filter((i) => i.status === "approved" && i.filePath)
-          .sort((a, b) => (b.isBest ? 1 : 0) - (a.isBest ? 1 : 0));
+          .sort((a, b) => {
+            // Prefer square images (purpose-built for Shopify), then cropped
+            const sourceRank = (s: string | null) => s === "square" ? 0 : s === "cropped" ? 1 : 2;
+            const sr = sourceRank(a.source) - sourceRank(b.source);
+            if (sr !== 0) return sr;
+            return (b.isBest ? 1 : 0) - (a.isBest ? 1 : 0);
+          });
 
         const tagString = ep.tags.map((t) => t.tagName).filter(Boolean).join(", ");
 

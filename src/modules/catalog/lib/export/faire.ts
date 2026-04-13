@@ -484,20 +484,16 @@ export function generateFaireCsv(exportProducts: ExportProduct[]): string {
     const description = buildFaireDescription(ep);
     const productType = mapFaireProductType(ep.product.gender);
 
-    // TODO(compilation-image): replace with a generated compilation image that
-    // shows all color variants of this product in one frame (hero image).
-    // For now we use the best approved image across the whole product.
-    const productHeroImage = pickBestImage(ep);
+    // Faire image strategy:
+    //   product_images = collection image (all colors in one frame) as hero,
+    //     then 1 front per color variant, then other angles
+    //   option_image = best cropped/square image for this specific variant
+    const faireProductImages = buildFaireImageList(ep);
+    const productImagesStr = faireProductImages.join(";");
 
     for (const sku of ep.skus) {
-      // Best image for this specific variant (approved first, isBest first)
-      const variantImg = ep.images
-        .filter((i) => i.skuId === sku.id && i.filePath)
-        .sort((a, b) => {
-          if (a.status === "approved" && b.status !== "approved") return -1;
-          if (b.status === "approved" && a.status !== "approved") return 1;
-          return (b.isBest ? 1 : 0) - (a.isBest ? 1 : 0);
-        })[0];
+      // Best image for this specific variant — prefer cropped, then square, then any
+      const variantImg = pickVariantImage(ep.images, sku.id);
       const optionImageUrl = absoluteImageUrl(variantImg?.filePath || null);
 
       const row = blankRow();
@@ -519,7 +515,7 @@ export function generateFaireCsv(exportProducts: ExportProduct[]): string {
       row.price_wholesale = JAXY_WHOLESALE_PRICE;
       row.price_retail = JAXY_RETAIL_PRICE;
       row.option_image = optionImageUrl;
-      row.product_images = productHeroImage || optionImageUrl;
+      row.product_images = productImagesStr || optionImageUrl;
       row.made_in_country = JAXY_MADE_IN;
       row.has_customization = "No";
       row.continue_selling_when_out_of_stock = "Yes";
@@ -533,13 +529,81 @@ export function generateFaireCsv(exportProducts: ExportProduct[]): string {
   return lines.join("\n");
 }
 
-function pickBestImage(ep: ExportProduct): string {
-  const best = ep.images
-    .filter((i) => i.filePath)
-    .sort((a, b) => {
-      if (a.status === "approved" && b.status !== "approved") return -1;
-      if (b.status === "approved" && a.status !== "approved") return 1;
-      return (b.isBest ? 1 : 0) - (a.isBest ? 1 : 0);
-    })[0];
-  return absoluteImageUrl(best?.filePath || null);
+/**
+ * Build the Faire product_images list in priority order:
+ *   1. Collection image (source='collection') — hero showing all colors
+ *   2. One front image per color variant (prefer cropped source)
+ *   3. Other angles (side, other-side, etc.) from first variant
+ *
+ * Returns array of absolute image URLs.
+ */
+function buildFaireImageList(ep: ExportProduct): string[] {
+  const approved = ep.images.filter((i) => i.status === "approved" && i.filePath);
+  const urls: string[] = [];
+  const usedIds = new Set<string>();
+
+  // 1. Collection image first (hero)
+  const collectionImg = approved.find((i) => i.source === "collection");
+  if (collectionImg) {
+    urls.push(absoluteImageUrl(collectionImg.filePath));
+    usedIds.add(collectionImg.id);
+  }
+
+  // 2. One front image per color variant (prefer cropped, then square, then any)
+  for (const sku of ep.skus) {
+    const frontImg = pickVariantImage(approved.filter((i) => !usedIds.has(i.id)), sku.id);
+    if (frontImg) {
+      urls.push(absoluteImageUrl(frontImg.filePath));
+      usedIds.add(frontImg.id);
+    }
+  }
+
+  // 3. Other angles from first SKU (side, other-side, back-crossed, etc.)
+  const firstSkuId = ep.skus[0]?.id;
+  if (firstSkuId) {
+    const otherAngles = approved
+      .filter((i) =>
+        i.skuId === firstSkuId &&
+        !usedIds.has(i.id) &&
+        i.imageTypeSlug &&
+        i.imageTypeSlug !== "front" &&
+        (i.source === "cropped" || i.source === "square")
+      )
+      .sort((a, b) => {
+        const anglePriority = ["side", "other-side", "back-crossed", "crossed", "top", "inside", "closed", "above"];
+        const aIdx = anglePriority.indexOf(a.imageTypeSlug || "");
+        const bIdx = anglePriority.indexOf(b.imageTypeSlug || "");
+        return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx);
+      });
+
+    for (const img of otherAngles) {
+      if (urls.length >= 10) break; // Faire max ~10 images
+      urls.push(absoluteImageUrl(img.filePath));
+      usedIds.add(img.id);
+    }
+  }
+
+  return urls;
+}
+
+type ExportImage = ExportProduct["images"][number];
+
+/**
+ * Pick the best image for a specific variant.
+ * Priority: cropped front > square front > any front > cropped any > any approved
+ */
+function pickVariantImage(images: ExportImage[], skuId: string): ExportImage | undefined {
+  const variantImgs = images.filter((i) => i.skuId === skuId && i.filePath);
+  if (variantImgs.length === 0) return undefined;
+
+  // Prefer front angle, then any; prefer cropped source, then square
+  const sourceRank = (s: string | null) => s === "cropped" ? 0 : s === "square" ? 1 : 2;
+  const angleRank = (a: string | null) => a === "front" ? 0 : a ? 1 : 2;
+
+  return variantImgs.sort((a, b) => {
+    const ad = angleRank(a.imageTypeSlug) * 10 + sourceRank(a.source);
+    const bd = angleRank(b.imageTypeSlug) * 10 + sourceRank(b.source);
+    if (ad !== bd) return ad - bd;
+    return (b.isBest ? 1 : 0) - (a.isBest ? 1 : 0);
+  })[0];
 }

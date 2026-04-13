@@ -59,7 +59,17 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
   for (const ep of exportProducts) {
     const handle = slugify(ep.product.name || ep.product.skuPrefix || ep.product.id);
     const tagString = ep.tags.map((t) => t.tagName).filter(Boolean).join(", ");
-    const allImages = ep.images.filter((i) => i.status === "approved").sort((a, b) => (b.isBest ? 1 : 0) - (a.isBest ? 1 : 0));
+    // Shopify: prefer square images (source='square'), fall back to any approved
+    const allImages = ep.images
+      .filter((i) => i.status === "approved" && i.filePath)
+      .sort((a, b) => {
+        // Square source first (purpose-built for Shopify)
+        const sourceRank = (s: string | null) => s === "square" ? 0 : s === "cropped" ? 1 : 2;
+        const sr = sourceRank(a.source) - sourceRank(b.source);
+        if (sr !== 0) return sr;
+        // Then isBest
+        return (b.isBest ? 1 : 0) - (a.isBest ? 1 : 0);
+      });
     const tagNames = ep.tags.map((t) => t.tagName).filter(Boolean) as string[];
 
     const variantPrice = channel === "wholesale"

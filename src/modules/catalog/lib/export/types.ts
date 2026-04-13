@@ -52,6 +52,8 @@ export interface ExportProduct {
     height: number | null;
     status: string | null;
     isBest: boolean | null;
+    source: string | null;
+    imageTypeSlug: string | null;
   }[];
   tags: {
     tagName: string | null;
