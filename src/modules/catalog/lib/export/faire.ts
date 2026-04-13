@@ -137,13 +137,8 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-// Cache-bust timestamp — forces CDN to refetch instead of serving stale 404s
-const CACHE_BUST = `v=${Date.now()}`;
-
 function absoluteImageUrl(filePath: string | null): string {
-  const url = catalogImageUrl(filePath);
-  if (!url) return "";
-  return `${url}?${CACHE_BUST}`;
+  return catalogImageUrl(filePath) || "";
 }
 
 // ── Tag/attribute extraction ──
