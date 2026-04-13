@@ -119,10 +119,13 @@ const FAIRE_FIELD_KEYS = [
 // ── CSV Helpers ──
 
 function escapeCsvField(value: string): string {
-  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
-    return `"${value.replace(/"/g, '""')}"`;
+  // Faire's CSV parser doesn't handle multiline quoted fields —
+  // replace newlines with spaces to keep everything on one line
+  const flat = value.replace(/\n+/g, " ").replace(/\s{2,}/g, " ").trim();
+  if (flat.includes(",") || flat.includes('"')) {
+    return `"${flat.replace(/"/g, '""')}"`;
   }
-  return value;
+  return flat;
 }
 
 function stripHtml(html: string): string {
@@ -287,7 +290,7 @@ export function buildFaireDescription(ep: ExportProduct): string {
   // 3. Keywords — plain comma-separated list
   parts.push(buildKeywordLine(ep));
 
-  return parts.join("\n\n");
+  return parts.join(" ");
 }
 
 function buildTagSentence(ep: ExportProduct): string {
