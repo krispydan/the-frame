@@ -613,10 +613,11 @@ export function generateFaireXlsx(exportProducts: ExportProduct[]): Buffer {
 /**
  * Build the Faire product_images list in priority order:
  *   1. Collection image (source='collection') — hero showing all colors
- *   2. One front image per color variant (prefer cropped source)
- *   3. Other angles (side, other-side, etc.) from first variant
+ *   2. Per color variant: front (square), side (square), name (square)
+ *      — not all colors will have side/name, that's fine
+ *   All non-collection images must be from source='square' only.
  *
- * Returns array of absolute image URLs.
+ * Returns array of absolute image URLs (max 10).
  */
 function buildFaireImageList(ep: ExportProduct): string[] {
   const approved = ep.images.filter((i) => i.status === "approved" && i.filePath);
@@ -630,72 +631,25 @@ function buildFaireImageList(ep: ExportProduct): string[] {
     usedIds.add(collectionImg.id);
   }
 
-  // 2. One front image per color variant (prefer cropped, then square, then any)
-  for (const sku of ep.skus) {
-    const frontImg = pickVariantImage(approved.filter((i) => !usedIds.has(i.id)), sku.id);
-    if (frontImg) {
-      urls.push(absoluteImageUrl(frontImg.filePath));
-      usedIds.add(frontImg.id);
-    }
-  }
+  // 2. Per color: front → side → name (square source only)
+  const angleOrder = ["front", "side", "name"];
 
-  // 3. Other angles — 1 side + 1 inside per color variant, then remaining angles
-  const anglePriority = ["side", "inside", "other-side", "back-crossed", "crossed", "top", "closed", "above"];
-
-  // First pass: one side and one inside per color
   for (const sku of ep.skus) {
     if (urls.length >= 10) break;
-    const skuAngles = approved
-      .filter((i) =>
-        i.skuId === sku.id &&
-        !usedIds.has(i.id) &&
-        i.imageTypeSlug &&
-        i.imageTypeSlug !== "front" &&
-        (i.source === "cropped" || i.source === "square")
-      )
-      .sort((a, b) => {
-        const aIdx = anglePriority.indexOf(a.imageTypeSlug || "");
-        const bIdx = anglePriority.indexOf(b.imageTypeSlug || "");
-        return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx);
-      });
 
-    // Pick at most 1 side + 1 inside for this color
-    let addedSide = false;
-    let addedInside = false;
-    for (const img of skuAngles) {
+    const skuSquare = approved.filter((i) =>
+      i.skuId === sku.id &&
+      i.source === "square" &&
+      !usedIds.has(i.id)
+    );
+
+    for (const angle of angleOrder) {
       if (urls.length >= 10) break;
-      const slug = img.imageTypeSlug || "";
-      if (slug === "side" && !addedSide) {
+      const img = skuSquare.find((i) => i.imageTypeSlug === angle);
+      if (img) {
         urls.push(absoluteImageUrl(img.filePath));
         usedIds.add(img.id);
-        addedSide = true;
-      } else if (slug === "inside" && !addedInside) {
-        urls.push(absoluteImageUrl(img.filePath));
-        usedIds.add(img.id);
-        addedInside = true;
       }
-      if (addedSide && addedInside) break;
-    }
-  }
-
-  // Second pass: fill remaining slots with any other angles from any SKU
-  if (urls.length < 10) {
-    const remaining = approved
-      .filter((i) =>
-        !usedIds.has(i.id) &&
-        i.imageTypeSlug &&
-        i.imageTypeSlug !== "front" &&
-        (i.source === "cropped" || i.source === "square")
-      )
-      .sort((a, b) => {
-        const aIdx = anglePriority.indexOf(a.imageTypeSlug || "");
-        const bIdx = anglePriority.indexOf(b.imageTypeSlug || "");
-        return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx);
-      });
-    for (const img of remaining) {
-      if (urls.length >= 10) break;
-      urls.push(absoluteImageUrl(img.filePath));
-      usedIds.add(img.id);
     }
   }
 
