@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Wand2, Plus, X, Tag, Zap } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Wand2, Plus, X, Tag, Zap, Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { TAG_PRESETS } from "@/modules/catalog/lib/tag-presets";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,17 +18,62 @@ const DIMENSIONS = [
   "lens_type", "gender", "season", "other",
 ];
 
+const DIMENSION_LABELS: Record<string, string> = {
+  frame_shape: "Frame Shape",
+  style: "Style",
+  occasion: "Occasion",
+  material: "Material",
+  lens_type: "Lens Type",
+  gender: "Gender",
+  season: "Season",
+  other: "Other",
+};
+
+/** Fetch the best front image URL for a product's first SKU */
+async function fetchProductThumb(productId: string): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/v1/catalog/products/${productId}`);
+    const data = await res.json();
+    const skus = data.skus || [];
+    if (skus.length === 0) return null;
+
+    // Try to find an approved front image from any SKU
+    const imgRes = await fetch(`/api/v1/media?productId=${productId}&status=approved&limit=1`);
+    const imgData = await imgRes.json();
+    if (imgData.images?.length > 0 && imgData.images[0].url) {
+      return imgData.images[0].url;
+    }
+
+    // Fallback: try any image
+    const anyRes = await fetch(`/api/v1/media?productId=${productId}&limit=1`);
+    const anyData = await anyRes.json();
+    if (anyData.images?.length > 0 && anyData.images[0].url) {
+      return anyData.images[0].url;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function TagManagementTab({
-  productId, tags, onRefresh,
+  productId, tags, onRefresh, productName, skuPrefix,
 }: {
   productId: string;
   tags: TagItem[];
   onRefresh: () => void;
+  productName?: string | null;
+  skuPrefix?: string | null;
 }) {
   const [newTag, setNewTag] = useState("");
   const [newDimension, setNewDimension] = useState("style");
   const [suggesting, setSuggesting] = useState(false);
   const [suggestions, setSuggestions] = useState<{ tagName: string; dimension: string }[]>([]);
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchProductThumb(productId).then(setThumbUrl);
+  }, [productId]);
 
   const grouped = tags.reduce<Record<string, TagItem[]>>((acc, t) => {
     const dim = t.dimension || "other";
@@ -50,6 +95,15 @@ export function TagManagementTab({
 
   const handleDeleteTag = async (tagId: string) => {
     await fetch(`/api/v1/catalog/tags/${tagId}`, { method: "DELETE" });
+    onRefresh();
+  };
+
+  const handleAddPreset = async (tagName: string, dimension: string) => {
+    await fetch("/api/v1/catalog/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, tagName, dimension, source: "manual" }),
+    });
     onRefresh();
   };
 
@@ -79,130 +133,159 @@ export function TagManagementTab({
     onRefresh();
   };
 
+  // Check which presets are already applied
+  const existingTagNames = new Set(tags.map((t) => t.tagName?.toLowerCase()));
+
   return (
-    <div className="space-y-4">
-      {/* Add tag + AI suggest */}
-      <div className="flex items-center gap-3">
+    <div className="space-y-6">
+      {/* Product header with thumbnail */}
+      <div className="flex items-start gap-5 bg-muted/30 rounded-lg p-4">
+        {/* Thumbnail */}
+        <div className="w-28 h-28 rounded-lg bg-white border overflow-hidden flex-shrink-0 flex items-center justify-center">
+          {thumbUrl ? (
+            <img src={thumbUrl} alt={productName || "Product"} className="w-full h-full object-contain p-1" />
+          ) : (
+            <Tag className="h-8 w-8 text-muted-foreground/30" />
+          )}
+        </div>
+
+        {/* Product info + summary */}
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-lg truncate">{productName || skuPrefix || "Untitled Product"}</h3>
+          <p className="text-sm text-muted-foreground">{skuPrefix}</p>
+          <div className="flex items-center gap-2 mt-2">
+            <Badge variant="outline" className="text-xs">
+              {tags.length} tag{tags.length !== 1 ? "s" : ""}
+            </Badge>
+            {Object.keys(grouped).map((dim) => (
+              <Badge key={dim} variant="secondary" className="text-[10px]">
+                {DIMENSION_LABELS[dim] || dim}: {grouped[dim].length}
+              </Badge>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 mt-3">
+            <Button size="sm" variant="outline" onClick={handleSuggest} disabled={suggesting}>
+              <Wand2 className="h-3 w-3 mr-1" /> {suggesting ? "Suggesting..." : "AI Suggest"}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* AI Suggestions banner */}
+      {suggestions.length > 0 && (
+        <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Wand2 className="h-4 w-4 text-blue-600" />
+            <span className="text-sm font-medium text-blue-900 dark:text-blue-100">AI Suggestions</span>
+            <span className="text-xs text-blue-600">Click to add</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {suggestions.map((s) => (
+              <button
+                key={`${s.dimension}-${s.tagName}`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm
+                  bg-white dark:bg-blue-900/50 border border-blue-200 dark:border-blue-700
+                  hover:bg-blue-100 dark:hover:bg-blue-800/50 transition-colors cursor-pointer"
+                onClick={() => handleAcceptSuggestion(s.tagName, s.dimension)}
+              >
+                <Plus className="h-3 w-3 text-blue-500" />
+                <span>{s.tagName}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {DIMENSION_LABELS[s.dimension] || s.dimension}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tag dimensions - each as a row */}
+      <div className="space-y-3">
+        {DIMENSIONS.map((dim) => {
+          const items = grouped[dim] || [];
+          const presets = TAG_PRESETS[dim] || [];
+          const availablePresets = presets.filter((p) => !existingTagNames.has(p.toLowerCase()));
+
+          return (
+            <div
+              key={dim}
+              className="flex items-start gap-4 py-3 px-4 rounded-lg border bg-card hover:bg-accent/5 transition-colors"
+            >
+              {/* Dimension label */}
+              <div className="w-28 flex-shrink-0 pt-0.5">
+                <span className="text-sm font-medium text-muted-foreground">
+                  {DIMENSION_LABELS[dim] || dim}
+                </span>
+              </div>
+
+              {/* Active tags + presets */}
+              <div className="flex-1 flex flex-wrap items-center gap-1.5 min-h-[32px]">
+                {/* Active tags */}
+                {items.map((t) => (
+                  <span
+                    key={t.id}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-sm
+                      bg-primary text-primary-foreground"
+                  >
+                    <Check className="h-3 w-3" />
+                    {t.tagName}
+                    <button
+                      className="ml-0.5 hover:text-destructive-foreground/70 transition-colors"
+                      onClick={() => handleDeleteTag(t.id)}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+
+                {/* Available presets as toggleable chips */}
+                {availablePresets.map((preset) => (
+                  <button
+                    key={preset}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-sm
+                      border border-dashed border-muted-foreground/30 text-muted-foreground
+                      hover:border-primary/50 hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
+                    onClick={() => handleAddPreset(preset, dim)}
+                  >
+                    <Plus className="h-3 w-3" />
+                    {preset}
+                  </button>
+                ))}
+
+                {/* Empty state */}
+                {items.length === 0 && availablePresets.length === 0 && (
+                  <span className="text-xs text-muted-foreground/50 italic">No tags</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Custom tag input */}
+      <div className="flex items-center gap-2 pt-2 border-t">
+        <span className="text-sm text-muted-foreground whitespace-nowrap">Add custom:</span>
         <Select value={newDimension} onValueChange={(v) => v && setNewDimension(v)}>
-          <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-[140px] h-8 text-sm">
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             {DIMENSIONS.map((d) => (
-              <SelectItem key={d} value={d}>{d.replace("_", " ")}</SelectItem>
+              <SelectItem key={d} value={d}>{DIMENSION_LABELS[d] || d}</SelectItem>
             ))}
           </SelectContent>
         </Select>
         <Input
-          placeholder="Add tag..."
+          placeholder="Tag name..."
           value={newTag}
           onChange={(e) => setNewTag(e.target.value)}
-          className="max-w-[200px]"
+          className="max-w-[200px] h-8 text-sm"
           onKeyDown={(e) => e.key === "Enter" && handleAddTag()}
         />
-        <Button size="sm" onClick={handleAddTag}><Plus className="h-3 w-3 mr-1" /> Add</Button>
-        <div className="flex-1" />
-        <Button size="sm" variant="outline" onClick={handleSuggest} disabled={suggesting}>
-          <Wand2 className="h-3 w-3 mr-1" /> {suggesting ? "Suggesting..." : "AI Suggest"}
+        <Button size="sm" variant="outline" className="h-8" onClick={handleAddTag} disabled={!newTag.trim()}>
+          <Plus className="h-3 w-3 mr-1" /> Add
         </Button>
       </div>
-
-      {/* AI Suggestions */}
-      {suggestions.length > 0 && (
-        <Card className="border-dashed border-primary/50">
-          <CardHeader><CardTitle className="text-sm">AI Suggestions</CardTitle></CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {suggestions.map((s) => (
-                <Badge
-                  key={`${s.dimension}-${s.tagName}`}
-                  variant="outline"
-                  className="cursor-pointer hover:bg-primary/10 pr-1"
-                  onClick={() => handleAcceptSuggestion(s.tagName, s.dimension)}
-                >
-                  {s.tagName}
-                  <span className="text-[10px] text-muted-foreground ml-1">({s.dimension.replace("_", " ")})</span>
-                  <Plus className="h-3 w-3 ml-1" />
-                </Badge>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Existing tags */}
-      {Object.keys(grouped).length === 0 ? (
-        <Card>
-          <CardContent className="p-12 text-center text-muted-foreground">
-            <Tag className="h-12 w-12 mx-auto opacity-50 mb-2" />
-            <p>No tags yet. Add manually or use AI suggestions.</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Show preset-only cards for dimensions that have presets but no tags yet */}
-          {DIMENSIONS.filter((d) => TAG_PRESETS[d] && !grouped[d]).map((dim) => (
-            <Card key={dim}>
-              <CardHeader>
-                <CardTitle className="text-sm capitalize">{dim.replace("_", " ")}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-wrap gap-1.5">
-                  {TAG_PRESETS[dim].map((preset) => (
-                    <Badge
-                      key={preset}
-                      variant="outline"
-                      className="cursor-pointer hover:bg-primary/10 text-[10px]"
-                      onClick={() => handleAcceptSuggestion(preset, dim)}
-                    >
-                      <Zap className="h-2.5 w-2.5 mr-0.5" /> {preset}
-                    </Badge>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-          {Object.entries(grouped).map(([dim, items]) => (
-            <Card key={dim}>
-              <CardHeader>
-                <CardTitle className="text-sm capitalize">{dim.replace("_", " ")}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex flex-wrap gap-2">
-                  {items.map((t) => (
-                    <Badge key={t.id} variant={t.source === "ai" ? "secondary" : "default"} className="pr-1">
-                      {t.tagName}
-                      <button
-                        className="ml-1 hover:text-destructive"
-                        onClick={() => handleDeleteTag(t.id)}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  ))}
-                </div>
-                {TAG_PRESETS[dim] && (() => {
-                  const existing = new Set(items.map((t) => t.tagName?.toLowerCase()));
-                  const available = TAG_PRESETS[dim].filter((p) => !existing.has(p.toLowerCase()));
-                  if (available.length === 0) return null;
-                  return (
-                    <div className="flex flex-wrap gap-1.5 pt-1 border-t">
-                      {available.map((preset) => (
-                        <Badge
-                          key={preset}
-                          variant="outline"
-                          className="cursor-pointer hover:bg-primary/10 text-[10px]"
-                          onClick={() => handleAcceptSuggestion(preset, dim)}
-                        >
-                          <Zap className="h-2.5 w-2.5 mr-0.5" /> {preset}
-                        </Badge>
-                      ))}
-                    </div>
-                  );
-                })()}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

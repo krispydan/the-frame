@@ -447,7 +447,7 @@ export default function ProductDetailPage() {
 
         {/* Tags Tab */}
         <TabsContent value="tags">
-          <TagManagementTab productId={productId!} tags={tagsList} onRefresh={loadProduct} />
+          <TagManagementTab productId={productId!} tags={tagsList} onRefresh={loadProduct} productName={product?.name} skuPrefix={product?.skuPrefix} />
         </TabsContent>
 
         {/* Keywords Tab */}
