@@ -147,7 +147,14 @@ export async function generateCollectionImage(
     const col = i % columns;
     const row = Math.floor(i / columns);
 
-    const resized = await sharp(sorted[i].buffer)
+    // Auto-crop transparent padding before resizing so the product
+    // fills the cell instead of being tiny with huge margins
+    const trimmed = await sharp(sorted[i].buffer)
+      .trim()
+      .png()
+      .toBuffer();
+
+    const resized = await sharp(trimmed)
       .resize({
         width: innerWidth,
         height: innerHeight,
