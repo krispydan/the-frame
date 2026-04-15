@@ -55,7 +55,7 @@ export async function POST(_request: NextRequest) {
           LEFT JOIN catalog_image_types cit ON ci.image_type_id = cit.id
           WHERE ci.sku_id = ?
             AND ci.file_path IS NOT NULL
-            AND ci.source = 'no_bg'
+            AND ci.source = 'cropped'
           ORDER BY
             CASE WHEN cit.slug = 'front' THEN 0 ELSE 1 END,
             CASE WHEN ci.status = 'approved' THEN 0 WHEN ci.status = 'review' THEN 1 ELSE 2 END,
