@@ -320,43 +320,61 @@ function buildTagSentence(ep: ExportProduct): string {
   return `Features ${rest}, and ${last} styling.`;
 }
 
+/**
+ * Build keyword line — max 10 keywords, ordered by specificity:
+ *   1. Shape + gender combo (highest buyer intent)
+ *   2. Polarized combo (if applicable)
+ *   3. Style combo (if applicable)
+ *   4. Shape alone
+ *   5. Gender alone
+ *   6. Generic high-volume terms to fill remaining slots
+ */
 function buildKeywordLine(ep: ExportProduct): string {
   const tagSet = getTagSet(ep);
   const style = detectStyleAdjective(tagSet);
   const shape = detectFrameShape(ep, tagSet);
   const polar = isPolarized(ep, tagSet);
   const gender = ep.product.gender?.toLowerCase().trim();
+  const shapeName = shape ? (shape === "cat-eye" ? "cat eye" : shape) : "";
 
-  const base = [
-    "sunglasses",
-    "wholesale sunglasses",
-    "designer sunglasses",
-    "trendy sunglasses",
-    "boutique eyewear",
-  ];
-  if (gender === "women" || gender === "womens" || gender === "women's") {
-    base.push("womens sunglasses", "sunglasses women", "women's sunglasses");
-  } else if (gender === "men" || gender === "mens" || gender === "men's") {
-    base.push("mens sunglasses", "sunglasses men", "men's sunglasses");
-  } else {
-    base.push("womens sunglasses", "mens sunglasses", "unisex sunglasses");
-  }
-  if (shape) {
-    const s = shape === "cat-eye" ? "cat eye" : shape;
-    base.push(`${s} sunglasses`, `${s} sunglasses women`);
-  }
-  if (polar) base.push("polarized sunglasses", "polarized sunglasses women");
-  if (style) base.push(`${style} sunglasses`);
-  // Evergreen high-volume Faire search terms
-  base.push("retro sunglasses", "vintage sunglasses", "aviator sunglasses", "oversized sunglasses");
+  const isWomen = gender === "women" || gender === "womens" || gender === "women's";
+  const isMen = gender === "men" || gender === "mens" || gender === "men's";
+  const genderWord = isWomen ? "women" : isMen ? "men" : "";
 
-  // Dedupe while preserving order
+  // Ordered by specificity — most specific first
+  const ranked: string[] = [];
+
+  // 1. Shape + gender (highest intent)
+  if (shapeName && genderWord) ranked.push(`${shapeName} sunglasses ${genderWord}`);
+
+  // 2. Polarized combos
+  if (polar && genderWord) ranked.push(`polarized sunglasses ${genderWord}`);
+  if (polar) ranked.push("polarized sunglasses");
+
+  // 3. Style combos
+  if (style && shapeName) ranked.push(`${style} ${shapeName} sunglasses`);
+  if (style) ranked.push(`${style} sunglasses`);
+
+  // 4. Shape alone
+  if (shapeName) ranked.push(`${shapeName} sunglasses`);
+
+  // 5. Gender alone
+  if (isWomen) ranked.push("womens sunglasses");
+  else if (isMen) ranked.push("mens sunglasses");
+
+  // 6. Generic high-volume fill
+  ranked.push("sunglasses", "wholesale sunglasses", "boutique eyewear", "designer sunglasses");
+
+  // Dedupe, cap at 10
   const seen = new Set<string>();
-  const out = base.filter((k) => {
-    if (seen.has(k)) return false;
+  const out: string[] = [];
+  for (const k of ranked) {
+    if (seen.has(k)) continue;
     seen.add(k);
-    return true;
-  });
+    out.push(k);
+    if (out.length >= 10) break;
+  }
+
   return `Keywords: ${out.join(", ")}.`;
 }
 
