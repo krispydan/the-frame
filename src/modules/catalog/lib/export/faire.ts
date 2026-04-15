@@ -36,6 +36,15 @@ const JAXY_WEIGHT = "0.10";
 const JAXY_WEIGHT_UNIT = "lb";
 const JAXY_MADE_IN = "China";
 const JAXY_HS6 = "900410"; // HS6 code for sunglasses
+const FAIRE_MAX_DESCRIPTION = 3000;
+
+/** GTIN must be 8, 12, 13, or 14 digits. Return empty string if invalid. */
+function validGtin(upc: string | null | undefined): string {
+  if (!upc) return "";
+  const digits = upc.replace(/\D/g, "");
+  if ([8, 12, 13, 14].includes(digits.length)) return digits;
+  return "";
+}
 // Inventory is now loaded from the database per-SKU (ExportProduct.skus[].inventoryQuantity)
 
 // Faire SEO rule: 35–60 chars
@@ -291,7 +300,12 @@ export function buildFaireDescription(ep: ExportProduct): string {
   // 3. Keywords — plain comma-separated list
   parts.push(buildKeywordLine(ep));
 
-  return parts.join(" ");
+  const full = parts.join(" ");
+  if (full.length <= FAIRE_MAX_DESCRIPTION) return full;
+  // Trim keywords block first, then hard-truncate if still over
+  const withoutKeywords = parts.slice(0, -1).join(" ");
+  if (withoutKeywords.length <= FAIRE_MAX_DESCRIPTION) return withoutKeywords;
+  return withoutKeywords.slice(0, FAIRE_MAX_DESCRIPTION - 3) + "...";
 }
 
 function buildTagSentence(ep: ExportProduct): string {
@@ -513,7 +527,7 @@ export function generateFaireCsv(exportProducts: ExportProduct[]): string {
       row.item_weight_unit = JAXY_WEIGHT_UNIT;
       row.option_status = "Published";
       row.sku = sku.sku || "";
-      row.gtin = sku.upc || "";
+      row.gtin = validGtin(sku.upc);
       row.option_1_name = "Color";
       row.option_1_value = sku.colorName || "Default";
       row.price_wholesale = JAXY_WHOLESALE_PRICE;
@@ -573,7 +587,7 @@ export function generateFaireXlsx(exportProducts: ExportProduct[]): Buffer {
       row.item_weight_unit = JAXY_WEIGHT_UNIT;
       row.option_status = "Published";
       row.sku = sku.sku || "";
-      row.gtin = sku.upc || "";
+      row.gtin = validGtin(sku.upc);
       row.option_1_name = "Color";
       row.option_1_value = sku.colorName || "Default";
       row.price_wholesale = JAXY_WHOLESALE_PRICE;
@@ -624,26 +638,61 @@ function buildFaireImageList(ep: ExportProduct): string[] {
     }
   }
 
-  // 3. Other angles from first SKU (side, other-side, back-crossed, etc.)
-  const firstSkuId = ep.skus[0]?.id;
-  if (firstSkuId) {
-    const otherAngles = approved
+  // 3. Other angles — 1 side + 1 inside per color variant, then remaining angles
+  const anglePriority = ["side", "inside", "other-side", "back-crossed", "crossed", "top", "closed", "above"];
+
+  // First pass: one side and one inside per color
+  for (const sku of ep.skus) {
+    if (urls.length >= 10) break;
+    const skuAngles = approved
       .filter((i) =>
-        i.skuId === firstSkuId &&
+        i.skuId === sku.id &&
         !usedIds.has(i.id) &&
         i.imageTypeSlug &&
         i.imageTypeSlug !== "front" &&
         (i.source === "cropped" || i.source === "square")
       )
       .sort((a, b) => {
-        const anglePriority = ["side", "other-side", "back-crossed", "crossed", "top", "inside", "closed", "above"];
         const aIdx = anglePriority.indexOf(a.imageTypeSlug || "");
         const bIdx = anglePriority.indexOf(b.imageTypeSlug || "");
         return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx);
       });
 
-    for (const img of otherAngles) {
-      if (urls.length >= 10) break; // Faire max ~10 images
+    // Pick at most 1 side + 1 inside for this color
+    let addedSide = false;
+    let addedInside = false;
+    for (const img of skuAngles) {
+      if (urls.length >= 10) break;
+      const slug = img.imageTypeSlug || "";
+      if (slug === "side" && !addedSide) {
+        urls.push(absoluteImageUrl(img.filePath));
+        usedIds.add(img.id);
+        addedSide = true;
+      } else if (slug === "inside" && !addedInside) {
+        urls.push(absoluteImageUrl(img.filePath));
+        usedIds.add(img.id);
+        addedInside = true;
+      }
+      if (addedSide && addedInside) break;
+    }
+  }
+
+  // Second pass: fill remaining slots with any other angles from any SKU
+  if (urls.length < 10) {
+    const remaining = approved
+      .filter((i) =>
+        !usedIds.has(i.id) &&
+        i.imageTypeSlug &&
+        i.imageTypeSlug !== "front" &&
+        (i.source === "cropped" || i.source === "square")
+      )
+      .sort((a, b) => {
+        const aIdx = anglePriority.indexOf(a.imageTypeSlug || "");
+        const bIdx = anglePriority.indexOf(b.imageTypeSlug || "");
+        return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx);
+      });
+    for (const img of remaining) {
+      if (urls.length >= 10) break;
       urls.push(absoluteImageUrl(img.filePath));
       usedIds.add(img.id);
     }
@@ -655,15 +704,16 @@ function buildFaireImageList(ep: ExportProduct): string[] {
 type ExportImage = ExportProduct["images"][number];
 
 /**
- * Pick the best image for a specific variant.
- * Priority: cropped front > square front > any front > cropped any > any approved
+ * Pick the best image for a specific variant (used for option_image / color swatch).
+ * Priority: square front > square any > cropped front > any front > any approved
+ * Uses square (grey background) for cleaner color swatches.
  */
 function pickVariantImage(images: ExportImage[], skuId: string): ExportImage | undefined {
   const variantImgs = images.filter((i) => i.skuId === skuId && i.filePath);
   if (variantImgs.length === 0) return undefined;
 
-  // Prefer front angle, then any; prefer cropped source, then square
-  const sourceRank = (s: string | null) => s === "cropped" ? 0 : s === "square" ? 1 : 2;
+  // Prefer square source for color swatches, then cropped
+  const sourceRank = (s: string | null) => s === "square" ? 0 : s === "cropped" ? 1 : 2;
   const angleRank = (a: string | null) => a === "front" ? 0 : a ? 1 : 2;
 
   return variantImgs.sort((a, b) => {
