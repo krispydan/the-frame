@@ -297,15 +297,16 @@ export function buildFaireDescription(ep: ExportProduct): string {
   const tagSentence = buildTagSentence(ep);
   if (tagSentence) parts.push(tagSentence);
 
-  // 3. Keywords — plain comma-separated list
-  parts.push(buildKeywordLine(ep));
+  // 3. Keywords — pushed to bottom with spacing
+  const keywords = buildKeywordLine(ep);
 
-  const full = parts.join(" ");
+  // Join description + tags with double line break, then 6 line breaks before keywords
+  const body = parts.join("\n\n");
+  const full = `${body}\n\n\n\n\n\n${keywords}`;
   if (full.length <= FAIRE_MAX_DESCRIPTION) return full;
   // Trim keywords block first, then hard-truncate if still over
-  const withoutKeywords = parts.slice(0, -1).join(" ");
-  if (withoutKeywords.length <= FAIRE_MAX_DESCRIPTION) return withoutKeywords;
-  return withoutKeywords.slice(0, FAIRE_MAX_DESCRIPTION - 3) + "...";
+  if (body.length <= FAIRE_MAX_DESCRIPTION) return body;
+  return body.slice(0, FAIRE_MAX_DESCRIPTION - 3) + "...";
 }
 
 function buildTagSentence(ep: ExportProduct): string {
