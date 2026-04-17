@@ -80,24 +80,21 @@ export async function POST(request: NextRequest) {
   const ext = path.posix.extname(row.file_path);
   const newFilePath = path.posix.join(dir, `${newChecksum}${ext}`);
 
-  // If the new path already exists on disk and overwrite not set, 409
-  if (!overwrite) {
-    const existing = await imageStat(newFilePath);
-    if (existing.exists) {
+  // The target path is content-addressed. If a file already exists at
+  // the new path, it IS the same bytes — skip the write (unless overwrite
+  // is explicitly set to force a re-write). The DB row still gets updated
+  // below so the row points at the on-disk file.
+  const existing = await imageStat(newFilePath);
+  let wrote = false;
+  if (!existing.exists || overwrite) {
+    try {
+      await saveImage(buffer, newFilePath);
+      wrote = true;
+    } catch (err) {
       return NextResponse.json({
-        error: "target path exists",
-        newFilePath,
-        size: existing.size,
-      }, { status: 409 });
+        error: err instanceof Error ? err.message : String(err),
+      }, { status: 500 });
     }
-  }
-
-  try {
-    await saveImage(buffer, newFilePath);
-  } catch (err) {
-    return NextResponse.json({
-      error: err instanceof Error ? err.message : String(err),
-    }, { status: 500 });
   }
 
   sqlite.prepare(`
@@ -114,5 +111,6 @@ export async function POST(request: NextRequest) {
     oldChecksum: row.checksum,
     newChecksum,
     size: buffer.length,
+    wroteFile: wrote,
   });
 }
