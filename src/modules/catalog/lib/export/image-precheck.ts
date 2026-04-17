@@ -51,21 +51,29 @@ export interface MissingImageFile {
  * For each product, verify every approved image's filePath resolves to
  * a real file on disk. Returns products with at least one missing file.
  * Parallelised in batches of 50 to avoid thrashing the event loop.
+ *
+ * @param sources - if provided, only images with `source IN sources` are
+ *   checked. This avoids false positives for platforms that don't emit
+ *   every source (e.g. Faire ships square + collection only, so a
+ *   missing `raw` file is irrelevant for its CSV upload).
  */
 export async function findProductsWithMissingImageFiles(
   products: ExportProduct[],
+  sources?: string[],
 ): Promise<MissingImageFile[]> {
-  const out: MissingImageFile[] = [];
+  const sourceSet = sources && sources.length > 0 ? new Set(sources) : null;
+  const isRelevant = (src: string | null | undefined): boolean =>
+    sourceSet === null || (src != null && sourceSet.has(src));
 
   // Gather every approved image across all products and stat in batches.
   type Check = { productId: string; filePath: string; source: string | null };
   const checks: Check[] = [];
   for (const p of products) {
     for (const i of p.images) {
-      if (i.status === "approved" && i.filePath) {
-        // image source isn't on the ExportProduct image shape yet; fall back to null.
-        checks.push({ productId: p.product.id, filePath: i.filePath, source: (i as { source?: string | null }).source ?? null });
-      }
+      if (i.status !== "approved" || !i.filePath) continue;
+      const src = (i as { source?: string | null }).source ?? null;
+      if (!isRelevant(src)) continue;
+      checks.push({ productId: p.product.id, filePath: i.filePath, source: src });
     }
   }
 
@@ -77,11 +85,15 @@ export async function findProductsWithMissingImageFiles(
     for (const [fp, ok] of results) existsMap.set(fp, ok);
   }
 
+  const out: MissingImageFile[] = [];
   for (const p of products) {
     const missing: { source: string | null; filePath: string }[] = [];
     for (const i of p.images) {
-      if (i.status === "approved" && i.filePath && existsMap.get(i.filePath) === false) {
-        missing.push({ source: (i as { source?: string | null }).source ?? null, filePath: i.filePath });
+      if (i.status !== "approved" || !i.filePath) continue;
+      const src = (i as { source?: string | null }).source ?? null;
+      if (!isRelevant(src)) continue;
+      if (existsMap.get(i.filePath) === false) {
+        missing.push({ source: src, filePath: i.filePath });
       }
     }
     if (missing.length > 0) {

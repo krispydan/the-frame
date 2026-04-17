@@ -35,8 +35,16 @@ export async function GET(
 
     // Cross-check: every approved image's file must exist on disk, or the
     // platform's fetcher will 404 on upload. Fold any missing files into
-    // the per-product validations as blocked issues.
-    const missingFiles = await findProductsWithMissingImageFiles(exportProducts);
+    // the per-product validations as blocked issues. Scope the check to
+    // only the sources each platform actually emits in its CSV — e.g.
+    // Faire only ships `square` + `collection`, so a missing `raw` file
+    // isn't a blocker for the Faire upload.
+    const platformSources: Record<string, string[] | undefined> = {
+      faire: ["square", "collection"],
+      shopify: undefined, // all approved images
+      amazon: undefined,  // all approved images
+    };
+    const missingFiles = await findProductsWithMissingImageFiles(exportProducts, platformSources[platform]);
     if (missingFiles.length > 0) {
       const byId = new Map(missingFiles.map((m) => [m.productId, m] as const));
       for (const v of validations) {
