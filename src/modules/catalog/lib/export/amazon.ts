@@ -90,7 +90,7 @@ export function generateAmazonTsv(exportProducts: ExportProduct[]): string {
     }
 
     for (const sku of ep.skus) {
-      const skuImages = ep.images.filter((i) => i.skuId === sku.id).sort((a, b) => (b.isBest ? 1 : 0) - (a.isBest ? 1 : 0)).map((i) => i.filePath || "");
+      const skuImages = ep.images.filter((i) => i.skuId === sku.id && i.status === "approved" && i.filePath).sort((a, b) => (b.isBest ? 1 : 0) - (a.isBest ? 1 : 0)).map((i) => i.filePath || "");
       const row: Record<string, string> = {
         item_sku: sku.sku || "", external_product_id: sku.upc || "",
         external_product_id_type: sku.upc ? "UPC" : "", item_name: ep.product.name || parentSku,

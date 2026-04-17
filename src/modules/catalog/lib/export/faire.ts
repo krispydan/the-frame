@@ -409,9 +409,9 @@ export function validateForFaire(product: ExportProduct): ProductValidationResul
   if (product.skus.length === 0) {
     issues.push({ field: "skus", message: "No SKUs found", severity: "blocked" });
   }
-  const approvedImages = product.images.filter((i) => i.filePath);
+  const approvedImages = product.images.filter((i) => i.status === "approved" && i.filePath);
   if (approvedImages.length === 0) {
-    issues.push({ field: "images", message: "At least one image required", severity: "blocked" });
+    issues.push({ field: "images", message: "At least one approved image required", severity: "blocked" });
   }
 
   return {
@@ -682,7 +682,10 @@ type ExportImage = ExportProduct["images"][number];
  * Uses square (grey background) for cleaner color swatches.
  */
 function pickVariantImage(images: ExportImage[], skuId: string): ExportImage | undefined {
-  const variantImgs = images.filter((i) => i.skuId === skuId && i.filePath);
+  // Filter to approved only — superseded rows still have valid-looking
+  // file_paths but their files have been superseded on disk, so Faire
+  // would 404 on them.
+  const variantImgs = images.filter((i) => i.skuId === skuId && i.filePath && i.status === "approved");
   if (variantImgs.length === 0) return undefined;
 
   // Prefer square source for color swatches, then cropped
