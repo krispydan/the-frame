@@ -6,7 +6,7 @@ import { loadExportProducts } from "@/modules/catalog/lib/export/load-products";
 import { generateShopifyCSV, validateProductsForShopify } from "@/modules/catalog/lib/export/shopify";
 import { generateFaireCsv, generateFaireXlsx, validateForFaire } from "@/modules/catalog/lib/export/faire";
 import { generateAmazonTsv, validateForAmazon } from "@/modules/catalog/lib/export/amazon";
-import { findProductsMissingApprovedImages } from "@/modules/catalog/lib/export/image-precheck";
+import { findProductsMissingApprovedImages, findProductsWithMissingImageFiles } from "@/modules/catalog/lib/export/image-precheck";
 
 export async function GET(
   request: NextRequest,
@@ -32,7 +32,32 @@ export async function GET(
       case "amazon": validations = exportProducts.map(validateForAmazon); break;
       default: return NextResponse.json({ error: "Invalid platform" }, { status: 400 });
     }
-    return NextResponse.json({ validations, platform, imageBlockers });
+
+    // Cross-check: every approved image's file must exist on disk, or the
+    // platform's fetcher will 404 on upload. Fold any missing files into
+    // the per-product validations as blocked issues.
+    const missingFiles = await findProductsWithMissingImageFiles(exportProducts);
+    if (missingFiles.length > 0) {
+      const byId = new Map(missingFiles.map((m) => [m.productId, m] as const));
+      for (const v of validations) {
+        const mf = byId.get(v.productId);
+        if (!mf) continue;
+        const bySource = new Map<string, number>();
+        for (const f of mf.missing) {
+          const k = f.source ?? "unknown";
+          bySource.set(k, (bySource.get(k) ?? 0) + 1);
+        }
+        const breakdown = Array.from(bySource.entries()).map(([s, n]) => `${n} ${s}`).join(", ");
+        v.issues.push({
+          field: "images",
+          message: `${mf.missing.length} image file${mf.missing.length === 1 ? "" : "s"} missing on disk (${breakdown}) — will 404 on upload`,
+          severity: "blocked",
+        });
+        v.status = "blocked";
+      }
+    }
+
+    return NextResponse.json({ validations, platform, imageBlockers, missingFiles });
   }
 
   if (imageBlockers.length > 0 && !force) {
