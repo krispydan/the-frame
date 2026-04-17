@@ -44,8 +44,14 @@ SOURCE_TO_STAGE = {
     "collection": ("06_collection", ("jpg", "jpeg")),
 }
 
+# Cloudflare blocks Python-urllib by default; use a browser-like UA.
+UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+
 def api_get(path):
-    req = urllib.request.Request(f"{API_BASE}{path}", headers={"x-admin-key": ADMIN_KEY})
+    req = urllib.request.Request(
+        f"{API_BASE}{path}",
+        headers={"x-admin-key": ADMIN_KEY, "User-Agent": UA, "Accept": "application/json"},
+    )
     with urllib.request.urlopen(req, timeout=120) as resp:
         return json.loads(resp.read())
 
@@ -54,7 +60,12 @@ def api_post(path, body):
     req = urllib.request.Request(
         f"{API_BASE}{path}",
         data=data,
-        headers={"x-admin-key": ADMIN_KEY, "Content-Type": "application/json"},
+        headers={
+            "x-admin-key": ADMIN_KEY,
+            "Content-Type": "application/json",
+            "User-Agent": UA,
+            "Accept": "application/json",
+        },
         method="POST",
     )
     try:
@@ -75,7 +86,12 @@ def mcp_query(sql):
     req = urllib.request.Request(
         f"{API_BASE}/api/mcp",
         data=data,
-        headers={"x-api-key": MCP_KEY, "Content-Type": "application/json"},
+        headers={
+            "x-api-key": MCP_KEY,
+            "Content-Type": "application/json",
+            "User-Agent": UA,
+            "Accept": "application/json",
+        },
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=60) as resp:

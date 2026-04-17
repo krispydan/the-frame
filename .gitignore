@@ -47,3 +47,6 @@ next-env.d.ts
 the-frame.db
 data/scrape-import/
 .mcp.json
+
+# script output artifacts (regenerated per run)
+scripts/*-report.json
