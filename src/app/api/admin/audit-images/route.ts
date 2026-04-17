@@ -17,8 +17,9 @@ export const maxDuration = 120;
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
-import { imageStat } from "@/lib/storage/local";
+import { imageStat, imagesRoot, getFullPath } from "@/lib/storage/local";
 import { requireAdmin } from "@/lib/admin-auth";
+import { stat } from "fs/promises";
 
 type Row = {
   id: string;
@@ -42,6 +43,32 @@ function groupKey(r: Pick<Row, "sku_id" | "source" | "image_type_id" | "position
 export async function GET(request: NextRequest) {
   const deny = requireAdmin(request);
   if (deny) return deny;
+
+  const { searchParams } = request.nextUrl;
+  if (searchParams.get("debug") === "1") {
+    const testPath = searchParams.get("path") || "f9869e4b-9b17-419d-a893-a1e33b87212c/square/f8849cd5929998a8.jpg";
+    const resolved = getFullPath(testPath);
+    let statResult: unknown;
+    try {
+      const s = await stat(resolved);
+      statResult = { size: s.size, isFile: s.isFile(), mtime: s.mtime.toISOString() };
+    } catch (e: unknown) {
+      statResult = {
+        error: e instanceof Error ? e.message : String(e),
+        code: (e as NodeJS.ErrnoException)?.code,
+      };
+    }
+    const imageStatResult = await imageStat(testPath);
+    return NextResponse.json({
+      imagesRoot: imagesRoot(),
+      env_IMAGES_PATH: process.env.IMAGES_PATH ?? null,
+      cwd: process.cwd(),
+      testPath,
+      resolvedFullPath: resolved,
+      directStat: statResult,
+      imageStatHelper: imageStatResult,
+    });
+  }
 
   const rows = sqlite.prepare(`
     SELECT id, sku_id, source, image_type_id, position, file_path, checksum, created_at
