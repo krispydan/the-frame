@@ -71,6 +71,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
         return (b.isBest ? 1 : 0) - (a.isBest ? 1 : 0);
       });
     const tagNames = ep.tags.map((t) => t.tagName).filter(Boolean) as string[];
+    const lensTag = ep.tags.find((t) => t.dimension === "lens")?.tagName || "";
 
     const variantPrice = channel === "wholesale"
       ? ((ep.wholesalePrice && ep.wholesalePrice > 0) ? ep.wholesalePrice.toFixed(2) : "8.00")
@@ -92,6 +93,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       "Image Src": firstImage?.filePath || "", "Image Position": firstImage ? "1" : "",
       "Image Alt Text": firstImage ? buildSeoAltText(ep.product.name || "", firstSku?.colorName || null, tagNames, 0, allImages.length) : "",
       "SEO Title": ep.product.name || "", "SEO Description": ep.product.shortDescription || "",
+      "Metafield: custom.lens_type [single_line_text_field]": lensTag,
     });
 
     for (let i = 1; i < ep.skus.length; i++) {
@@ -101,6 +103,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
         "Variant SKU": ep.skus[i].sku || "", "Variant Price": variantPrice,
         "Variant Compare At Price": compareAtPrice,
         "Image Src": "", "Image Position": "", "Image Alt Text": "", "SEO Title": "", "SEO Description": "",
+        "Metafield: custom.lens_type [single_line_text_field]": "",
       });
     }
 
@@ -112,6 +115,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
         "Image Src": allImages[i].filePath || "", "Image Position": String(i + 1),
         "Image Alt Text": buildSeoAltText(ep.product.name || "", null, tagNames, i, allImages.length),
         "SEO Title": "", "SEO Description": "",
+        "Metafield: custom.lens_type [single_line_text_field]": "",
       });
     }
   }
