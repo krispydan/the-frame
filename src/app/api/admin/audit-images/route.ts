@@ -47,26 +47,44 @@ export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   if (searchParams.get("debug") === "1") {
     const testPath = searchParams.get("path") || "f9869e4b-9b17-419d-a893-a1e33b87212c/square/f8849cd5929998a8.jpg";
-    const resolved = getFullPath(testPath);
-    let statResult: unknown;
-    try {
-      const s = await stat(resolved);
-      statResult = { size: s.size, isFile: s.isFile(), mtime: s.mtime.toISOString() };
-    } catch (e: unknown) {
-      statResult = {
-        error: e instanceof Error ? e.message : String(e),
-        code: (e as NodeJS.ErrnoException)?.code,
-      };
+    const fs = await import("fs/promises");
+    const pathMod = await import("path");
+
+    async function statOne(abs: string) {
+      try {
+        const s = await fs.stat(abs);
+        return { size: s.size, isFile: s.isFile(), mtime: s.mtime.toISOString() };
+      } catch (e: unknown) {
+        return { error: (e as Error).message, code: (e as NodeJS.ErrnoException)?.code };
+      }
     }
-    const imageStatResult = await imageStat(testPath);
+    async function readdir(abs: string) {
+      try {
+        const d = await fs.readdir(abs);
+        return { count: d.length, sample: d.slice(0, 10) };
+      } catch (e: unknown) {
+        return { error: (e as Error).message, code: (e as NodeJS.ErrnoException)?.code };
+      }
+    }
+
+    const resolved = getFullPath(testPath);
     return NextResponse.json({
       imagesRoot: imagesRoot(),
       env_IMAGES_PATH: process.env.IMAGES_PATH ?? null,
+      env_DATA_DIR: process.env.DATA_DIR ?? null,
+      env_DATABASE_URL: process.env.DATABASE_URL ?? null,
+      env_DATABASE_PATH: process.env.DATABASE_PATH ?? null,
       cwd: process.cwd(),
       testPath,
-      resolvedFullPath: resolved,
-      directStat: statResult,
-      imageStatHelper: imageStatResult,
+      currentResolved: resolved,
+      stat_via_helper: await statOne(resolved),
+      stat_app_data_images: await statOne(pathMod.join("/app", "data", "images", testPath)),
+      stat_data_images: await statOne(pathMod.join("/data", "images", testPath)),
+      stat_data: await statOne("/data"),
+      readdir_data: await readdir("/data"),
+      readdir_data_images: await readdir("/data/images"),
+      readdir_app_data: await readdir("/app/data"),
+      readdir_app_data_images: await readdir("/app/data/images"),
     });
   }
 
