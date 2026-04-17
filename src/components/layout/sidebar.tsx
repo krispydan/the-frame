@@ -103,7 +103,7 @@ const bottomNav = [
 
 const ROLE_ALLOWED_HREFS: Record<string, string[]> = {
   owner: ["*"],
-  sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/pipeline", "/campaigns", "/campaigns/inbox", "/customers", "/brands"],
+  sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/pipeline", "/campaigns", "/campaigns/inbox", "/customers", "/brands", "/catalog"],
   warehouse: ["/dashboard", "/orders", "/catalog", "/media", "/inventory"],
   finance: ["/dashboard", "/orders", "/finance"],
   marketing: ["/dashboard", "/marketing", "/catalog", "/media", "/campaigns"],
