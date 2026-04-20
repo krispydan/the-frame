@@ -279,12 +279,48 @@ def main():
     print(f"Report: {out}")
 
     if not args.dry and not args.save_local_only and not report["errors"]:
-        print("\nNext steps:")
-        print("  1. curl -s -X POST https://theframe.getjaxy.com/api/admin/cleanup-images \\")
-        print("       -H 'x-admin-key: jaxy2026' -H 'Content-Type: application/json' \\")
-        print('       -d \'{"dryRun": false}\' | jq')
-        print("  2. curl -s -X POST https://theframe.getjaxy.com/api/v1/catalog/images/regen-collections | jq")
-        print("  3. Purge Cloudflare /api/images/* cache and re-export Faire/Shopify CSVs")
+        print("\n=== Auto-cleanup: demoting older duplicate rows (status='superseded') ===")
+        try:
+            req = urllib.request.Request(
+                f"{API_BASE}/api/admin/cleanup-images",
+                data=json.dumps({"dryRun": False}).encode(),
+                headers={
+                    "x-admin-key": "jaxy2026",
+                    "Content-Type": "application/json",
+                    "User-Agent": UA,
+                    "Accept": "application/json",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                r = json.loads(resp.read())
+            print(f"  demoted: {r.get('total_demoted', 0)}")
+            for src, n in (r.get("affected_by_source") or {}).items():
+                print(f"    {src}: {n}")
+        except Exception as e:
+            print(f"  cleanup FAILED: {e} — run manually:")
+            print("    curl -s -X POST https://theframe.getjaxy.com/api/admin/cleanup-images \\")
+            print("      -H 'x-admin-key: jaxy2026' -H 'Content-Type: application/json' \\")
+            print('      -d \'{"dryRun": false}\' | jq')
+
+        print("\n=== Auto-regen: rebuilding collection composites ===")
+        try:
+            req = urllib.request.Request(
+                f"{API_BASE}/api/v1/catalog/images/regen-collections",
+                data=b"",
+                headers={"User-Agent": UA, "Accept": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=600) as resp:
+                r = json.loads(resp.read())
+            print(f"  regenerated: {r.get('regenerated', 0)}  failed: {r.get('failed', 0)}  skipped: {r.get('skipped', 0)}")
+        except Exception as e:
+            print(f"  regen FAILED: {e} — run manually:")
+            print("    curl -s -X POST https://theframe.getjaxy.com/api/v1/catalog/images/regen-collections | jq")
+
+        print("\nDone. Next:")
+        print("  • Purge Cloudflare /api/images/* cache (dashboard → Caching → Purge)")
+        print("  • Re-export Faire/Shopify CSVs")
 
 
 if __name__ == "__main__":
