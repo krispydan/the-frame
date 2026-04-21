@@ -107,6 +107,16 @@ try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN pipeline_status TEXT DE
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN parent_image_id TEXT REFERENCES catalog_images(id)"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN preset_id TEXT REFERENCES catalog_processing_presets(id)"); } catch { /* exists */ }
 
+// Image generation (AI personas): new columns on catalog_images
+try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN persona_slug TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN prompt_template_slug TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN prompt_variables TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN ref_image_paths TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN review_notes TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN product_id TEXT"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_catalog_images_product ON catalog_images (product_id)"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_catalog_images_persona ON catalog_images (persona_slug)"); } catch { /* exists */ }
+
 // Image editor: new tables (idempotent via IF NOT EXISTS)
 try {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS catalog_processing_presets (

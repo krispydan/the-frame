@@ -105,8 +105,80 @@ export const images = sqliteTable("catalog_images", {
   pipelineStatus: text("pipeline_status").default("none"),
   parentImageId: text("parent_image_id"),
   presetId: text("preset_id"),
+  // AI persona / prompt-template lineage (for generated images)
+  personaSlug: text("persona_slug"),
+  promptTemplateSlug: text("prompt_template_slug"),
+  promptVariables: text("prompt_variables", { mode: "json" }),
+  refImagePaths: text("ref_image_paths", { mode: "json" }).$type<string[]>(),
+  reviewNotes: text("review_notes"),
+  productId: text("product_id"),
   createdAt: timestamp("created_at"),
 });
+
+// ── AI Personas (buyer-persona-aware prompt buckets) ──
+export const personas = sqliteTable("catalog_personas", {
+  id: id(),
+  slug: text("slug").unique().notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  ageRange: text("age_range"),
+  moodKeywords: text("mood_keywords"),
+  kind: text("kind", { enum: ["lifestyle", "studio", "ugc"] }).notNull().default("lifestyle"),
+  sortOrder: integer("sort_order").default(0),
+  active: integer("active", { mode: "boolean" }).default(true),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+});
+
+// ── Prompt Templates ──
+// A template is owned by a persona. It can target a specific image-type (imageTypeSlug set)
+// OR any image-type of a given kind (imageTypeSlug null + kind set). At selection time, a
+// specific match wins over a kind match.
+export const promptTemplates = sqliteTable("catalog_prompt_templates", {
+  id: id(),
+  personaSlug: text("persona_slug").notNull(),
+  imageTypeSlug: text("image_type_slug"),
+  kind: text("kind", { enum: ["lifestyle", "studio", "ugc"] }).notNull().default("lifestyle"),
+  slug: text("slug").notNull(),
+  name: text("name").notNull(),
+  templateText: text("template_text").notNull(),
+  requiredVars: text("required_vars", { mode: "json" }).$type<string[]>(),
+  orderIndex: integer("order_index").default(0),
+  active: integer("active", { mode: "boolean" }).default(true),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  uniqueIndex("uq_prompt_tpl_persona_slug").on(table.personaSlug, table.slug),
+  index("idx_prompt_tpl_persona_kind").on(table.personaSlug, table.kind),
+]);
+
+// ── Variable Presets (pools for auto-pick rotation) ──
+export const variablePresets = sqliteTable("catalog_variable_presets", {
+  id: id(),
+  scope: text("scope", { enum: ["global", "image_type", "persona_image_type"] }).notNull().default("image_type"),
+  imageTypeSlug: text("image_type_slug"),
+  personaSlug: text("persona_slug"),
+  varName: text("var_name").notNull(),
+  value: text("value").notNull(),
+  weight: real("weight").default(1.0),
+  lastUsedAt: text("last_used_at"),
+  useCount: integer("use_count").default(0),
+  active: integer("active", { mode: "boolean" }).default(true),
+  createdAt: timestamp("created_at"),
+}, (table) => [
+  index("idx_varpreset_scope").on(table.imageTypeSlug, table.personaSlug, table.varName),
+]);
+
+// ── Product → Persona tagging (M:N) ──
+export const productPersonas = sqliteTable("catalog_product_personas", {
+  id: id(),
+  productId: text("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
+  personaSlug: text("persona_slug").notNull(),
+  createdAt: timestamp("created_at"),
+}, (table) => [
+  uniqueIndex("uq_product_persona").on(table.productId, table.personaSlug),
+  index("idx_product_persona_product").on(table.productId),
+]);
 
 // ── Tags ──
 export const tags = sqliteTable("catalog_tags", {
