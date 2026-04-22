@@ -329,11 +329,23 @@ function isLifestyleImage(img: ExportImage): boolean {
 }
 
 /**
- * Build the Shopify image list for one product, in display order:
- *   1. Collection composite (product-level hero, if present)
- *   2. For each SKU: that SKU's square + front image (color swatch)
- *   3. For the first SKU only: side, other-side, top squares (product detail angles)
- *   4. Lifestyle / studio-* images (any SKU) if present
+ * Build the Shopify image list for one product, in display order.
+ *
+ * RETAIL channel (consumer storefront):
+ *   1. First SKU's front square (single-product hero — standard
+ *      Shopify grid tile that shows the actual product, not a
+ *      marketing composite).
+ *   2. Collection composite (product-level multi-color hero, if present)
+ *   3. Remaining SKU fronts (color swatches)
+ *   4. First SKU's side / other-side / top (detail angles)
+ *   5. Lifestyle / studio-* images if present
+ *
+ * WHOLESALE channel (Faire-style buyer-facing catalog):
+ *   1. Collection composite first — wholesale buyers want to see all
+ *      colorways on the grid tile at a glance (mirrors Faire).
+ *   2. Per-SKU fronts
+ *   3. First SKU's angles
+ *   4. Lifestyle / studio-* images if present
  *
  * Returns the ordered list and a per-SKU → front-image map used to
  * populate Shopify's "Variant Image" column so color-swatch selection
@@ -342,27 +354,47 @@ function isLifestyleImage(img: ExportImage): boolean {
  * Exported so the validator can stat exactly the files the CSV would
  * reference (and nothing extra).
  */
-export function buildShopifyImageList(ep: ExportProduct): {
+export function buildShopifyImageList(
+  ep: ExportProduct,
+  channel: ShopifyChannel = "retail",
+): {
   productImages: ExportImage[];
   frontBySkuId: Map<string, ExportImage>;
 } {
   const approved = ep.images.filter((i) => i.status === "approved" && i.filePath);
 
   const productImages: ExportImage[] = [];
-
-  // 1. Collection composite
   const collection = approved.find((i) => i.source === "collection");
-  if (collection) productImages.push(collection);
 
-  // 2. Per-SKU front (also used as Variant Image)
+  // Build per-SKU front map once — used for both channel branches and
+  // for the CSV's "Variant Image" column.
   const frontBySkuId = new Map<string, ExportImage>();
   for (const sku of ep.skus) {
     const front = approved.find(
       (i) => i.skuId === sku.id && i.source === "square" && i.imageTypeSlug === "front",
     );
-    if (front) {
-      frontBySkuId.set(sku.id, front);
-      productImages.push(front);
+    if (front) frontBySkuId.set(sku.id, front);
+  }
+  const firstSkuFront = ep.skus[0] ? frontBySkuId.get(ep.skus[0].id) : undefined;
+
+  if (channel === "wholesale") {
+    // 1. Collection first (Faire-style hero)
+    if (collection) productImages.push(collection);
+    // 2. Per-SKU fronts
+    for (const sku of ep.skus) {
+      const f = frontBySkuId.get(sku.id);
+      if (f) productImages.push(f);
+    }
+  } else {
+    // RETAIL
+    // 1. First SKU's front as hero
+    if (firstSkuFront) productImages.push(firstSkuFront);
+    // 2. Collection composite as secondary
+    if (collection && !productImages.includes(collection)) productImages.push(collection);
+    // 3. Remaining SKU fronts
+    for (const sku of ep.skus) {
+      const f = frontBySkuId.get(sku.id);
+      if (f && !productImages.includes(f)) productImages.push(f);
     }
   }
 
@@ -416,7 +448,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
     const colorPattern = Array.from(colorSet).join("; ");
     const polarization = mapLensPolarization(tagsByDim);
 
-    const { productImages, frontBySkuId } = buildShopifyImageList(ep);
+    const { productImages, frontBySkuId } = buildShopifyImageList(ep, channel);
 
     // Alt-role map is populated below once firstSku is known.
     type AltRole =

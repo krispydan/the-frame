@@ -48,7 +48,7 @@ export async function GET(
     let missingFiles: Awaited<ReturnType<typeof findProductsWithMissingImageFiles>> = [];
     if (platform === "shopify") {
       missingFiles = await findProductsWithMissingImageFilesByList(exportProducts, (ep) => {
-        const { productImages } = buildShopifyImageList(ep);
+        const { productImages } = buildShopifyImageList(ep, channel);
         return productImages.map((i) => ({ filePath: i.filePath, source: i.source }));
       });
     } else {
