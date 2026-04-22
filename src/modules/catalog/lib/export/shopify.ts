@@ -59,15 +59,21 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
   for (const ep of exportProducts) {
     const handle = slugify(ep.product.name || ep.product.skuPrefix || ep.product.id);
     const tagString = ep.tags.map((t) => t.tagName).filter(Boolean).join(", ");
-    // Shopify: prefer square images (source='square'), fall back to any approved
+    // Shopify: only ship square (per-variant) + collection (product-level).
+    // Raws, no_bg, white_bg, cropped are pipeline intermediates that contain
+    // shadows / reflections / checkered alpha and should never hit the
+    // storefront. Matches Faire's behavior (see faire.ts:636).
     const allImages = ep.images
-      .filter((i) => i.status === "approved" && i.filePath)
+      .filter((i) =>
+        i.status === "approved" &&
+        i.filePath &&
+        (i.source === "square" || i.source === "collection")
+      )
       .sort((a, b) => {
-        // Square source first (purpose-built for Shopify)
-        const sourceRank = (s: string | null) => s === "square" ? 0 : s === "cropped" ? 1 : 2;
+        // Collection composite first (hero shot), then per-variant squares
+        const sourceRank = (s: string | null) => s === "collection" ? 0 : 1;
         const sr = sourceRank(a.source) - sourceRank(b.source);
         if (sr !== 0) return sr;
-        // Then isBest
         return (b.isBest ? 1 : 0) - (a.isBest ? 1 : 0);
       });
     const tagNames = ep.tags.map((t) => t.tagName).filter(Boolean) as string[];
