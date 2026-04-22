@@ -461,93 +461,177 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       return buildImageAltText(seoCtx, role);
     };
 
-    rows.push({
-      Handle: handle, Title: ep.product.name || "", "Body (HTML)": ep.product.description || "",
+    // ── Build one row per variant + extra rows for product-level images ──
+    //
+    // We emit Shopify's "simplified" product-template CSV columns in
+    // their exact order (`Title`, `URL handle`, `Description`, …) so the
+    // file drops into Shopify Admin → Products → Import. Extra columns
+    // that Shopify Admin recognises but that aren't in the simplified
+    // template (`Variant HS Code`, `Variant Country of Origin`,
+    // `Metafield: custom.lens_type [single_line_text_field]`) are
+    // appended at the end — Shopify ignores unknown columns and reads
+    // the ones it knows.
+    //
+    // Every row includes every column (empty string for cells that
+    // don't apply) so the header order stays deterministic.
+
+    /**
+     * Build one CSV row. Shopify's template uses 57 fixed columns in a
+     * fixed order — this helper produces that object literal once, with
+     * whatever subset of fields apply to the given row.
+     */
+    const makeRow = (
+      opts: Partial<{
+        title: string;
+        sku: string;
+        barcode: string;
+        optionValue: string;
+        price: string;
+        compareAt: string;
+        costPerItem: string;
+        inventoryQty: string;
+        variantImage: string;
+        imageUrl: string;
+        imagePosition: string;
+        imageAlt: string;
+        tags: string;
+        seoTitle: string;
+        seoDescription: string;
+        status: string;
+        productCategory: string;
+        description: string;
+        type: string;
+        lensType: string;
+        hsCode: string;
+        countryOfOrigin: string;
+      }>,
+    ): Record<string, string> => ({
+      Title: opts.title ?? "",
+      "URL handle": handle,
+      Description: opts.description ?? "",
       Vendor: "Jaxy",
-      "Product Category": JAXY_CONSTANTS.productCategory,
-      Type: ep.product.category || "Sunglasses",
-      Tags: tagString, Published: "TRUE",
-      "Option1 Name": ep.skus.length > 1 ? "Color" : "Title",
-      "Option1 Value": firstSku?.colorName || "Default Title",
-      "Variant SKU": firstSku?.sku || "",
-      "Variant Inventory Tracker": "shopify",
-      "Variant Inventory Policy": "continue",
-      "Variant Fulfillment Service": "manual",
-      "Variant Price": variantPrice,
-      "Variant Compare At Price": compareAtPrice,
-      "Variant Requires Shipping": "true",
-      "Variant Taxable": "true",
-      "Variant HS Code": JAXY_CONSTANTS.hsCode,
-      "Variant Country of Origin": JAXY_CONSTANTS.countryOfOrigin,
-      "Variant Image": absUrl(firstVariantImage?.filePath),
-      "Variant Weight Unit": "oz",
-      "Cost per item": landedCostFor(firstSku?.costPrice ?? null),
-      "Image Src": absUrl(firstImage?.filePath), "Image Position": firstImage ? "1" : "",
-      "Image Alt Text": altFor(firstImage),
-      "SEO Title": seoTitle, "SEO Description": ep.product.shortDescription || "",
-      Status: "active",
-      "Metafield: custom.lens_type [single_line_text_field]": lensTag,
-      // Shopify's standard shopify.* metafields (age-group, color-pattern,
-      // eyewear-frame-color/design, lens-color, lens-polarization,
-      // target-gender) are metaobject references, not plain text —
-      // CSV import rejects string values with "Value require that you
-      // select a metaobject". Set these once per product in Shopify's
-      // Bulk Editor UI where the taxonomy picker resolves metaobject
-      // GIDs natively. Keeping `custom.lens_type` because it's a
-      // free-text metafield we own.
+      "Product category": opts.productCategory ?? "",
+      Type: opts.type ?? "",
+      Tags: opts.tags ?? "",
+      "Published on online store": "TRUE",
+      Status: opts.status ?? "",
+      SKU: opts.sku ?? "",
+      Barcode: opts.barcode ?? "",
+      "Option1 name": ep.skus.length > 1 ? "Color" : "Title",
+      "Option1 value": opts.optionValue ?? "",
+      "Option1 Linked To": "",
+      "Option2 name": "",
+      "Option2 value": "",
+      "Option2 Linked To": "",
+      "Option3 name": "",
+      "Option3 value": "",
+      "Option3 Linked To": "",
+      Price: opts.price ?? "",
+      "Compare-at price": opts.compareAt ?? "",
+      "Cost per item": opts.costPerItem ?? "",
+      "Charge tax": opts.price ? "TRUE" : "",
+      "Tax code": "",
+      "Unit price total measure": "",
+      "Unit price total measure unit": "",
+      "Unit price base measure": "",
+      "Unit price base measure unit": "",
+      "Inventory tracker": opts.sku ? "shopify" : "",
+      "Inventory quantity": opts.inventoryQty ?? "",
+      "Continue selling when out of stock": opts.sku ? "deny" : "",
+      // 15 oz per pair → 15 × 28.3495 ≈ 425 grams. User confirmed 15 oz.
+      "Weight value (grams)": opts.sku ? "425" : "",
+      "Weight unit for display": opts.sku ? "oz" : "",
+      "Requires shipping": opts.sku ? "TRUE" : "",
+      "Fulfillment service": opts.sku ? "manual" : "",
+      "Product image URL": opts.imageUrl ?? "",
+      "Image position": opts.imagePosition ?? "",
+      "Image alt text": opts.imageAlt ?? "",
+      "Variant image URL": opts.variantImage ?? "",
+      "Gift card": "FALSE",
+      "SEO title": opts.seoTitle ?? "",
+      "SEO description": opts.seoDescription ?? "",
+      // shopify.color-pattern is a metaobject reference — leave empty to
+      // avoid "Value require that you select a metaobject" errors.
+      "Color (product.metafields.shopify.color-pattern)": "",
+      "Google Shopping / Google product category":
+        opts.productCategory ? JAXY_CONSTANTS.productCategory : "",
+      "Google Shopping / Gender": opts.sku
+        ? (seoCtx.gender === "women" ? "female"
+           : seoCtx.gender === "men" ? "male"
+           : "unisex")
+        : "",
+      "Google Shopping / Age group": opts.sku ? "adult" : "",
+      "Google Shopping / Manufacturer part number (MPN)": opts.sku ?? "",
+      "Google Shopping / Ad group name": "",
+      "Google Shopping / Ads labels": "",
+      "Google Shopping / Condition": opts.sku ? "new" : "",
+      "Google Shopping / Custom product": opts.sku ? "FALSE" : "",
+      "Google Shopping / Custom label 0": "",
+      "Google Shopping / Custom label 1": "",
+      "Google Shopping / Custom label 2": "",
+      "Google Shopping / Custom label 3": "",
+      "Google Shopping / Custom label 4": "",
+      // ── Jaxy-specific columns appended after the template set ──
+      "Variant HS Code": opts.hsCode ?? "",
+      "Variant Country of Origin": opts.countryOfOrigin ?? "",
+      "Metafield: custom.lens_type [single_line_text_field]": opts.lensType ?? "",
     });
 
+    // 1. First variant row — also carries all product-level fields
+    //    (title, description, category, status, tags, SEO, first image)
+    rows.push(makeRow({
+      title: ep.product.name || "",
+      description: ep.product.description || "",
+      productCategory: JAXY_CONSTANTS.productCategory,
+      type: ep.product.category || "Sunglasses",
+      tags: tagString,
+      status: "active",
+      sku: firstSku?.sku || "",
+      barcode: firstSku?.upc || "",
+      optionValue: firstSku?.colorName || "Default Title",
+      price: variantPrice,
+      compareAt: compareAtPrice,
+      costPerItem: landedCostFor(firstSku?.costPrice ?? null),
+      inventoryQty: firstSku ? String(firstSku.inventoryQuantity ?? 0) : "",
+      variantImage: absUrl(firstVariantImage?.filePath),
+      imageUrl: absUrl(firstImage?.filePath),
+      imagePosition: firstImage ? "1" : "",
+      imageAlt: altFor(firstImage),
+      seoTitle: seoTitle,
+      seoDescription: ep.product.shortDescription || "",
+      lensType: lensTag,
+      hsCode: JAXY_CONSTANTS.hsCode,
+      countryOfOrigin: JAXY_CONSTANTS.countryOfOrigin,
+    }));
+
+    // 2. Additional variant rows (one per SKU after the first) —
+    //    Shopify groups variants by URL handle.
     for (let i = 1; i < ep.skus.length; i++) {
       const sku = ep.skus[i];
       const variantImage = frontBySkuId.get(sku.id);
-      rows.push({
-        Handle: handle, Title: "", "Body (HTML)": "", Vendor: "",
-        "Product Category": "",
-        Type: "", Tags: "", Published: "",
-        "Option1 Name": "", "Option1 Value": sku.colorName || "",
-        "Variant SKU": sku.sku || "",
-        "Variant Inventory Tracker": "shopify",
-        "Variant Inventory Policy": "continue",
-        "Variant Fulfillment Service": "manual",
-        "Variant Price": variantPrice,
-        "Variant Compare At Price": compareAtPrice,
-        "Variant Requires Shipping": "true",
-        "Variant Taxable": "true",
-        "Variant HS Code": JAXY_CONSTANTS.hsCode,
-        "Variant Country of Origin": JAXY_CONSTANTS.countryOfOrigin,
-        "Variant Image": absUrl(variantImage?.filePath),
-        "Variant Weight Unit": "oz",
-        "Cost per item": landedCostFor(sku.costPrice ?? null),
-        "Image Src": "", "Image Position": "", "Image Alt Text": "", "SEO Title": "", "SEO Description": "",
-        Status: "",
-        "Metafield: custom.lens_type [single_line_text_field]": "",
-      });
+      rows.push(makeRow({
+        sku: sku.sku || "",
+        barcode: sku.upc || "",
+        optionValue: sku.colorName || "",
+        price: variantPrice,
+        compareAt: compareAtPrice,
+        costPerItem: landedCostFor(sku.costPrice ?? null),
+        inventoryQty: String(sku.inventoryQuantity ?? 0),
+        variantImage: absUrl(variantImage?.filePath),
+        lensType: "",
+        hsCode: JAXY_CONSTANTS.hsCode,
+        countryOfOrigin: JAXY_CONSTANTS.countryOfOrigin,
+      }));
     }
 
+    // 3. Extra image-only rows (one per additional product-level image).
+    //    Shopify associates them by URL handle + Image position.
     for (let i = 1; i < productImages.length; i++) {
-      rows.push({
-        Handle: handle, Title: "", "Body (HTML)": "", Vendor: "",
-        "Product Category": "",
-        Type: "", Tags: "", Published: "",
-        "Option1 Name": "", "Option1 Value": "", "Variant SKU": "",
-        "Variant Inventory Tracker": "",
-        "Variant Inventory Policy": "",
-        "Variant Fulfillment Service": "",
-        "Variant Price": "",
-        "Variant Compare At Price": "",
-        "Variant Requires Shipping": "",
-        "Variant Taxable": "",
-        "Variant HS Code": "",
-        "Variant Country of Origin": "",
-        "Variant Image": "",
-        "Variant Weight Unit": "",
-        "Cost per item": "",
-        "Image Src": absUrl(productImages[i].filePath), "Image Position": String(i + 1),
-        "Image Alt Text": altFor(productImages[i]),
-        "SEO Title": "", "SEO Description": "",
-        Status: "",
-        "Metafield: custom.lens_type [single_line_text_field]": "",
-      });
+      rows.push(makeRow({
+        imageUrl: absUrl(productImages[i].filePath),
+        imagePosition: String(i + 1),
+        imageAlt: altFor(productImages[i]),
+      }));
     }
   }
 
