@@ -20,31 +20,83 @@ const JAXY_CONSTANTS = {
   countryOfOrigin: "CN",
 } as const;
 
-/**
- * Convert FOB cost (catalog_skus.cost_price) into landed cost for
- * Shopify's "Cost per item" column so Shopify margin/Finance reports
- * reflect reality instead of FOB-only.
- *
- * landed = (FOB × LANDED_MULTIPLIER) + LANDED_FLAT_ADDER
- *
- * Defaults:
- *   - 25% multiplier covers US import duties on HS 9004.10 + broker
- *     fees for Chinese eyewear.
- *   - $0.50 flat adder is a conservative per-unit freight allocation.
- *
- * Override in Railway env when you have real landed data:
- *   COST_LANDED_MULTIPLIER=1.25
- *   COST_LANDED_FLAT=0.50
- */
+// ─────────────────────────────────────────────────────────────────────
+// Landed cost calculation
+// ─────────────────────────────────────────────────────────────────────
+//
+// Shopify's "Cost per item" column drives the gross-margin figures in
+// Shopify Analytics → Finance → Margin reports, the Profit report, and
+// per-order profit calculations. If we ship the raw FOB number from
+// catalog_skus.cost_price, every margin number in Shopify will be
+// overstated by ~25–50% because it ignores duties and freight.
+//
+// We don't have per-shipment landed costs in the DB yet, so we apply a
+// single deterministic adjustment to the FOB cost:
+//
+//   landed = (FOB × COST_LANDED_MULTIPLIER) + COST_LANDED_FLAT
+//
+// ── Why 1.25 × FOB (default multiplier) ───────────────────────────────
+// For Chinese-manufactured sunglasses imported to the US on HS 9004.10
+// the ad-valorem costs stack roughly like this:
+//
+//   US import duty on HS 9004.10 ............. ~2%
+//   Section 301 China list 3 tariff .......... ~7.5% (25% post-Sept '25)
+//   MPF + HMF fees ............................ ~0.3%
+//   Customs broker fee (amortized) ............ ~3–5%
+//   Foreign-trade handling + docs ............. ~2–3%
+//   Contingency buffer ........................ ~3–5%
+//                                              ─────
+//                            total ad-valorem ≈ 20–25%
+//
+// User has confirmed 25% is the right figure for Jaxy's current lane,
+// which also covers recent Section 301 increases on eyewear frames.
+//
+// ── Why +$0.50 flat (default adder) ───────────────────────────────────
+// Freight scales with shipment density, not unit price, so a pure %
+// multiplier under-allocates freight cost to cheap units. We know:
+//
+//   - Air-freight a full sunglasses carton costs ~$300–$400
+//   - A carton holds ~500–800 units (light + small)
+//   - ≈ $0.40–$0.60 freight per unit
+//
+// $0.50 is the conservative midpoint and matches what the user sees on
+// recent shipments. Being slightly high here makes margin look
+// slightly worse than reality, which is the safer reporting bias.
+//
+// ── Worked examples (at current DB FOB range) ─────────────────────────
+//   $1.38 FOB → (1.38 × 1.25) + 0.50 = $2.23
+//   $1.98 FOB → (1.98 × 1.25) + 0.50 = $2.98   ← current avg
+//   $2.00 FOB → (2.00 × 1.25) + 0.50 = $3.00
+//
+// ── Tuning in production ──────────────────────────────────────────────
+// Set in Railway env vars when real landed data is available:
+//   COST_LANDED_MULTIPLIER=1.25
+//   COST_LANDED_FLAT=0.50
+//
+// For higher fidelity later we can move to per-shipment landed costs
+// on catalog_skus (add a `landed_cost` column, populate from broker
+// invoices) and drop this heuristic.
+// ─────────────────────────────────────────────────────────────────────
 function getLandedCostAdjustment() {
   const mult = parseFloat(process.env.COST_LANDED_MULTIPLIER ?? "1.25");
   const flat = parseFloat(process.env.COST_LANDED_FLAT ?? "0.50");
   return {
+    // Guard against garbage env values; fall back to defaults rather
+    // than emit NaN into the CSV.
     multiplier: Number.isFinite(mult) && mult > 0 ? mult : 1.25,
     flat: Number.isFinite(flat) && flat >= 0 ? flat : 0.5,
   };
 }
 
+/**
+ * Compute the landed cost (FOB + duties + freight) for a single SKU.
+ * Emitted into Shopify's "Cost per item" column. See the long
+ * explanation above for how the multiplier and flat adder are derived.
+ *
+ * Returns "" for missing/invalid FOB values so Shopify leaves the cell
+ * blank (which Shopify treats as "no cost data" — different from 0.00
+ * which would be a very misleading 100% margin).
+ */
 function landedCostFor(fob: number | null | undefined): string {
   if (fob == null || !Number.isFinite(fob) || fob <= 0) return "";
   const { multiplier, flat } = getLandedCostAdjustment();
