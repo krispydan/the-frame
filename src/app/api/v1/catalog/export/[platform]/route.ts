@@ -3,10 +3,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { exports_ } from "@/modules/catalog/schema";
 import { loadExportProducts } from "@/modules/catalog/lib/export/load-products";
-import { generateShopifyCSV, validateProductsForShopify } from "@/modules/catalog/lib/export/shopify";
+import { generateShopifyCSV, validateProductsForShopify, buildShopifyImageList } from "@/modules/catalog/lib/export/shopify";
 import { generateFaireCsv, generateFaireXlsx, validateForFaire } from "@/modules/catalog/lib/export/faire";
 import { generateAmazonTsv, validateForAmazon } from "@/modules/catalog/lib/export/amazon";
-import { findProductsMissingApprovedImages, findProductsWithMissingImageFiles } from "@/modules/catalog/lib/export/image-precheck";
+import {
+  findProductsMissingApprovedImages,
+  findProductsWithMissingImageFiles,
+  findProductsWithMissingImageFilesByList,
+} from "@/modules/catalog/lib/export/image-precheck";
 
 export async function GET(
   request: NextRequest,
@@ -35,16 +39,25 @@ export async function GET(
 
     // Cross-check: every approved image's file must exist on disk, or the
     // platform's fetcher will 404 on upload. Fold any missing files into
-    // the per-product validations as blocked issues. Scope the check to
-    // only the sources each platform actually emits in its CSV — e.g.
-    // Faire only ships `square` + `collection`, so a missing `raw` file
-    // isn't a blocker for the Faire upload.
-    const platformSources: Record<string, string[] | undefined> = {
-      faire: ["square", "collection"],
-      shopify: ["square", "collection"], // matches shopify.ts emitted sources
-      amazon: undefined,                   // amazon still emits all per-SKU images
-    };
-    const missingFiles = await findProductsWithMissingImageFiles(exportProducts, platformSources[platform]);
+    // the per-product validations as blocked issues.
+    //
+    // Shopify validates against the exact list the exporter will emit
+    // (front per SKU + main SKU angles + lifestyle + collection), so we
+    // don't false-positive on approved squares that the CSV never
+    // references. Faire and Amazon still use the source-filter variant.
+    let missingFiles: Awaited<ReturnType<typeof findProductsWithMissingImageFiles>> = [];
+    if (platform === "shopify") {
+      missingFiles = await findProductsWithMissingImageFilesByList(exportProducts, (ep) => {
+        const { productImages } = buildShopifyImageList(ep);
+        return productImages.map((i) => ({ filePath: i.filePath, source: i.source }));
+      });
+    } else {
+      const platformSources: Record<string, string[] | undefined> = {
+        faire: ["square", "collection"],
+        amazon: undefined, // amazon still emits all per-SKU images
+      };
+      missingFiles = await findProductsWithMissingImageFiles(exportProducts, platformSources[platform]);
+    }
     if (missingFiles.length > 0) {
       const byId = new Map(missingFiles.map((m) => [m.productId, m] as const));
       for (const v of validations) {

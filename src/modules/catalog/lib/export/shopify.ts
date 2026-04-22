@@ -53,31 +53,84 @@ export function validateProductsForShopify(exportProducts: ExportProduct[], chan
   });
 }
 
+type ExportImage = ExportProduct["images"][number];
+
+const EXTRA_ANGLES_FOR_MAIN_SKU = ["side", "other-side", "top"] as const;
+
+function isLifestyleImage(img: ExportImage): boolean {
+  const slug = img.imageTypeSlug ?? "";
+  return slug.startsWith("lifestyle") || slug.startsWith("studio-");
+}
+
+/**
+ * Build the Shopify image list for one product, in display order:
+ *   1. Collection composite (product-level hero, if present)
+ *   2. For each SKU: that SKU's square + front image (color swatch)
+ *   3. For the first SKU only: side, other-side, top squares (product detail angles)
+ *   4. Lifestyle / studio-* images (any SKU) if present
+ *
+ * Returns the ordered list and a per-SKU → front-image map used to
+ * populate Shopify's "Variant Image" column so color-swatch selection
+ * swaps to the right photo natively.
+ *
+ * Exported so the validator can stat exactly the files the CSV would
+ * reference (and nothing extra).
+ */
+export function buildShopifyImageList(ep: ExportProduct): {
+  productImages: ExportImage[];
+  frontBySkuId: Map<string, ExportImage>;
+} {
+  const approved = ep.images.filter((i) => i.status === "approved" && i.filePath);
+
+  const productImages: ExportImage[] = [];
+
+  // 1. Collection composite
+  const collection = approved.find((i) => i.source === "collection");
+  if (collection) productImages.push(collection);
+
+  // 2. Per-SKU front (also used as Variant Image)
+  const frontBySkuId = new Map<string, ExportImage>();
+  for (const sku of ep.skus) {
+    const front = approved.find(
+      (i) => i.skuId === sku.id && i.source === "square" && i.imageTypeSlug === "front",
+    );
+    if (front) {
+      frontBySkuId.set(sku.id, front);
+      productImages.push(front);
+    }
+  }
+
+  // 3. First SKU's other angles (product detail views)
+  const firstSku = ep.skus[0];
+  if (firstSku) {
+    for (const angle of EXTRA_ANGLES_FOR_MAIN_SKU) {
+      const img = approved.find(
+        (i) => i.skuId === firstSku.id && i.source === "square" && i.imageTypeSlug === angle,
+      );
+      if (img) productImages.push(img);
+    }
+  }
+
+  // 4. Lifestyle / studio scene images (any source, any SKU)
+  for (const img of approved) {
+    if (isLifestyleImage(img) && !productImages.includes(img)) {
+      productImages.push(img);
+    }
+  }
+
+  return { productImages, frontBySkuId };
+}
+
 export function generateShopifyCSV(exportProducts: ExportProduct[], channel: ShopifyChannel = "retail"): string {
   const rows: Record<string, string>[] = [];
 
   for (const ep of exportProducts) {
     const handle = slugify(ep.product.name || ep.product.skuPrefix || ep.product.id);
     const tagString = ep.tags.map((t) => t.tagName).filter(Boolean).join(", ");
-    // Shopify: only ship square (per-variant) + collection (product-level).
-    // Raws, no_bg, white_bg, cropped are pipeline intermediates that contain
-    // shadows / reflections / checkered alpha and should never hit the
-    // storefront. Matches Faire's behavior (see faire.ts:636).
-    const allImages = ep.images
-      .filter((i) =>
-        i.status === "approved" &&
-        i.filePath &&
-        (i.source === "square" || i.source === "collection")
-      )
-      .sort((a, b) => {
-        // Collection composite first (hero shot), then per-variant squares
-        const sourceRank = (s: string | null) => s === "collection" ? 0 : 1;
-        const sr = sourceRank(a.source) - sourceRank(b.source);
-        if (sr !== 0) return sr;
-        return (b.isBest ? 1 : 0) - (a.isBest ? 1 : 0);
-      });
     const tagNames = ep.tags.map((t) => t.tagName).filter(Boolean) as string[];
     const lensTag = ep.tags.find((t) => t.dimension === "lens")?.tagName || "";
+
+    const { productImages, frontBySkuId } = buildShopifyImageList(ep);
 
     const variantPrice = channel === "wholesale"
       ? ((ep.wholesalePrice && ep.wholesalePrice > 0) ? ep.wholesalePrice.toFixed(2) : "8.00")
@@ -87,7 +140,8 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       : ((ep.msrp && ep.msrp > 0) ? ep.msrp.toFixed(2) : "");
 
     const firstSku = ep.skus[0];
-    const firstImage = allImages[0];
+    const firstImage = productImages[0];
+    const firstVariantImage = firstSku ? frontBySkuId.get(firstSku.id) : undefined;
 
     rows.push({
       Handle: handle, Title: ep.product.name || "", "Body (HTML)": ep.product.description || "",
@@ -96,30 +150,35 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       "Option1 Value": firstSku?.colorName || "Default Title",
       "Variant SKU": firstSku?.sku || "", "Variant Price": variantPrice,
       "Variant Compare At Price": compareAtPrice,
+      "Variant Image": firstVariantImage?.filePath || "",
       "Image Src": firstImage?.filePath || "", "Image Position": firstImage ? "1" : "",
-      "Image Alt Text": firstImage ? buildSeoAltText(ep.product.name || "", firstSku?.colorName || null, tagNames, 0, allImages.length) : "",
+      "Image Alt Text": firstImage ? buildSeoAltText(ep.product.name || "", firstSku?.colorName || null, tagNames, 0, productImages.length) : "",
       "SEO Title": ep.product.name || "", "SEO Description": ep.product.shortDescription || "",
       "Metafield: custom.lens_type [single_line_text_field]": lensTag,
     });
 
     for (let i = 1; i < ep.skus.length; i++) {
+      const sku = ep.skus[i];
+      const variantImage = frontBySkuId.get(sku.id);
       rows.push({
         Handle: handle, Title: "", "Body (HTML)": "", Vendor: "", Type: "", Tags: "", Published: "",
-        "Option1 Name": "", "Option1 Value": ep.skus[i].colorName || "",
-        "Variant SKU": ep.skus[i].sku || "", "Variant Price": variantPrice,
+        "Option1 Name": "", "Option1 Value": sku.colorName || "",
+        "Variant SKU": sku.sku || "", "Variant Price": variantPrice,
         "Variant Compare At Price": compareAtPrice,
+        "Variant Image": variantImage?.filePath || "",
         "Image Src": "", "Image Position": "", "Image Alt Text": "", "SEO Title": "", "SEO Description": "",
         "Metafield: custom.lens_type [single_line_text_field]": "",
       });
     }
 
-    for (let i = 1; i < allImages.length; i++) {
+    for (let i = 1; i < productImages.length; i++) {
       rows.push({
         Handle: handle, Title: "", "Body (HTML)": "", Vendor: "", Type: "", Tags: "", Published: "",
         "Option1 Name": "", "Option1 Value": "", "Variant SKU": "", "Variant Price": "",
         "Variant Compare At Price": "",
-        "Image Src": allImages[i].filePath || "", "Image Position": String(i + 1),
-        "Image Alt Text": buildSeoAltText(ep.product.name || "", null, tagNames, i, allImages.length),
+        "Variant Image": "",
+        "Image Src": productImages[i].filePath || "", "Image Position": String(i + 1),
+        "Image Alt Text": buildSeoAltText(ep.product.name || "", null, tagNames, i, productImages.length),
         "SEO Title": "", "SEO Description": "",
         "Metafield: custom.lens_type [single_line_text_field]": "",
       });
