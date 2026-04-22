@@ -3,6 +3,11 @@
  */
 import type { ExportProduct, ValidationIssue, ProductValidationResult } from "./types";
 import Papa from "papaparse";
+import { catalogImageUrl } from "@/lib/storage/image-url";
+
+function absUrl(filePath: string | null | undefined): string {
+  return catalogImageUrl(filePath) || "";
+}
 
 const SHAPE_TAGS = new Set(["aviator", "cat-eye", "round", "square", "oversized", "rectangle", "wayfarer", "oval", "geometric"]);
 const STYLE_TAGS = new Set(["retro", "vintage", "classic", "modern", "bold", "statement", "timeless", "trendy"]);
@@ -229,9 +234,9 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       "Variant Taxable": "true",
       "Variant HS Code": JAXY_CONSTANTS.hsCode,
       "Variant Country of Origin": JAXY_CONSTANTS.countryOfOrigin,
-      "Variant Image": firstVariantImage?.filePath || "",
+      "Variant Image": absUrl(firstVariantImage?.filePath),
       "Variant Weight Unit": "oz",
-      "Image Src": firstImage?.filePath || "", "Image Position": firstImage ? "1" : "",
+      "Image Src": absUrl(firstImage?.filePath), "Image Position": firstImage ? "1" : "",
       "Image Alt Text": firstImage ? buildSeoAltText(ep.product.name || "", firstSku?.colorName || null, tagNames, 0, productImages.length) : "",
       "SEO Title": ep.product.name || "", "SEO Description": ep.product.shortDescription || "",
       Status: "active",
@@ -263,7 +268,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
         "Variant Taxable": "true",
         "Variant HS Code": JAXY_CONSTANTS.hsCode,
         "Variant Country of Origin": JAXY_CONSTANTS.countryOfOrigin,
-        "Variant Image": variantImage?.filePath || "",
+        "Variant Image": absUrl(variantImage?.filePath),
         "Variant Weight Unit": "oz",
         "Image Src": "", "Image Position": "", "Image Alt Text": "", "SEO Title": "", "SEO Description": "",
         Status: "",
@@ -295,7 +300,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
         "Variant Country of Origin": "",
         "Variant Image": "",
         "Variant Weight Unit": "",
-        "Image Src": productImages[i].filePath || "", "Image Position": String(i + 1),
+        "Image Src": absUrl(productImages[i].filePath), "Image Position": String(i + 1),
         "Image Alt Text": buildSeoAltText(ep.product.name || "", null, tagNames, i, productImages.length),
         "SEO Title": "", "SEO Description": "",
         Status: "",
