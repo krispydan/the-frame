@@ -58,22 +58,154 @@ function mapLensPolarization(tagsByDim: Map<string, string[]>): string {
   return lensTags.includes("polarized") ? "polarized" : "non-polarized";
 }
 
-function buildSeoAltText(productName: string, colorName: string | null, tagNames: string[], imageIndex: number, totalImages: number): string {
-  const tagSet = new Set(tagNames.map((t) => t.toLowerCase()));
-  const shape = tagNames.find((t) => SHAPE_TAGS.has(t.toLowerCase()))?.toLowerCase() || "";
-  const style = tagNames.find((t) => STYLE_TAGS.has(t.toLowerCase()))?.toLowerCase() || "";
-  const isPolarized = tagSet.has("polarized");
-  const isWomens = tagSet.has("womens");
-  const parts = [`Jaxy ${productName}${colorName ? ` ${colorName}` : ""}`];
-  const descriptors: string[] = [];
-  if (isWomens) descriptors.push("women's");
-  if (isPolarized) descriptors.push("polarized");
-  if (shape) descriptors.push(shape);
-  descriptors.push("sunglasses");
-  if (style) descriptors.push(`${style} style`);
-  parts.push(descriptors.join(" "));
-  if (totalImages > 1) parts.push(["front view", "angle view", "detail view"][Math.min(imageIndex, 2)]);
-  return parts.join(" - ");
+function capitalize(s: string): string {
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
+function joinWords(...parts: (string | null | undefined | false)[]): string {
+  return parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+}
+
+function truncateToWordBoundary(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const trimmed = s.slice(0, max);
+  const lastSpace = trimmed.lastIndexOf(" ");
+  return (lastSpace > max * 0.6 ? trimmed.slice(0, lastSpace) : trimmed).replace(/[ ,\-]+$/, "");
+}
+
+interface SeoContext {
+  name: string;         // "Havana Haze"
+  shape: string;        // "round"
+  style: string;        // "vintage" | "retro" | "classic" | ...
+  gender: string;       // "women" | "men" | "unisex"
+  isPolarized: boolean;
+  hasUv400: boolean;
+  colorLabel: string;   // "Brown" (already capitalized display form)
+  keywordTag: string | null;
+}
+
+function buildSeoContext(
+  productName: string,
+  firstColorDisplay: string | null,
+  tagsByDim: Map<string, string[]>,
+  productGender: string | null,
+  productFrameShape: string | null,
+): SeoContext {
+  const shape = (
+    (tagsByDim.get("frame_shape") ?? tagsByDim.get("frameShape") ?? [])[0]
+    ?? productFrameShape
+    ?? ""
+  ).toLowerCase();
+  const style = (tagsByDim.get("style") ?? []).find((t) =>
+    STYLE_TAGS.has(t.toLowerCase()),
+  )?.toLowerCase() ?? "";
+  const lensTags = (tagsByDim.get("lens") ?? []).map((t) => t.toLowerCase());
+  const genderTagged = (tagsByDim.get("gender") ?? [])[0]?.toLowerCase() ?? "";
+  const genderRaw = genderTagged || (productGender ?? "unisex").toLowerCase();
+  const gender =
+    genderRaw === "womens" ? "women"
+    : genderRaw === "mens" ? "men"
+    : genderRaw; // "unisex"
+  const keywordTag = (tagsByDim.get("keyword") ?? [])[0] ?? null;
+  return {
+    name: productName,
+    shape,
+    style,
+    gender,
+    isPolarized: lensTags.includes("polarized"),
+    hasUv400: lensTags.includes("uv400"),
+    colorLabel: firstColorDisplay || "",
+    keywordTag,
+  };
+}
+
+/**
+ * Product SEO title — target ≤60 chars for Google SERP.
+ * Template: `{Style} {Shape} {Polarization} Sunglasses for {Gender} — {Name} | Jaxy`
+ * Falls back gracefully when fields are empty.
+ */
+function buildSeoTitle(ctx: SeoContext): string {
+  const descriptor = joinWords(
+    capitalize(ctx.style),
+    capitalize(ctx.shape),
+    ctx.isPolarized ? "Polarized" : "",
+    "Sunglasses",
+  );
+  const audience =
+    ctx.gender === "women" ? "for Women"
+    : ctx.gender === "men" ? "for Men"
+    : ctx.gender === "unisex" ? "for Women & Men"
+    : "";
+  const lead = joinWords(descriptor, audience, `\u2014 ${ctx.name}`);
+  // Always keep the brand suffix
+  const full = `${lead} | Jaxy`;
+  if (full.length <= 60) return full;
+  // Drop the em-dash + product name section if too long, keep descriptor + brand
+  const withoutName = `${joinWords(descriptor, audience)} | Jaxy`;
+  if (withoutName.length <= 60) return withoutName;
+  // Final fallback
+  return truncateToWordBoundary(full, 57) + " | Jaxy";
+}
+
+/**
+ * Image alt text — target ≤125 chars. Position-aware:
+ *   - idx 0 (collection hero): "Jaxy {Name} — {Style} {Shape} {Polarization} sunglasses in {Colors}"
+ *   - per-SKU front (variant image): "Jaxy {Name} in {Color} — {Shape} {Polarization} sunglasses"
+ *   - angle shots: "Jaxy {Name} {Shape} sunglasses — {angle} view"
+ *   - lifestyle: "Jaxy {Name} sunglasses styled — {imageTypeSlug | 'lifestyle'}"
+ */
+function buildImageAltText(
+  ctx: SeoContext,
+  role: { kind: "hero" } | { kind: "variant-front"; colorDisplay: string | null }
+       | { kind: "angle"; angle: string } | { kind: "lifestyle"; label: string },
+): string {
+  const shapeBit = ctx.shape ? capitalize(ctx.shape) : "";
+  const polBit = ctx.isPolarized ? "Polarized" : "";
+
+  let alt = "";
+  switch (role.kind) {
+    case "hero": {
+      const colors = ctx.colorLabel ? `in ${ctx.colorLabel}` : "";
+      alt = joinWords(
+        `Jaxy ${ctx.name} \u2014`,
+        capitalize(ctx.style),
+        shapeBit,
+        polBit,
+        "sunglasses",
+        colors,
+      );
+      break;
+    }
+    case "variant-front": {
+      const color = role.colorDisplay ? ` in ${role.colorDisplay}` : "";
+      alt = joinWords(
+        `Jaxy ${ctx.name}${color} \u2014`,
+        shapeBit,
+        polBit,
+        "sunglasses",
+      );
+      break;
+    }
+    case "angle": {
+      alt = joinWords(
+        `Jaxy ${ctx.name}`,
+        shapeBit,
+        "sunglasses \u2014",
+        role.angle,
+        "view",
+      );
+      break;
+    }
+    case "lifestyle": {
+      const label = role.label
+        .replace(/^(lifestyle|studio)-?/, "")
+        .replace(/-/g, " ")
+        .trim() || "lifestyle";
+      alt = joinWords(`Jaxy ${ctx.name} sunglasses styled \u2014`, label);
+      break;
+    }
+  }
+  return truncateToWordBoundary(alt, 125);
 }
 
 function slugify(text: string): string {
@@ -178,7 +310,6 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
   for (const ep of exportProducts) {
     const handle = slugify(ep.product.name || ep.product.skuPrefix || ep.product.id);
     const tagString = ep.tags.map((t) => t.tagName).filter(Boolean).join(", ");
-    const tagNames = ep.tags.map((t) => t.tagName).filter(Boolean) as string[];
     const lensTag = ep.tags.find((t) => t.dimension === "lens")?.tagName || "";
 
     // Group tags by dimension for easier lookup
@@ -204,6 +335,14 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
 
     const { productImages, frontBySkuId } = buildShopifyImageList(ep);
 
+    // Alt-role map is populated below once firstSku is known.
+    type AltRole =
+      | { kind: "hero" }
+      | { kind: "variant-front"; colorDisplay: string | null }
+      | { kind: "angle"; angle: string }
+      | { kind: "lifestyle"; label: string };
+    const altRoleByImageId = new Map<string, AltRole>();
+
     const variantPrice = channel === "wholesale"
       ? ((ep.wholesalePrice && ep.wholesalePrice > 0) ? ep.wholesalePrice.toFixed(2) : "8.00")
       : ((ep.retailPrice && ep.retailPrice > 0) ? ep.retailPrice.toFixed(2) : "24.00");
@@ -218,6 +357,46 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
     const firstImage = productImages[0];
     const firstVariantImage = firstSku ? frontBySkuId.get(firstSku.id) : undefined;
     const firstSkuColor = normalizeShopifyColor(firstSku?.colorName ?? null);
+
+    // Build SEO + alt context now that firstSku is known.
+    const seoCtx = buildSeoContext(
+      ep.product.name || ep.product.skuPrefix || "",
+      firstSku?.colorName ?? null,
+      tagsByDim,
+      ep.product.gender,
+      ep.product.frameShape,
+    );
+    const seoTitle = buildSeoTitle(seoCtx);
+
+    // Seed alt-role map (populated now that we know firstSku/productImages).
+    if (productImages[0]?.source === "collection") {
+      altRoleByImageId.set(productImages[0].id, { kind: "hero" });
+    }
+    for (const sku of ep.skus) {
+      const front = frontBySkuId.get(sku.id);
+      if (front) {
+        altRoleByImageId.set(front.id, { kind: "variant-front", colorDisplay: sku.colorName || null });
+      }
+    }
+    if (firstSku) {
+      for (const angle of EXTRA_ANGLES_FOR_MAIN_SKU) {
+        const img = productImages.find((i) => i.skuId === firstSku.id && i.imageTypeSlug === angle);
+        if (img) altRoleByImageId.set(img.id, { kind: "angle", angle });
+      }
+    }
+    for (const img of productImages) {
+      if (!altRoleByImageId.has(img.id)) {
+        altRoleByImageId.set(img.id, { kind: "lifestyle", label: img.imageTypeSlug ?? "lifestyle" });
+      }
+    }
+    if (productImages[0] && !altRoleByImageId.has(productImages[0].id)) {
+      altRoleByImageId.set(productImages[0].id, { kind: "hero" });
+    }
+    const altFor = (img: ExportImage | undefined): string => {
+      if (!img) return "";
+      const role = altRoleByImageId.get(img.id) ?? ({ kind: "hero" } as AltRole);
+      return buildImageAltText(seoCtx, role);
+    };
 
     rows.push({
       Handle: handle, Title: ep.product.name || "", "Body (HTML)": ep.product.description || "",
@@ -240,8 +419,8 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       "Variant Image": absUrl(firstVariantImage?.filePath),
       "Variant Weight Unit": "oz",
       "Image Src": absUrl(firstImage?.filePath), "Image Position": firstImage ? "1" : "",
-      "Image Alt Text": firstImage ? buildSeoAltText(ep.product.name || "", firstSku?.colorName || null, tagNames, 0, productImages.length) : "",
-      "SEO Title": ep.product.name || "", "SEO Description": ep.product.shortDescription || "",
+      "Image Alt Text": altFor(firstImage),
+      "SEO Title": seoTitle, "SEO Description": ep.product.shortDescription || "",
       Status: "active",
       "Metafield: custom.lens_type [single_line_text_field]": lensTag,
       "Age group (product.metafields.shopify.age-group)": JAXY_CONSTANTS.ageGroup,
@@ -304,7 +483,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
         "Variant Image": "",
         "Variant Weight Unit": "",
         "Image Src": absUrl(productImages[i].filePath), "Image Position": String(i + 1),
-        "Image Alt Text": buildSeoAltText(ep.product.name || "", null, tagNames, i, productImages.length),
+        "Image Alt Text": altFor(productImages[i]),
         "SEO Title": "", "SEO Description": "",
         Status: "",
         "Metafield: custom.lens_type [single_line_text_field]": "",
