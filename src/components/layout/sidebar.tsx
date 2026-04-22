@@ -84,7 +84,13 @@ const operationsNav: NavItem[] = [
   { title: "Orders", href: "/orders", icon: ShoppingCart },
   { title: "Catalog", href: "/catalog", icon: Package },
   { title: "Media Center", href: "/media", icon: ImageIcon },
-  { title: "Inventory", href: "/inventory", icon: Warehouse },
+  {
+    title: "Inventory", href: "/inventory", icon: Warehouse,
+    children: [
+      { title: "Purchase Orders", href: "/inventory/purchase-orders", icon: Package },
+      { title: "Warehouse Exports", href: "/inventory/exports", icon: Database },
+    ],
+  },
   { title: "Finance", href: "/finance", icon: DollarSign },
 ];
 

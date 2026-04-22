@@ -216,6 +216,41 @@ try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN ai_categorization TEX
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN ai_categorized_at TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN ai_categorization_model TEXT"); } catch { /* exists */ }
 
+// Warehouse/ShipHero exports: PO line items, freight info on POs, shiphero sync timestamps
+try { sqlite.exec("ALTER TABLE catalog_skus ADD COLUMN shiphero_synced_at TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_purchase_orders ADD COLUMN factory_code TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_purchase_orders ADD COLUMN freight_type TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_purchase_orders ADD COLUMN shipping_method TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_purchase_orders ADD COLUMN ship_date TEXT"); } catch { /* exists */ }
+
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS catalog_purchase_order_items (
+    id TEXT PRIMARY KEY NOT NULL,
+    purchase_order_id TEXT NOT NULL REFERENCES catalog_purchase_orders(id) ON DELETE CASCADE,
+    sku TEXT NOT NULL,
+    vendor_sku TEXT,
+    quantity INTEGER NOT NULL,
+    unit_price REAL,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_po_items_po ON catalog_purchase_order_items(purchase_order_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_po_items_sku ON catalog_purchase_order_items(sku)`);
+} catch (e) { console.error("[db] PO items table error:", e); }
+
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS operations_exports (
+    id TEXT PRIMARY KEY NOT NULL,
+    export_type TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    row_count INTEGER NOT NULL,
+    filters TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    created_by TEXT
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_operations_exports_type ON operations_exports(export_type)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_operations_exports_created ON operations_exports(created_at)`);
+} catch (e) { console.error("[db] Operations exports table error:", e); }
+
 // Ensure brand_accounts + company_brand_links + magic_link_tokens exist (idempotent)
 try {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS brand_accounts (

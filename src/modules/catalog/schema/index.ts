@@ -10,9 +10,35 @@ export const purchaseOrders = sqliteTable("catalog_purchase_orders", {
   poNumber: text("po_number").unique(),
   supplier: text("supplier"),
   orderDate: text("order_date"),
+  shipDate: text("ship_date"),
+  factoryCode: text("factory_code"),
+  freightType: text("freight_type"),
+  shippingMethod: text("shipping_method"),
   notes: text("notes"),
   status: text("status", { enum: ["ordered", "received", "processing", "complete"] }).default("ordered"),
   createdAt: timestamp("created_at"),
+});
+
+// ── Purchase Order Items (line items on a PO) ──
+export const purchaseOrderItems = sqliteTable("catalog_purchase_order_items", {
+  id: id(),
+  purchaseOrderId: text("purchase_order_id").references(() => purchaseOrders.id, { onDelete: "cascade" }).notNull(),
+  sku: text("sku").notNull(),
+  vendorSku: text("vendor_sku"),
+  quantity: integer("quantity").notNull(),
+  unitPrice: real("unit_price"),
+  createdAt: timestamp("created_at"),
+});
+
+// ── Operations Exports (audit log for ShipHero + factory CSV exports) ──
+export const operationsExports = sqliteTable("operations_exports", {
+  id: id(),
+  exportType: text("export_type").notNull(),
+  filename: text("filename").notNull(),
+  rowCount: integer("row_count").notNull(),
+  filters: text("filters"),
+  createdAt: timestamp("created_at"),
+  createdBy: text("created_by"),
 });
 
 // ── Products ──
@@ -64,6 +90,7 @@ export const skus = sqliteTable("catalog_skus", {
   metaDescription: text("meta_description"),
   twelvePackSku: text("twelve_pack_sku"),
   twelvePackUpc: text("twelve_pack_upc"),
+  shipheroSyncedAt: text("shiphero_synced_at"),
   status: text("status", { enum: ["intake", "review", "approved"] }).default("intake"),
   createdAt: timestamp("created_at"),
 });
