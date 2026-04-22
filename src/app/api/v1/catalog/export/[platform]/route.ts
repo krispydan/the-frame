@@ -41,8 +41,8 @@ export async function GET(
     // isn't a blocker for the Faire upload.
     const platformSources: Record<string, string[] | undefined> = {
       faire: ["square", "collection"],
-      shopify: undefined, // all approved images
-      amazon: undefined,  // all approved images
+      shopify: ["square", "collection"], // matches shopify.ts emitted sources
+      amazon: undefined,                   // amazon still emits all per-SKU images
     };
     const missingFiles = await findProductsWithMissingImageFiles(exportProducts, platformSources[platform]);
     if (missingFiles.length > 0) {
