@@ -107,3 +107,52 @@ export async function findProductsWithMissingImageFiles(
 
   return out;
 }
+
+/**
+ * Stat exactly the images a given image-list builder would emit per
+ * product. Use this when a platform's exporter picks a curated subset
+ * (e.g. Shopify's "front per SKU + main SKU angles + lifestyle") so the
+ * validator reports blockers on only those files, not every approved
+ * image in the DB.
+ */
+export async function findProductsWithMissingImageFilesByList(
+  products: ExportProduct[],
+  pickImages: (p: ExportProduct) => { filePath: string | null; source: string | null }[],
+): Promise<MissingImageFile[]> {
+  type Check = { productId: string; filePath: string; source: string | null };
+  const checks: Check[] = [];
+  for (const p of products) {
+    for (const i of pickImages(p)) {
+      if (!i.filePath) continue;
+      checks.push({ productId: p.product.id, filePath: i.filePath, source: i.source });
+    }
+  }
+
+  const existsMap = new Map<string, boolean>();
+  const batchSize = 50;
+  for (let i = 0; i < checks.length; i += batchSize) {
+    const batch = checks.slice(i, i + batchSize);
+    const results = await Promise.all(batch.map(async (c) => [c.filePath, (await imageStat(c.filePath)).exists] as const));
+    for (const [fp, ok] of results) existsMap.set(fp, ok);
+  }
+
+  const out: MissingImageFile[] = [];
+  for (const p of products) {
+    const missing: { source: string | null; filePath: string }[] = [];
+    for (const i of pickImages(p)) {
+      if (!i.filePath) continue;
+      if (existsMap.get(i.filePath) === false) {
+        missing.push({ source: i.source, filePath: i.filePath });
+      }
+    }
+    if (missing.length > 0) {
+      out.push({
+        productId: p.product.id,
+        productName: p.product.name ?? p.product.skuPrefix ?? p.product.id,
+        missing,
+      });
+    }
+  }
+
+  return out;
+}
