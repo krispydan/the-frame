@@ -7,6 +7,52 @@ import Papa from "papaparse";
 const SHAPE_TAGS = new Set(["aviator", "cat-eye", "round", "square", "oversized", "rectangle", "wayfarer", "oval", "geometric"]);
 const STYLE_TAGS = new Set(["retro", "vintage", "classic", "modern", "bold", "statement", "timeless", "trendy"]);
 
+// Constant fields every Jaxy product shares
+const JAXY_CONSTANTS = {
+  productCategory: "Apparel & Accessories > Clothing Accessories > Sunglasses",
+  ageGroup: "adults",
+  hsCode: "9004.10",
+  countryOfOrigin: "CN",
+} as const;
+
+/**
+ * Map a Jaxy color name to Shopify's controlled vocab for
+ * `shopify.color-pattern` and `shopify.eyewear-frame-color`.
+ * Defaults to lowercased input so custom colors still round-trip.
+ */
+function normalizeShopifyColor(colorName: string | null): string {
+  if (!colorName) return "";
+  const c = colorName.toLowerCase().trim();
+  const map: Record<string, string> = {
+    "tortoise": "brown",
+    "tortoiseshell": "brown",
+    "tor": "brown",
+    "brw": "brown",
+    "blk": "black",
+    "wht": "white",
+    "grn": "green",
+    "blu": "blue",
+    "red": "red",
+    "gld": "gold",
+    "slv": "silver",
+    "olv": "green",
+    "ylw": "yellow",
+    "pnk": "pink",
+    "amb": "orange",
+    "snd": "beige",
+    "rst": "orange",
+    "tea": "green",
+    "gry": "gray",
+    "bur": "purple",
+  };
+  return map[c] ?? c;
+}
+
+function mapLensPolarization(tagsByDim: Map<string, string[]>): string {
+  const lensTags = (tagsByDim.get("lens") ?? []).map((t) => t.toLowerCase());
+  return lensTags.includes("polarized") ? "polarized" : "non-polarized";
+}
+
 function buildSeoAltText(productName: string, colorName: string | null, tagNames: string[], imageIndex: number, totalImages: number): string {
   const tagSet = new Set(tagNames.map((t) => t.toLowerCase()));
   const shape = tagNames.find((t) => SHAPE_TAGS.has(t.toLowerCase()))?.toLowerCase() || "";
@@ -130,6 +176,27 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
     const tagNames = ep.tags.map((t) => t.tagName).filter(Boolean) as string[];
     const lensTag = ep.tags.find((t) => t.dimension === "lens")?.tagName || "";
 
+    // Group tags by dimension for easier lookup
+    const tagsByDim = new Map<string, string[]>();
+    for (const t of ep.tags) {
+      if (!t.dimension || !t.tagName) continue;
+      const arr = tagsByDim.get(t.dimension) ?? [];
+      arr.push(t.tagName);
+      tagsByDim.set(t.dimension, arr);
+    }
+
+    // Product-level Shopify standard metafields (only set on the first row)
+    const gender = (ep.product.gender || "unisex").toLowerCase();
+    const frameShape = (ep.product.frameShape || "").toLowerCase();
+    // color-pattern: unique list of normalized SKU colors
+    const colorSet = new Set<string>();
+    for (const sku of ep.skus) {
+      const norm = normalizeShopifyColor(sku.colorName);
+      if (norm) colorSet.add(norm);
+    }
+    const colorPattern = Array.from(colorSet).join("; ");
+    const polarization = mapLensPolarization(tagsByDim);
+
     const { productImages, frontBySkuId } = buildShopifyImageList(ep);
 
     const variantPrice = channel === "wholesale"
@@ -142,45 +209,104 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
     const firstSku = ep.skus[0];
     const firstImage = productImages[0];
     const firstVariantImage = firstSku ? frontBySkuId.get(firstSku.id) : undefined;
+    const firstSkuColor = normalizeShopifyColor(firstSku?.colorName ?? null);
 
     rows.push({
       Handle: handle, Title: ep.product.name || "", "Body (HTML)": ep.product.description || "",
-      Vendor: "Jaxy", Type: ep.product.category || "", Tags: tagString, Published: "TRUE",
+      Vendor: "Jaxy",
+      "Product Category": JAXY_CONSTANTS.productCategory,
+      Type: ep.product.category || "Sunglasses",
+      Tags: tagString, Published: "TRUE",
       "Option1 Name": ep.skus.length > 1 ? "Color" : "Title",
       "Option1 Value": firstSku?.colorName || "Default Title",
-      "Variant SKU": firstSku?.sku || "", "Variant Price": variantPrice,
+      "Variant SKU": firstSku?.sku || "",
+      "Variant Inventory Tracker": "shopify",
+      "Variant Inventory Policy": "continue",
+      "Variant Fulfillment Service": "manual",
+      "Variant Price": variantPrice,
       "Variant Compare At Price": compareAtPrice,
+      "Variant Requires Shipping": "true",
+      "Variant Taxable": "true",
+      "Variant HS Code": JAXY_CONSTANTS.hsCode,
+      "Variant Country of Origin": JAXY_CONSTANTS.countryOfOrigin,
       "Variant Image": firstVariantImage?.filePath || "",
+      "Variant Weight Unit": "oz",
       "Image Src": firstImage?.filePath || "", "Image Position": firstImage ? "1" : "",
       "Image Alt Text": firstImage ? buildSeoAltText(ep.product.name || "", firstSku?.colorName || null, tagNames, 0, productImages.length) : "",
       "SEO Title": ep.product.name || "", "SEO Description": ep.product.shortDescription || "",
+      Status: "active",
       "Metafield: custom.lens_type [single_line_text_field]": lensTag,
+      "Age group (product.metafields.shopify.age-group)": JAXY_CONSTANTS.ageGroup,
+      "Color (product.metafields.shopify.color-pattern)": colorPattern,
+      "Eyewear frame color (product.metafields.shopify.eyewear-frame-color)": firstSkuColor,
+      "Eyewear frame design (product.metafields.shopify.eyewear-frame-design)": frameShape,
+      "Lens color (product.metafields.shopify.lens-color)": firstSkuColor,
+      "Lens polarization (product.metafields.shopify.lens-polarization)": polarization,
+      "Target gender (product.metafields.shopify.target-gender)": gender,
     });
 
     for (let i = 1; i < ep.skus.length; i++) {
       const sku = ep.skus[i];
       const variantImage = frontBySkuId.get(sku.id);
       rows.push({
-        Handle: handle, Title: "", "Body (HTML)": "", Vendor: "", Type: "", Tags: "", Published: "",
+        Handle: handle, Title: "", "Body (HTML)": "", Vendor: "",
+        "Product Category": "",
+        Type: "", Tags: "", Published: "",
         "Option1 Name": "", "Option1 Value": sku.colorName || "",
-        "Variant SKU": sku.sku || "", "Variant Price": variantPrice,
+        "Variant SKU": sku.sku || "",
+        "Variant Inventory Tracker": "shopify",
+        "Variant Inventory Policy": "continue",
+        "Variant Fulfillment Service": "manual",
+        "Variant Price": variantPrice,
         "Variant Compare At Price": compareAtPrice,
+        "Variant Requires Shipping": "true",
+        "Variant Taxable": "true",
+        "Variant HS Code": JAXY_CONSTANTS.hsCode,
+        "Variant Country of Origin": JAXY_CONSTANTS.countryOfOrigin,
         "Variant Image": variantImage?.filePath || "",
+        "Variant Weight Unit": "oz",
         "Image Src": "", "Image Position": "", "Image Alt Text": "", "SEO Title": "", "SEO Description": "",
+        Status: "",
         "Metafield: custom.lens_type [single_line_text_field]": "",
+        "Age group (product.metafields.shopify.age-group)": "",
+        "Color (product.metafields.shopify.color-pattern)": "",
+        "Eyewear frame color (product.metafields.shopify.eyewear-frame-color)": "",
+        "Eyewear frame design (product.metafields.shopify.eyewear-frame-design)": "",
+        "Lens color (product.metafields.shopify.lens-color)": "",
+        "Lens polarization (product.metafields.shopify.lens-polarization)": "",
+        "Target gender (product.metafields.shopify.target-gender)": "",
       });
     }
 
     for (let i = 1; i < productImages.length; i++) {
       rows.push({
-        Handle: handle, Title: "", "Body (HTML)": "", Vendor: "", Type: "", Tags: "", Published: "",
-        "Option1 Name": "", "Option1 Value": "", "Variant SKU": "", "Variant Price": "",
+        Handle: handle, Title: "", "Body (HTML)": "", Vendor: "",
+        "Product Category": "",
+        Type: "", Tags: "", Published: "",
+        "Option1 Name": "", "Option1 Value": "", "Variant SKU": "",
+        "Variant Inventory Tracker": "",
+        "Variant Inventory Policy": "",
+        "Variant Fulfillment Service": "",
+        "Variant Price": "",
         "Variant Compare At Price": "",
+        "Variant Requires Shipping": "",
+        "Variant Taxable": "",
+        "Variant HS Code": "",
+        "Variant Country of Origin": "",
         "Variant Image": "",
+        "Variant Weight Unit": "",
         "Image Src": productImages[i].filePath || "", "Image Position": String(i + 1),
         "Image Alt Text": buildSeoAltText(ep.product.name || "", null, tagNames, i, productImages.length),
         "SEO Title": "", "SEO Description": "",
+        Status: "",
         "Metafield: custom.lens_type [single_line_text_field]": "",
+        "Age group (product.metafields.shopify.age-group)": "",
+        "Color (product.metafields.shopify.color-pattern)": "",
+        "Eyewear frame color (product.metafields.shopify.eyewear-frame-color)": "",
+        "Eyewear frame design (product.metafields.shopify.eyewear-frame-design)": "",
+        "Lens color (product.metafields.shopify.lens-color)": "",
+        "Lens polarization (product.metafields.shopify.lens-polarization)": "",
+        "Target gender (product.metafields.shopify.target-gender)": "",
       });
     }
   }
