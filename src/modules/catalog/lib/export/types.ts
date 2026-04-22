@@ -44,6 +44,7 @@ export interface ExportProduct {
     upc: string | null;
     inStock: boolean | null;
     inventoryQuantity: number;
+    costPrice: number | null;
   }[];
   images: {
     id: string;

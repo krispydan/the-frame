@@ -21,6 +21,37 @@ const JAXY_CONSTANTS = {
 } as const;
 
 /**
+ * Convert FOB cost (catalog_skus.cost_price) into landed cost for
+ * Shopify's "Cost per item" column so Shopify margin/Finance reports
+ * reflect reality instead of FOB-only.
+ *
+ * landed = (FOB × LANDED_MULTIPLIER) + LANDED_FLAT_ADDER
+ *
+ * Defaults:
+ *   - 25% multiplier covers US import duties on HS 9004.10 + broker
+ *     fees for Chinese eyewear.
+ *   - $0.50 flat adder is a conservative per-unit freight allocation.
+ *
+ * Override in Railway env when you have real landed data:
+ *   COST_LANDED_MULTIPLIER=1.25
+ *   COST_LANDED_FLAT=0.50
+ */
+function getLandedCostAdjustment() {
+  const mult = parseFloat(process.env.COST_LANDED_MULTIPLIER ?? "1.25");
+  const flat = parseFloat(process.env.COST_LANDED_FLAT ?? "0.50");
+  return {
+    multiplier: Number.isFinite(mult) && mult > 0 ? mult : 1.25,
+    flat: Number.isFinite(flat) && flat >= 0 ? flat : 0.5,
+  };
+}
+
+function landedCostFor(fob: number | null | undefined): string {
+  if (fob == null || !Number.isFinite(fob) || fob <= 0) return "";
+  const { multiplier, flat } = getLandedCostAdjustment();
+  return (fob * multiplier + flat).toFixed(2);
+}
+
+/**
  * Map a Jaxy color name to Shopify's controlled vocab for
  * `shopify.color-pattern` and `shopify.eyewear-frame-color`.
  * Defaults to lowercased input so custom colors still round-trip.
@@ -418,6 +449,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       "Variant Country of Origin": JAXY_CONSTANTS.countryOfOrigin,
       "Variant Image": absUrl(firstVariantImage?.filePath),
       "Variant Weight Unit": "oz",
+      "Cost per item": landedCostFor(firstSku?.costPrice ?? null),
       "Image Src": absUrl(firstImage?.filePath), "Image Position": firstImage ? "1" : "",
       "Image Alt Text": altFor(firstImage),
       "SEO Title": seoTitle, "SEO Description": ep.product.shortDescription || "",
@@ -452,6 +484,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
         "Variant Country of Origin": JAXY_CONSTANTS.countryOfOrigin,
         "Variant Image": absUrl(variantImage?.filePath),
         "Variant Weight Unit": "oz",
+        "Cost per item": landedCostFor(sku.costPrice ?? null),
         "Image Src": "", "Image Position": "", "Image Alt Text": "", "SEO Title": "", "SEO Description": "",
         Status: "",
         "Metafield: custom.lens_type [single_line_text_field]": "",
@@ -482,6 +515,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
         "Variant Country of Origin": "",
         "Variant Image": "",
         "Variant Weight Unit": "",
+        "Cost per item": "",
         "Image Src": absUrl(productImages[i].filePath), "Image Position": String(i + 1),
         "Image Alt Text": altFor(productImages[i]),
         "SEO Title": "", "SEO Description": "",

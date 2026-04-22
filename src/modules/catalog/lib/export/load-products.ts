@@ -65,6 +65,7 @@ export async function loadExportProducts(productIds?: string[]): Promise<ExportP
         id: s.id, sku: s.sku, colorName: s.colorName, colorHex: s.colorHex,
         size: s.size, upc: s.upc, inStock: s.inStock,
         inventoryQuantity: inventoryBySku.get(s.id) ?? 0,
+        costPrice: s.costPrice,
       })),
       images: productImages.map((i) => ({
         id: i.id, skuId: i.skuId, filePath: i.filePath, width: i.width,
