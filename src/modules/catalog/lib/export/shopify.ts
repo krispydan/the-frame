@@ -333,19 +333,20 @@ function isLifestyleImage(img: ExportImage): boolean {
  *
  * RETAIL channel (consumer storefront):
  *   1. First SKU's front square (single-product hero — standard
- *      Shopify grid tile that shows the actual product, not a
- *      marketing composite).
- *   2. Collection composite (product-level multi-color hero, if present)
- *   3. Remaining SKU fronts (color swatches)
- *   4. First SKU's side / other-side / top (detail angles)
- *   5. Lifestyle / studio-* images if present
+ *      Shopify grid tile).
+ *   2. Remaining SKU fronts (color swatches).
+ *   3. First SKU's side / other-side / top (detail angles).
+ *   4. Lifestyle / studio-* images if present.
+ *   NOTE: the collection composite is deliberately EXCLUDED from
+ *   retail — DTC shoppers see the multi-color composite as a category
+ *   header, not a product image.
  *
  * WHOLESALE channel (Faire-style buyer-facing catalog):
  *   1. Collection composite first — wholesale buyers want to see all
  *      colorways on the grid tile at a glance (mirrors Faire).
- *   2. Per-SKU fronts
- *   3. First SKU's angles
- *   4. Lifestyle / studio-* images if present
+ *   2. Per-SKU fronts.
+ *   3. First SKU's angles.
+ *   4. Lifestyle / studio-* images if present.
  *
  * Returns the ordered list and a per-SKU → front-image map used to
  * populate Shopify's "Variant Image" column so color-swatch selection
@@ -386,12 +387,10 @@ export function buildShopifyImageList(
       if (f) productImages.push(f);
     }
   } else {
-    // RETAIL
+    // RETAIL — collection composite is intentionally skipped
     // 1. First SKU's front as hero
     if (firstSkuFront) productImages.push(firstSkuFront);
-    // 2. Collection composite as secondary
-    if (collection && !productImages.includes(collection)) productImages.push(collection);
-    // 3. Remaining SKU fronts
+    // 2. Remaining SKU fronts
     for (const sku of ep.skus) {
       const f = frontBySkuId.get(sku.id);
       if (f && !productImages.includes(f)) productImages.push(f);
