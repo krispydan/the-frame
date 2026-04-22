@@ -538,8 +538,10 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       "Inventory tracker": opts.sku ? "shopify" : "",
       "Inventory quantity": opts.inventoryQty ?? "",
       "Continue selling when out of stock": opts.sku ? "deny" : "",
-      // 15 oz per pair → 15 × 28.3495 ≈ 425 grams. User confirmed 15 oz.
-      "Weight value (grams)": opts.sku ? "425" : "",
+      // 1.5 oz per pair (typical sunglasses weight) → 1.5 × 28.3495
+      // ≈ 42.52 g. Admin UI shows this back as 1.5 oz via the display
+      // unit below.
+      "Weight value (grams)": opts.sku ? "42.52" : "",
       "Weight unit for display": opts.sku ? "oz" : "",
       "Requires shipping": opts.sku ? "TRUE" : "",
       "Fulfillment service": opts.sku ? "manual" : "",
