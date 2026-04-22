@@ -103,44 +103,6 @@ function landedCostFor(fob: number | null | undefined): string {
   return (fob * multiplier + flat).toFixed(2);
 }
 
-/**
- * Map a Jaxy color name to Shopify's controlled vocab for
- * `shopify.color-pattern` and `shopify.eyewear-frame-color`.
- * Defaults to lowercased input so custom colors still round-trip.
- */
-function normalizeShopifyColor(colorName: string | null): string {
-  if (!colorName) return "";
-  const c = colorName.toLowerCase().trim();
-  const map: Record<string, string> = {
-    "tortoise": "brown",
-    "tortoiseshell": "brown",
-    "tor": "brown",
-    "brw": "brown",
-    "blk": "black",
-    "wht": "white",
-    "grn": "green",
-    "blu": "blue",
-    "red": "red",
-    "gld": "gold",
-    "slv": "silver",
-    "olv": "green",
-    "ylw": "yellow",
-    "pnk": "pink",
-    "amb": "orange",
-    "snd": "beige",
-    "rst": "orange",
-    "tea": "green",
-    "gry": "gray",
-    "bur": "purple",
-  };
-  return map[c] ?? c;
-}
-
-function mapLensPolarization(tagsByDim: Map<string, string[]>): string {
-  const lensTags = (tagsByDim.get("lens") ?? []).map((t) => t.toLowerCase());
-  return lensTags.includes("polarized") ? "polarized" : "non-polarized";
-}
-
 function capitalize(s: string): string {
   return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
@@ -435,18 +397,6 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       tagsByDim.set(t.dimension, arr);
     }
 
-    // Product-level Shopify standard metafields (only set on the first row)
-    const gender = (ep.product.gender || "unisex").toLowerCase();
-    const frameShape = (ep.product.frameShape || "").toLowerCase();
-    // color-pattern: unique list of normalized SKU colors
-    const colorSet = new Set<string>();
-    for (const sku of ep.skus) {
-      const norm = normalizeShopifyColor(sku.colorName);
-      if (norm) colorSet.add(norm);
-    }
-    const colorPattern = Array.from(colorSet).join("; ");
-    const polarization = mapLensPolarization(tagsByDim);
-
     const { productImages, frontBySkuId } = buildShopifyImageList(ep, channel);
 
     // Alt-role map is populated below once firstSku is known.
@@ -470,7 +420,6 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
     const firstSku = ep.skus[0];
     const firstImage = productImages[0];
     const firstVariantImage = firstSku ? frontBySkuId.get(firstSku.id) : undefined;
-    const firstSkuColor = normalizeShopifyColor(firstSku?.colorName ?? null);
 
     // Build SEO + alt context now that firstSku is known.
     const seoCtx = buildSeoContext(
@@ -538,13 +487,14 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       "SEO Title": seoTitle, "SEO Description": ep.product.shortDescription || "",
       Status: "active",
       "Metafield: custom.lens_type [single_line_text_field]": lensTag,
-      "Age group (product.metafields.shopify.age-group)": JAXY_CONSTANTS.ageGroup,
-      "Color (product.metafields.shopify.color-pattern)": colorPattern,
-      "Eyewear frame color (product.metafields.shopify.eyewear-frame-color)": firstSkuColor,
-      "Eyewear frame design (product.metafields.shopify.eyewear-frame-design)": frameShape,
-      "Lens color (product.metafields.shopify.lens-color)": firstSkuColor,
-      "Lens polarization (product.metafields.shopify.lens-polarization)": polarization,
-      "Target gender (product.metafields.shopify.target-gender)": gender,
+      // Shopify's standard shopify.* metafields (age-group, color-pattern,
+      // eyewear-frame-color/design, lens-color, lens-polarization,
+      // target-gender) are metaobject references, not plain text —
+      // CSV import rejects string values with "Value require that you
+      // select a metaobject". Set these once per product in Shopify's
+      // Bulk Editor UI where the taxonomy picker resolves metaobject
+      // GIDs natively. Keeping `custom.lens_type` because it's a
+      // free-text metafield we own.
     });
 
     for (let i = 1; i < ep.skus.length; i++) {
@@ -571,13 +521,6 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
         "Image Src": "", "Image Position": "", "Image Alt Text": "", "SEO Title": "", "SEO Description": "",
         Status: "",
         "Metafield: custom.lens_type [single_line_text_field]": "",
-        "Age group (product.metafields.shopify.age-group)": "",
-        "Color (product.metafields.shopify.color-pattern)": "",
-        "Eyewear frame color (product.metafields.shopify.eyewear-frame-color)": "",
-        "Eyewear frame design (product.metafields.shopify.eyewear-frame-design)": "",
-        "Lens color (product.metafields.shopify.lens-color)": "",
-        "Lens polarization (product.metafields.shopify.lens-polarization)": "",
-        "Target gender (product.metafields.shopify.target-gender)": "",
       });
     }
 
@@ -604,13 +547,6 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
         "SEO Title": "", "SEO Description": "",
         Status: "",
         "Metafield: custom.lens_type [single_line_text_field]": "",
-        "Age group (product.metafields.shopify.age-group)": "",
-        "Color (product.metafields.shopify.color-pattern)": "",
-        "Eyewear frame color (product.metafields.shopify.eyewear-frame-color)": "",
-        "Eyewear frame design (product.metafields.shopify.eyewear-frame-design)": "",
-        "Lens color (product.metafields.shopify.lens-color)": "",
-        "Lens polarization (product.metafields.shopify.lens-polarization)": "",
-        "Target gender (product.metafields.shopify.target-gender)": "",
       });
     }
   }
