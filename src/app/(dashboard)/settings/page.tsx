@@ -18,7 +18,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { User, Users, Plug, Bell, Database, Info, Save, Trash2, Upload, Download, ExternalLink, Wifi, WifiOff, Loader2, CheckCircle2, XCircle, Link2, ChevronRight } from "lucide-react";
+import { User, Users, Plug, Bell, Database, Info, Save, Trash2, Upload, Download, ExternalLink, Wifi, WifiOff, Loader2, CheckCircle2, XCircle, Link2, ChevronRight, KeyRound } from "lucide-react";
 import Link from "next/link";
 
 // ── Helpers ──
@@ -227,6 +227,12 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
 
+  // Password change form
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false);
+
   const load = useCallback(async () => {
     try {
       const data = await fetchSettings();
@@ -349,6 +355,96 @@ export default function SettingsPage() {
               </div>
               <Button onClick={() => saveMultiple(["user_name", "user_email"])} disabled={saving}>
                 <Save className="h-4 w-4 mr-2" /> Save Profile
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <KeyRound className="h-5 w-5" /> Password
+              </CardTitle>
+              <CardDescription>
+                Set or change your password for email + password login
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-2">
+                <Label htmlFor="current-pw">Current Password</Label>
+                <Input
+                  id="current-pw"
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  placeholder="Leave blank if you haven't set one yet"
+                  autoComplete="current-password"
+                />
+                <p className="text-xs text-muted-foreground">
+                  If you signed up via magic link and never set a password, leave this blank.
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="new-pw">New Password</Label>
+                <Input
+                  id="new-pw"
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Minimum 8 characters"
+                  autoComplete="new-password"
+                  minLength={8}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="confirm-pw">Confirm New Password</Label>
+                <Input
+                  id="confirm-pw"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Re-enter new password"
+                  autoComplete="new-password"
+                  minLength={8}
+                />
+              </div>
+              <Button
+                disabled={changingPassword || newPassword.length < 8 || newPassword !== confirmPassword}
+                onClick={async () => {
+                  if (newPassword !== confirmPassword) {
+                    toast.error("Passwords don't match");
+                    return;
+                  }
+                  setChangingPassword(true);
+                  try {
+                    const res = await fetch("/api/v1/auth/change-password", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        currentPassword: currentPassword || undefined,
+                        newPassword,
+                      }),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                      toast.error(data.error || "Failed to change password");
+                    } else {
+                      toast.success("Password updated successfully");
+                      setCurrentPassword("");
+                      setNewPassword("");
+                      setConfirmPassword("");
+                    }
+                  } catch {
+                    toast.error("Failed to change password");
+                  } finally {
+                    setChangingPassword(false);
+                  }
+                }}
+              >
+                {changingPassword ? (
+                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</>
+                ) : (
+                  <><KeyRound className="h-4 w-4 mr-2" /> {currentPassword ? "Change" : "Set"} Password</>
+                )}
               </Button>
             </CardContent>
           </Card>

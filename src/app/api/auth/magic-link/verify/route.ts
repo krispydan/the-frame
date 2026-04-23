@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
   })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime("7d")
+    .setExpirationTime("30d")
     .sign(secret);
 
   // Update last login
@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
     httpOnly: true,
     secure: true,
     sameSite: "lax",
-    maxAge: 7 * 24 * 60 * 60,
+    maxAge: 30 * 24 * 60 * 60,
     path: "/",
   });
 

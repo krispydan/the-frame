@@ -10,7 +10,7 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const users = sqlite
-    .prepare("SELECT id, email, name, role, is_active, last_login_at, created_at FROM users ORDER BY created_at ASC")
+    .prepare("SELECT id, email, name, role, is_active, CASE WHEN password_hash IS NOT NULL AND password_hash != '' THEN 1 ELSE 0 END as has_password, last_login_at, created_at FROM users ORDER BY created_at ASC")
     .all();
 
   return NextResponse.json(users);

@@ -31,7 +31,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { UserPlus, Shield, Loader2, ArrowLeft, ToggleLeft, ToggleRight } from "lucide-react";
+import { UserPlus, Shield, Loader2, ArrowLeft, ToggleLeft, ToggleRight, KeyRound, Lock } from "lucide-react";
 import Link from "next/link";
 
 interface UserRow {
@@ -40,6 +40,7 @@ interface UserRow {
   name: string;
   role: string;
   is_active: number;
+  has_password: number;
   last_login_at: string | null;
   created_at: string;
 }
@@ -87,6 +88,11 @@ export default function UsersPage() {
   // Edit form
   const [editRole, setEditRole] = useState("");
   const [editActive, setEditActive] = useState(true);
+
+  // Password management
+  const [setPasswordOpen, setSetPasswordOpen] = useState<UserRow | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [settingPassword, setSettingPassword] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -159,6 +165,50 @@ export default function UsersPage() {
       toast.error("Failed to update user");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSetPassword = async () => {
+    if (!setPasswordOpen || !newPassword) return;
+    if (newPassword.length < 8) {
+      toast.error("Password must be at least 8 characters");
+      return;
+    }
+    setSettingPassword(true);
+    try {
+      const res = await fetch(`/api/v1/settings/users/${setPasswordOpen.id}/password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Failed to set password");
+      } else {
+        toast.success(`Password set for ${setPasswordOpen.name}`);
+        setSetPasswordOpen(null);
+        setNewPassword("");
+        load();
+      }
+    } catch {
+      toast.error("Failed to set password");
+    } finally {
+      setSettingPassword(false);
+    }
+  };
+
+  const handleClearPassword = async (user: UserRow) => {
+    if (!confirm(`Remove password for ${user.name}? They'll need to use magic link to sign in.`)) return;
+    try {
+      const res = await fetch(`/api/v1/settings/users/${user.id}/password`, { method: "DELETE" });
+      if (!res.ok) {
+        toast.error("Failed to clear password");
+      } else {
+        toast.success(`Password cleared for ${user.name}`);
+        load();
+      }
+    } catch {
+      toast.error("Failed to clear password");
     }
   };
 
@@ -240,6 +290,7 @@ export default function UsersPage() {
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Auth</TableHead>
                   <TableHead>Last Login</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -265,10 +316,29 @@ export default function UsersPage() {
                         </span>
                       )}
                     </TableCell>
+                    <TableCell>
+                      {u.has_password ? (
+                        <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                          <Lock className="h-3.5 w-3.5" /> Password
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                          <KeyRound className="h-3.5 w-3.5" /> Magic link only
+                        </span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-sm text-muted-foreground">{formatDate(u.last_login_at)}</TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right space-x-1">
                       <Button variant="ghost" size="sm" onClick={() => openEdit(u)}>
                         Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => { setSetPasswordOpen(u); setNewPassword(""); }}
+                      >
+                        <KeyRound className="h-3.5 w-3.5 mr-1" />
+                        {u.has_password ? "Reset" : "Set"} Password
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -317,6 +387,61 @@ export default function UsersPage() {
             <Button onClick={handleEdit} disabled={saving}>
               {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Set/Reset Password Dialog */}
+      <Dialog open={!!setPasswordOpen} onOpenChange={(open) => !open && setSetPasswordOpen(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {setPasswordOpen?.has_password ? "Reset" : "Set"} Password — {setPasswordOpen?.name}
+            </DialogTitle>
+            <DialogDescription>
+              {setPasswordOpen?.email}
+              {setPasswordOpen?.has_password && (
+                <span className="block mt-1 text-amber-600">
+                  This will replace their current password immediately.
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="new-pw">New Password</Label>
+              <Input
+                id="new-pw"
+                type="password"
+                placeholder="Minimum 8 characters"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                minLength={8}
+                autoComplete="new-password"
+              />
+            </div>
+            {setPasswordOpen?.has_password && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-red-600 hover:text-red-700"
+                onClick={() => {
+                  if (setPasswordOpen) {
+                    handleClearPassword(setPasswordOpen);
+                    setSetPasswordOpen(null);
+                  }
+                }}
+              >
+                Remove password (force magic link only)
+              </Button>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSetPasswordOpen(null)}>Cancel</Button>
+            <Button onClick={handleSetPassword} disabled={settingPassword || newPassword.length < 8}>
+              {settingPassword && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {setPasswordOpen?.has_password ? "Reset" : "Set"} Password
             </Button>
           </DialogFooter>
         </DialogContent>
