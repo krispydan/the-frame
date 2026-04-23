@@ -117,7 +117,7 @@ const ROLE_ALLOWED_HREFS: Record<string, string[]> = {
   owner: ["*"],
   sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/pipeline", "/campaigns", "/campaigns/inbox", "/customers", "/brands", "/catalog"],
   warehouse: ["/dashboard", "/orders", "/catalog", "/media", "/inventory"],
-  finance: ["/dashboard", "/orders", "/finance"],
+  finance: ["/dashboard", "/orders", "/finance", "/finance/cogs"],
   marketing: ["/dashboard", "/marketing", "/catalog", "/media", "/campaigns"],
   support: ["/dashboard", "/orders", "/customers"],
   ai: ["/dashboard", "/ai"],
@@ -155,6 +155,17 @@ export function AppSidebar() {
 
   const prospectsExpanded = pathname.startsWith("/prospects") || pathname.startsWith("/brands");
   const [prospectsOpen, setProspectsOpen] = useState(prospectsExpanded);
+
+  // Track open/closed for any operations nav item with children
+  const [opsOpen, setOpsOpen] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    for (const item of operationsNav) {
+      if (item.children) {
+        initial[item.href] = pathname.startsWith(item.href);
+      }
+    }
+    return initial;
+  });
 
   return (
     <Sidebar collapsible="icon">
@@ -246,18 +257,53 @@ export function AppSidebar() {
           <SidebarGroupLabel>Operations</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {filteredOps.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    render={<Link href={item.href} onClick={() => setOpenMobile(false)} />}
-                    isActive={pathname.startsWith(item.href)}
-                    tooltip={item.title}
-                  >
-                    <item.icon />
-                    <span>{item.title}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {filteredOps.map((item) =>
+                item.children && item.children.length > 0 ? (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      render={<Link href={item.href} onClick={() => setOpenMobile(false)} />}
+                      isActive={pathname === item.href}
+                      tooltip={item.title}
+                    >
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </SidebarMenuButton>
+                    <button
+                      onClick={() => setOpsOpen((prev) => ({ ...prev, [item.href]: !prev[item.href] }))}
+                      className="absolute right-1 top-1.5 flex h-5 w-5 items-center justify-center rounded-md hover:bg-sidebar-accent"
+                    >
+                      <ChevronRight className={`h-3.5 w-3.5 transition-transform ${opsOpen[item.href] ? "rotate-90" : ""}`} />
+                    </button>
+                    {opsOpen[item.href] && (
+                      <SidebarMenuSub>
+                        {item.children.map((child) => (
+                          <SidebarMenuSubItem key={child.href}>
+                            <SidebarMenuSubButton
+                              render={<Link href={child.href} onClick={() => setOpenMobile(false)} />}
+                              isActive={pathname === child.href || pathname.startsWith(child.href)}
+                              size="sm"
+                            >
+                              <child.icon className="h-3.5 w-3.5" />
+                              <span>{child.title}</span>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
+                      </SidebarMenuSub>
+                    )}
+                  </SidebarMenuItem>
+                ) : (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      render={<Link href={item.href} onClick={() => setOpenMobile(false)} />}
+                      isActive={pathname.startsWith(item.href)}
+                      tooltip={item.title}
+                    >
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
