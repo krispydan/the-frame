@@ -409,13 +409,13 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
 
     const variantPrice = channel === "wholesale"
       ? ((ep.wholesalePrice && ep.wholesalePrice > 0) ? ep.wholesalePrice.toFixed(2) : "8.00")
-      : ((ep.retailPrice && ep.retailPrice > 0) ? ep.retailPrice.toFixed(2) : "24.00");
-    // Wholesale never shows a compare-at price — retailers set their own
-    // retail margin, so any strike-through would be misleading.
-    // Retail uses MSRP for the compare-at strike-through.
-    const compareAtPrice = channel === "wholesale"
-      ? ""
-      : ((ep.msrp && ep.msrp > 0) ? ep.msrp.toFixed(2) : "");
+      : ((ep.retailPrice && ep.retailPrice > 0) ? ep.retailPrice.toFixed(2) : "28.00");
+    // Compare-at is always empty for both channels.
+    // - Wholesale: retailers set their own margin, so any strike-through we
+    //   emit would be misleading.
+    // - Retail: we don't run strike-through on the DTC storefront; the
+    //   sticker price is the sticker price.
+    const compareAtPrice = "";
 
     const firstSku = ep.skus[0];
     const firstImage = productImages[0];
