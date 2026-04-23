@@ -388,3 +388,119 @@ export function getXeroCategoryMapping(categoryId: string): string | null {
   const row = db.select().from(settings).where(eq(settings.key, key)).get();
   return row?.value || null;
 }
+
+// ── COGS Manual Journal Posting ──
+
+interface CogsJournalInput {
+  weekStart: string;
+  weekEnd: string;
+  productCost: number;
+  freightCost: number;
+  dutiesCost: number;
+  totalCogs: number;
+  unitCount: number;
+  channelBreakdown?: Record<string, { units: number; productCost: number; freightCost: number; dutiesCost: number; totalCogs: number }>;
+  asDraft?: boolean;
+}
+
+/**
+ * Xero account codes for COGS posting. These should match the user's actual
+ * chart of accounts in Xero. Configurable via settings.
+ */
+function getCogsAccountCodes() {
+  const productCogs = db.select().from(settings).where(eq(settings.key, "xero_cogs_product_account")).get()?.value || "500";
+  const freightCogs = db.select().from(settings).where(eq(settings.key, "xero_cogs_freight_account")).get()?.value || "501";
+  const dutiesCogs = db.select().from(settings).where(eq(settings.key, "xero_cogs_duties_account")).get()?.value || "502";
+  const inventoryAsset = db.select().from(settings).where(eq(settings.key, "xero_inventory_asset_account")).get()?.value || "630";
+  return { productCogs, freightCogs, dutiesCogs, inventoryAsset };
+}
+
+/**
+ * Post a weekly COGS journal to Xero as a Manual Journal.
+ *
+ * The journal debits COGS accounts (product / freight / duties) and credits
+ * the Inventory Asset account. Lines net to zero.
+ *
+ * Returns the Xero ManualJournalID on success.
+ */
+export async function postCogsJournalToXero(
+  input: CogsJournalInput,
+): Promise<{ success: boolean; journalId?: string; error?: string }> {
+  const auth = await getAccessToken();
+  if (!auth) return { success: false, error: "Not authenticated with Xero" };
+
+  const codes = getCogsAccountCodes();
+  const status = input.asDraft ? "DRAFT" : "POSTED";
+  const narration = `Weekly COGS — ${input.weekStart} to ${input.weekEnd} (${input.unitCount} units)`;
+
+  const journalLines: Array<{
+    LineAmount: number;
+    AccountCode: string;
+    Description: string;
+    Tracking?: Array<{ Name: string; Option: string }>;
+  }> = [];
+
+  // Debit lines — split by cost component
+  if (input.productCost > 0) {
+    journalLines.push({
+      LineAmount: Math.round(input.productCost * 100) / 100,
+      AccountCode: codes.productCogs,
+      Description: `COGS — Product cost (${input.unitCount} units)`,
+    });
+  }
+  if (input.freightCost > 0) {
+    journalLines.push({
+      LineAmount: Math.round(input.freightCost * 100) / 100,
+      AccountCode: codes.freightCogs,
+      Description: `COGS — Freight/shipping allocation`,
+    });
+  }
+  if (input.dutiesCost > 0) {
+    journalLines.push({
+      LineAmount: Math.round(input.dutiesCost * 100) / 100,
+      AccountCode: codes.dutiesCogs,
+      Description: `COGS — Duties/tariffs allocation`,
+    });
+  }
+
+  // Credit line — inventory asset (must equal the sum of debits, negative)
+  const totalDebit = journalLines.reduce((sum, l) => sum + l.LineAmount, 0);
+  journalLines.push({
+    LineAmount: -Math.round(totalDebit * 100) / 100,
+    AccountCode: codes.inventoryAsset,
+    Description: `Inventory consumed — ${input.weekStart} to ${input.weekEnd}`,
+  });
+
+  const payload = {
+    ManualJournals: [{
+      Narration: narration,
+      Date: input.weekEnd,
+      Status: status,
+      LineAmountTypes: "NoTax",
+      JournalLines: journalLines,
+    }],
+  };
+
+  try {
+    const res = await fetch("https://api.xero.com/api.xro/2.0/ManualJournals", {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+        "xero-tenant-id": auth.tenantId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      return { success: false, error: `Xero ${res.status}: ${errText.slice(0, 500)}` };
+    }
+
+    const data = await res.json();
+    const journalId = data?.ManualJournals?.[0]?.ManualJournalID;
+    return { success: true, journalId };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}

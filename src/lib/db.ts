@@ -211,6 +211,64 @@ try {
   }
 } catch (e) { console.error("[db] Image type seed error:", e); }
 
+// FIFO inventory costing tables
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS inventory_cost_layers (
+    id TEXT PRIMARY KEY NOT NULL,
+    sku_id TEXT NOT NULL,
+    po_line_item_id TEXT,
+    po_id TEXT,
+    po_number TEXT,
+    quantity INTEGER NOT NULL,
+    remaining_quantity INTEGER NOT NULL,
+    unit_cost REAL NOT NULL DEFAULT 0,
+    freight_per_unit REAL NOT NULL DEFAULT 0,
+    duties_per_unit REAL NOT NULL DEFAULT 0,
+    landed_cost_per_unit REAL NOT NULL DEFAULT 0,
+    shipping_method TEXT,
+    received_at TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cost_layers_sku ON inventory_cost_layers(sku_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cost_layers_po ON inventory_cost_layers(po_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cost_layers_received ON inventory_cost_layers(received_at)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS inventory_cost_depletions (
+    id TEXT PRIMARY KEY NOT NULL,
+    cost_layer_id TEXT NOT NULL REFERENCES inventory_cost_layers(id),
+    order_item_id TEXT,
+    order_id TEXT,
+    channel TEXT,
+    quantity INTEGER NOT NULL,
+    unit_cost REAL NOT NULL,
+    landed_cost_per_unit REAL NOT NULL,
+    depleted_at TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_depletions_layer ON inventory_cost_depletions(cost_layer_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_depletions_order ON inventory_cost_depletions(order_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_depletions_depleted ON inventory_cost_depletions(depleted_at)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS cogs_journals (
+    id TEXT PRIMARY KEY NOT NULL,
+    week_start TEXT NOT NULL,
+    week_end TEXT NOT NULL,
+    product_cost REAL NOT NULL DEFAULT 0,
+    freight_cost REAL NOT NULL DEFAULT 0,
+    duties_cost REAL NOT NULL DEFAULT 0,
+    total_cogs REAL NOT NULL DEFAULT 0,
+    unit_count INTEGER NOT NULL DEFAULT 0,
+    channel_breakdown TEXT,
+    status TEXT NOT NULL DEFAULT 'draft',
+    xero_journal_id TEXT,
+    xero_posted_at TEXT,
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cogs_journals_week ON cogs_journals(week_start, week_end)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cogs_journals_status ON cogs_journals(status)`);
+} catch (e) { console.error("[db] FIFO tables error:", e); }
+
 // Shopify category metafield sync: cached AI categorization per product
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN ai_categorization TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN ai_categorized_at TEXT"); } catch { /* exists */ }

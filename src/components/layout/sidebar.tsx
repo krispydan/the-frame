@@ -27,6 +27,7 @@ import {
   Search,
   ChevronRight,
   ImageIcon,
+  Layers,
 } from "lucide-react";
 import {
   Sidebar,
@@ -91,7 +92,12 @@ const operationsNav: NavItem[] = [
       { title: "Warehouse Exports", href: "/inventory/exports", icon: Database },
     ],
   },
-  { title: "Finance", href: "/finance", icon: DollarSign },
+  {
+    title: "Finance", href: "/finance", icon: DollarSign,
+    children: [
+      { title: "FIFO Costing / COGS", href: "/finance/cogs", icon: Layers },
+    ],
+  },
 ];
 
 const insightsNav: NavItem[] = [

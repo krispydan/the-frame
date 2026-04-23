@@ -59,6 +59,67 @@ export const expenseCategories = sqliteTable("expense_categories", {
   createdAt: timestamp("created_at"),
 });
 
+// ── FIFO Cost Layers (one entry per PO line item receipt) ──
+export const costLayers = sqliteTable("inventory_cost_layers", {
+  id: id(),
+  skuId: text("sku_id").notNull(),
+  poLineItemId: text("po_line_item_id"),
+  poId: text("po_id"),
+  poNumber: text("po_number"),
+  quantity: integer("quantity").notNull(),
+  remainingQuantity: integer("remaining_quantity").notNull(),
+  unitCost: real("unit_cost").notNull().default(0),
+  freightPerUnit: real("freight_per_unit").notNull().default(0),
+  dutiesPerUnit: real("duties_per_unit").notNull().default(0),
+  landedCostPerUnit: real("landed_cost_per_unit").notNull().default(0),
+  shippingMethod: text("shipping_method"), // air or ocean
+  receivedAt: text("received_at").notNull(),
+  createdAt: timestamp("created_at"),
+}, (table) => [
+  index("idx_cost_layers_sku").on(table.skuId),
+  index("idx_cost_layers_po").on(table.poId),
+  index("idx_cost_layers_received").on(table.receivedAt),
+]);
+
+// ── Cost Depletions (FIFO consumption records) ──
+export const costDepletions = sqliteTable("inventory_cost_depletions", {
+  id: id(),
+  costLayerId: text("cost_layer_id").notNull().references(() => costLayers.id),
+  orderItemId: text("order_item_id"),
+  orderId: text("order_id"),
+  channel: text("channel"),
+  quantity: integer("quantity").notNull(),
+  unitCost: real("unit_cost").notNull(),
+  landedCostPerUnit: real("landed_cost_per_unit").notNull(),
+  depletedAt: text("depleted_at").notNull(),
+  createdAt: timestamp("created_at"),
+}, (table) => [
+  index("idx_depletions_layer").on(table.costLayerId),
+  index("idx_depletions_order").on(table.orderId),
+  index("idx_depletions_depleted").on(table.depletedAt),
+]);
+
+// ── COGS Journals (weekly Xero postings) ──
+export const cogsJournals = sqliteTable("cogs_journals", {
+  id: id(),
+  weekStart: text("week_start").notNull(),
+  weekEnd: text("week_end").notNull(),
+  productCost: real("product_cost").notNull().default(0),
+  freightCost: real("freight_cost").notNull().default(0),
+  dutiesCost: real("duties_cost").notNull().default(0),
+  totalCogs: real("total_cogs").notNull().default(0),
+  unitCount: integer("unit_count").notNull().default(0),
+  channelBreakdown: text("channel_breakdown"), // JSON
+  status: text("status", { enum: ["draft", "posted", "reconciled"] }).notNull().default("draft"),
+  xeroJournalId: text("xero_journal_id"),
+  xeroPostedAt: text("xero_posted_at"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at"),
+}, (table) => [
+  index("idx_cogs_journals_week").on(table.weekStart, table.weekEnd),
+  index("idx_cogs_journals_status").on(table.status),
+]);
+
 // ── Expenses ──
 export const expenses = sqliteTable("expenses", {
   id: id(),
