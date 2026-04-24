@@ -6,10 +6,11 @@ import { Suspense } from "react";
 import {
   Globe, Phone, Mail, MapPin, Star, Search, ExternalLink,
   CheckCircle, XCircle, SkipForward, ChevronLeft, ChevronRight,
-  Filter, ChevronsUpDown, Check, Tag, X, Plus,
+  Filter, ChevronsUpDown, Check, Tag, X, Plus, Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import {
   Select,
@@ -103,6 +104,11 @@ function ReviewQueueInner() {
   const [segmentOpen, setSegmentOpen] = useState(false);
   const [segmentSearch, setSegmentSearch] = useState("");
   const segmentTriggerRef = useRef<HTMLButtonElement>(null);
+
+  // Inline website editing
+  const [editingWebsite, setEditingWebsite] = useState(false);
+  const [websiteInput, setWebsiteInput] = useState("");
+  const websiteInputRef = useRef<HTMLInputElement>(null);
 
   // Swipe support
   const touchStart = useRef<{ x: number; y: number } | null>(null);
@@ -263,6 +269,35 @@ function ReviewQueueInner() {
     setSegmentOpen(false);
     setSegmentSearch("");
   }, [current]);
+
+  // Save website URL for current prospect
+  const saveWebsite = useCallback(async (url: string) => {
+    if (!current) return;
+    const trimmed = url.trim();
+    try {
+      await fetch(`/api/v1/sales/prospects/${current.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ website: trimmed || null }),
+      });
+      setProspects(prev => prev.map(p =>
+        p.id === current.id ? { ...p, website: trimmed || null } : p
+      ));
+      setEditingWebsite(false);
+      setIframeError(false);
+      if (trimmed) {
+        toast.success("Website saved");
+      }
+    } catch {
+      toast.error("Failed to save website");
+    }
+  }, [current]);
+
+  // Reset website edit state when prospect changes
+  useEffect(() => {
+    setEditingWebsite(false);
+    setWebsiteInput("");
+  }, [current?.id]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -521,6 +556,52 @@ function ReviewQueueInner() {
                   </a>
                 </div>
               )}
+
+              {/* Website — editable inline */}
+              <div className="flex items-center gap-2 text-sm">
+                <Globe className="w-4 h-4 text-gray-400 shrink-0" />
+                {editingWebsite ? (
+                  <form
+                    className="flex items-center gap-1.5 flex-1"
+                    onSubmit={(e) => { e.preventDefault(); saveWebsite(websiteInput); }}
+                  >
+                    <Input
+                      ref={websiteInputRef}
+                      type="url"
+                      value={websiteInput}
+                      onChange={(e) => setWebsiteInput(e.target.value)}
+                      placeholder="https://example.com"
+                      className="h-7 text-sm flex-1"
+                      autoFocus
+                      onKeyDown={(e) => { if (e.key === "Escape") { setEditingWebsite(false); setWebsiteInput(""); } }}
+                    />
+                    <Button type="submit" size="sm" className="h-7 px-2 text-xs">Save</Button>
+                    <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => { setEditingWebsite(false); setWebsiteInput(""); }}>
+                      <X className="w-3 h-3" />
+                    </Button>
+                  </form>
+                ) : current.website ? (
+                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                    <a href={current.website.startsWith("http") ? current.website : `https://${current.website}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate">
+                      {current.website}
+                    </a>
+                    <button
+                      onClick={() => { setWebsiteInput(current.website || ""); setEditingWebsite(true); }}
+                      className="text-gray-400 hover:text-gray-600 shrink-0"
+                      title="Edit website"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { setWebsiteInput(""); setEditingWebsite(true); }}
+                    className="text-gray-400 hover:text-blue-600 text-sm italic flex items-center gap-1"
+                  >
+                    <Plus className="w-3 h-3" /> Add website
+                  </button>
+                )}
+              </div>
 
               {/* Google Rating */}
               {current.google_rating != null && (
