@@ -1,0 +1,433 @@
+# Competitive Email Intelligence Module — Project Scope
+
+**Codename:** Competitor Inbox
+**Module:** `intelligence/competitor-emails`
+**Inspired by:** SendView ($69-169/mo), Panoramata, MailCharts, Owletter
+**Goal:** Replace SendView with a built-in system that captures competitor
+emails, categorizes them with AI, extracts actionable intelligence, and feeds
+recommendations into Jaxy's marketing + Faire strategy.
+
+---
+
+## Why build this instead of using SendView
+
+| Factor | SendView | Built into The Frame |
+|--------|----------|---------------------|
+| Cost | $69-169/mo recurring | $0 marginal (amortized into dev time) |
+| AI analysis | None — manual review only | Gemini-powered categorization, subject line analysis, promotion extraction |
+| Industry context | Generic (any industry) | Trained on eyewear/accessories wholesale patterns |
+| Integration | Standalone dashboard | Connected to marketing calendar, Faire strategy, pricing intelligence |
+| Data ownership | Locked in their platform | Yours forever, queryable via MCP |
+| Competitor limit | 10-50 depending on tier | Unlimited |
+| Customization | None | Full control over AI prompts, categories, alerts |
+
+---
+
+## What it does
+
+### The 30-second pitch
+
+Subscribe to competitors' mailing lists using unique tracking email
+addresses. Every email they send gets captured, parsed, rendered safely
+in The Frame, categorized by AI, and analyzed for patterns. Over time,
+build a competitive intelligence database that answers:
+
+- What are competitors promoting this week?
+- How often do they email their retailers?
+- What subject lines get used for wholesale vs. DTC?
+- When do they announce new collections / price changes?
+- What's their promotional cadence (% off, free shipping, BOGO)?
+- How should Jaxy's next email campaign differ?
+
+---
+
+## Architecture
+
+```
+Competitor sends email
+        │
+        ▼
+Inbound email service (Mailgun / CloudMailin / SendGrid)
+  receives at {hash}@inbox.theframe.getjaxy.com
+  POSTs parsed email JSON to webhook
+        │
+        ▼
+POST /api/v1/intelligence/competitor-emails/inbound
+  │
+  ├── Parse: sender, subject, HTML body, text body, headers
+  ├── Extract: links, UTM params, images, tracking pixels
+  ├── Store: raw email + parsed metadata in competitor_emails table
+  ├── Proxy images: rewrite img src to /api/images/proxy?url=...
+  │   (blocks tracking pixels, caches images locally)
+  ├── Screenshot: capture rendered email as PNG for grid view
+  └── Queue: AI categorization job
+        │
+        ▼
+AI Categorizer (Gemini)
+  │
+  ├── Email type: promotional, newsletter, collection_launch,
+  │   price_change, event, transactional, welcome_series,
+  │   abandoned_cart, restock, seasonal
+  ├── Promotion detection: % off, $ off, free shipping, BOGO,
+  │   bundle deal, opening order discount, MOQ change
+  ├── Subject line analysis: length, emoji usage, personalization,
+  │   urgency words, curiosity hooks
+  ├── Product mentions: sunglasses, readers, accessories, cases
+  ├── Channel: wholesale, DTC, both
+  ├── Sentiment: aggressive_sale, soft_sell, educational,
+  │   relationship_building, urgency
+  ├── Key themes: new_arrival, clearance, seasonal, holiday,
+  │   trade_show, partnership, social_proof
+  └── Suggested response: what Jaxy should do in reaction
+        │
+        ▼
+Dashboard UI
+  ├── Inbox view (list of captured emails, filterable)
+  ├── Email detail view (safe HTML rendering in sandboxed iframe)
+  ├── Competitor profiles (per-brand analytics)
+  ├── Trends (send frequency, promotion patterns, subject line analysis)
+  ├── AI insights feed (weekly digest of competitive moves)
+  └── Inspiration board (starred emails for reference)
+```
+
+---
+
+## Data model
+
+### `competitor_brands` — brands being tracked
+
+```
+id              TEXT PK
+name            TEXT NOT NULL        -- "Blue Gem Sunglasses"
+website         TEXT                 -- "bluegem.com"
+tracking_email  TEXT UNIQUE          -- "bg7x2k@inbox.theframe.getjaxy.com"
+category        TEXT                 -- "direct_competitor", "adjacent", "aspirational"
+faire_url       TEXT                 -- their Faire brand page
+shopify_url     TEXT                 -- their Shopify store
+notes           TEXT
+is_active       INTEGER DEFAULT 1
+email_count     INTEGER DEFAULT 0   -- denormalized count
+last_email_at   TEXT                 -- most recent email received
+created_at      TEXT
+```
+
+### `competitor_emails` — every captured email
+
+```
+id              TEXT PK
+brand_id        TEXT FK → competitor_brands
+-- Raw email data
+from_address    TEXT
+from_name       TEXT
+subject         TEXT
+html_body       TEXT                 -- original HTML
+text_body       TEXT                 -- plain text fallback
+headers         TEXT                 -- JSON: all email headers
+raw_email       TEXT                 -- full raw MIME (for re-parsing)
+-- Extracted metadata
+links           TEXT                 -- JSON: [{url, text, utm_source, utm_medium, utm_campaign}]
+image_urls      TEXT                 -- JSON: [proxied URLs]
+tracking_pixels TEXT                 -- JSON: detected tracker domains
+esp_detected    TEXT                 -- "Klaviyo", "Mailchimp", "Sendgrid", etc.
+-- AI categorization
+email_type      TEXT                 -- promotional, newsletter, collection_launch, etc.
+promotion_type  TEXT                 -- percent_off, dollar_off, free_shipping, bogo, bundle, none
+promotion_value TEXT                 -- "20%", "$5 off", "free over $300"
+channel_target  TEXT                 -- wholesale, dtc, both
+sentiment       TEXT                 -- aggressive_sale, soft_sell, educational, etc.
+themes          TEXT                 -- JSON: ["new_arrival", "seasonal"]
+product_mentions TEXT                -- JSON: ["sunglasses", "readers"]
+subject_analysis TEXT                -- JSON: {length, hasEmoji, hasPersonalization, urgencyScore}
+ai_summary      TEXT                 -- 2-3 sentence summary
+ai_suggested_response TEXT           -- what Jaxy should do
+ai_model        TEXT
+ai_categorized_at TEXT
+-- UI state
+is_starred      INTEGER DEFAULT 0
+is_read         INTEGER DEFAULT 0
+screenshot_path TEXT                 -- path to rendered screenshot
+received_at     TEXT NOT NULL
+created_at      TEXT
+```
+
+### `competitor_email_alerts` — configurable triggers
+
+```
+id              TEXT PK
+name            TEXT                 -- "Price drop alert"
+condition       TEXT                 -- JSON: {field: "promotion_type", op: "in", values: ["percent_off", "dollar_off"]}
+notify_via      TEXT                 -- "email", "telegram", "in_app"
+is_active       INTEGER DEFAULT 1
+last_triggered  TEXT
+created_at      TEXT
+```
+
+### `competitor_insights` — AI-generated weekly digests
+
+```
+id              TEXT PK
+week_start      TEXT
+week_end        TEXT
+summary         TEXT                 -- AI-generated competitive summary
+key_moves       TEXT                 -- JSON: [{brand, action, significance}]
+recommendations TEXT                 -- JSON: suggestions for Jaxy
+email_count     INTEGER
+brands_active   INTEGER
+created_at      TEXT
+```
+
+---
+
+## Technical implementation
+
+### Phase 1: Email capture infrastructure (Week 1)
+
+**Email receiving — use Mailgun Inbound Routes (recommended)**
+
+Mailgun is the simplest path. No SMTP server to run, no port to open on
+Railway. Setup:
+1. Add MX record for `inbox.theframe.getjaxy.com` → Mailgun
+2. Create a catch-all route: any email to `*@inbox.theframe.getjaxy.com`
+   → POST webhook to `https://theframe.getjaxy.com/api/v1/intelligence/competitor-emails/inbound`
+3. Mailgun parses the MIME, extracts HTML/text/headers/attachments, and
+   POSTs structured JSON to the webhook
+
+Cost: Mailgun's free tier includes 1,000 inbound emails/month (more than
+enough — 50 competitors × 4 emails/week = 200/month). Flex plan starts at
+$0.80/1000 emails after that.
+
+Alternative: CloudMailin ($9/mo for 10K emails, simpler setup, better docs).
+
+**Webhook handler:**
+- Validate Mailgun signature (HMAC verification)
+- Look up `competitor_brands` by the `To:` address
+- Parse HTML body for links, images, UTM params
+- Detect ESP from headers (`X-Mailer`, `X-SG-EID`, `X-Klaviyo-*`, etc.)
+- Rewrite image URLs to proxy through `/api/v1/intelligence/image-proxy`
+- Store everything in `competitor_emails`
+- Queue AI categorization
+
+**Dependencies to add:** `mailparser` (for any raw MIME re-parsing needs)
+
+### Phase 2: AI categorization (Week 1-2)
+
+Reuse the existing Gemini integration pattern from `ai-categorize.ts`.
+
+**Prompt strategy:**
+- System: "You are a competitive intelligence analyst for Jaxy Eyewear,
+  a wholesale sunglasses brand. Analyze this competitor email."
+- Input: subject line, plain text body (not HTML — cheaper and more
+  reliable), sender name, detected ESP
+- Output: constrained JSON schema with enums for every field
+- Temperature: 0.1 (highly deterministic for classification)
+
+**Categorization fields:**
+
+```typescript
+interface EmailCategorization {
+  email_type: "promotional" | "newsletter" | "collection_launch" |
+    "price_change" | "event" | "welcome_series" | "restock" |
+    "seasonal" | "partnership" | "social_proof" | "other";
+  promotion: {
+    type: "percent_off" | "dollar_off" | "free_shipping" | "bogo" |
+      "bundle" | "opening_order" | "moq_change" | "none";
+    value: string | null;  // "20%", "$5 off", etc.
+    conditions: string | null;  // "orders over $300", "first order only"
+  };
+  channel_target: "wholesale" | "dtc" | "both" | "unknown";
+  sentiment: "aggressive_sale" | "soft_sell" | "educational" |
+    "relationship" | "urgency" | "fomo";
+  themes: string[];  // ["new_arrival", "summer_collection"]
+  products_mentioned: string[];  // ["sunglasses", "readers", "cases"]
+  subject_line_analysis: {
+    length: number;
+    has_emoji: boolean;
+    has_personalization: boolean;
+    urgency_score: number;  // 0-10
+    curiosity_score: number;  // 0-10
+  };
+  summary: string;  // 2-3 sentences
+  jaxy_response: string;  // what Jaxy should consider doing
+}
+```
+
+**Cost:** ~$0.001/email with Gemini Flash (text-only). 200 emails/month = $0.20.
+
+### Phase 3: Dashboard UI (Week 2-3)
+
+**New sidebar item:** Intelligence → Competitor Inbox
+
+**Views:**
+
+#### 3a. Inbox view
+- Table/list layout showing all captured emails
+- Columns: received date, brand (with logo/avatar), subject, email type (badge),
+  promotion (badge if detected), starred, read/unread
+- Filters: by brand, by email type, by promotion type, by date range,
+  starred only, unread only
+- Search: full-text search on subject + text body
+- Bulk actions: mark read, star, delete
+
+#### 3b. Email detail view
+- Split pane: metadata on top, rendered email below
+- Rendered HTML in sandboxed `<iframe srcdoc="..." sandbox="">` with
+  all images proxied (blocks tracking pixels)
+- Metadata panel: from, subject, received, ESP detected, AI categorization
+  badges, extracted links with UTM breakdown, AI summary, suggested response
+- Action buttons: star, reply-with-idea (opens marketing calendar),
+  share to team (copy link)
+
+#### 3c. Brand profile view
+- Per-brand analytics page
+- Email frequency chart (emails per week over time)
+- Most common email types (pie chart)
+- Promotion history timeline
+- Subject line word cloud
+- Average send time / day of week heatmap
+- Recent emails list
+
+#### 3d. Trends & insights
+- Cross-brand comparison: who's emailing most this month?
+- Promotion activity: aggregate view of all promotions detected
+- Industry benchmark: average send frequency, most common email types
+- AI weekly digest: auto-generated summary of competitive moves
+
+#### 3e. Inspiration board
+- Grid of starred/saved emails (screenshots)
+- Drag to reorder
+- Notes per saved email
+- "Use as reference" button that copies to marketing content ideas
+
+### Phase 4: AI insights engine (Week 3-4)
+
+**Weekly digest generation:**
+- Cron job (or manual trigger) runs every Monday
+- Queries all emails received in the past week
+- Groups by brand, counts by type, extracts promotions
+- Sends to Gemini with a longer context window:
+  "Here are 47 competitor emails from this week across 12 brands.
+  Summarize the key competitive moves, identify trends, and suggest
+  3 specific actions Jaxy should take this week."
+- Stores result in `competitor_insights`
+- Optionally sends digest via email/Telegram to Daniel
+
+**Pattern detection over time:**
+- "Brand X has increased email frequency by 3x in the last month"
+- "3 competitors launched summer collections this week"
+- "Average discount depth increased from 15% to 20% across the industry"
+- "Competitor Y is pushing Faire-specific promotions for the first time"
+
+### Phase 5: Integration with existing modules (Week 4+)
+
+- **Marketing calendar:** Surface competitor email activity on the content
+  calendar so you can see what competitors sent alongside your own campaigns
+- **Faire strategy:** Extract Faire-specific promotions (opening order
+  discounts, MOQ changes) and surface as action items for Jaxy's Faire listing
+- **Pricing intelligence:** Track competitor wholesale price changes mentioned
+  in emails against Jaxy's catalog pricing
+- **Campaign inspiration:** "Write an email like this one" button that
+  pre-fills the campaign editor with AI-adapted copy based on a starred
+  competitor email
+- **MCP tools:** `intelligence.search_competitor_emails`,
+  `intelligence.get_brand_trends`, `intelligence.get_weekly_digest`
+
+---
+
+## Competitors to track at launch
+
+Based on the Faire Growth Playbook competitor research:
+
+| Brand | Category | Faire? | Priority |
+|-------|----------|--------|----------|
+| Blue Gem Sunglasses | Direct competitor, similar price point | Yes | High |
+| Cramilo Eyewear | Budget competitor, $3-5 wholesale | Yes | High |
+| Fashion City | Budget competitor | Yes | High |
+| Shark Eyes | Budget competitor | Yes | Medium |
+| WMP Eyewear | Premium competitor, $21+ wholesale | Yes | Medium |
+| DIFF Eyewear | Aspirational, DTC-first | Shopify | Medium |
+| Quay Australia | Aspirational, mass market | Shopify | Low |
+| Goodr | Adjacent, active/sport category | Yes | Low |
+| Krewe | Aspirational, premium independent | Shopify | Low |
+| Frère | Adjacent, trending on Faire | Yes | Medium |
+
+Start with the top 5, expand as the system proves useful.
+
+---
+
+## Effort estimate
+
+| Phase | What | Effort | Dependencies |
+|-------|------|--------|-------------|
+| 1 | Email capture (Mailgun + webhook + parsing + storage) | 8 hrs | Mailgun account + DNS |
+| 2 | AI categorization (Gemini integration + schema) | 4 hrs | Phase 1 |
+| 3 | Dashboard UI (inbox, detail, brand profiles) | 12 hrs | Phase 2 |
+| 4 | AI insights engine (weekly digest, pattern detection) | 6 hrs | Phase 2 + 2 weeks of data |
+| 5 | Module integrations (marketing calendar, Faire, MCP) | 8 hrs | Phase 3 |
+| **Total** | | **~38 hrs** | |
+
+### Phased delivery
+
+- **Week 1:** Phases 1-2 ship. Emails start flowing in. AI categorizes them.
+  You can query via MCP immediately.
+- **Week 2-3:** Phase 3 ships. Full dashboard UI live. Start using daily.
+- **Week 4:** Phase 4 ships. Weekly AI digests start generating.
+- **Ongoing:** Phase 5 integrations added incrementally.
+
+---
+
+## Setup requirements (what you need to do)
+
+1. **Mailgun account** — sign up, verify domain, add MX record for
+   `inbox.theframe.getjaxy.com`
+2. **Subscribe to competitors** — use the generated tracking email addresses
+   to sign up for each competitor's mailing list (newsletter, wholesale list,
+   Faire notifications, etc.)
+3. **Wait 2 weeks** — competitive intelligence needs data to accumulate before
+   patterns emerge (same limitation as SendView)
+
+---
+
+## What this replaces
+
+- SendView subscription ($69-169/mo saved)
+- Manual competitor email monitoring (hours/week of scanning inboxes)
+- Ad-hoc competitive analysis (replaced by automated weekly digests)
+- Guesswork on competitor promotions (replaced by data-driven tracking)
+
+## What this enables that SendView can't
+
+- AI-powered categorization and promotion extraction (SendView has zero AI)
+- Wholesale-specific intelligence (MOQ changes, trade show announcements, Faire promotions)
+- Direct integration with Jaxy's marketing calendar and campaign tools
+- Custom alerts ("notify me when any competitor offers > 25% off")
+- Weekly AI digest with specific Jaxy action items
+- Full data ownership + MCP queryability from Claude Code
+- Industry-trained classification models that improve over time
+
+---
+
+## Open questions
+
+1. **Mailgun vs CloudMailin vs self-hosted SMTP?** Mailgun is cheapest and
+   most reliable. CloudMailin has simpler docs. Self-hosted gives full control
+   but adds ops burden on Railway. Recommendation: **Mailgun**.
+
+2. **Screenshot generation?** Puppeteer/Playwright can render emails to PNG
+   for the inspiration board grid view. Adds a dependency and compute cost.
+   Alternative: just show the HTML in an iframe and skip screenshots for v1.
+
+3. **How many competitors to start?** 5 is manageable for testing. 10-15 is
+   the sweet spot. Beyond 20, you'll want automated triage (AI marks
+   low-value emails as "skip").
+
+4. **Retention policy?** Keep all emails forever (storage is cheap in SQLite),
+   or auto-archive after 6 months? Recommendation: keep forever — the
+   historical data is the moat.
+
+5. **Team access?** Should other team members see the competitor inbox, or
+   is this Daniel-only? The role system already supports this — just add
+   `/intelligence/competitor-inbox` to the appropriate role's allowed hrefs.
+
+---
+
+*Ready to build when you give the go-ahead. Phase 1 can ship in a day.*
