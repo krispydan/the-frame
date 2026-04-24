@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/get-session";
 import { sqlite } from "@/lib/db";
