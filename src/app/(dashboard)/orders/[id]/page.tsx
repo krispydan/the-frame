@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import {
@@ -44,10 +45,20 @@ interface OrderDetail {
   deliveredAt: string | null;
   company: { id: string; name: string } | null;
   contact: { id: string; name: string; email: string } | null;
+  profit: {
+    itemsRevenue: number;
+    totalCost: number | null;
+    grossProfit: number | null;
+    grossMargin: number | null;
+    hasFullCostData: boolean;
+  } | null;
   items: Array<{
     id: string;
     sku: string | null;
     productName: string;
+    unitCost: number | null;
+    lineCost: number | null;
+    lineProfit: number | null;
     colorName: string | null;
     quantity: number;
     unitPrice: number;
@@ -354,22 +365,48 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                   <th className="text-left px-4 py-3 font-medium">SKU</th>
                   <th className="text-center px-4 py-3 font-medium">Qty</th>
                   <th className="text-right px-4 py-3 font-medium">Unit Price</th>
+                  <th className="text-right px-4 py-3 font-medium">Cost</th>
+                  <th className="text-right px-4 py-3 font-medium">Profit</th>
                   <th className="text-right px-6 py-3 font-medium">Total</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {order.items.map((item) => (
-                  <tr key={item.id} className="hover:bg-muted/30">
-                    <td className="px-6 py-3">
-                      <p className="font-medium">{item.productName}</p>
-                      {item.colorName && <p className="text-muted-foreground text-xs">{item.colorName}</p>}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{item.sku || "—"}</td>
-                    <td className="px-4 py-3 text-center">{item.quantity}</td>
-                    <td className="px-4 py-3 text-right">${item.unitPrice.toFixed(2)}</td>
-                    <td className="px-6 py-3 text-right font-medium">${item.totalPrice.toFixed(2)}</td>
-                  </tr>
-                ))}
+                {order.items.map((item) => {
+                  // SKU prefix = before the first hyphen (e.g. JX1001-BLK -> JX1001)
+                  const skuPrefix = item.sku ? item.sku.split("-")[0] : null;
+                  return (
+                    <tr key={item.id} className="hover:bg-muted/30">
+                      <td className="px-6 py-3">
+                        {skuPrefix ? (
+                          <Link href={`/catalog/${skuPrefix}`} className="font-medium hover:underline">
+                            {item.productName}
+                          </Link>
+                        ) : (
+                          <p className="font-medium">{item.productName}</p>
+                        )}
+                        {item.colorName && <p className="text-muted-foreground text-xs">{item.colorName}</p>}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                        {item.sku ? (
+                          skuPrefix ? (
+                            <Link href={`/catalog/${skuPrefix}`} className="hover:underline hover:text-foreground">
+                              {item.sku}
+                            </Link>
+                          ) : item.sku
+                        ) : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-center">{item.quantity}</td>
+                      <td className="px-4 py-3 text-right">${item.unitPrice.toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right text-muted-foreground">
+                        {item.unitCost != null ? `$${item.unitCost.toFixed(2)}` : "—"}
+                      </td>
+                      <td className={`px-4 py-3 text-right font-medium ${item.lineProfit != null ? (item.lineProfit >= 0 ? "text-green-600" : "text-red-600") : "text-muted-foreground"}`}>
+                        {item.lineProfit != null ? `$${item.lineProfit.toFixed(2)}` : "—"}
+                      </td>
+                      <td className="px-6 py-3 text-right font-medium">${item.totalPrice.toFixed(2)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
 
@@ -383,6 +420,30 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                 <span>Total</span>
                 <span>${order.total.toFixed(2)}</span>
               </div>
+              {order.profit && (
+                <div className="border-t mt-2 pt-2 space-y-1">
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>COGS{!order.profit.hasFullCostData && <span title="One or more line items have no cost on file" className="ml-1 text-yellow-600">*</span>}</span>
+                    <span>{order.profit.totalCost != null ? `$${order.profit.totalCost.toFixed(2)}` : "—"}</span>
+                  </div>
+                  <div className="flex justify-between font-semibold">
+                    <span>Gross Profit</span>
+                    <span className={order.profit.grossProfit != null ? (order.profit.grossProfit >= 0 ? "text-green-600" : "text-red-600") : ""}>
+                      {order.profit.grossProfit != null ? `$${order.profit.grossProfit.toFixed(2)}` : "—"}
+                      {order.profit.grossMargin != null && (
+                        <span className="text-muted-foreground font-normal ml-2">
+                          ({(order.profit.grossMargin * 100).toFixed(1)}%)
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  {!order.profit.hasFullCostData && (
+                    <p className="text-xs text-yellow-700 dark:text-yellow-500 mt-1">
+                      * Some line items have no cost on file — add SKU costs in the catalog to see full profit.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

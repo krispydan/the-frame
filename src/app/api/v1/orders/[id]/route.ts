@@ -3,9 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { orders, orderItems, returns } from "@/modules/orders/schema";
 import { companies, contacts } from "@/modules/sales/schema";
+import { skus as catalogSkus } from "@/modules/catalog/schema";
 import { activityFeed } from "@/modules/core/schema";
 import { shopifyShops } from "@/modules/integrations/schema/shopify";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, inArray } from "drizzle-orm";
 import { updateOrderStatus } from "@/modules/orders/lib/fulfillment";
 
 // GET /api/v1/orders/:id — order detail
@@ -16,6 +17,36 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const items = db.select().from(orderItems).where(eq(orderItems.orderId, id)).all();
   const orderReturns = db.select().from(returns).where(eq(returns.orderId, id)).all();
+
+  // Gross profit calculation — pull catalog cost_price for every SKU on the
+  // order and attach unitCost / lineCost / lineProfit per item, plus order
+  // totals. Items missing a SKU match (e.g. shipping line items) get
+  // unitCost: null and don't contribute to profit (treated as missing data,
+  // not zero cost).
+  const skuStrings = items.map((it) => it.sku).filter((s): s is string => !!s);
+  const skuMatches = skuStrings.length
+    ? db.select({ sku: catalogSkus.sku, cost: catalogSkus.costPrice }).from(catalogSkus).where(inArray(catalogSkus.sku, skuStrings)).all()
+    : [];
+  const costBySku = new Map<string, number | null>();
+  for (const r of skuMatches) {
+    if (r.sku) costBySku.set(r.sku, r.cost ?? null);
+  }
+
+  let totalCost = 0;
+  let totalCostKnown = true;
+  const itemsWithProfit = items.map((it) => {
+    const unitCost = it.sku ? costBySku.get(it.sku) ?? null : null;
+    if (unitCost == null) totalCostKnown = false;
+    const lineCost = unitCost != null ? unitCost * it.quantity : null;
+    const lineRevenue = it.unitPrice * it.quantity;
+    const lineProfit = lineCost != null ? lineRevenue - lineCost : null;
+    if (lineCost != null) totalCost += lineCost;
+    return { ...it, unitCost, lineCost, lineProfit };
+  });
+
+  const itemsRevenue = items.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
+  const grossProfit = totalCostKnown ? itemsRevenue - totalCost : null;
+  const grossMargin = grossProfit != null && itemsRevenue > 0 ? grossProfit / itemsRevenue : null;
 
   const company = order.companyId
     ? db.select().from(companies).where(eq(companies.id, order.companyId)).get()
@@ -55,10 +86,17 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     ...order,
     company,
     contact,
-    items,
+    items: itemsWithProfit,
     returns: orderReturns,
     timeline,
     externalUrl,
+    profit: {
+      itemsRevenue,
+      totalCost: totalCostKnown ? totalCost : null,
+      grossProfit,
+      grossMargin,
+      hasFullCostData: totalCostKnown,
+    },
   });
 }
 
