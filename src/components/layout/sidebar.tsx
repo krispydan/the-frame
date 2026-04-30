@@ -103,6 +103,7 @@ const insightsNav: NavItem[] = [
     title: "Integrations", href: "/settings/integrations/shopify", icon: Plug,
     children: [
       { title: "Shopify", href: "/settings/integrations/shopify", icon: ShoppingBag },
+      { title: "Xero", href: "/settings/integrations/xero", icon: DollarSign },
     ],
   },
 ];
