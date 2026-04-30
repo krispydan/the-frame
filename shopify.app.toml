@@ -5,7 +5,7 @@
 # Update SHOPIFY_APP_URL when switching between local (cloudflared) and prod.
 
 client_id = "7a1d1bd5bb328d1928a9e73835ff2726"
-application_url = "http://localhost:3000"
+application_url = "https://theframe.getjaxy.com"
 embedded = false
 name = "the-frame"
 
@@ -50,6 +50,10 @@ api_version = "2025-07"
   topics = [ "products/create", "products/update", "products/delete" ]
 
 [auth]
-redirect_urls = [ "http://localhost:3000/api/auth/shopify/callback" ]
+# Both URLs allowed: production (real install) + localhost (local dev with .env.local SHOPIFY_APP_URL=http://localhost:3000).
+redirect_urls = [
+  "https://theframe.getjaxy.com/api/auth/shopify/callback",
+  "http://localhost:3000/api/auth/shopify/callback",
+]
 
 [build]
