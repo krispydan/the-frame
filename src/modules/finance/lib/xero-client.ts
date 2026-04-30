@@ -83,15 +83,15 @@ export function getXeroAuthUrl(): string | null {
   const config = getConfig();
   if (!config) return null;
 
-  // Granular scopes (post-2-Mar-2026 apps). Must match what's enabled in
-  // the Xero app's "Configuration > Scopes" panel — Xero rejects with
-  // "unauthorized_client / Invalid scope" if we ask for any unticked scope.
+  // Granular scopes (post-2-Mar-2026 apps). Apps no longer pre-configure
+  // scopes — the request must use names Xero recognises in their
+  // identity provider. Override via XERO_SCOPES env var so we can iterate
+  // on the right list without redeploying.
   //
-  // Override via XERO_SCOPES env var to add scopes after enabling them in
-  // the app, without redeploying.
+  // Starting minimal: just identity + offline + manual journals. Add
+  // files / settings.read / etc. one at a time once this base works.
   const scopes = process.env.XERO_SCOPES ||
-    "openid profile email offline_access " +
-    "accounting.manualjournals files";
+    "openid profile email offline_access accounting.manualjournals";
   const state = crypto.randomUUID();
 
   return `https://login.xero.com/identity/connect/authorize?response_type=code&client_id=${config.clientId}&redirect_uri=${encodeURIComponent(config.redirectUri)}&scope=${encodeURIComponent(scopes)}&state=${state}`;
