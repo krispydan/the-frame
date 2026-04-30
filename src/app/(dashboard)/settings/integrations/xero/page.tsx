@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { XeroAccountMapping } from "@/modules/integrations/components/xero-account-mapping";
+import { XeroTrackingMapping } from "@/modules/integrations/components/xero-tracking-mapping";
 
 type XeroStatus = {
   configured: boolean;
@@ -157,8 +158,9 @@ function XeroIntegrationsPageInner() {
       )}
 
       {status?.connected && (
-        <div className="mt-6">
+        <div className="mt-6 space-y-6">
           <XeroAccountMapping />
+          <XeroTrackingMapping />
         </div>
       )}
     </div>
