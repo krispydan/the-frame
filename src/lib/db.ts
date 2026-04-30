@@ -370,6 +370,76 @@ try {
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shopify_webhook_events_topic ON shopify_webhook_events(topic)`);
 } catch (e) { console.error("[db] Shopify shops table error:", e); }
 
+// ── Xero integration tables ──
+// Account mappings (category -> Xero GL account code), sync runs,
+// journal log audit trail, and per-payout idempotency.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS xero_account_mappings (
+    id TEXT PRIMARY KEY NOT NULL,
+    source_platform TEXT NOT NULL,
+    category TEXT NOT NULL,
+    xero_account_code TEXT NOT NULL,
+    xero_account_name TEXT,
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_xero_mapping_platform_category
+               ON xero_account_mappings(source_platform, category)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS xero_sync_runs (
+    id TEXT PRIMARY KEY NOT NULL,
+    kind TEXT NOT NULL,
+    source_platform TEXT,
+    status TEXT NOT NULL DEFAULT 'running',
+    date_from TEXT,
+    date_to TEXT,
+    total_payouts INTEGER DEFAULT 0,
+    successful INTEGER DEFAULT 0,
+    failed INTEGER DEFAULT 0,
+    error_message TEXT,
+    started_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_xero_sync_runs_kind ON xero_sync_runs(kind)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_xero_sync_runs_started ON xero_sync_runs(started_at DESC)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS xero_journal_log (
+    id TEXT PRIMARY KEY NOT NULL,
+    sync_run_id TEXT REFERENCES xero_sync_runs(id) ON DELETE SET NULL,
+    source_platform TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    xero_object_type TEXT NOT NULL,
+    xero_object_id TEXT,
+    status TEXT NOT NULL,
+    amount REAL,
+    currency TEXT,
+    payload TEXT,
+    response TEXT,
+    error_message TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_xero_journal_log_run ON xero_journal_log(sync_run_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_xero_journal_log_source ON xero_journal_log(source_platform, source_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_xero_journal_log_created ON xero_journal_log(created_at DESC)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS xero_payout_syncs (
+    id TEXT PRIMARY KEY NOT NULL,
+    source_platform TEXT NOT NULL,
+    source_payout_id TEXT NOT NULL,
+    amount REAL,
+    currency TEXT,
+    paid_at TEXT,
+    xero_object_type TEXT,
+    xero_object_id TEXT,
+    sync_run_id TEXT REFERENCES xero_sync_runs(id) ON DELETE SET NULL,
+    synced_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_xero_payout_sync_platform_id
+               ON xero_payout_syncs(source_platform, source_payout_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_xero_payout_sync_run ON xero_payout_syncs(sync_run_id)`);
+} catch (e) { console.error("[db] Xero ops tables error:", e); }
+
 try {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS operations_exports (
     id TEXT PRIMARY KEY NOT NULL,
