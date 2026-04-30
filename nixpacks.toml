@@ -2,7 +2,11 @@
 nixPkgs = ["nodejs_22", "python3", "gcc", "gnumake"]
 
 [phases.install]
-cmds = ["npm ci"]
+# --include=dev because Railway sets NODE_ENV=production which makes
+# npm ci skip devDependencies. Tailwind v4 (@tailwindcss/postcss),
+# typescript, and the next build pipeline all need to be present at
+# build time.
+cmds = ["npm ci --include=dev"]
 
 [phases.build]
 cmds = ["npm run build"]
