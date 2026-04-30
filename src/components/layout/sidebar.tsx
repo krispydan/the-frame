@@ -28,6 +28,8 @@ import {
   ChevronRight,
   ImageIcon,
   Layers,
+  Plug,
+  ShoppingBag,
 } from "lucide-react";
 import {
   Sidebar,
@@ -97,6 +99,12 @@ const insightsNav: NavItem[] = [
   { title: "Intelligence", href: "/intelligence", icon: BarChart3 },
   { title: "AI Center", href: "/ai", icon: Brain },
   { title: "Notifications", href: "/notifications", icon: Bell },
+  {
+    title: "Integrations", href: "/settings/integrations/shopify", icon: Plug,
+    children: [
+      { title: "Shopify", href: "/settings/integrations/shopify", icon: ShoppingBag },
+    ],
+  },
 ];
 
 const bottomNav = [
