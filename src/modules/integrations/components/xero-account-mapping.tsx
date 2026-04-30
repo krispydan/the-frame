@@ -57,12 +57,15 @@ export function XeroAccountMapping() {
 
   async function loadAccounts() {
     const res = await fetch("/api/v1/integrations/xero/accounts");
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      toast.error("Failed to load Xero accounts");
+      const msg = data?.hint
+        ? `${data.error || "Failed to load Xero accounts"} — ${data.hint}`
+        : data?.error || "Failed to load Xero accounts";
+      toast.error(msg);
       setAccounts([]);
       return;
     }
-    const data = await res.json();
     setAccounts(data.accounts || []);
   }
 

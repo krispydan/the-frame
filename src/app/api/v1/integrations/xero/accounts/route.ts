@@ -16,11 +16,18 @@ import { getChartOfAccounts } from "@/modules/finance/lib/xero-client";
 export async function GET() {
   const result = await getChartOfAccounts();
   if (!result.success) {
-    return NextResponse.json({ error: result.error || "Failed to fetch Xero accounts" }, { status: 502 });
+    const error = result.error || "Failed to fetch Xero accounts";
+    // Surface scope-specific guidance — most common failure mode is a token
+    // that was issued before accounting.settings.read was in our scope set.
+    const isScopeIssue = /401|403|forbidden|unauthor/i.test(error);
+    return NextResponse.json({
+      error,
+      hint: isScopeIssue
+        ? "Reconnect Xero — your current token may be missing the accounting.settings.read scope."
+        : undefined,
+    }, { status: 502 });
   }
 
-  // Filter to active accounts only — archived ones aren't postable.
   const active = (result.accounts || []).filter((a) => a.status === "ACTIVE");
-
   return NextResponse.json({ accounts: active });
 }
