@@ -27,7 +27,11 @@ interface XeroTokens {
 function getConfig(): XeroConfig | null {
   const clientId = process.env.XERO_CLIENT_ID;
   const clientSecret = process.env.XERO_CLIENT_SECRET;
-  const redirectUri = process.env.XERO_REDIRECT_URI || "http://localhost:3000/api/v1/auth/xero/callback";
+  // Default to the new /api/auth/xero/callback route (matches the Shopify
+  // pattern). Override via XERO_REDIRECT_URI when running locally without
+  // SHOPIFY_APP_URL set.
+  const appUrl = process.env.SHOPIFY_APP_URL || process.env.XERO_APP_URL || "http://localhost:3000";
+  const redirectUri = process.env.XERO_REDIRECT_URI || `${appUrl.replace(/\/$/, "")}/api/auth/xero/callback`;
 
   if (!clientId || !clientSecret) return null;
   return { clientId, clientSecret, redirectUri };
