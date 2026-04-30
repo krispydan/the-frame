@@ -88,7 +88,8 @@ export function getXeroAuthUrl(): string | null {
   // Override via XERO_SCOPES env var if Xero adds or renames any.
   const scopes = process.env.XERO_SCOPES ||
     "openid profile email offline_access " +
-    "accounting.transactions accounting.contacts accounting.settings.read accounting.journals.read";
+    "accounting.transactions accounting.contacts accounting.settings.read " +
+    "accounting.journals.read accounting.manualjournals files";
   const state = crypto.randomUUID();
 
   return `https://login.xero.com/identity/connect/authorize?response_type=code&client_id=${config.clientId}&redirect_uri=${encodeURIComponent(config.redirectUri)}&scope=${encodeURIComponent(scopes)}&state=${state}`;
