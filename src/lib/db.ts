@@ -438,6 +438,20 @@ try {
   sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_xero_payout_sync_platform_id
                ON xero_payout_syncs(source_platform, source_payout_id)`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_xero_payout_sync_run ON xero_payout_syncs(sync_run_id)`);
+
+  // Tracking-category mapping per source platform. Lets us tag each manual
+  // journal line with the matching Xero tracking option (e.g. "Sales Channel
+  // = Shopify - Retail") so P&L splits automatically by channel.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS xero_tracking_mappings (
+    id TEXT PRIMARY KEY NOT NULL,
+    source_platform TEXT NOT NULL UNIQUE,
+    tracking_category_id TEXT NOT NULL,
+    tracking_category_name TEXT,
+    tracking_option_id TEXT NOT NULL,
+    tracking_option_name TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
 } catch (e) { console.error("[db] Xero ops tables error:", e); }
 
 try {

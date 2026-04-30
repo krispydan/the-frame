@@ -78,6 +78,28 @@ export const xeroPayoutSyncs = sqliteTable("xero_payout_syncs", {
   syncedAt: text("synced_at").default(sql`(datetime('now'))`),
 });
 
+/**
+ * Maps a source platform (shopify_dtc, etc.) to a Xero tracking option so
+ * Phase 2 can attach the right tag to each journal line.
+ *
+ * Tracking categories in Xero are user-defined (e.g. "Sales Channel" with
+ * options "Faire", "Shopify - Retail", "Shopify - Wholesale"), so we store
+ * both the IDs (stable, used for posting) and the names (cached for UI).
+ */
+export const xeroTrackingMappings = sqliteTable("xero_tracking_mappings", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  sourcePlatform: text("source_platform").notNull().unique(),
+  trackingCategoryId: text("tracking_category_id").notNull(),
+  trackingCategoryName: text("tracking_category_name"),
+  trackingOptionId: text("tracking_option_id").notNull(),
+  trackingOptionName: text("tracking_option_name"),
+  createdAt: text("created_at").default(sql`(datetime('now'))`),
+  updatedAt: text("updated_at").default(sql`(datetime('now'))`),
+});
+
+export type XeroTrackingMapping = typeof xeroTrackingMappings.$inferSelect;
+export type NewXeroTrackingMapping = typeof xeroTrackingMappings.$inferInsert;
+
 export type XeroAccountMapping = typeof xeroAccountMappings.$inferSelect;
 export type NewXeroAccountMapping = typeof xeroAccountMappings.$inferInsert;
 export type XeroSyncRun = typeof xeroSyncRuns.$inferSelect;
