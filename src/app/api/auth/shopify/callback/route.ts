@@ -117,14 +117,31 @@ export async function GET(request: NextRequest) {
     await db.run(sql`DELETE FROM shopify_oauth_states WHERE created_at < datetime('now', '-1 hour')`);
   } catch { /* ignore */ }
 
-  // Redirect to settings (or where the caller asked)
+  // Redirect to settings (or where the caller asked). Use SHOPIFY_APP_URL as
+  // the canonical base so we don't accidentally redirect to localhost:<port>
+  // when the request came through Railway's reverse proxy.
   const target = stateRow.returnTo || "/settings/integrations/shopify?connected=" + encodeURIComponent(shop);
-  return NextResponse.redirect(new URL(target, request.url));
+  return NextResponse.redirect(absoluteUrl(target, request));
 }
 
 function errorRedirect(request: NextRequest, code: string, message: string) {
-  const url = new URL("/settings/integrations/shopify", request.url);
+  const url = absoluteUrl("/settings/integrations/shopify", request);
   url.searchParams.set("error", code);
   url.searchParams.set("error_message", message);
   return NextResponse.redirect(url);
+}
+
+/**
+ * Build an absolute URL for redirects that survives reverse-proxy hops.
+ * Order of precedence: SHOPIFY_APP_URL env -> X-Forwarded-Host -> request.url.
+ */
+function absoluteUrl(target: string, request: NextRequest): URL {
+  const envBase = process.env.SHOPIFY_APP_URL;
+  if (envBase) return new URL(target, envBase.replace(/\/$/, ""));
+
+  const forwardedHost = request.headers.get("x-forwarded-host");
+  const forwardedProto = request.headers.get("x-forwarded-proto") || "https";
+  if (forwardedHost) return new URL(target, `${forwardedProto}://${forwardedHost}`);
+
+  return new URL(target, request.url);
 }
