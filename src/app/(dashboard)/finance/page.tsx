@@ -255,10 +255,13 @@ function FinancePageContent() {
   }, []);
 
   useEffect(() => {
+    // loadCashFlow + loadExpenses are intentionally not called — those tabs
+    // are disabled. Their endpoints still exist but we don't need to hit them
+    // on every Finance page load until the data is real.
     setLoading(true);
-    Promise.all([loadPnl(), loadCashFlow(), loadSettlements(), loadExpenses(), loadReconciliation()])
+    Promise.all([loadPnl(), loadSettlements(), loadReconciliation()])
       .finally(() => setLoading(false));
-  }, [loadPnl, loadCashFlow, loadSettlements, loadExpenses, loadReconciliation]);
+  }, [loadPnl, loadSettlements, loadReconciliation]);
 
   const setTab = (t: string) => {
     router.push(`/finance?tab=${t}`);
@@ -321,7 +324,7 @@ function FinancePageContent() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Finance</h1>
-          <p className="text-muted-foreground">P&L, settlements, expenses, and cash flow</p>
+          <p className="text-muted-foreground">P&L, settlements, and reconciliation. Expenses and cash flow live in Xero.</p>
         </div>
         <div className="flex items-center gap-2">
           <select
@@ -368,8 +371,11 @@ function FinancePageContent() {
             { key: "pnl", label: "P&L", icon: TrendingUp },
             { key: "settlements", label: "Settlements", icon: Receipt },
             { key: "reconciliation", label: "Reconciliation", icon: Scale },
-            { key: "expenses", label: "Expenses", icon: CreditCard },
-            { key: "cashflow", label: "Cash Flow", icon: Wallet },
+            // Expenses tab removed — bookkeeping happens in Xero now.
+            // Cash Flow tab commented out — placeholder data, revisit once
+            // Xero payout sync is wired up so we have real bank movements.
+            // { key: "expenses", label: "Expenses", icon: CreditCard },
+            // { key: "cashflow", label: "Cash Flow", icon: Wallet },
           ].map((t) => (
             <button
               key={t.key}
@@ -402,20 +408,7 @@ function FinancePageContent() {
           onRefresh={loadReconciliation}
         />
       )}
-      {tab === "expenses" && (
-        <ExpensesTab
-          expenses={expenseList}
-          categories={categories}
-          pnl={pnl}
-          showForm={showExpenseForm}
-          setShowForm={setShowExpenseForm}
-          form={expForm}
-          setForm={setExpForm}
-          onSubmit={handleAddExpense}
-          onDelete={handleDeleteExpense}
-        />
-      )}
-      {tab === "cashflow" && cashFlow && <CashFlowTab cashFlow={cashFlow} />}
+      {/* Expenses + Cash Flow tabs intentionally disabled — see comments above. */}
     </div>
   );
 }
