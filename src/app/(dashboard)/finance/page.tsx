@@ -56,6 +56,9 @@ interface PnlSummary {
     grossMarginPct: number;
     fees: number;
     orderCount: number;
+    cogsCoveredUnits?: number;
+    totalUnits?: number;
+    hasFullCostData?: boolean;
   }>;
   expensesByCategory: Array<{ category: string; amount: number; budget: number | null }>;
   comparison: PnlComparison | null;
@@ -431,20 +434,26 @@ function PnlTab({ pnl, onExportCsv }: { pnl: PnlSummary; onExportCsv: () => void
       </div>
 
       {/* Summary Cards with Comparison */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <SummaryCard title="Revenue" value={fmt(pnl.revenue)} icon={DollarSign} trend={comp ? changeBadge(comp.revenueChange) : null} />
-        <SummaryCard title="COGS" value={fmt(pnl.cogs)} icon={TrendingDown} trend={comp ? changeBadge(comp.cogsChange, true) : null} negative />
-        <SummaryCard title="Gross Margin" value={fmt(pnl.grossMargin)} subtitle={pct(pnl.grossMarginPct)} icon={TrendingUp} trend={comp ? changeBadge(comp.grossMarginChange) : null} />
-        <SummaryCard title="Expenses + Fees" value={fmt(pnl.totalExpenses + pnl.totalFees)} icon={CreditCard} trend={comp ? changeBadge(comp.expensesChange, true) : null} negative />
-        <SummaryCard
-          title="Net Income"
-          value={fmt(pnl.netIncome)}
-          icon={Wallet}
-          trend={comp ? changeBadge(comp.netIncomeChange) : null}
-          negative={pnl.netIncome < 0}
-          highlight
-        />
-      </div>
+      {(() => {
+        const hasPartialCogs = pnl.channels.some((c) => c.hasFullCostData === false);
+        const partialNote = hasPartialCogs ? " (partial)" : "";
+        return (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <SummaryCard title="Revenue" value={fmt(pnl.revenue)} icon={DollarSign} trend={comp ? changeBadge(comp.revenueChange) : null} />
+            <SummaryCard title={`COGS${partialNote}`} value={fmt(pnl.cogs)} icon={TrendingDown} trend={comp ? changeBadge(comp.cogsChange, true) : null} negative />
+            <SummaryCard title={`Gross Margin${partialNote}`} value={fmt(pnl.grossMargin)} subtitle={pct(pnl.grossMarginPct)} icon={TrendingUp} trend={comp ? changeBadge(comp.grossMarginChange) : null} />
+            <SummaryCard title="Expenses + Fees" value={fmt(pnl.totalExpenses + pnl.totalFees)} icon={CreditCard} trend={comp ? changeBadge(comp.expensesChange, true) : null} negative />
+            <SummaryCard
+              title={`Net Income${partialNote}`}
+              value={fmt(pnl.netIncome)}
+              icon={Wallet}
+              trend={comp ? changeBadge(comp.netIncomeChange) : null}
+              negative={pnl.netIncome < 0}
+              highlight
+            />
+          </div>
+        );
+      })()}
 
       {/* Period Comparison Banner */}
       {comp && (comp.revenue > 0 || pnl.revenue > 0) && (
@@ -497,26 +506,38 @@ function PnlTab({ pnl, onExportCsv }: { pnl: PnlSummary; onExportCsv: () => void
               </tr>
             </thead>
             <tbody>
-              {pnl.channels.map((ch) => (
-                <tr key={ch.channel} className="border-b hover:bg-muted/30">
-                  <td className="p-3">
-                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${CHANNEL_COLORS[ch.channel] || "bg-gray-100"}`}>
-                      {ch.channelLabel}
-                    </span>
-                  </td>
-                  <td className="text-right p-3">{ch.orderCount}</td>
-                  <td className="text-right p-3 font-medium">{fmt(ch.revenue)}</td>
-                  <td className="text-right p-3 text-muted-foreground">{fmt(ch.cogs)}</td>
-                  <td className="text-right p-3">{fmt(ch.grossMargin)}</td>
-                  <td className="text-right p-3">
-                    <span className={ch.grossMarginPct >= 50 ? "text-green-600" : ch.grossMarginPct >= 30 ? "text-yellow-600" : "text-red-600"}>
-                      {pct(ch.grossMarginPct)}
-                    </span>
-                  </td>
-                  <td className="text-right p-3 text-muted-foreground">{fmt(ch.fees)}</td>
-                  <td className="text-right p-3 font-medium">{fmt(ch.grossMargin - ch.fees)}</td>
-                </tr>
-              ))}
+              {pnl.channels.map((ch) => {
+                const partial = ch.hasFullCostData === false;
+                const coverage = partial && ch.totalUnits && ch.cogsCoveredUnits != null
+                  ? `${Math.round((ch.cogsCoveredUnits / ch.totalUnits) * 100)}% of units have cost on file`
+                  : undefined;
+                return (
+                  <tr key={ch.channel} className="border-b hover:bg-muted/30">
+                    <td className="p-3">
+                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${CHANNEL_COLORS[ch.channel] || "bg-gray-100"}`}>
+                        {ch.channelLabel}
+                      </span>
+                    </td>
+                    <td className="text-right p-3">{ch.orderCount}</td>
+                    <td className="text-right p-3 font-medium">{fmt(ch.revenue)}</td>
+                    <td className="text-right p-3 text-muted-foreground">
+                      {fmt(ch.cogs)}
+                      {partial && (
+                        <span title={coverage} className="ml-1 text-yellow-600 cursor-help">*</span>
+                      )}
+                    </td>
+                    <td className="text-right p-3">{fmt(ch.grossMargin)}</td>
+                    <td className="text-right p-3">
+                      <span className={ch.grossMarginPct >= 50 ? "text-green-600" : ch.grossMarginPct >= 30 ? "text-yellow-600" : "text-red-600"}>
+                        {pct(ch.grossMarginPct)}
+                        {partial && <span className="ml-1 text-yellow-600 font-normal">(partial)</span>}
+                      </span>
+                    </td>
+                    <td className="text-right p-3 text-muted-foreground">{fmt(ch.fees)}</td>
+                    <td className="text-right p-3 font-medium">{fmt(ch.grossMargin - ch.fees)}</td>
+                  </tr>
+                );
+              })}
               {pnl.channels.length === 0 && (
                 <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">No order data for this period</td></tr>
               )}
@@ -527,9 +548,19 @@ function PnlTab({ pnl, onExportCsv }: { pnl: PnlSummary; onExportCsv: () => void
                   <td className="p-3">Total</td>
                   <td className="text-right p-3">{pnl.channels.reduce((s, c) => s + c.orderCount, 0)}</td>
                   <td className="text-right p-3">{fmt(pnl.revenue)}</td>
-                  <td className="text-right p-3">{fmt(pnl.cogs)}</td>
+                  <td className="text-right p-3">
+                    {fmt(pnl.cogs)}
+                    {pnl.channels.some((c) => c.hasFullCostData === false) && (
+                      <span title="One or more channels have units with no cost on file" className="ml-1 text-yellow-600 cursor-help">*</span>
+                    )}
+                  </td>
                   <td className="text-right p-3">{fmt(pnl.grossMargin)}</td>
-                  <td className="text-right p-3">{pct(pnl.grossMarginPct)}</td>
+                  <td className="text-right p-3">
+                    {pct(pnl.grossMarginPct)}
+                    {pnl.channels.some((c) => c.hasFullCostData === false) && (
+                      <span className="ml-1 text-yellow-600 font-normal">(partial)</span>
+                    )}
+                  </td>
                   <td className="text-right p-3">{fmt(pnl.totalFees)}</td>
                   <td className="text-right p-3">{fmt(pnl.grossMargin - pnl.totalFees)}</td>
                 </tr>
@@ -537,6 +568,11 @@ function PnlTab({ pnl, onExportCsv }: { pnl: PnlSummary; onExportCsv: () => void
             )}
           </table>
         </div>
+        {pnl.channels.some((c) => c.hasFullCostData === false) && (
+          <div className="px-4 py-3 border-t text-xs text-yellow-700 dark:text-yellow-500 bg-yellow-50 dark:bg-yellow-950/30">
+            <span className="font-semibold">*</span> Some line items don&apos;t have a cost on file in the catalog. COGS is the sum of items we DO have costs for, so margin is overstated. Add SKU costs in the catalog to see the real number.
+          </div>
+        )}
       </div>
 
       {/* Expenses by Category */}
