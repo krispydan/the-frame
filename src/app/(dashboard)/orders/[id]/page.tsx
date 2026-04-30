@@ -36,6 +36,7 @@ interface OrderDetail {
   currency: string;
   notes: string | null;
   externalId: string | null;
+  externalUrl: string | null;
   trackingNumber: string | null;
   trackingCarrier: string | null;
   placedAt: string;
@@ -283,14 +284,21 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                 <CalendarDays className="h-3.5 w-3.5" />
                 {order.placedAt ? new Date(order.placedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
               </span>
-              {order.externalId && (
+              {order.externalId && order.externalUrl && (
+                <a
+                  href={order.externalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border bg-background hover:bg-muted text-xs font-medium"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  {order.channel === "faire" ? "View in Faire" : "View in Shopify"}
+                </a>
+              )}
+              {order.externalId && !order.externalUrl && (
                 <span className="inline-flex items-center gap-1 font-mono text-xs">
                   <ExternalLink className="h-3 w-3" />
-                  {order.channel === "faire" ? (
-                    <a href={`https://www.faire.com/brand-portal/orders/${order.externalId}`} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                      {order.externalId.slice(0, 12)}…
-                    </a>
-                  ) : order.externalId}
+                  {order.externalId}
                 </span>
               )}
             </div>
@@ -378,25 +386,30 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             </div>
           </div>
 
-          {/* Fulfillment Section */}
-          <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
-            <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
-              <Truck className="h-5 w-5" />
-              Fulfillment
-            </h2>
+          {/* Fulfillment Section — read-only.
+              Status changes happen in Shopify / ShipHero and sync down via
+              webhooks or the Sync Shopify button on /orders. */}
+          {(order.trackingNumber || order.shippedAt || order.deliveredAt) && (
+            <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
+              <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
+                <Truck className="h-5 w-5" />
+                Fulfillment
+              </h2>
 
-            {/* Tracking info if exists */}
-            {order.trackingNumber && (
-              <div className="bg-muted/30 rounded-lg p-4 mb-4 text-sm">
+              <div className="bg-muted/30 rounded-lg p-4 text-sm">
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="text-muted-foreground">Carrier</p>
-                    <p className="font-medium">{order.trackingCarrier || "—"}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Tracking Number</p>
-                    <p className="font-medium font-mono">{order.trackingNumber}</p>
-                  </div>
+                  {order.trackingCarrier && (
+                    <div>
+                      <p className="text-muted-foreground">Carrier</p>
+                      <p className="font-medium">{order.trackingCarrier}</p>
+                    </div>
+                  )}
+                  {order.trackingNumber && (
+                    <div>
+                      <p className="text-muted-foreground">Tracking Number</p>
+                      <p className="font-medium font-mono">{order.trackingNumber}</p>
+                    </div>
+                  )}
                   {order.shippedAt && (
                     <div>
                       <p className="text-muted-foreground">Shipped</p>
@@ -411,76 +424,14 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                   )}
                 </div>
               </div>
-            )}
 
-            {/* Ship form */}
-            {order.status === "packed" && (
-              <div>
-                {!showShipForm ? (
-                  <button onClick={() => setShowShipForm(true)} className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90">
-                    <Truck className="h-4 w-4" /> Mark as Shipped
-                  </button>
-                ) : (
-                  <div className="space-y-3 border rounded-lg p-4">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-sm font-medium mb-1">Carrier</label>
-                        <select value={trackingCarrier} onChange={(e) => setTrackingCarrier(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm">
-                          <option value="">Select carrier...</option>
-                          {carriers.map((c) => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-1">Tracking Number</label>
-                        <input
-                          value={trackingNumber}
-                          onChange={(e) => setTrackingNumber(e.target.value)}
-                          placeholder="Enter tracking number"
-                          className="w-full px-3 py-2 border rounded-lg text-sm"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => updateStatus("shipped", { trackingNumber, trackingCarrier })}
-                        disabled={updating}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
-                      >
-                        {updating ? "Shipping..." : "Confirm Shipment"}
-                      </button>
-                      <button onClick={() => setShowShipForm(false)} className="px-4 py-2 border rounded-lg text-sm hover:bg-muted">
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Advance status (non-ship) */}
-            {canAdvance && order.status !== "packed" && (
-              <button
-                onClick={() => updateStatus(nextStatus[order.status])}
-                disabled={updating}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
-              >
-                {updating ? "Updating..." : `Mark as ${statusConfig[nextStatus[order.status]]?.label}`}
-              </button>
-            )}
-
-            {canCancel && (
-              <button
-                onClick={() => { if (confirm("Cancel this order?")) updateStatus("cancelled"); }}
-                className="ml-2 px-4 py-2 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50"
-              >
-                Cancel Order
-              </button>
-            )}
-
-            {!canAdvance && !order.trackingNumber && (
-              <p className="text-sm text-muted-foreground">No fulfillment actions available for this status.</p>
-            )}
-          </div>
+              {order.externalUrl && (
+                <p className="text-xs text-muted-foreground mt-3">
+                  Manage fulfillment in <a href={order.externalUrl} target="_blank" rel="noopener noreferrer" className="underline">{order.channel === "faire" ? "Faire" : "Shopify"}</a> — the-frame syncs status updates automatically.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Returns Section */}
           <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
