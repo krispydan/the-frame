@@ -541,6 +541,21 @@ try {
   }
 } catch (e) { console.error("[db] Image reset error:", e); }
 
+// Unique constraint on inventory(sku_id, location) for ShipHero sync upsert
+try { sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_sku_location ON inventory(sku_id, location)"); } catch { /* exists */ }
+
+// One-time: wipe stale inventory quantities so ShipHero sync becomes source of truth
+try {
+  const flag = sqlite.prepare("SELECT 1 FROM catalog_processing_presets WHERE name = '__inventory_reset_shiphero_v1'").get();
+  if (!flag) {
+    sqlite.exec("UPDATE inventory SET quantity = 0, reserved_quantity = 0, updated_at = datetime('now')");
+    sqlite.prepare(
+      "INSERT INTO catalog_processing_presets (id, name, description, created_at) VALUES (lower(hex(randomblob(16))), '__inventory_reset_shiphero_v1', 'Migration flag — old inventory zeroed for ShipHero sync', datetime('now'))"
+    ).run();
+    console.log("[db] Inventory quantities reset to 0 — ShipHero sync is now source of truth");
+  }
+} catch (e) { console.error("[db] Inventory reset error:", e); }
+
 // ShipHero columns on orders table
 try { sqlite.exec("ALTER TABLE orders ADD COLUMN shiphero_order_id TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE orders ADD COLUMN shiphero_order_number TEXT"); } catch { /* exists */ }
