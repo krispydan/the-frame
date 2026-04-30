@@ -44,9 +44,22 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return { ...it, unitCost, lineCost, lineProfit };
   });
 
+  // Revenue base for gross profit:
+  //   subtotal (post-discount, pre-shipping, pre-tax)
+  //
+  // Why not items × unitPrice? Because line-item prices are gross-of-discount,
+  // so summing them inflates revenue when wholesale/Faire commissions are
+  // recorded as a discount on the order. order.subtotal already has the
+  // discount applied — so it matches the "Subtotal" row shown in the UI and
+  // matches what accountants treat as net revenue.
+  //
+  // Shipping and tax are excluded — shipping is a pass-through to the
+  // carrier (we don't have shipping COGS attached here yet), and tax is
+  // collected for the government.
   const itemsRevenue = items.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
-  const grossProfit = totalCostKnown ? itemsRevenue - totalCost : null;
-  const grossMargin = grossProfit != null && itemsRevenue > 0 ? grossProfit / itemsRevenue : null;
+  const revenueBase = order.subtotal ?? itemsRevenue;
+  const grossProfit = totalCostKnown ? revenueBase - totalCost : null;
+  const grossMargin = grossProfit != null && revenueBase > 0 ? grossProfit / revenueBase : null;
 
   const company = order.companyId
     ? db.select().from(companies).where(eq(companies.id, order.companyId)).get()
