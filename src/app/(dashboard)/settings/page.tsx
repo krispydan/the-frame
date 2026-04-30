@@ -503,67 +503,21 @@ export default function SettingsPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Shopify DTC (Retail)</CardTitle>
-                <CardDescription>Consumer-facing store — jaxy-9712.myshopify.com → getjaxy.com</CardDescription>
+                <CardTitle>Shopify</CardTitle>
+                <CardDescription>
+                  Shopify connections are now managed via OAuth on a dedicated page.
+                  Tokens are issued by Shopify when a merchant approves install scopes.
+                </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid gap-2">
-                  <Label htmlFor="shopify_dtc_store_domain">Store Domain</Label>
-                  <Input
-                    id="shopify_dtc_store_domain"
-                    value={settings.shopify_dtc_store_domain ?? ""}
-                    onChange={(e) => update("shopify_dtc_store_domain", e.target.value)}
-                    placeholder="jaxy-9712.myshopify.com"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="shopify_dtc_access_token">Access Token</Label>
-                  <ApiKeyInput
-                    id="shopify_dtc_access_token"
-                    value={settings.shopify_dtc_access_token ?? ""}
-                    onChange={(v) => update("shopify_dtc_access_token", v)}
-                    integration="shopify_access_token"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" onClick={() => saveMultiple(["shopify_dtc_store_domain", "shopify_dtc_access_token"])} disabled={saving}>
-                    <Save className="h-4 w-4 mr-2" /> Save
-                  </Button>
-                  <TestConnectionButton integration="shopify_dtc" settings={settings} />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Shopify Wholesale (B2B)</CardTitle>
-                <CardDescription>Wholesale store for retailers — jaxy-wholesale.myshopify.com</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid gap-2">
-                  <Label htmlFor="shopify_wholesale_store_domain">Store Domain</Label>
-                  <Input
-                    id="shopify_wholesale_store_domain"
-                    value={settings.shopify_wholesale_store_domain ?? ""}
-                    onChange={(e) => update("shopify_wholesale_store_domain", e.target.value)}
-                    placeholder="jaxy-wholesale.myshopify.com"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="shopify_wholesale_access_token">Access Token</Label>
-                  <ApiKeyInput
-                    id="shopify_wholesale_access_token"
-                    value={settings.shopify_wholesale_access_token ?? ""}
-                    onChange={(v) => update("shopify_wholesale_access_token", v)}
-                    integration="shopify_access_token"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" onClick={() => saveMultiple(["shopify_wholesale_store_domain", "shopify_wholesale_access_token"])} disabled={saving}>
-                    <Save className="h-4 w-4 mr-2" /> Save
-                  </Button>
-                  <TestConnectionButton integration="shopify_wholesale" settings={settings} />
-                </div>
+              <CardContent>
+                <Link
+                  href="/settings/integrations/shopify"
+                  className="inline-flex items-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+                >
+                  <Link2 className="h-4 w-4 mr-2" />
+                  Open Shopify integrations
+                  <ChevronRight className="h-4 w-4 ml-2" />
+                </Link>
               </CardContent>
             </Card>
 
