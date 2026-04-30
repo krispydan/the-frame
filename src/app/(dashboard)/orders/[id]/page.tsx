@@ -23,21 +23,26 @@ import {
 // ── Types ──
 
 interface Shipment {
+  id?: string;
   shiphero_shipment_id?: string | null;
+  carrier?: string | null;
   tracking_number?: string | null;
-  tracking_carrier?: string | null;
-  shipping_method?: string | null;
-  shipping_method_label?: string | null;
-  shipped_off_warehouse_at?: string | null;
-  delivered_at?: string | null;
+  tracking_url?: string | null;
+  label_cost?: number | null;
+  status?: string | null;
+  picked_up?: number | null;
+  total_packages?: number | null;
   created_date?: string | null;
 }
 
 interface FulfillmentCost {
+  invoice_id?: string | null;
   invoice_date?: string | null;
-  description?: string | null;
-  amount?: number | null;
-  currency?: string | null;
+  shipping_rate?: number | null;
+  processing_fee?: number | null;
+  picking_fee?: number | null;
+  overcharge_fee?: number | null;
+  total_cost?: number | null;
 }
 
 interface OrderDetail {
@@ -56,6 +61,8 @@ interface OrderDetail {
   externalId: string | null;
   externalUrl: string | null;
   shipheroUrl: string | null;
+  shiphero_order_number?: string | null;
+  shiphero_fulfillment_status?: string | null;
   trackingNumber: string | null;
   trackingCarrier: string | null;
   placedAt: string;
@@ -353,7 +360,10 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             </div>
           </div>
 
-          {/* Hero numbers — Total + Gross Profit are the headliners */}
+          {/* Hero number — Revenue. Gross Profit lives in the line-items
+              totals where it accounts for shipping/discounts; surfacing it
+              here was misleading because the hero figure didn't include
+              all the costs the bottom calculation does. */}
           <div className="flex items-stretch gap-4 sm:gap-6 lg:border-l lg:pl-6 shrink-0">
             <div className="text-right">
               <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Revenue</p>
@@ -361,36 +371,6 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                 ${order.total.toFixed(2)}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">{order.currency}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs uppercase tracking-wide font-medium text-emerald-700 dark:text-emerald-400">
-                Gross Profit
-              </p>
-              <p className={`text-3xl sm:text-4xl font-bold tabular-nums mt-1 ${
-                order.profit?.grossProfit == null
-                  ? "text-muted-foreground"
-                  : order.profit.grossProfit >= 0
-                    ? "text-emerald-600 dark:text-emerald-500"
-                    : "text-red-600 dark:text-red-500"
-              }`}>
-                {order.profit?.grossProfit != null ? `$${order.profit.grossProfit.toFixed(2)}` : "—"}
-              </p>
-              <p className="text-xs mt-0.5">
-                {order.profit?.grossMargin != null ? (
-                  <span className={`font-medium ${
-                    order.profit.grossProfit != null && order.profit.grossProfit >= 0
-                      ? "text-emerald-700 dark:text-emerald-400"
-                      : "text-red-700 dark:text-red-400"
-                  }`}>
-                    {(order.profit.grossMargin * 100).toFixed(1)}% margin
-                  </span>
-                ) : !order.profit?.hasFullCostData ? (
-                  <span className="text-muted-foreground">Cost data missing</span>
-                ) : null}
-                {order.profit?.grossMargin != null && !order.profit.hasFullCostData && (
-                  <span className="text-yellow-600 ml-1">(partial)</span>
-                )}
-              </p>
             </div>
           </div>
         </div>
@@ -577,23 +557,38 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               {/* ShipHero shipments */}
               {order.shipments?.length > 0 && (
                 <div>
-                  <h3 className="text-sm font-medium text-muted-foreground mb-2">ShipHero Shipments</h3>
+                  <h3 className="text-sm font-medium text-muted-foreground mb-2">
+                    Shipments ({order.shipments.length})
+                  </h3>
                   <div className="border rounded-lg divide-y">
                     {order.shipments.map((s, i) => (
-                      <div key={s.shiphero_shipment_id || i} className="p-3 text-sm flex items-center justify-between gap-3 flex-wrap">
-                        <div>
-                          <p className="font-medium">
-                            {s.shipping_method_label || s.shipping_method || "Shipment"}
-                          </p>
-                          {s.tracking_number && (
-                            <p className="font-mono text-xs text-muted-foreground">
-                              {s.tracking_carrier ? `${s.tracking_carrier} · ` : ""}{s.tracking_number}
+                      <div key={s.shiphero_shipment_id || i} className="p-3 text-sm">
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                          <div>
+                            <p className="font-medium">
+                              {s.carrier ? s.carrier.toUpperCase() : "Shipment"}{s.total_packages ? ` · ${s.total_packages} pkg${s.total_packages > 1 ? "s" : ""}` : ""}
                             </p>
-                          )}
-                        </div>
-                        <div className="text-xs text-muted-foreground text-right">
-                          {s.shipped_off_warehouse_at && <p>Shipped {new Date(s.shipped_off_warehouse_at).toLocaleDateString()}</p>}
-                          {s.delivered_at && <p>Delivered {new Date(s.delivered_at).toLocaleDateString()}</p>}
+                            {s.tracking_number && (
+                              <p className="font-mono text-xs mt-0.5">
+                                {s.tracking_url ? (
+                                  <a href={s.tracking_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                                    {s.tracking_number}
+                                  </a>
+                                ) : s.tracking_number}
+                              </p>
+                            )}
+                          </div>
+                          <div className="text-xs text-muted-foreground text-right space-y-0.5">
+                            {s.status && (
+                              <p className={`font-medium ${s.status === "delivered" ? "text-green-600" : s.status === "in_transit" ? "text-blue-600" : "text-muted-foreground"}`}>
+                                {s.status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                              </p>
+                            )}
+                            {s.created_date && <p>{new Date(s.created_date).toLocaleDateString()}</p>}
+                            {s.label_cost != null && s.label_cost > 0 && (
+                              <p className="text-muted-foreground">${s.label_cost.toFixed(2)}</p>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -605,20 +600,31 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               {order.fulfillmentCosts?.length > 0 && (
                 <div>
                   <h3 className="text-sm font-medium text-muted-foreground mb-2">Fulfillment Costs</h3>
-                  <div className="border rounded-lg divide-y">
-                    {order.fulfillmentCosts.map((c, i) => (
-                      <div key={i} className="p-3 text-sm flex items-center justify-between gap-3">
-                        <div>
-                          <p className="font-medium">{c.description || "Fulfillment charge"}</p>
-                          {c.invoice_date && (
-                            <p className="text-xs text-muted-foreground">{new Date(c.invoice_date).toLocaleDateString()}</p>
-                          )}
-                        </div>
-                        <span className="font-mono">
-                          {c.amount != null ? `${c.currency || "$"}${Number(c.amount).toFixed(2)}` : "—"}
-                        </span>
-                      </div>
-                    ))}
+                  <div className="border rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="text-left px-3 py-2 font-medium">Invoice</th>
+                          <th className="text-right px-3 py-2 font-medium">Postage</th>
+                          <th className="text-right px-3 py-2 font-medium">Processing</th>
+                          <th className="text-right px-3 py-2 font-medium">Picking</th>
+                          <th className="text-right px-3 py-2 font-medium">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {order.fulfillmentCosts.map((c, i) => (
+                          <tr key={i}>
+                            <td className="px-3 py-2 text-muted-foreground">
+                              {c.invoice_date ? new Date(c.invoice_date).toLocaleDateString() : "—"}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono">{c.shipping_rate != null ? `$${c.shipping_rate.toFixed(2)}` : "—"}</td>
+                            <td className="px-3 py-2 text-right font-mono">{c.processing_fee != null ? `$${c.processing_fee.toFixed(2)}` : "—"}</td>
+                            <td className="px-3 py-2 text-right font-mono">{c.picking_fee != null ? `$${c.picking_fee.toFixed(2)}` : "—"}</td>
+                            <td className="px-3 py-2 text-right font-mono font-medium">{c.total_cost != null ? `$${c.total_cost.toFixed(2)}` : "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
@@ -841,6 +847,47 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                     <p className="text-xs text-muted-foreground">Faire Commission</p>
                     <p className="font-medium text-red-600">-${order.discount.toFixed(2)}</p>
                   </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ShipHero */}
+          {(order.shiphero_order_number || order.shipheroUrl) && (
+            <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
+              <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
+                <Truck className="h-4 w-4" />
+                ShipHero
+              </h2>
+              <div className="space-y-2 text-sm">
+                {order.shiphero_order_number && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Order #</p>
+                    <p className="font-mono text-xs font-medium">{order.shiphero_order_number}</p>
+                  </div>
+                )}
+                {order.shiphero_fulfillment_status && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Fulfillment Status</p>
+                    <p className="font-medium capitalize">{order.shiphero_fulfillment_status}</p>
+                  </div>
+                )}
+                {order.shipments && order.shipments.length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Shipments</p>
+                    <p className="font-medium">{order.shipments.length} shipment{order.shipments.length > 1 ? "s" : ""}</p>
+                  </div>
+                )}
+                {order.shipheroUrl && (
+                  <a
+                    href={order.shipheroUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-background hover:bg-muted text-sm font-medium mt-2 w-full justify-center"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    Open in ShipHero
+                  </a>
                 )}
               </div>
             </div>
