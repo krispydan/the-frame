@@ -4,7 +4,14 @@ import { db } from "@/lib/db";
 import { xeroTrackingMappings } from "@/modules/integrations/schema/xero";
 import { eq } from "drizzle-orm";
 
-const PLATFORMS = ["shopify_dtc", "shopify_wholesale", "faire"] as const;
+const PLATFORMS = [
+  "shopify_dtc",
+  "shopify_afterpay",
+  "shopify_wholesale",
+  "faire",
+  "amazon",
+  "tiktok_shop",
+] as const;
 type Platform = (typeof PLATFORMS)[number];
 
 /**

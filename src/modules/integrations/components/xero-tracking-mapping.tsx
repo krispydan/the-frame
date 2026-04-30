@@ -21,8 +21,11 @@ type Mapping = {
 
 const PLATFORM_LABELS: Record<string, string> = {
   shopify_dtc: "Shopify Retail (DTC)",
+  shopify_afterpay: "Shopify Afterpay",
   shopify_wholesale: "Shopify Wholesale",
   faire: "Faire",
+  amazon: "Amazon",
+  tiktok_shop: "TikTok Shop",
 };
 
 /**
