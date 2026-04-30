@@ -306,8 +306,10 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
       {/* ── Hero ── */}
       <div className="bg-white dark:bg-gray-800 border rounded-lg overflow-hidden">
-        <div className="p-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-          <div>
+        {/* Top row: order metadata (left) + Total / Gross Profit big numbers (right) */}
+        <div className="p-6 flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
+          {/* Order info + external links */}
+          <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-2xl font-bold">{order.orderNumber}</h1>
               <StatusBadge status={order.status} size="lg" />
@@ -325,62 +327,76 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                 </span>
               )}
             </div>
+            <div className="flex items-center gap-2 mt-3 flex-wrap">
+              {order.externalUrl && (
+                <a
+                  href={order.externalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-background hover:bg-muted text-sm font-medium"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  {order.channel === "faire" ? "View in Faire" : "View in Shopify"}
+                </a>
+              )}
+              {order.shipheroUrl && (
+                <a
+                  href={order.shipheroUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-background hover:bg-muted text-sm font-medium"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  View in ShipHero
+                </a>
+              )}
+            </div>
           </div>
-          <div className="flex flex-col items-end gap-2 shrink-0">
-            {order.externalUrl && (
-              <a
-                href={order.externalUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border bg-background hover:bg-muted text-sm font-medium"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-                {order.channel === "faire" ? "View in Faire" : "View in Shopify"}
-              </a>
-            )}
-            {order.shipheroUrl && (
-              <a
-                href={order.shipheroUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border bg-background hover:bg-muted text-sm font-medium"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-                View in ShipHero
-              </a>
-            )}
+
+          {/* Hero numbers — Total + Gross Profit are the headliners */}
+          <div className="flex items-stretch gap-4 sm:gap-6 lg:border-l lg:pl-6 shrink-0">
+            <div className="text-right">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Revenue</p>
+              <p className="text-3xl sm:text-4xl font-bold tabular-nums mt-1">
+                ${order.total.toFixed(2)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">{order.currency}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs uppercase tracking-wide font-medium text-emerald-700 dark:text-emerald-400">
+                Gross Profit
+              </p>
+              <p className={`text-3xl sm:text-4xl font-bold tabular-nums mt-1 ${
+                order.profit?.grossProfit == null
+                  ? "text-muted-foreground"
+                  : order.profit.grossProfit >= 0
+                    ? "text-emerald-600 dark:text-emerald-500"
+                    : "text-red-600 dark:text-red-500"
+              }`}>
+                {order.profit?.grossProfit != null ? `$${order.profit.grossProfit.toFixed(2)}` : "—"}
+              </p>
+              <p className="text-xs mt-0.5">
+                {order.profit?.grossMargin != null ? (
+                  <span className={`font-medium ${
+                    order.profit.grossProfit != null && order.profit.grossProfit >= 0
+                      ? "text-emerald-700 dark:text-emerald-400"
+                      : "text-red-700 dark:text-red-400"
+                  }`}>
+                    {(order.profit.grossMargin * 100).toFixed(1)}% margin
+                  </span>
+                ) : !order.profit?.hasFullCostData ? (
+                  <span className="text-muted-foreground">Cost data missing</span>
+                ) : null}
+                {order.profit?.grossMargin != null && !order.profit.hasFullCostData && (
+                  <span className="text-yellow-600 ml-1">(partial)</span>
+                )}
+              </p>
+            </div>
           </div>
         </div>
 
-        {/* ── KPI Strip ── */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 border-t divide-x divide-y sm:divide-y-0">
-          <KpiTile
-            label="Total"
-            value={`$${order.total.toFixed(2)}`}
-            sub={order.currency}
-          />
-          <KpiTile
-            label="Gross Profit"
-            value={
-              order.profit?.grossProfit != null
-                ? `$${order.profit.grossProfit.toFixed(2)}`
-                : "—"
-            }
-            sub={
-              order.profit?.grossMargin != null
-                ? `${(order.profit.grossMargin * 100).toFixed(1)}% margin${!order.profit.hasFullCostData ? " (partial)" : ""}`
-                : !order.profit?.hasFullCostData
-                  ? "Cost data missing"
-                  : undefined
-            }
-            accent={
-              order.profit?.grossProfit == null
-                ? "muted"
-                : order.profit.grossProfit >= 0
-                  ? "positive"
-                  : "negative"
-            }
-          />
+        {/* Secondary metrics strip — smaller, supporting info */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 border-t divide-x">
           <KpiTile
             label="COGS"
             value={
