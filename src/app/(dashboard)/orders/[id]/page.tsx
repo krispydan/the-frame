@@ -13,7 +13,6 @@ import {
   ShoppingCart,
   RotateCcw,
   Clock,
-  Hash,
   User,
   Mail,
   Building2,
@@ -22,6 +21,24 @@ import {
 } from "lucide-react";
 
 // ── Types ──
+
+interface Shipment {
+  shiphero_shipment_id?: string | null;
+  tracking_number?: string | null;
+  tracking_carrier?: string | null;
+  shipping_method?: string | null;
+  shipping_method_label?: string | null;
+  shipped_off_warehouse_at?: string | null;
+  delivered_at?: string | null;
+  created_date?: string | null;
+}
+
+interface FulfillmentCost {
+  invoice_date?: string | null;
+  description?: string | null;
+  amount?: number | null;
+  currency?: string | null;
+}
 
 interface OrderDetail {
   id: string;
@@ -38,6 +55,7 @@ interface OrderDetail {
   notes: string | null;
   externalId: string | null;
   externalUrl: string | null;
+  shipheroUrl: string | null;
   trackingNumber: string | null;
   trackingCarrier: string | null;
   placedAt: string;
@@ -64,6 +82,8 @@ interface OrderDetail {
     unitPrice: number;
     totalPrice: number;
   }>;
+  shipments: Shipment[];
+  fulfillmentCosts: FulfillmentCost[];
   returns: Array<{
     id: string;
     reason: string | null;
@@ -104,8 +124,6 @@ const statusConfig: Record<string, { label: string; color: string; icon: React.E
 
 const statusPipeline = ["pending", "confirmed", "picking", "packed", "shipped", "delivered"];
 
-const carriers = ["UPS", "FedEx", "USPS", "DHL", "Other"];
-
 const returnReasons = [
   "Defective / Damaged",
   "Wrong item received",
@@ -114,14 +132,6 @@ const returnReasons = [
   "Not as described",
   "Other",
 ];
-
-const nextStatus: Record<string, string> = {
-  pending: "confirmed",
-  confirmed: "picking",
-  picking: "packed",
-  packed: "shipped",
-  shipped: "delivered",
-};
 
 // ── Badges ──
 
@@ -162,6 +172,31 @@ function timelineLabel(eventType: string): { label: string; icon: React.ElementT
   return map[eventType] || { label: eventType, icon: Clock, color: "text-gray-400" };
 }
 
+// ── KPI Tile ──
+
+function KpiTile({
+  label, value, sub, accent,
+}: {
+  label: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+  accent?: "default" | "positive" | "negative" | "muted";
+}) {
+  const accentClass = {
+    default: "",
+    positive: "text-green-600 dark:text-green-500",
+    negative: "text-red-600 dark:text-red-500",
+    muted: "text-muted-foreground",
+  }[accent || "default"];
+  return (
+    <div className="px-5 py-4">
+      <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium">{label}</p>
+      <p className={`text-2xl font-semibold mt-1 ${accentClass}`}>{value}</p>
+      {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
 // ── Page ──
 
 export default function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -171,12 +206,6 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Fulfillment state
-  const [showShipForm, setShowShipForm] = useState(false);
-  const [trackingNumber, setTrackingNumber] = useState("");
-  const [trackingCarrier, setTrackingCarrier] = useState("");
-  const [updating, setUpdating] = useState(false);
 
   // Return state
   const [showReturnForm, setShowReturnForm] = useState(false);
@@ -198,8 +227,8 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       const data = await res.json();
       setOrder(data);
       setError(null);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
@@ -210,21 +239,6 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
     if (order) setOverride(order.orderNumber);
     return () => setOverride(null);
   }, [order, setOverride]);
-
-  const updateStatus = async (status: string, extra?: Record<string, string>) => {
-    if (!order) return;
-    setUpdating(true);
-    await fetch(`/api/v1/orders/${order.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status, ...extra }),
-    });
-    setShowShipForm(false);
-    setTrackingNumber("");
-    setTrackingCarrier("");
-    await fetchOrder();
-    setUpdating(false);
-  };
 
   const submitReturn = async () => {
     if (!order) return;
@@ -248,10 +262,14 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
   if (loading) {
     return (
-      <div className="p-6">
+      <div className="p-6 max-w-7xl mx-auto">
         <div className="animate-pulse space-y-4">
           <div className="h-8 w-48 bg-muted rounded" />
-          <div className="h-64 bg-muted rounded-lg" />
+          <div className="h-32 bg-muted rounded-lg" />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 h-64 bg-muted rounded-lg" />
+            <div className="h-64 bg-muted rounded-lg" />
+          </div>
         </div>
       </div>
     );
@@ -259,7 +277,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
   if (error || !order) {
     return (
-      <div className="p-6">
+      <div className="p-6 max-w-7xl mx-auto">
         <button onClick={() => router.push("/orders")} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back to Orders
         </button>
@@ -270,42 +288,36 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
     );
   }
 
-  const canAdvance = !!nextStatus[order.status];
   const canReturn = ["delivered", "shipped"].includes(order.status);
-  const canCancel = !["cancelled", "delivered", "returned"].includes(order.status);
+  const itemCount = order.items.reduce((sum, it) => sum + it.quantity, 0);
+  const hasFulfillmentBlock =
+    order.trackingNumber ||
+    order.shippedAt ||
+    order.deliveredAt ||
+    (order.shipments && order.shipments.length > 0) ||
+    (order.fulfillmentCosts && order.fulfillmentCosts.length > 0);
 
   return (
-    <div className="p-6 space-y-6 max-w-6xl mx-auto">
+    <div className="p-6 space-y-6 max-w-7xl mx-auto">
       {/* Back nav */}
       <button onClick={() => router.push("/orders")} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-4 w-4" /> Back to Orders
       </button>
 
-      {/* ── Order Header ── */}
-      <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+      {/* ── Hero ── */}
+      <div className="bg-white dark:bg-gray-800 border rounded-lg overflow-hidden">
+        <div className="p-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-2xl font-bold">{order.orderNumber}</h1>
               <StatusBadge status={order.status} size="lg" />
+              <ChannelBadge channel={order.channel} />
             </div>
             <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-muted-foreground">
-              <ChannelBadge channel={order.channel} />
               <span className="inline-flex items-center gap-1">
                 <CalendarDays className="h-3.5 w-3.5" />
-                {order.placedAt ? new Date(order.placedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
+                Placed {order.placedAt ? new Date(order.placedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
               </span>
-              {order.externalId && order.externalUrl && (
-                <a
-                  href={order.externalUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border bg-background hover:bg-muted text-xs font-medium"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  {order.channel === "faire" ? "View in Faire" : "View in Shopify"}
-                </a>
-              )}
               {order.externalId && !order.externalUrl && (
                 <span className="inline-flex items-center gap-1 font-mono text-xs">
                   <ExternalLink className="h-3 w-3" />
@@ -314,35 +326,91 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               )}
             </div>
           </div>
-          <div className="text-right">
-            <p className="text-3xl font-bold">${order.total.toFixed(2)}</p>
-            <p className="text-sm text-muted-foreground">{order.currency}</p>
+          <div className="flex flex-col items-end gap-2 shrink-0">
+            {order.externalUrl && (
+              <a
+                href={order.externalUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border bg-background hover:bg-muted text-sm font-medium"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                {order.channel === "faire" ? "View in Faire" : "View in Shopify"}
+              </a>
+            )}
+            {order.shipheroUrl && (
+              <a
+                href={order.shipheroUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border bg-background hover:bg-muted text-sm font-medium"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                View in ShipHero
+              </a>
+            )}
           </div>
         </div>
 
-        {/* Customer info */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6 pt-4 border-t text-sm">
-          <div className="flex items-start gap-2">
-            <Building2 className="h-4 w-4 text-muted-foreground mt-0.5" />
-            <div>
-              <p className="text-muted-foreground">Company</p>
-              <p className="font-medium">{order.company?.name || "—"}</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <User className="h-4 w-4 text-muted-foreground mt-0.5" />
-            <div>
-              <p className="text-muted-foreground">Contact</p>
-              <p className="font-medium">{order.contact?.name || "—"}</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <Mail className="h-4 w-4 text-muted-foreground mt-0.5" />
-            <div>
-              <p className="text-muted-foreground">Email</p>
-              <p className="font-medium">{order.contact?.email || "—"}</p>
-            </div>
-          </div>
+        {/* ── KPI Strip ── */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 border-t divide-x divide-y sm:divide-y-0">
+          <KpiTile
+            label="Total"
+            value={`$${order.total.toFixed(2)}`}
+            sub={order.currency}
+          />
+          <KpiTile
+            label="Gross Profit"
+            value={
+              order.profit?.grossProfit != null
+                ? `$${order.profit.grossProfit.toFixed(2)}`
+                : "—"
+            }
+            sub={
+              order.profit?.grossMargin != null
+                ? `${(order.profit.grossMargin * 100).toFixed(1)}% margin${!order.profit.hasFullCostData ? " (partial)" : ""}`
+                : !order.profit?.hasFullCostData
+                  ? "Cost data missing"
+                  : undefined
+            }
+            accent={
+              order.profit?.grossProfit == null
+                ? "muted"
+                : order.profit.grossProfit >= 0
+                  ? "positive"
+                  : "negative"
+            }
+          />
+          <KpiTile
+            label="COGS"
+            value={
+              order.profit?.totalCost != null
+                ? `$${order.profit.totalCost.toFixed(2)}`
+                : "—"
+            }
+            sub={order.profit?.hasFullCostData ? undefined : "Partial — see line items"}
+            accent="muted"
+          />
+          <KpiTile
+            label="Items"
+            value={itemCount}
+            sub={`${order.items.length} line${order.items.length === 1 ? "" : "s"}`}
+            accent="muted"
+          />
+          <KpiTile
+            label="Customer"
+            value={
+              <span className="text-base font-semibold leading-tight block truncate">
+                {order.contact?.name || order.company?.name || "—"}
+              </span>
+            }
+            sub={
+              order.company?.name && order.contact?.name
+                ? order.company.name
+                : order.contact?.email || undefined
+            }
+            accent="muted"
+          />
         </div>
       </div>
 
@@ -358,75 +426,78 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                 <span className="text-sm font-normal text-muted-foreground">({order.items.length})</span>
               </h2>
             </div>
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="text-left px-6 py-3 font-medium">Product</th>
-                  <th className="text-left px-4 py-3 font-medium">SKU</th>
-                  <th className="text-center px-4 py-3 font-medium">Qty</th>
-                  <th className="text-right px-4 py-3 font-medium">Unit Price</th>
-                  <th className="text-right px-4 py-3 font-medium">Cost</th>
-                  <th className="text-right px-4 py-3 font-medium">Profit</th>
-                  <th className="text-right px-6 py-3 font-medium">Total</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {order.items.map((item) => {
-                  // SKU prefix = before the first hyphen (e.g. JX1001-BLK -> JX1001)
-                  const skuPrefix = item.sku ? item.sku.split("-")[0] : null;
-                  return (
-                    <tr key={item.id} className="hover:bg-muted/30">
-                      <td className="px-6 py-3">
-                        {skuPrefix ? (
-                          <Link href={`/catalog/${skuPrefix}`} className="font-medium hover:underline">
-                            {item.productName}
-                          </Link>
-                        ) : (
-                          <p className="font-medium">{item.productName}</p>
-                        )}
-                        {item.colorName && <p className="text-muted-foreground text-xs">{item.colorName}</p>}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                        {item.sku ? (
-                          skuPrefix ? (
-                            <Link href={`/catalog/${skuPrefix}`} className="hover:underline hover:text-foreground">
-                              {item.sku}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50">
+                  <tr>
+                    <th className="text-left px-6 py-3 font-medium">Product</th>
+                    <th className="text-left px-3 py-3 font-medium">SKU</th>
+                    <th className="text-center px-3 py-3 font-medium">Qty</th>
+                    <th className="text-right px-3 py-3 font-medium">Price</th>
+                    <th className="text-right px-3 py-3 font-medium">Cost</th>
+                    <th className="text-right px-3 py-3 font-medium">Profit</th>
+                    <th className="text-right px-6 py-3 font-medium">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {order.items.map((item) => {
+                    const skuPrefix = item.sku ? item.sku.split("-")[0] : null;
+                    return (
+                      <tr key={item.id} className="hover:bg-muted/30">
+                        <td className="px-6 py-3">
+                          {skuPrefix ? (
+                            <Link href={`/catalog/${skuPrefix}`} className="font-medium hover:underline">
+                              {item.productName}
                             </Link>
-                          ) : item.sku
-                        ) : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-center">{item.quantity}</td>
-                      <td className="px-4 py-3 text-right">${item.unitPrice.toFixed(2)}</td>
-                      <td className="px-4 py-3 text-right text-muted-foreground">
-                        {item.unitCost != null ? `$${item.unitCost.toFixed(2)}` : "—"}
-                      </td>
-                      <td className={`px-4 py-3 text-right font-medium ${item.lineProfit != null ? (item.lineProfit >= 0 ? "text-green-600" : "text-red-600") : "text-muted-foreground"}`}>
-                        {item.lineProfit != null ? `$${item.lineProfit.toFixed(2)}` : "—"}
-                      </td>
-                      <td className="px-6 py-3 text-right font-medium">${item.totalPrice.toFixed(2)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                          ) : (
+                            <span className="font-medium">{item.productName}</span>
+                          )}
+                          {item.colorName && <p className="text-muted-foreground text-xs">{item.colorName}</p>}
+                        </td>
+                        <td className="px-3 py-3 font-mono text-xs text-muted-foreground">
+                          {item.sku ? (
+                            skuPrefix ? (
+                              <Link href={`/catalog/${skuPrefix}`} className="hover:underline hover:text-foreground">
+                                {item.sku}
+                              </Link>
+                            ) : item.sku
+                          ) : "—"}
+                        </td>
+                        <td className="px-3 py-3 text-center">{item.quantity}</td>
+                        <td className="px-3 py-3 text-right">${item.unitPrice.toFixed(2)}</td>
+                        <td className="px-3 py-3 text-right text-muted-foreground">
+                          {item.unitCost != null ? `$${item.unitCost.toFixed(2)}` : "—"}
+                        </td>
+                        <td className={`px-3 py-3 text-right font-medium ${item.lineProfit != null ? (item.lineProfit >= 0 ? "text-green-600" : "text-red-600") : "text-muted-foreground"}`}>
+                          {item.lineProfit != null ? `$${item.lineProfit.toFixed(2)}` : "—"}
+                        </td>
+                        <td className="px-6 py-3 text-right font-medium">${item.totalPrice.toFixed(2)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
 
             {/* Totals */}
-            <div className="border-t px-6 py-4 space-y-1.5 text-sm">
-              <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>${order.subtotal.toFixed(2)}</span></div>
-              {order.discount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="text-red-600">-${order.discount.toFixed(2)}</span></div>}
-              {order.shipping > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Shipping</span><span>${order.shipping.toFixed(2)}</span></div>}
-              {order.tax > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Tax</span><span>${order.tax.toFixed(2)}</span></div>}
-              <div className="flex justify-between font-bold text-base border-t pt-2">
-                <span>Total</span>
-                <span>${order.total.toFixed(2)}</span>
+            <div className="border-t px-6 py-4 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5 text-sm">
+              <div className="space-y-1.5">
+                <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>${order.subtotal.toFixed(2)}</span></div>
+                {order.discount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="text-red-600">-${order.discount.toFixed(2)}</span></div>}
+                {order.shipping > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Shipping</span><span>${order.shipping.toFixed(2)}</span></div>}
+                {order.tax > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Tax</span><span>${order.tax.toFixed(2)}</span></div>}
+                <div className="flex justify-between font-bold text-base border-t pt-2">
+                  <span>Total</span>
+                  <span>${order.total.toFixed(2)}</span>
+                </div>
               </div>
               {order.profit && (
-                <div className="border-t mt-2 pt-2 space-y-1">
+                <div className="space-y-1.5">
                   <div className="flex justify-between text-muted-foreground">
-                    <span>COGS{!order.profit.hasFullCostData && <span title="One or more line items have no cost on file" className="ml-1 text-yellow-600">*</span>}</span>
+                    <span>COGS{!order.profit.hasFullCostData && <span title="Some line items have no cost on file" className="ml-1 text-yellow-600">*</span>}</span>
                     <span>{order.profit.totalCost != null ? `$${order.profit.totalCost.toFixed(2)}` : "—"}</span>
                   </div>
-                  <div className="flex justify-between font-semibold">
+                  <div className="flex justify-between font-semibold text-base border-t pt-2">
                     <span>Gross Profit</span>
                     <span className={order.profit.grossProfit != null ? (order.profit.grossProfit >= 0 ? "text-green-600" : "text-red-600") : ""}>
                       {order.profit.grossProfit != null ? `$${order.profit.grossProfit.toFixed(2)}` : "—"}
@@ -438,8 +509,8 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                     </span>
                   </div>
                   {!order.profit.hasFullCostData && (
-                    <p className="text-xs text-yellow-700 dark:text-yellow-500 mt-1">
-                      * Some line items have no cost on file — add SKU costs in the catalog to see full profit.
+                    <p className="text-xs text-yellow-700 dark:text-yellow-500">
+                      * Some line items have no cost — add SKU costs in the catalog for full profit.
                     </p>
                   )}
                 </div>
@@ -447,18 +518,19 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             </div>
           </div>
 
-          {/* Fulfillment Section — read-only.
+          {/* Fulfillment — read-only.
               Status changes happen in Shopify / ShipHero and sync down via
-              webhooks or the Sync Shopify button on /orders. */}
-          {(order.trackingNumber || order.shippedAt || order.deliveredAt) && (
-            <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
-              <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
+              webhooks or Sync Shopify on /orders. */}
+          {hasFulfillmentBlock && (
+            <div className="bg-white dark:bg-gray-800 border rounded-lg p-6 space-y-4">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
                 <Truck className="h-5 w-5" />
                 Fulfillment
               </h2>
 
-              <div className="bg-muted/30 rounded-lg p-4 text-sm">
-                <div className="grid grid-cols-2 gap-3">
+              {/* Top-level tracking from order record */}
+              {(order.trackingNumber || order.shippedAt || order.deliveredAt) && (
+                <div className="bg-muted/30 rounded-lg p-4 text-sm grid grid-cols-2 gap-3">
                   {order.trackingCarrier && (
                     <div>
                       <p className="text-muted-foreground">Carrier</p>
@@ -467,7 +539,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                   )}
                   {order.trackingNumber && (
                     <div>
-                      <p className="text-muted-foreground">Tracking Number</p>
+                      <p className="text-muted-foreground">Tracking #</p>
                       <p className="font-medium font-mono">{order.trackingNumber}</p>
                     </div>
                   )}
@@ -484,17 +556,65 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                     </div>
                   )}
                 </div>
-              </div>
-
-              {order.externalUrl && (
-                <p className="text-xs text-muted-foreground mt-3">
-                  Manage fulfillment in <a href={order.externalUrl} target="_blank" rel="noopener noreferrer" className="underline">{order.channel === "faire" ? "Faire" : "Shopify"}</a> — the-frame syncs status updates automatically.
-                </p>
               )}
+
+              {/* ShipHero shipments */}
+              {order.shipments?.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-medium text-muted-foreground mb-2">ShipHero Shipments</h3>
+                  <div className="border rounded-lg divide-y">
+                    {order.shipments.map((s, i) => (
+                      <div key={s.shiphero_shipment_id || i} className="p-3 text-sm flex items-center justify-between gap-3 flex-wrap">
+                        <div>
+                          <p className="font-medium">
+                            {s.shipping_method_label || s.shipping_method || "Shipment"}
+                          </p>
+                          {s.tracking_number && (
+                            <p className="font-mono text-xs text-muted-foreground">
+                              {s.tracking_carrier ? `${s.tracking_carrier} · ` : ""}{s.tracking_number}
+                            </p>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground text-right">
+                          {s.shipped_off_warehouse_at && <p>Shipped {new Date(s.shipped_off_warehouse_at).toLocaleDateString()}</p>}
+                          {s.delivered_at && <p>Delivered {new Date(s.delivered_at).toLocaleDateString()}</p>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Fulfillment costs */}
+              {order.fulfillmentCosts?.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-medium text-muted-foreground mb-2">Fulfillment Costs</h3>
+                  <div className="border rounded-lg divide-y">
+                    {order.fulfillmentCosts.map((c, i) => (
+                      <div key={i} className="p-3 text-sm flex items-center justify-between gap-3">
+                        <div>
+                          <p className="font-medium">{c.description || "Fulfillment charge"}</p>
+                          {c.invoice_date && (
+                            <p className="text-xs text-muted-foreground">{new Date(c.invoice_date).toLocaleDateString()}</p>
+                          )}
+                        </div>
+                        <span className="font-mono">
+                          {c.amount != null ? `${c.currency || "$"}${Number(c.amount).toFixed(2)}` : "—"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <p className="text-xs text-muted-foreground">
+                Fulfillment is managed in {order.shipheroUrl ? "ShipHero" : order.channel === "faire" ? "Faire" : "Shopify"}
+                {" "}— the-frame syncs status updates automatically.
+              </p>
             </div>
           )}
 
-          {/* Returns Section */}
+          {/* Returns */}
           <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold flex items-center gap-2">
@@ -514,7 +634,6 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               )}
             </div>
 
-            {/* Existing returns */}
             {order.returns.length > 0 ? (
               <div className="space-y-3 mb-4">
                 {order.returns.map((ret) => (
@@ -537,7 +656,6 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               <p className="text-sm text-muted-foreground">No returns for this order.</p>
             ) : null}
 
-            {/* Create return form */}
             {showReturnForm && (
               <div className="border rounded-lg p-4 space-y-4">
                 <h3 className="font-medium">New Return</h3>
@@ -592,109 +710,122 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
         {/* ── Sidebar (Right col) ── */}
         <div className="space-y-6">
-          {/* Status Timeline */}
+          {/* Status Timeline (compact) */}
           <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
-            <h2 className="text-lg font-semibold mb-4">Status</h2>
-            <ol className="relative border-l border-gray-200 dark:border-gray-700 ml-3">
+            <h2 className="text-base font-semibold mb-3">Status</h2>
+            <ol className="relative border-l border-gray-200 dark:border-gray-700 ml-2.5">
               {statusPipeline.map((s, i) => {
                 const reached = statusPipeline.indexOf(order.status) >= i;
                 const isCurrent = order.status === s;
+                const isLast = i === statusPipeline.length - 1;
                 return (
-                  <li key={s} className="mb-6 ml-6 last:mb-0">
-                    <span className={`absolute flex items-center justify-center w-6 h-6 rounded-full -left-3 ring-4 ring-white dark:ring-gray-800 ${
+                  <li key={s} className={`ml-5 ${isLast ? "" : "mb-3"}`}>
+                    <span className={`absolute flex items-center justify-center w-5 h-5 rounded-full -left-2.5 ring-4 ring-white dark:ring-gray-800 ${
                       isCurrent ? "bg-primary text-primary-foreground" : reached ? "bg-green-500 text-white" : "bg-gray-200 dark:bg-gray-600"
                     }`}>
                       {reached && !isCurrent ? (
-                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        <CheckCircle2 className="h-3 w-3" />
                       ) : (
-                        <span className="text-xs font-bold">{i + 1}</span>
+                        <span className="text-[10px] font-bold">{i + 1}</span>
                       )}
                     </span>
-                    <h3 className={`text-sm font-medium ${isCurrent ? "text-foreground" : reached ? "text-green-600" : "text-muted-foreground"}`}>
+                    <p className={`text-xs font-medium ${isCurrent ? "text-foreground" : reached ? "text-green-600" : "text-muted-foreground"}`}>
                       {statusConfig[s]?.label || s}
-                    </h3>
+                    </p>
                     {s === "shipped" && order.shippedAt && (
-                      <time className="text-xs text-muted-foreground">{new Date(order.shippedAt).toLocaleDateString()}</time>
+                      <time className="text-[11px] text-muted-foreground">{new Date(order.shippedAt).toLocaleDateString()}</time>
                     )}
                     {s === "delivered" && order.deliveredAt && (
-                      <time className="text-xs text-muted-foreground">{new Date(order.deliveredAt).toLocaleDateString()}</time>
+                      <time className="text-[11px] text-muted-foreground">{new Date(order.deliveredAt).toLocaleDateString()}</time>
                     )}
                     {s === "pending" && order.placedAt && (
-                      <time className="text-xs text-muted-foreground">{new Date(order.placedAt).toLocaleDateString()}</time>
+                      <time className="text-[11px] text-muted-foreground">{new Date(order.placedAt).toLocaleDateString()}</time>
                     )}
                   </li>
                 );
               })}
               {["cancelled", "returned"].includes(order.status) && (
-                <li className="mb-0 ml-6">
-                  <span className="absolute flex items-center justify-center w-6 h-6 rounded-full -left-3 ring-4 ring-white dark:ring-gray-800 bg-red-500 text-white">
-                    <XCircle className="h-3.5 w-3.5" />
+                <li className="ml-5">
+                  <span className="absolute flex items-center justify-center w-5 h-5 rounded-full -left-2.5 ring-4 ring-white dark:ring-gray-800 bg-red-500 text-white">
+                    <XCircle className="h-3 w-3" />
                   </span>
-                  <h3 className="text-sm font-medium text-red-600">{statusConfig[order.status]?.label}</h3>
+                  <p className="text-xs font-medium text-red-600">{statusConfig[order.status]?.label}</p>
                 </li>
               )}
             </ol>
           </div>
 
-          {/* Faire Details */}
+          {/* Customer */}
+          <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
+            <h2 className="text-base font-semibold mb-3">Customer</h2>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-start gap-2">
+                <Building2 className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Company</p>
+                  <p className="font-medium truncate">{order.company?.name || "—"}</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <User className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Contact</p>
+                  <p className="font-medium truncate">{order.contact?.name || "—"}</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <Mail className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Email</p>
+                  <p className="font-medium truncate">{order.contact?.email || "—"}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Faire details (channel-specific) */}
           {order.channel === "faire" && (
             <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
-              <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+              <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
                 <span className="text-green-600">●</span> Faire Details
               </h2>
-              <div className="space-y-3 text-sm">
+              <div className="space-y-2 text-sm">
                 {order.externalId && (
                   <div>
-                    <p className="text-muted-foreground">Faire Order ID</p>
-                    <p className="font-mono text-xs font-medium">{order.externalId}</p>
+                    <p className="text-xs text-muted-foreground">Faire Order ID</p>
+                    <p className="font-mono text-xs font-medium break-all">{order.externalId}</p>
                   </div>
                 )}
-                {order.notes && (
-                  <>
-                    {order.notes.includes("Net ") && (
-                      <div>
-                        <p className="text-muted-foreground">Payment Terms</p>
-                        <p className="font-medium">
-                          {order.notes.match(/Net \d+/)?.[0] || (order.notes.includes("Prepaid") ? "Prepaid" : "—")}
-                        </p>
-                      </div>
-                    )}
-                    {order.notes.includes("Prepaid") && !order.notes.includes("Net ") && (
-                      <div>
-                        <p className="text-muted-foreground">Payment Terms</p>
-                        <p className="font-medium">Prepaid</p>
-                      </div>
-                    )}
-                    {order.notes.includes("Opening Order") && (
-                      <div>
-                        <p className="text-muted-foreground">Order Type</p>
-                        <p className="font-medium">🆕 Opening Order</p>
-                      </div>
-                    )}
-                    {order.notes.includes("Ship by:") && (
-                      <div>
-                        <p className="text-muted-foreground">Ship By</p>
-                        <p className="font-medium">{order.notes.match(/Ship by: (.+?)(?:\s*\||$)/)?.[1] || "—"}</p>
-                      </div>
-                    )}
-                  </>
+                {order.notes?.includes("Net ") && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Payment Terms</p>
+                    <p className="font-medium">{order.notes.match(/Net \d+/)?.[0]}</p>
+                  </div>
+                )}
+                {order.notes?.includes("Prepaid") && !order.notes.includes("Net ") && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Payment Terms</p>
+                    <p className="font-medium">Prepaid</p>
+                  </div>
+                )}
+                {order.notes?.includes("Opening Order") && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Order Type</p>
+                    <p className="font-medium">Opening Order</p>
+                  </div>
+                )}
+                {order.notes?.includes("Ship by:") && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Ship By</p>
+                    <p className="font-medium">{order.notes.match(/Ship by: (.+?)(?:\s*\||$)/)?.[1] || "—"}</p>
+                  </div>
                 )}
                 {order.discount > 0 && (
                   <div>
-                    <p className="text-muted-foreground">Faire Commission</p>
+                    <p className="text-xs text-muted-foreground">Faire Commission</p>
                     <p className="font-medium text-red-600">-${order.discount.toFixed(2)}</p>
                   </div>
                 )}
-                <div className="pt-2 border-t">
-                  <a
-                    href={`https://www.faire.com/brand-portal/orders/${order.externalId}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-blue-600 hover:underline inline-flex items-center gap-1"
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" /> View on Faire
-                  </a>
-                </div>
               </div>
             </div>
           )}
@@ -702,41 +833,42 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           {/* Notes */}
           {order.notes && (
             <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
-              <h2 className="text-lg font-semibold mb-2">Notes</h2>
+              <h2 className="text-base font-semibold mb-2">Notes</h2>
               <p className="text-sm text-muted-foreground whitespace-pre-wrap">{order.notes}</p>
-            </div>
-          )}
-
-          {/* Activity Timeline */}
-          {order.timeline.length > 0 && (
-            <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
-              <h2 className="text-lg font-semibold mb-4">Activity</h2>
-              <ol className="relative border-l border-gray-200 dark:border-gray-700 ml-3">
-                {order.timeline.map((event) => {
-                  const info = timelineLabel(event.eventType);
-                  const Icon = info.icon;
-                  return (
-                    <li key={event.id} className="mb-4 ml-6 last:mb-0">
-                      <span className={`absolute flex items-center justify-center w-5 h-5 rounded-full -left-2.5 ring-4 ring-white dark:ring-gray-800 bg-white dark:bg-gray-800 ${info.color}`}>
-                        <Icon className="h-3 w-3" />
-                      </span>
-                      <p className="text-sm font-medium">{info.label}</p>
-                      <time className="text-xs text-muted-foreground">
-                        {new Date(event.createdAt).toLocaleString()}
-                      </time>
-                      {event.data?.trackingNumber && (
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          Tracking: {String(event.data.trackingNumber)}
-                        </p>
-                      )}
-                    </li>
-                  );
-                })}
-              </ol>
             </div>
           )}
         </div>
       </div>
+
+      {/* ── Activity (full-width below grid) ── */}
+      {order.timeline.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
+          <h2 className="text-lg font-semibold mb-4">Activity</h2>
+          <ol className="relative border-l border-gray-200 dark:border-gray-700 ml-3">
+            {order.timeline.map((event) => {
+              const info = timelineLabel(event.eventType);
+              const Icon = info.icon;
+              const tracking = event.data?.trackingNumber;
+              return (
+                <li key={event.id} className="mb-4 ml-6 last:mb-0">
+                  <span className={`absolute flex items-center justify-center w-5 h-5 rounded-full -left-2.5 ring-4 ring-white dark:ring-gray-800 bg-white dark:bg-gray-800 ${info.color}`}>
+                    <Icon className="h-3 w-3" />
+                  </span>
+                  <p className="text-sm font-medium">{info.label}</p>
+                  <time className="text-xs text-muted-foreground">
+                    {new Date(event.createdAt).toLocaleString()}
+                  </time>
+                  {tracking != null && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Tracking: {String(tracking)}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      )}
     </div>
   );
 }
