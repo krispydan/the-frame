@@ -184,16 +184,26 @@ export function XeroTrackingMapping() {
               <TableBody>
                 {Object.keys(PLATFORM_LABELS).map((platform) => {
                   const m = getMappingFor(platform);
+                  const compositeKey = compositeKeyFor(m);
+                  // Build the display string for the trigger so it shows the
+                  // friendly name instead of the composite UUID. Radix's
+                  // SelectValue otherwise falls back to the value attribute
+                  // when SelectItem children are complex JSX.
+                  const triggerLabel = m.trackingOptionId
+                    ? `${m.trackingCategoryName ?? ""} → ${m.trackingOptionName ?? ""}`.trim()
+                    : null;
                   return (
                     <TableRow key={platform}>
                       <TableCell className="font-medium">{PLATFORM_LABELS[platform]}</TableCell>
                       <TableCell>
                         <Select
-                          value={compositeKeyFor(m)}
+                          value={compositeKey}
                           onValueChange={(v) => updateMapping(platform, v ?? "__none__")}
                         >
                           <SelectTrigger className="w-full max-w-md">
-                            <SelectValue placeholder="Select tracking option..." />
+                            <SelectValue placeholder="Select tracking option...">
+                              {triggerLabel || <span className="text-muted-foreground">— Not mapped —</span>}
+                            </SelectValue>
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="__none__">— Not mapped —</SelectItem>
