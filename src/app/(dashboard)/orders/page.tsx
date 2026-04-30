@@ -17,7 +17,7 @@ import {
   ArrowUpDown,
   RefreshCw,
 } from "lucide-react";
-import { CreateOrderDialog } from "@/modules/orders/components/create-order-dialog";
+// CreateOrderDialog removed — orders are created in Shopify/Faire and synced here
 
 // ── Types ──
 
@@ -142,7 +142,7 @@ function OrdersPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<OrderDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  // showCreateDialog removed — orders are created in Shopify/Faire only
   const [syncingFaire, setSyncingFaire] = useState(false);
   const [syncingShopify, setSyncingShopify] = useState(false);
 
@@ -267,13 +267,6 @@ function OrdersPage() {
             <RefreshCw className={`h-4 w-4 ${syncingFaire ? "animate-spin" : ""}`} />
             {syncingFaire ? "Syncing..." : "Sync Faire"}
           </button>
-          <button
-            onClick={() => setShowCreateDialog(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90"
-          >
-            <Plus className="h-4 w-4" />
-            Create Order
-          </button>
         </div>
       </div>
 
@@ -341,10 +334,7 @@ function OrdersPage() {
               <tr><td colSpan={7} className="px-4 py-16 text-center">
                 <ShoppingCart className="h-10 w-10 mx-auto text-muted-foreground/50 mb-3" />
                 <p className="font-medium text-muted-foreground">No orders yet</p>
-                <p className="text-sm text-muted-foreground/70 mt-1">Create your first order or sync from Faire to get started.</p>
-                <button onClick={() => setShowCreateDialog(true)} className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90">
-                  <Plus className="h-4 w-4" /> Create Order
-                </button>
+                <p className="text-sm text-muted-foreground/70 mt-1">Sync from Shopify or Faire to pull orders into the-frame.</p>
               </td></tr>
             ) : (
               orders.map((o) => (
@@ -377,16 +367,6 @@ function OrdersPage() {
           </div>
         </div>
       )}
-
-      {/* Create Order Dialog */}
-      <CreateOrderDialog
-        open={showCreateDialog}
-        onClose={() => setShowCreateDialog(false)}
-        onCreated={(orderId) => {
-          fetchOrders();
-          if (orderId) router.push(`/orders/${orderId}`);
-        }}
-      />
 
       {/* Order Detail Slide-over */}
       {selectedOrder && (
