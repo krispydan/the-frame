@@ -3,7 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { orders, orderItems } from "@/modules/orders/schema";
 import { companies } from "@/modules/sales/schema";
-import { createManualOrder, type CreateOrderInput } from "@/modules/orders/lib/faire-sync";
+// createManualOrder removed — orders originate in Shopify and sync via
+// /api/v1/orders/shopify-sync or webhooks. Manual creation produced orphan
+// records that didn't exist in Shopify.
 import { desc, eq, and, like, sql, gte, lte } from "drizzle-orm";
 
 // GET /api/v1/orders — list orders with filters
@@ -73,21 +75,13 @@ export async function GET(req: NextRequest) {
   });
 }
 
-// POST /api/v1/orders — create manual order
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json() as CreateOrderInput;
-
-    if (!body.items || body.items.length === 0) {
-      return NextResponse.json({ error: "At least one item is required" }, { status: 400 });
-    }
-    if (!body.channel || !["direct", "phone", "shopify_dtc", "shopify_wholesale", "faire"].includes(body.channel)) {
-      return NextResponse.json({ error: "Invalid channel" }, { status: 400 });
-    }
-
-    const newOrder = createManualOrder(body);
-    return NextResponse.json(newOrder, { status: 201 });
-  } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
-  }
+// POST /api/v1/orders is intentionally removed.
+// Orders are created in Shopify (or Faire, which routes through the wholesale
+// Shopify store) and synced into the-frame via /api/v1/orders/shopify-sync or
+// real-time webhooks. Locally creating an order would produce a record that
+// has no upstream source-of-truth and corrupts reporting.
+export async function POST() {
+  return NextResponse.json({
+    error: "Manual order creation is disabled. Create the order in Shopify and run Sync Shopify on the orders page (or wait for the webhook).",
+  }, { status: 410 });
 }

@@ -303,71 +303,11 @@ function mapFaireStatus(status: string): "pending" | "confirmed" | "shipped" | "
   return "pending";
 }
 
-// ── Manual Order Creation ──
-
-export interface CreateOrderInput {
-  companyId?: string;
-  contactId?: string;
-  channel: "direct" | "phone" | "shopify_dtc" | "shopify_wholesale" | "faire";
-  paymentTerms?: string;
-  items: Array<{
-    productId?: string;
-    skuId?: string;
-    productName: string;
-    sku?: string;
-    colorName?: string;
-    quantity: number;
-    unitPrice: number;
-  }>;
-  shipping?: number;
-  discount?: number;
-  tax?: number;
-  notes?: string;
-}
-
-export function createManualOrder(input: CreateOrderInput) {
-  const subtotal = input.items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
-  const total = subtotal - (input.discount || 0) + (input.shipping || 0) + (input.tax || 0);
-
-  const count = db.select().from(orders).all().length;
-  const orderNumber = `M-${String(count + 1).padStart(4, "0")}`;
-
-  const newOrder = db.insert(orders).values({
-    orderNumber,
-    companyId: input.companyId || null,
-    contactId: input.contactId || null,
-    channel: input.channel,
-    status: "pending",
-    subtotal,
-    discount: input.discount || 0,
-    shipping: input.shipping || 0,
-    tax: input.tax || 0,
-    total,
-    notes: input.notes || null,
-    placedAt: new Date().toISOString(),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  }).returning().get();
-
-  for (const item of input.items) {
-    db.insert(orderItems).values({
-      orderId: newOrder.id,
-      productId: item.productId || null,
-      skuId: item.skuId || null,
-      sku: item.sku || null,
-      productName: item.productName,
-      colorName: item.colorName || null,
-      quantity: item.quantity,
-      unitPrice: item.unitPrice,
-      totalPrice: item.unitPrice * item.quantity,
-    }).run();
-  }
-
-  eventBus.emit("order.created", { orderId: newOrder.id, companyId: input.companyId || "", total });
-
-  if (input.companyId) {
-    try { ensureCustomerAccount(input.companyId); } catch (e) { console.error("[Manual Order] ensureCustomerAccount:", e); }
-  }
-
-  return newOrder;
-}
+// ── Manual Order Creation: removed ──
+//
+// `createManualOrder` and `CreateOrderInput` were dropped because all orders
+// originate in Shopify. Faire orders flow through Faire's Shopify channel
+// integration, so the wholesale Shopify store is the source of truth for
+// every B2B order too. Anything that needs to "create an order" should do it
+// in Shopify and let the sync (POST /api/v1/orders/shopify-sync) or webhook
+// pull it down.

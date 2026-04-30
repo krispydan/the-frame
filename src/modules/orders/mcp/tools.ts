@@ -3,7 +3,7 @@ import { mcpRegistry } from "@/modules/core/mcp/server";
 import { db } from "@/lib/db";
 import { orders, orderItems, returns } from "@/modules/orders/schema";
 import { companies } from "@/modules/sales/schema";
-import { createManualOrder } from "@/modules/orders/lib/faire-sync";
+// createManualOrder removed — orders are created in Shopify, then synced down.
 import { updateOrderStatus } from "@/modules/orders/lib/fulfillment";
 import { eq, desc, and, like, sql } from "drizzle-orm";
 
@@ -57,30 +57,9 @@ mcpRegistry.register(
   }
 );
 
-// ── orders.create_order ──
-mcpRegistry.register(
-  "orders.create_order",
-  "Create a manual order (direct or phone channel)",
-  z.object({
-    companyId: z.string().optional().describe("Company ID"),
-    channel: z.enum(["direct", "phone"]).describe("Order channel"),
-    items: z.array(z.object({
-      productName: z.string(),
-      sku: z.string().optional(),
-      colorName: z.string().optional(),
-      quantity: z.number(),
-      unitPrice: z.number(),
-    })).describe("Line items"),
-    shipping: z.number().optional(),
-    discount: z.number().optional(),
-    tax: z.number().optional(),
-    notes: z.string().optional(),
-  }),
-  async (args) => {
-    const order = createManualOrder(args);
-    return { content: [{ type: "text" as const, text: JSON.stringify(order, null, 2) }] };
-  }
-);
+// orders.create_order removed — all orders originate in Shopify and sync via
+// /api/v1/orders/shopify-sync or webhooks. Creating orders locally produced
+// orphan records that didn't exist in Shopify, which corrupted reporting.
 
 // ── orders.update_status ──
 mcpRegistry.register(
