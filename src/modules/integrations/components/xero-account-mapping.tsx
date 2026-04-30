@@ -1,18 +1,29 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Save, RefreshCw, ChevronsUpDown, Check, X } from "lucide-react";
+import { Loader2, Save, RefreshCw, ChevronsUpDown, Check, X, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
 type Account = { code: string; name: string; type: string; status: string };
+/**
+ * Server-driven mapping row. The mappings API returns one of these per
+ * category, including suggested defaults from the mapping guide so the UI
+ * can show "use 4000 Sales - Shopify Retail" as a placeholder.
+ */
 type Mapping = {
   category: string;
+  label: string;
+  hint: string;
+  side: "credit" | "debit";
+  defaultAccountCode: string | null;
+  defaultAccountName: string | null;
   xeroAccountCode: string | null;
   xeroAccountName: string | null;
   notes: string | null;
@@ -21,33 +32,14 @@ type Mapping = {
 
 const PLATFORM_LABELS: Record<string, string> = {
   shopify_dtc: "Shopify Retail (DTC)",
+  shopify_afterpay: "Shopify Afterpay",
   shopify_wholesale: "Shopify Wholesale",
   faire: "Faire",
+  amazon: "Amazon",
+  tiktok_shop: "TikTok Shop",
 };
 
-const CATEGORY_LABELS: Record<string, string> = {
-  sales: "Sales",
-  shipping: "Shipping income",
-  discounts: "Discounts",
-  refunds: "Refunds",
-  tax: "Tax collected",
-  fees: "Payment fees",
-  adjustments: "Adjustments",
-  bank_clearing: "Bank clearing",
-};
-
-const CATEGORY_HINTS: Record<string, string> = {
-  sales: "Revenue from product sales (excl. tax / shipping). Usually a 4xxx Revenue account.",
-  shipping: "Shipping charged to customers. Often a 4xxx Revenue account.",
-  discounts: "Discount totals (will be debited). Often a 4xxx Discount contra-revenue account.",
-  refunds: "Refunds issued to customers. Often a 4xxx Refunds contra-revenue account.",
-  tax: "Sales tax collected. A 2xxx Liability account.",
-  fees: "Payment processor fees deducted from the payout. A 6xxx Expense account.",
-  adjustments: "Stripe / Shopify Payments adjustments. Usually 6xxx Expense or 4xxx contra-revenue.",
-  bank_clearing: "The bank account that receives the net payout. A 1xxx Asset / Bank account.",
-};
-
-const PLATFORMS = ["shopify_dtc", "shopify_wholesale", "faire"];
+const PLATFORMS = ["shopify_dtc", "shopify_afterpay", "shopify_wholesale", "faire", "amazon", "tiktok_shop"];
 
 /**
  * Searchable combobox for picking a Xero account by code or name.
@@ -185,6 +177,35 @@ export function XeroAccountMapping() {
     });
   }
 
+  /**
+   * Fill in any unmapped rows with the suggested defaults from the mapping
+   * guide, looking up the matching active Xero account by code. Skips rows
+   * that are already mapped, so this is safe to click multiple times.
+   */
+  function applySuggestedDefaults(platform: string) {
+    setMappings((current) => {
+      const list = current[platform] || [];
+      let filled = 0;
+      const updated = list.map((m) => {
+        if (m.xeroAccountCode || !m.defaultAccountCode) return m;
+        const account = accounts?.find((a) => a.code === m.defaultAccountCode);
+        if (!account) return m;  // suggested code doesn't exist in this Xero tenant
+        filled++;
+        return {
+          ...m,
+          xeroAccountCode: account.code,
+          xeroAccountName: account.name,
+        };
+      });
+      if (filled === 0) {
+        toast.info("Nothing to fill — all categories already mapped, or suggested codes not in your Xero chart.");
+      } else {
+        toast.success(`Filled ${filled} row${filled === 1 ? "" : "s"} with suggested defaults. Review and save.`);
+      }
+      return { ...current, [platform]: updated };
+    });
+  }
+
   async function save(platform: string) {
     setSaving(true);
     try {
@@ -240,7 +261,7 @@ export function XeroAccountMapping() {
         </div>
 
         <Tabs value={activePlatform} onValueChange={(v) => setActivePlatform(v ?? "shopify_dtc")}>
-          <TabsList className="grid grid-cols-3 max-w-lg">
+          <TabsList className="flex flex-wrap h-auto justify-start">
             {PLATFORMS.map((p) => (
               <TabsTrigger key={p} value={p}>{PLATFORM_LABELS[p]}</TabsTrigger>
             ))}
@@ -259,8 +280,18 @@ export function XeroAccountMapping() {
                   {(mappings[platform] || []).map((m) => (
                     <TableRow key={m.category}>
                       <TableCell>
-                        <div className="font-medium">{CATEGORY_LABELS[m.category] || m.category}</div>
-                        <div className="text-xs text-muted-foreground">{CATEGORY_HINTS[m.category]}</div>
+                        <div className="font-medium flex items-center gap-2">
+                          {m.label}
+                          <Badge variant="outline" className="text-[10px] uppercase font-normal">{m.side}</Badge>
+                        </div>
+                        <div className="text-xs text-muted-foreground">{m.hint}</div>
+                        {m.defaultAccountCode && !m.xeroAccountCode && (
+                          <div className="text-[11px] text-muted-foreground mt-1">
+                            Suggested:{" "}
+                            <span className="font-mono">{m.defaultAccountCode}</span>{" "}
+                            <span>{m.defaultAccountName}</span>
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell>
                         <AccountCombobox
@@ -273,7 +304,11 @@ export function XeroAccountMapping() {
                   ))}
                 </TableBody>
               </Table>
-              <div className="mt-3 flex justify-end">
+              <div className="mt-3 flex justify-between items-center">
+                <Button variant="outline" onClick={() => applySuggestedDefaults(platform)} disabled={saving}>
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Apply suggested defaults
+                </Button>
                 <Button onClick={() => save(platform)} disabled={saving}>
                   <Save className="h-4 w-4 mr-2" />
                   Save {PLATFORM_LABELS[platform]} mappings
