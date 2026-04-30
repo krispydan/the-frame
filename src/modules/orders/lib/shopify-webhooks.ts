@@ -208,7 +208,7 @@ function createInventoryMovements(fulfillment: ShopifyFulfillment, orderId: stri
 
 // ── Webhook Handlers ──
 
-async function handleOrderCreate(order: ShopifyOrder, shopDomain?: string) {
+export async function handleOrderCreate(order: ShopifyOrder, shopDomain?: string) {
   const existing = db.select().from(orders).where(eq(orders.externalId, String(order.id))).get();
   if (existing) return; // idempotent
 
@@ -253,7 +253,7 @@ async function handleOrderCreate(order: ShopifyOrder, shopDomain?: string) {
   });
 }
 
-async function handleOrderUpdated(order: ShopifyOrder, shopDomain?: string) {
+export async function handleOrderUpdated(order: ShopifyOrder, shopDomain?: string) {
   const existing = db.select().from(orders).where(eq(orders.externalId, String(order.id))).get();
   if (!existing) {
     await handleOrderCreate(order, shopDomain);
@@ -333,8 +333,8 @@ webhookRegistry.register("shopify", async (payload) => {
   // Shopify sends the originating store domain in the webhook headers
   const shopDomain = payload.headers["x-shopify-shop-domain"] || "";
 
-  // Verify HMAC if secret is configured
-  const secret = process.env.SHOPIFY_WEBHOOK_SECRET;
+  // Verify HMAC against the app's API secret (public-app shared secret).
+  const secret = process.env.SHOPIFY_API_SECRET || process.env.SHOPIFY_WEBHOOK_SECRET;
   if (secret) {
     const signature = payload.headers["x-shopify-hmac-sha256"];
     if (!signature || !verifyShopifyHmac(payload.body, signature, secret)) {
