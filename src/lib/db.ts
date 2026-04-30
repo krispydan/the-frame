@@ -325,6 +325,25 @@ try {
     return_to TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   )`);
+
+  // Webhook event log — every incoming Shopify webhook lands here so we can
+  // observe what's firing in production and confirm the subscriptions work.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS shopify_webhook_events (
+    id TEXT PRIMARY KEY NOT NULL,
+    shop_domain TEXT,
+    topic TEXT,
+    webhook_id TEXT,
+    triggered_at TEXT,
+    received_at TEXT DEFAULT (datetime('now')),
+    hmac_valid INTEGER,
+    handler_ok INTEGER,
+    handler_message TEXT,
+    payload_size INTEGER,
+    payload_preview TEXT
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shopify_webhook_events_received ON shopify_webhook_events(received_at DESC)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shopify_webhook_events_shop ON shopify_webhook_events(shop_domain)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shopify_webhook_events_topic ON shopify_webhook_events(topic)`);
 } catch (e) { console.error("[db] Shopify shops table error:", e); }
 
 try {
