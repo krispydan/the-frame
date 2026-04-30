@@ -4,7 +4,8 @@ import { db } from "@/lib/db";
 import { orders, orderItems, returns } from "@/modules/orders/schema";
 import { companies, contacts } from "@/modules/sales/schema";
 import { activityFeed } from "@/modules/core/schema";
-import { eq, desc } from "drizzle-orm";
+import { shopifyShops } from "@/modules/integrations/schema/shopify";
+import { eq, desc, and } from "drizzle-orm";
 import { updateOrderStatus } from "@/modules/orders/lib/fulfillment";
 
 // GET /api/v1/orders/:id — order detail
@@ -31,6 +32,25 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     .orderBy(desc(activityFeed.createdAt))
     .all();
 
+  // Build a deep link to the upstream order in its source system.
+  // For Shopify channels we resolve the connected shop's domain so the link
+  // points at the correct retail or wholesale admin.
+  let externalUrl: string | null = null;
+  if (order.externalId) {
+    if (order.channel === "shopify_dtc" || order.channel === "shopify_wholesale") {
+      const channel = order.channel === "shopify_wholesale" ? "wholesale" : "retail";
+      const [shop] = await db
+        .select()
+        .from(shopifyShops)
+        .where(and(eq(shopifyShops.channel, channel), eq(shopifyShops.isActive, true)));
+      if (shop) {
+        externalUrl = `https://${shop.shopDomain}/admin/orders/${order.externalId}`;
+      }
+    } else if (order.channel === "faire") {
+      externalUrl = `https://www.faire.com/brand-portal/orders/${order.externalId}`;
+    }
+  }
+
   return NextResponse.json({
     ...order,
     company,
@@ -38,6 +58,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     items,
     returns: orderReturns,
     timeline,
+    externalUrl,
   });
 }
 
