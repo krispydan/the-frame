@@ -136,22 +136,36 @@ function calculatePnlForRange(startDate: string, endDate: string): {
   channels: ChannelPnl[];
   expensesByCategory: Array<{ category: string; amount: number; budget: number | null }>;
 } {
-  // Revenue + COGS by channel from orders.
-  //
-  // COGS lookup order per line item:
-  //   1. catalog_skus.cost_price         (manually entered, matches order detail page)
-  //   2. AVG(inventory_po_line_items.unit_cost) for the SKU  (real PO data)
-  //
-  // No fallback to wholesale_price (that's the SELL price, not the cost) and
-  // no hardcoded $7.00 placeholder. Items without cost data on either side
-  // contribute NULL and are EXCLUDED from the COGS sum, so margin is honest
-  // about what we don't know. The `coveredItems` / `totalItems` counts are
-  // returned alongside so the UI can flag partial COGS coverage.
-  const channelData = sqlite.prepare(`
+  // ── Revenue per channel ──
+  // No join. Joining order_items multiplies SUM(o.total) by the number of
+  // line items per order (Cartesian product) — an order with 45 items had
+  // its total counted 45 times, inflating revenue ~18x in production.
+  // One row per order, then sum.
+  const revenueData = sqlite.prepare(`
     SELECT
       o.channel,
-      COUNT(DISTINCT o.id) as order_count,
-      COALESCE(SUM(o.total), 0) as revenue,
+      COUNT(*) as order_count,
+      COALESCE(SUM(o.total), 0) as revenue
+    FROM orders o
+    WHERE o.placed_at >= ? AND o.placed_at <= ?
+      AND o.status NOT IN ('cancelled', 'returned')
+    GROUP BY o.channel
+  `).all(startDate, endDate + "T23:59:59") as Array<{
+    channel: string;
+    order_count: number;
+    revenue: number;
+  }>;
+
+  // ── COGS per channel ──
+  // Separate query that joins order_items. COGS lookup order per item:
+  //   1. catalog_skus.cost_price           (manually entered, matches order detail)
+  //   2. AVG(inventory_po_line_items.unit_cost) for the SKU
+  //   3. NULL — line is excluded from the COGS sum so margin doesn't lie.
+  //
+  // Returns coverage stats so the UI can flag partial COGS data.
+  const cogsData = sqlite.prepare(`
+    SELECT
+      o.channel,
       COALESCE(SUM(
         oi.quantity * COALESCE(
           cs.cost_price,
@@ -167,19 +181,31 @@ function calculatePnlForRange(startDate: string, endDate: string): {
       ), 0) as cogs_covered_units,
       COALESCE(SUM(oi.quantity), 0) as total_units
     FROM orders o
-    LEFT JOIN order_items oi ON oi.order_id = o.id
+    JOIN order_items oi ON oi.order_id = o.id
     LEFT JOIN catalog_skus cs ON cs.id = oi.sku_id
     WHERE o.placed_at >= ? AND o.placed_at <= ?
       AND o.status NOT IN ('cancelled', 'returned')
     GROUP BY o.channel
   `).all(startDate, endDate + "T23:59:59") as Array<{
     channel: string;
-    order_count: number;
-    revenue: number;
     cogs: number;
     cogs_covered_units: number;
     total_units: number;
   }>;
+
+  // Merge revenue + cogs per channel
+  const cogsByChannel = new Map(cogsData.map((r) => [r.channel, r]));
+  const channelData = revenueData.map((r) => {
+    const c = cogsByChannel.get(r.channel);
+    return {
+      channel: r.channel,
+      order_count: r.order_count,
+      revenue: r.revenue,
+      cogs: c?.cogs ?? 0,
+      cogs_covered_units: c?.cogs_covered_units ?? 0,
+      total_units: c?.total_units ?? 0,
+    };
+  });
 
   // Fees from settlements
   const feeData = sqlite.prepare(`
