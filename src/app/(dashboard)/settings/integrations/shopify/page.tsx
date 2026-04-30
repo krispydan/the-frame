@@ -133,11 +133,6 @@ function ShopifyIntegrationsPageInner() {
             </DialogHeader>
             <div className="space-y-3">
               <div>
-                <Label>Store domain</Label>
-                <Input value={newShopDomain} onChange={(e) => setNewShopDomain(e.target.value)} placeholder="getjaxy.myshopify.com" />
-                <p className="text-xs text-muted-foreground mt-1">Or just the slug (e.g. <code>getjaxy</code>) — we'll append <code>.myshopify.com</code>.</p>
-              </div>
-              <div>
                 <Label>Channel</Label>
                 <Select value={newChannel} onValueChange={(v) => setNewChannel(v ?? "retail")}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -147,6 +142,15 @@ function ShopifyIntegrationsPageInner() {
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground mt-1">Determines which catalog/orders/sync operations target this store.</p>
+              </div>
+              <div>
+                <Label>Store domain</Label>
+                <Input
+                  value={newShopDomain}
+                  onChange={(e) => setNewShopDomain(e.target.value)}
+                  placeholder={newChannel === "wholesale" ? "jaxy-wholesale.myshopify.com" : "getjaxy.myshopify.com"}
+                />
+                <p className="text-xs text-muted-foreground mt-1">Or just the slug (e.g. <code>getjaxy</code>) — we'll append <code>.myshopify.com</code>.</p>
               </div>
             </div>
             <DialogFooter>
