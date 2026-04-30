@@ -77,8 +77,8 @@ export default function IntegrationsIndexPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Link href="/settings/integrations/shopify" className="block group">
-          <Card className="transition-shadow group-hover:shadow-md">
+        <Link href="/settings/integrations/shopify" className="block group cursor-pointer">
+          <Card className="transition-all group-hover:shadow-md group-hover:border-primary/40">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center justify-between text-base">
                 <span className="flex items-center gap-2">
@@ -100,8 +100,8 @@ export default function IntegrationsIndexPage() {
           </Card>
         </Link>
 
-        <Link href="/settings/integrations/xero" className="block group">
-          <Card className="transition-shadow group-hover:shadow-md">
+        <Link href="/settings/integrations/xero" className="block group cursor-pointer">
+          <Card className="transition-all group-hover:shadow-md group-hover:border-primary/40">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center justify-between text-base">
                 <span className="flex items-center gap-2">
