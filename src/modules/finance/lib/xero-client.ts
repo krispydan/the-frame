@@ -355,30 +355,38 @@ export async function getChartOfAccounts(): Promise<{
   accounts?: Array<{ code: string; name: string; type: string; status: string }>;
   error?: string;
 }> {
-  const auth = await getAccessToken();
-  if (!auth) return { success: false, error: "Not authenticated with Xero" };
+  try {
+    const auth = await getAccessToken();
+    if (!auth) return { success: false, error: "Not authenticated with Xero" };
 
-  const res = await fetch("https://api.xero.com/api.xro/2.0/Accounts", {
-    headers: {
-      Authorization: `Bearer ${auth.token}`,
-      "xero-tenant-id": auth.tenantId,
-    },
-  });
+    const res = await fetch("https://api.xero.com/api.xro/2.0/Accounts", {
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+        "Xero-tenant-id": auth.tenantId,
+        // Xero defaults to XML — explicitly ask for JSON.
+        Accept: "application/json",
+      },
+    });
 
-  if (!res.ok) {
-    const err = await res.text();
-    return { success: false, error: `Xero API error: ${res.status} ${err}` };
+    if (!res.ok) {
+      const err = await res.text();
+      return { success: false, error: `Xero API ${res.status}: ${err.slice(0, 300)}` };
+    }
+
+    const result = await res.json();
+    const accounts = (result?.Accounts || []).map((a: Record<string, string>) => ({
+      code: a.Code,
+      name: a.Name,
+      type: a.Type,
+      status: a.Status,
+    }));
+
+    return { success: true, accounts };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    console.error("[Xero] getChartOfAccounts error:", e);
+    return { success: false, error: `Chart of accounts fetch failed: ${msg}` };
   }
-
-  const result = await res.json();
-  const accounts = (result?.Accounts || []).map((a: Record<string, string>) => ({
-    code: a.Code,
-    name: a.Name,
-    type: a.Type,
-    status: a.Status,
-  }));
-
-  return { success: true, accounts };
 }
 
 /**
