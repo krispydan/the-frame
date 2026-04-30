@@ -106,7 +106,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   // ShipHero dashboard link
   let shipheroUrl: string | null = null;
-  const shipheroOrderId = (order as Record<string, unknown>).shiphero_order_id as string | null;
+  const shipheroOrderId = order.shipheroOrderId;
   if (shipheroOrderId) {
     // ShipHero base64 ID decodes to "Order:12345" — extract the numeric ID
     try {

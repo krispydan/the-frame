@@ -27,6 +27,9 @@ export const orders = sqliteTable("orders", {
   currency: text("currency").notNull().default("USD"),
   notes: text("notes"),
   externalId: text("external_id"), // Shopify/Faire order ID
+  shipheroOrderId: text("shiphero_order_id"),
+  shipheroOrderNumber: text("shiphero_order_number"),
+  shipheroFulfillmentStatus: text("shiphero_fulfillment_status"),
   trackingNumber: text("tracking_number"),
   trackingCarrier: text("tracking_carrier"),
   placedAt: text("placed_at"),
