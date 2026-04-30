@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { ShopifyStatusWidget } from "@/modules/integrations/components/shopify-status-widget";
 
 
 interface FocusData {
@@ -209,6 +210,11 @@ export default function DashboardPage() {
             href="/notifications"
           />
         )}
+      </div>
+
+      {/* Integration status */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+        <ShopifyStatusWidget />
       </div>
 
       {/* Revenue by Channel */}
