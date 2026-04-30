@@ -30,7 +30,7 @@ export async function GET(_request: NextRequest) {
     secure: true,
     sameSite: "lax",
     maxAge: 600,  // 10 minutes
-    path: "/api/auth/xero",
+    path: "/",  // root path so it survives the Xero -> /api/auth/xero/callback hop reliably
   });
 
   return response;
