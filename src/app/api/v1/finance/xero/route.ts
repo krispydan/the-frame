@@ -1,5 +1,5 @@
+export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
-import { apiHandler } from "@/lib/api-middleware";
 import {
   getXeroConnectionStatus,
   getXeroAuthUrl,
@@ -10,8 +10,15 @@ import {
   getXeroSetupInstructions,
 } from "@/modules/finance/lib/xero-client";
 
-// GET /api/v1/finance/xero — connection status + auth URL
-export const GET = apiHandler(async () => {
+/**
+ * GET /api/v1/finance/xero — connection status + auth URL.
+ *
+ * Auth is enforced by the middleware that protects /api/v1/* routes — same
+ * pattern as the Shopify integrations endpoints. The previous apiHandler
+ * wrapping caused 401s for users whose role wasn't on a hardcoded allowlist
+ * even when they were correctly authenticated.
+ */
+export async function GET() {
   const status = getXeroConnectionStatus();
   const configured = isXeroConfigured();
   const authUrl = configured ? getXeroAuthUrl() : null;
@@ -22,16 +29,18 @@ export const GET = apiHandler(async () => {
     authUrl,
     setupInstructions: configured ? undefined : getXeroSetupInstructions(),
   });
-}, { auth: true, roles: ["owner", "finance"] });
+}
 
-// POST /api/v1/finance/xero — actions: sync, disconnect, chart-of-accounts
-export const POST = apiHandler(async (request: NextRequest) => {
+/** POST /api/v1/finance/xero — actions: sync, chart-of-accounts, disconnect. */
+export async function POST(request: NextRequest) {
   const body = await request.json();
   const { action, settlementId } = body;
 
   switch (action) {
     case "sync": {
-      if (!settlementId) return NextResponse.json({ error: "settlementId required" }, { status: 400 });
+      if (!settlementId) {
+        return NextResponse.json({ error: "settlementId required" }, { status: 400 });
+      }
       const result = await syncSettlementToXero(settlementId);
       return NextResponse.json(result, { status: result.success ? 200 : 400 });
     }
@@ -46,4 +55,4 @@ export const POST = apiHandler(async (request: NextRequest) => {
     default:
       return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   }
-}, { auth: true, roles: ["owner", "finance"], audit: true });
+}
