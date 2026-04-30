@@ -8,9 +8,16 @@ import {
 import { handleOrderCreate, handleOrderUpdated } from "@/modules/orders/lib/shopify-webhooks";
 import { getShopifyClientByChannel } from "@/modules/integrations/lib/shopify/admin-api";
 
-// POST /api/v1/orders/shopify-sync — manual full sync of Shopify orders.
+// POST /api/v1/orders/shopify-sync — manual sync of recent Shopify orders.
 // Calls the order handlers directly (not through the webhook registry) so we
 // don't trip HMAC verification on internal sync calls.
+//
+// Default window: orders created in the past 14 days. Override by passing
+// { days: 30 } in the request body, or { createdAtMin: "2026-01-01T00:00:00Z" }
+// for an explicit cutoff. Webhooks handle real-time updates for older orders
+// that change status (fulfilled, refunded, etc.).
+export const DEFAULT_SYNC_WINDOW_DAYS = 14;
+
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const stores: ShopifyStore[] = body.store
@@ -18,6 +25,13 @@ export async function POST(req: NextRequest) {
     : (["dtc", "wholesale"] as ShopifyStore[]);
 
   const STORE_TO_CHANNEL: Record<ShopifyStore, string> = { dtc: "retail", wholesale: "wholesale" };
+
+  // Compute "created at or after" cutoff
+  const days = typeof body.days === "number" && body.days > 0 ? body.days : DEFAULT_SYNC_WINDOW_DAYS;
+  const createdAtMin: string =
+    typeof body.createdAtMin === "string" && body.createdAtMin
+      ? body.createdAtMin
+      : new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
   let totalSynced = 0;
   let totalErrors = 0;
@@ -45,9 +59,11 @@ export async function POST(req: NextRequest) {
     let errors = 0;
 
     try {
-      const orders = (await fetchShopifyOrders(store, { status: "any", limit: 250 })) as Array<
-        Parameters<typeof handleOrderCreate>[0]
-      >;
+      const orders = (await fetchShopifyOrders(store, {
+        status: "any",
+        limit: 250,
+        createdAtMin,
+      })) as Array<Parameters<typeof handleOrderCreate>[0]>;
 
       for (const order of orders) {
         try {

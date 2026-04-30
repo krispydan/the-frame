@@ -347,12 +347,22 @@ export async function listWebhooks(store: ShopifyStore) {
 
 export async function fetchShopifyOrders(
   store: ShopifyStore,
-  params: { status?: string; since_id?: string; limit?: number } = {},
+  params: {
+    status?: string;
+    since_id?: string;
+    limit?: number;
+    /** ISO 8601 timestamp; only return orders created at or after this. */
+    createdAtMin?: string;
+    /** ISO 8601 timestamp; only return orders updated at or after this. */
+    updatedAtMin?: string;
+  } = {},
 ) {
   const qs = new URLSearchParams();
   qs.set("limit", String(params.limit || 250));
   if (params.status) qs.set("status", params.status);
   if (params.since_id) qs.set("since_id", params.since_id);
+  if (params.createdAtMin) qs.set("created_at_min", params.createdAtMin);
+  if (params.updatedAtMin) qs.set("updated_at_min", params.updatedAtMin);
 
   const data = (await shopifyAdminRequest(
     store,
