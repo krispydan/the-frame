@@ -107,9 +107,84 @@ export type XeroJournalLogEntry = typeof xeroJournalLog.$inferSelect;
 export type XeroPayoutSync = typeof xeroPayoutSyncs.$inferSelect;
 
 /**
- * Default category set the UI seeds when a platform is first configured.
- * Each platform gets its own row per category so the GL account can differ
- * by source (e.g. retail goes to 4000 Sales, wholesale to 4100 Wholesale).
+ * Per-platform category catalog. Drives the mapping UI grid and the
+ * journal-line builder in Phase 2. Account codes/names below are the
+ * suggested defaults from Jaxy's Channel Payout Mapping Guide
+ * (April 2026) — used as placeholders the user can accept or override.
+ */
+export type CategorySuggestion = {
+  category: string;
+  label: string;
+  hint: string;
+  /** Suggested Xero account code from the mapping guide. */
+  defaultAccountCode?: string;
+  /** Suggested Xero account name (cached for display). */
+  defaultAccountName?: string;
+  /** Whether this line typically posts as a credit or debit. */
+  side: "credit" | "debit";
+};
+
+export const PLATFORM_CATEGORY_SUGGESTIONS: Record<string, CategorySuggestion[]> = {
+  shopify_dtc: [
+    { category: "sales",          label: "Sales (gross)",           hint: "Order total before fees", defaultAccountCode: "4000", defaultAccountName: "Sales - Shopify Retail (DTC)", side: "credit" },
+    { category: "shipping",       label: "Shipping income",          hint: "Shipping charged to customer", defaultAccountCode: "4060", defaultAccountName: "Shipping Income", side: "credit" },
+    { category: "tax",            label: "Sales tax collected",      hint: "Sales tax liability", defaultAccountCode: "2230", defaultAccountName: "Sales Tax", side: "credit" },
+    { category: "refunds",        label: "Refunds & returns",        hint: "Refunds issued to customers", defaultAccountCode: "4300", defaultAccountName: "Sales Returns & Allowances", side: "debit" },
+    { category: "discounts",      label: "Discounts & promotions",   hint: "Discount totals", defaultAccountCode: "4310", defaultAccountName: "Sales Discounts & Promotions", side: "debit" },
+    { category: "fees",           label: "Merchant fees",            hint: "Shopify Payments processing fee", defaultAccountCode: "5400", defaultAccountName: "Merchant Fees - Shopify Payments", side: "debit" },
+    { category: "clearing",       label: "Clearing account",         hint: "Net payout debits this account; transfer to BofA on bank deposit", defaultAccountCode: "1010", defaultAccountName: "Shopify Payments Clearing", side: "debit" },
+  ],
+  shopify_afterpay: [
+    { category: "sales",          label: "Sales (gross)",           hint: "Same revenue account as Shopify DTC", defaultAccountCode: "4000", defaultAccountName: "Sales - Shopify Retail (DTC)", side: "credit" },
+    { category: "shipping",       label: "Shipping income",          hint: "Shipping charged to customer", defaultAccountCode: "4060", defaultAccountName: "Shipping Income", side: "credit" },
+    { category: "tax",            label: "Sales tax collected",      hint: "Sales tax liability", defaultAccountCode: "2230", defaultAccountName: "Sales Tax", side: "credit" },
+    { category: "refunds",        label: "Refunds & returns",        hint: "Refunds issued to customers", defaultAccountCode: "4300", defaultAccountName: "Sales Returns & Allowances", side: "debit" },
+    { category: "discounts",      label: "Discounts & promotions",   hint: "Discount totals", defaultAccountCode: "4310", defaultAccountName: "Sales Discounts & Promotions", side: "debit" },
+    { category: "fees",           label: "Afterpay fee",             hint: "BNPL processing fee, separate from Shopify Payments", defaultAccountCode: "5430", defaultAccountName: "Merchant Fees - Afterpay / BNPL", side: "debit" },
+    { category: "clearing",       label: "Afterpay clearing",        hint: "Afterpay settles separately from Shopify Payments", defaultAccountCode: "1050", defaultAccountName: "Afterpay Clearing", side: "debit" },
+  ],
+  shopify_wholesale: [
+    { category: "sales",          label: "Sales (gross)",           hint: "Order total — wholesale typically tax-exempt and non-returnable", defaultAccountCode: "4030", defaultAccountName: "Sales - Shopify Wholesale (B2B)", side: "credit" },
+    { category: "shipping",       label: "Shipping income",          hint: "Shipping charged to retailer", defaultAccountCode: "4060", defaultAccountName: "Shipping Income", side: "credit" },
+    { category: "fees",           label: "Merchant fees",            hint: "Shopify Payments processing fee", defaultAccountCode: "5400", defaultAccountName: "Merchant Fees - Shopify Payments", side: "debit" },
+    { category: "clearing",       label: "Wholesale clearing",       hint: "Net payout debits here; transfer to BofA on deposit", defaultAccountCode: "1015", defaultAccountName: "Shopify Wholesale Clearing", side: "debit" },
+  ],
+  faire: [
+    { category: "sales",          label: "Sales (gross)",           hint: 'CSV column "Order Total"', defaultAccountCode: "4040", defaultAccountName: "Sales - Faire Wholesale", side: "credit" },
+    { category: "discounts",      label: "Promotions",               hint: 'CSV column "Promotions"', defaultAccountCode: "4310", defaultAccountName: "Sales Discounts & Promotions", side: "debit" },
+    { category: "damaged_missing",label: "Damaged / missing claims", hint: 'CSV column "Damaged Or Missing"', defaultAccountCode: "5900", defaultAccountName: "Inventory Adjustments & Shrinkage", side: "debit" },
+    { category: "commission",     label: "Faire commission",         hint: 'CSV column "Total Commission" (% commission + new-customer fee)', defaultAccountCode: "5450", defaultAccountName: "Faire Fees - Commission", side: "debit" },
+    { category: "payment_processing", label: "Payment processing",   hint: 'CSV column "Payment Processing Fee"', defaultAccountCode: "5455", defaultAccountName: "Faire Fees - Payment Processing", side: "debit" },
+    { category: "shipping_labels",label: "Shipping labels",          hint: "Only when brand pays — see Insider shipping logic", defaultAccountCode: "5460", defaultAccountName: "Faire Fees - Shipping Labels", side: "debit" },
+    { category: "clearing",       label: "Faire clearing",           hint: 'CSV column "Payout Amount"', defaultAccountCode: "1020", defaultAccountName: "Faire Payments Clearing", side: "debit" },
+  ],
+  amazon: [
+    { category: "sales",          label: "Sales (gross)",           hint: "Settlement report gross sales", defaultAccountCode: "4010", defaultAccountName: "Sales - Amazon", side: "credit" },
+    { category: "tax",            label: "Sales tax collected",      hint: "Settlement report tax column", defaultAccountCode: "2230", defaultAccountName: "Sales Tax", side: "credit" },
+    { category: "refunds",        label: "Refunds & returns",        hint: "Settlement report refund rows", defaultAccountCode: "4300", defaultAccountName: "Sales Returns & Allowances", side: "debit" },
+    { category: "fees",           label: "Referral + FBA fees",      hint: "All Amazon-side fees combined", defaultAccountCode: "5410", defaultAccountName: "Merchant Fees - Amazon", side: "debit" },
+    { category: "outbound_shipping", label: "Outbound shipping (FBA)", hint: "FBA shipping & fulfillment fees", defaultAccountCode: "5300", defaultAccountName: "Outbound Shipping & Postage", side: "debit" },
+    { category: "clearing",       label: "Amazon clearing",          hint: "Settlement total", defaultAccountCode: "1030", defaultAccountName: "Amazon Clearing", side: "debit" },
+  ],
+  tiktok_shop: [
+    { category: "sales",          label: "Sales (gross)",           hint: "Settlement report gross sales", defaultAccountCode: "4020", defaultAccountName: "Sales - TikTok Shop", side: "credit" },
+    { category: "tax",            label: "Sales tax collected",      hint: "Settlement report tax column", defaultAccountCode: "2230", defaultAccountName: "Sales Tax", side: "credit" },
+    { category: "refunds",        label: "Refunds & returns",        hint: "Settlement report refund rows", defaultAccountCode: "4300", defaultAccountName: "Sales Returns & Allowances", side: "debit" },
+    { category: "fees",           label: "TikTok commission + fees", hint: "All TikTok-side fees combined", defaultAccountCode: "5420", defaultAccountName: "Merchant Fees - TikTok Shop", side: "debit" },
+    { category: "clearing",       label: "TikTok clearing",          hint: "Settlement total", defaultAccountCode: "1040", defaultAccountName: "TikTok Shop Clearing", side: "debit" },
+  ],
+};
+
+export const SUPPORTED_PAYOUT_PLATFORMS = Object.keys(PLATFORM_CATEGORY_SUGGESTIONS);
+
+/** Get the category suggestion list for a platform. Returns [] if unknown. */
+export function getCategoriesForPlatform(platform: string): CategorySuggestion[] {
+  return PLATFORM_CATEGORY_SUGGESTIONS[platform] ?? [];
+}
+
+/**
+ * Legacy export kept for any callers still using the flat list.
+ * New code should use PLATFORM_CATEGORY_SUGGESTIONS / getCategoriesForPlatform.
  */
 export const DEFAULT_PAYOUT_CATEGORIES = [
   "sales",
