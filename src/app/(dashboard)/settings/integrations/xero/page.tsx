@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { XeroAccountMapping } from "@/modules/integrations/components/xero-account-mapping";
 
 type XeroStatus = {
   configured: boolean;
@@ -151,11 +152,14 @@ function XeroIntegrationsPageInner() {
               </Button>
             </div>
 
-            <div className="text-xs text-muted-foreground pt-2 border-t">
-              Coming next: account mapping (Phase 1), per-payout journal sync (Phase 2). For now the connection is live and the Admin API is reachable.
-            </div>
           </CardContent>
         </Card>
+      )}
+
+      {status?.connected && (
+        <div className="mt-6">
+          <XeroAccountMapping />
+        </div>
       )}
     </div>
   );
