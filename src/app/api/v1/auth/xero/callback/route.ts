@@ -1,42 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { exchangeXeroCode } from "@/modules/finance/lib/xero-client";
-import { db } from "@/lib/db";
-import { settings } from "@/modules/core/schema";
 
+/**
+ * DEPRECATED: legacy Xero OAuth callback path.
+ *
+ * The active callback now lives at /api/auth/xero/callback to match the
+ * Shopify pattern and to use the absolute-URL redirect helper that survives
+ * Railway's reverse proxy.
+ *
+ * This route forwards the OAuth query params (code, state, error) to the
+ * new path so any Xero app config still pointing here keeps working
+ * during the cutover. Update your Xero app's Redirect URI to
+ * /api/auth/xero/callback at your earliest convenience.
+ */
 export async function GET(request: NextRequest) {
-  const code = request.nextUrl.searchParams.get("code");
-  const error = request.nextUrl.searchParams.get("error");
-
-  if (error) {
-    return NextResponse.redirect(new URL("/settings?xero=error&message=" + encodeURIComponent(error), request.url));
-  }
-
-  if (!code) {
-    return NextResponse.redirect(new URL("/settings?xero=error&message=no_code", request.url));
-  }
-
-  const result = await exchangeXeroCode(code);
-  if (!result.success) {
-    return NextResponse.redirect(new URL("/settings?xero=error&message=token_exchange_failed", request.url));
-  }
-
-  // Store tokens in settings
-  const tokenData = result.tokens!;
-  const entries = [
-    { key: "xero_access_token", value: tokenData.accessToken, type: "string" as const },
-    { key: "xero_refresh_token", value: tokenData.refreshToken, type: "string" as const },
-    { key: "xero_token_expires_at", value: String(tokenData.expiresAt), type: "string" as const },
-    { key: "xero_tenant_id", value: tokenData.tenantId || "", type: "string" as const },
-    { key: "xero_tenant_name", value: tokenData.tenantName || "", type: "string" as const },
-    { key: "xero_connected_at", value: new Date().toISOString(), type: "string" as const },
-  ];
-
-  for (const entry of entries) {
-    db.insert(settings)
-      .values({ key: entry.key, value: entry.value, type: entry.type, module: "finance" })
-      .onConflictDoUpdate({ target: settings.key, set: { value: entry.value, updatedAt: new Date().toISOString() } })
-      .run();
-  }
-
-  return NextResponse.redirect(new URL("/settings?xero=connected", request.url));
+  const url = new URL("/api/auth/xero/callback", request.url);
+  request.nextUrl.searchParams.forEach((value, key) => url.searchParams.set(key, value));
+  return NextResponse.redirect(url, { status: 308 });
 }
