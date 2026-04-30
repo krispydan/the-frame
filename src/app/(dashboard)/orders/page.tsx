@@ -142,8 +142,7 @@ function OrdersPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<OrderDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  // showCreateDialog removed — orders are created in Shopify/Faire only
-  const [syncingFaire, setSyncingFaire] = useState(false);
+  // showCreateDialog removed — orders are created in Shopify only (Faire orders sync via Faire's Shopify channel)
   const [syncingShopify, setSyncingShopify] = useState(false);
 
   // Filters
@@ -243,30 +242,6 @@ function OrdersPage() {
             <RefreshCw className={`h-4 w-4 ${syncingShopify ? "animate-spin" : ""}`} />
             {syncingShopify ? "Syncing..." : "Sync Shopify"}
           </button>
-          <button
-            onClick={async () => {
-              setSyncingFaire(true);
-              try {
-                const res = await fetch("/api/v1/orders/faire-sync", { method: "POST" });
-                const data = await res.json();
-                if (data.ok) {
-                  alert(`${data.message}`);
-                  fetchOrders();
-                } else {
-                  alert(`Faire sync error: ${data.error || "Unknown error"}`);
-                }
-              } catch (e) {
-                alert("Faire sync failed");
-              } finally {
-                setSyncingFaire(false);
-              }
-            }}
-            disabled={syncingFaire}
-            className="inline-flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium hover:bg-muted disabled:opacity-50"
-          >
-            <RefreshCw className={`h-4 w-4 ${syncingFaire ? "animate-spin" : ""}`} />
-            {syncingFaire ? "Syncing..." : "Sync Faire"}
-          </button>
         </div>
       </div>
 
@@ -334,7 +309,7 @@ function OrdersPage() {
               <tr><td colSpan={7} className="px-4 py-16 text-center">
                 <ShoppingCart className="h-10 w-10 mx-auto text-muted-foreground/50 mb-3" />
                 <p className="font-medium text-muted-foreground">No orders yet</p>
-                <p className="text-sm text-muted-foreground/70 mt-1">Sync from Shopify or Faire to pull orders into the-frame.</p>
+                <p className="text-sm text-muted-foreground/70 mt-1">Click "Sync Shopify" above to pull orders from your DTC and wholesale stores. Faire orders flow through Shopify automatically.</p>
               </td></tr>
             ) : (
               orders.map((o) => (
