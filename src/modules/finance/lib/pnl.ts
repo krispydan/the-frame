@@ -18,6 +18,12 @@ export interface ChannelPnl {
   grossMarginPct: number;
   fees: number;
   orderCount: number;
+  /** Units we have a cost on file for. */
+  cogsCoveredUnits: number;
+  /** Total units sold across the channel for the period. */
+  totalUnits: number;
+  /** True only when every unit had a cost on file. False = COGS is partial. */
+  hasFullCostData: boolean;
 }
 
 export interface PnlSummary {
@@ -130,23 +136,39 @@ function calculatePnlForRange(startDate: string, endDate: string): {
   channels: ChannelPnl[];
   expensesByCategory: Array<{ category: string; amount: number; budget: number | null }>;
 } {
-  // Revenue + COGS by channel from orders
-  // COGS: Use average unit cost from PO line items matched via SKU
+  // Revenue + COGS by channel from orders.
+  //
+  // COGS lookup order per line item:
+  //   1. catalog_skus.cost_price         (manually entered, matches order detail page)
+  //   2. AVG(inventory_po_line_items.unit_cost) for the SKU  (real PO data)
+  //
+  // No fallback to wholesale_price (that's the SELL price, not the cost) and
+  // no hardcoded $7.00 placeholder. Items without cost data on either side
+  // contribute NULL and are EXCLUDED from the COGS sum, so margin is honest
+  // about what we don't know. The `coveredItems` / `totalItems` counts are
+  // returned alongside so the UI can flag partial COGS coverage.
   const channelData = sqlite.prepare(`
-    SELECT 
+    SELECT
       o.channel,
       COUNT(DISTINCT o.id) as order_count,
       COALESCE(SUM(o.total), 0) as revenue,
       COALESCE(SUM(
         oi.quantity * COALESCE(
-          (SELECT AVG(pli.unit_cost) FROM inventory_po_line_items pli WHERE pli.sku_id = oi.sku_id AND pli.unit_cost > 0),
-          COALESCE(cs.wholesale_price, cp.wholesale_price, 7.00)
+          cs.cost_price,
+          (SELECT AVG(pli.unit_cost) FROM inventory_po_line_items pli WHERE pli.sku_id = oi.sku_id AND pli.unit_cost > 0)
         )
-      ), 0) as cogs
+      ), 0) as cogs,
+      COALESCE(SUM(
+        CASE
+          WHEN cs.cost_price IS NOT NULL THEN oi.quantity
+          WHEN (SELECT AVG(pli.unit_cost) FROM inventory_po_line_items pli WHERE pli.sku_id = oi.sku_id AND pli.unit_cost > 0) IS NOT NULL THEN oi.quantity
+          ELSE 0
+        END
+      ), 0) as cogs_covered_units,
+      COALESCE(SUM(oi.quantity), 0) as total_units
     FROM orders o
     LEFT JOIN order_items oi ON oi.order_id = o.id
     LEFT JOIN catalog_skus cs ON cs.id = oi.sku_id
-    LEFT JOIN catalog_products cp ON cp.id = cs.product_id
     WHERE o.placed_at >= ? AND o.placed_at <= ?
       AND o.status NOT IN ('cancelled', 'returned')
     GROUP BY o.channel
@@ -155,6 +177,8 @@ function calculatePnlForRange(startDate: string, endDate: string): {
     order_count: number;
     revenue: number;
     cogs: number;
+    cogs_covered_units: number;
+    total_units: number;
   }>;
 
   // Fees from settlements
@@ -180,6 +204,9 @@ function calculatePnlForRange(startDate: string, endDate: string): {
       grossMarginPct: c.revenue > 0 ? (grossMargin / c.revenue) * 100 : 0,
       fees,
       orderCount: c.order_count,
+      cogsCoveredUnits: c.cogs_covered_units,
+      totalUnits: c.total_units,
+      hasFullCostData: c.total_units > 0 && c.cogs_covered_units >= c.total_units,
     };
   });
 
