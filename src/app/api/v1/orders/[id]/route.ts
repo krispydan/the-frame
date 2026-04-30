@@ -48,7 +48,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   try {
     if (body.status) {
-      const updated = updateOrderStatus({
+      const updated = await updateOrderStatus({
         orderId: id,
         newStatus: body.status,
         trackingNumber: body.trackingNumber,

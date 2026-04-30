@@ -73,7 +73,7 @@ mcpRegistry.register(
   }),
   async (args) => {
     try {
-      const updated = updateOrderStatus({
+      const updated = await updateOrderStatus({
         orderId: args.orderId,
         newStatus: args.status,
         trackingNumber: args.trackingNumber,

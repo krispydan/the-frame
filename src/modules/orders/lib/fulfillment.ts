@@ -28,7 +28,7 @@ export interface StatusUpdateInput {
   source?: "ui" | "api" | "agent" | "system" | "webhook";
 }
 
-export function updateOrderStatus(input: StatusUpdateInput) {
+export async function updateOrderStatus(input: StatusUpdateInput) {
   const order = db.select().from(orders).where(eq(orders.id, input.orderId)).get();
   if (!order) throw new Error(`Order not found: ${input.orderId}`);
 
