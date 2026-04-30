@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Save, RefreshCw } from "lucide-react";
+import { Loader2, Save, RefreshCw, ChevronsUpDown, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { toast } from "sonner";
 
 type Account = { code: string; name: string; type: string; status: string };
@@ -47,6 +48,95 @@ const CATEGORY_HINTS: Record<string, string> = {
 };
 
 const PLATFORMS = ["shopify_dtc", "shopify_wholesale", "faire"];
+
+/**
+ * Searchable combobox for picking a Xero account by code or name.
+ * Replaces the plain Select since the chart of accounts can have 100+ rows
+ * and scrolling through them was painful.
+ */
+function AccountCombobox({
+  accounts,
+  value,
+  onChange,
+}: {
+  accounts: Account[];
+  value: string | null;
+  onChange: (code: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = value ? accounts.find((a) => a.code === value) : null;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <Button
+            variant="outline"
+            className="w-full justify-between font-normal min-w-[400px]"
+            type="button"
+          >
+            {selected ? (
+              <span className="flex items-center gap-2 truncate">
+                <span className="font-mono text-xs text-muted-foreground">{selected.code}</span>
+                <span className="truncate">{selected.name}</span>
+                <span className="text-xs text-muted-foreground">{selected.type}</span>
+              </span>
+            ) : (
+              <span className="text-muted-foreground">Select account...</span>
+            )}
+            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        }
+      />
+      <PopoverContent className="w-[500px] p-0" align="start">
+        <Command
+          filter={(itemValue, search) => {
+            // Search against the entire item label (code + name + type, joined)
+            return itemValue.toLowerCase().includes(search.toLowerCase()) ? 1 : 0;
+          }}
+        >
+          <CommandInput placeholder="Search by code, name, or type..." />
+          <CommandList>
+            <CommandEmpty>No accounts match.</CommandEmpty>
+            <CommandGroup>
+              {value && (
+                <CommandItem
+                  value="__clear__ Not mapped"
+                  onSelect={() => {
+                    onChange(null);
+                    setOpen(false);
+                  }}
+                  className="text-muted-foreground"
+                >
+                  <X className="mr-2 h-4 w-4" />
+                  Clear mapping
+                </CommandItem>
+              )}
+              {accounts.map((a) => {
+                const isSelected = a.code === value;
+                return (
+                  <CommandItem
+                    key={a.code}
+                    value={`${a.code} ${a.name} ${a.type}`}
+                    onSelect={() => {
+                      onChange(a.code);
+                      setOpen(false);
+                    }}
+                  >
+                    <Check className={`mr-2 h-4 w-4 ${isSelected ? "opacity-100" : "opacity-0"}`} />
+                    <span className="font-mono text-xs mr-2 w-12">{a.code}</span>
+                    <span className="flex-1 truncate">{a.name}</span>
+                    <span className="text-xs text-muted-foreground ml-2">{a.type}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export function XeroAccountMapping() {
   const [activePlatform, setActivePlatform] = useState<string>("shopify_dtc");
@@ -161,7 +251,7 @@ export function XeroAccountMapping() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Category</TableHead>
+                    <TableHead className="w-[40%]">Category</TableHead>
                     <TableHead>Xero account</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -173,24 +263,11 @@ export function XeroAccountMapping() {
                         <div className="text-xs text-muted-foreground">{CATEGORY_HINTS[m.category]}</div>
                       </TableCell>
                       <TableCell>
-                        <Select
-                          value={m.xeroAccountCode ?? "__none__"}
-                          onValueChange={(v) => updateLocal(platform, m.category, v === "__none__" ? null : (v ?? null))}
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Select account..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">— Not mapped —</SelectItem>
-                            {accounts?.map((a) => (
-                              <SelectItem key={a.code} value={a.code}>
-                                <span className="font-mono text-xs mr-2">{a.code}</span>
-                                {a.name}
-                                <span className="text-xs text-muted-foreground ml-2">{a.type}</span>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <AccountCombobox
+                          accounts={accounts || []}
+                          value={m.xeroAccountCode}
+                          onChange={(code) => updateLocal(platform, m.category, code)}
+                        />
                       </TableCell>
                     </TableRow>
                   ))}
