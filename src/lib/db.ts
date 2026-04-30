@@ -25,6 +25,18 @@ sqlite.pragma("temp_store = MEMORY");
 export const db = drizzle(sqlite);
 export { sqlite };
 
+// ── Skip migrations during `next build` ──
+// Next.js spawns ~30 parallel workers during the page-data-collection phase
+// of `next build`. Each worker re-imports this module and tries to run the
+// DDL below, which trips SQLITE_BUSY because better-sqlite3 only allows one
+// writer at a time. Migrations only need to execute when the running app
+// starts up, so skip them entirely during build.
+const IS_BUILD_PHASE =
+  process.env.NEXT_PHASE === "phase-production-build" ||
+  process.env.NEXT_PHASE === "phase-export";
+
+if (!IS_BUILD_PHASE) {
+
 // Ensure columns that ALTER TABLE can't add idempotently
 try {
   sqlite.exec("ALTER TABLE marketing_seo_keywords ADD COLUMN difficulty INTEGER");
@@ -443,3 +455,6 @@ try {
 } catch (err) {
   console.error("[db] Migration error:", err);
 }
+
+}  // end if (!IS_BUILD_PHASE)
+
