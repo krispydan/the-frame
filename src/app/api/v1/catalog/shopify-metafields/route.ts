@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
   if (store !== "dtc" && store !== "wholesale") {
     return NextResponse.json({ error: "store must be 'dtc' or 'wholesale'" }, { status: 400 });
   }
-  if (!hasShopifyCredentials(store)) {
+  if (!(await hasShopifyCredentials(store))) {
     return NextResponse.json(
       { error: `Shopify ${store} credentials not configured` },
       { status: 400 },

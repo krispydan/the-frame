@@ -295,6 +295,38 @@ try {
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_po_items_sku ON catalog_purchase_order_items(sku)`);
 } catch (e) { console.error("[db] PO items table error:", e); }
 
+// Shopify OAuth: shops table (multi-store, channel-driven)
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS shopify_shops (
+    id TEXT PRIMARY KEY NOT NULL,
+    shop_domain TEXT NOT NULL UNIQUE,
+    display_name TEXT,
+    channel TEXT NOT NULL,
+    access_token TEXT NOT NULL,
+    scope TEXT,
+    api_version TEXT DEFAULT '2025-07',
+    metadata TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    last_health_check_at TEXT,
+    last_health_status TEXT,
+    last_health_error TEXT,
+    installed_at TEXT DEFAULT (datetime('now')),
+    uninstalled_at TEXT,
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shopify_shops_channel ON shopify_shops(channel)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shopify_shops_active ON shopify_shops(is_active)`);
+
+  // OAuth nonces (anti-CSRF state). Short-lived rows; cleaned on use or by TTL.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS shopify_oauth_states (
+    state TEXT PRIMARY KEY NOT NULL,
+    shop_domain TEXT NOT NULL,
+    channel TEXT,
+    return_to TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+} catch (e) { console.error("[db] Shopify shops table error:", e); }
+
 try {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS operations_exports (
     id TEXT PRIMARY KEY NOT NULL,

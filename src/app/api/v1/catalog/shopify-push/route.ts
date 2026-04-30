@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
 
   // Validate credentials for requested stores
   for (const store of stores) {
-    if (!hasShopifyCredentials(store)) {
+    if (!(await hasShopifyCredentials(store))) {
       return NextResponse.json(
         { error: `Shopify ${store} credentials not configured` },
         { status: 400 },

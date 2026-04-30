@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
   const storeResults: Array<{ store: string; synced: number; errors: number }> = [];
 
   for (const store of stores) {
-    if (!hasShopifyCredentials(store)) {
+    if (!(await hasShopifyCredentials(store))) {
       storeResults.push({ store, synced: 0, errors: 0 });
       continue;
     }

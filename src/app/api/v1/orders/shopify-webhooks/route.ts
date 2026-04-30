@@ -11,7 +11,7 @@ import {
 export async function GET(req: NextRequest) {
   const store = (req.nextUrl.searchParams.get("store") || "dtc") as ShopifyStore;
 
-  if (!hasShopifyCredentials(store)) {
+  if (!(await hasShopifyCredentials(store))) {
     return NextResponse.json(
       { error: `Shopify ${store} credentials not configured` },
       { status: 400 },
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
     body.callbackUrl ||
     `${req.nextUrl.origin}/api/v1/webhooks/shopify`;
 
-  if (!hasShopifyCredentials(store)) {
+  if (!(await hasShopifyCredentials(store))) {
     return NextResponse.json(
       { error: `Shopify ${store} credentials not configured` },
       { status: 400 },

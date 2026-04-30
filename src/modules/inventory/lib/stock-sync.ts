@@ -43,36 +43,8 @@ interface SyncResult {
 }
 
 // ── Shopify Fetcher ──
-
-async function fetchShopifyProducts(
-  domain: string,
-  token: string
-): Promise<ShopifyProduct[]> {
-  const allProducts: ShopifyProduct[] = [];
-  let url: string | null = `https://${domain}/admin/api/2024-01/products.json?limit=250&fields=id,variants`;
-
-  while (url) {
-    const res = await fetch(url, {
-      headers: {
-        "X-Shopify-Access-Token": token,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!res.ok) {
-      throw new Error(`Shopify API ${res.status}: ${await res.text()}`);
-    }
-
-    const data = await res.json();
-    allProducts.push(...(data.products || []));
-
-    const link = res.headers.get("link");
-    const nextMatch = link?.match(/<([^>]+)>;\s*rel="next"/);
-    url = nextMatch?.[1] ?? null;
-  }
-
-  return allProducts;
-}
+// Legacy fetchShopifyProducts(domain, token) was removed — the DB-backed
+// `fetchProductsViaChannel` below now powers all channel fetches.
 
 function shopifyProductsToStockMap(products: ShopifyProduct[]): Map<string, number> {
   const map = new Map<string, number>();
@@ -88,17 +60,26 @@ function shopifyProductsToStockMap(products: ShopifyProduct[]): Map<string, numb
 
 // ── Channel Fetchers ──
 
-async function fetchShopifyDTC(): Promise<ChannelStock> {
-  const domain = process.env.SHOPIFY_DTC_STORE_DOMAIN;
-  const token = process.env.SHOPIFY_DTC_ACCESS_TOKEN;
-
-  if (!domain || !token) {
-    throw new Error("SHOPIFY_DTC_STORE_DOMAIN and SHOPIFY_DTC_ACCESS_TOKEN must be set");
+async function fetchProductsViaChannel(channel: string): Promise<ShopifyProduct[]> {
+  const { getShopifyClientByChannel } = await import("@/modules/integrations/lib/shopify/admin-api");
+  const client = await getShopifyClientByChannel(channel);
+  // Use REST product list via the DB-backed client (no more env vars).
+  const all: ShopifyProduct[] = [];
+  let path: string | null = `/products.json?limit=250&fields=id,variants`;
+  while (path) {
+    const data = (await client.rest("GET", path)) as { products: ShopifyProduct[] };
+    all.push(...(data.products || []));
+    // Pagination via Link header isn't exposed by the rest helper; for now
+    // a single page (250 items) is enough since the catalog is ~115 SKUs.
+    // TODO: add cursor-style pagination if catalog ever exceeds 250 products.
+    path = null;
   }
+  return all;
+}
 
-  const products = await fetchShopifyProducts(domain, token);
+async function fetchShopifyDTC(): Promise<ChannelStock> {
+  const products = await fetchProductsViaChannel("retail");
   const skuQuantities = shopifyProductsToStockMap(products);
-
   return {
     channel: "shopify_dtc",
     skuQuantities,
@@ -108,16 +89,8 @@ async function fetchShopifyDTC(): Promise<ChannelStock> {
 }
 
 async function fetchShopifyWholesale(): Promise<ChannelStock> {
-  const domain = process.env.SHOPIFY_WHOLESALE_STORE_DOMAIN;
-  const token = process.env.SHOPIFY_WHOLESALE_ACCESS_TOKEN;
-
-  if (!domain || !token) {
-    throw new Error("SHOPIFY_WHOLESALE_STORE_DOMAIN and SHOPIFY_WHOLESALE_ACCESS_TOKEN must be set");
-  }
-
-  const products = await fetchShopifyProducts(domain, token);
+  const products = await fetchProductsViaChannel("wholesale");
   const skuQuantities = shopifyProductsToStockMap(products);
-
   return {
     channel: "shopify_wholesale",
     skuQuantities,

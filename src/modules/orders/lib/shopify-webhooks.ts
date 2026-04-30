@@ -74,14 +74,19 @@ interface ShopifyOrder {
 
 // ── Channel Detection ──
 
-function detectChannel(order: ShopifyOrder, shopDomain?: string): "shopify_dtc" | "shopify_wholesale" {
-  // Primary: match by shop domain (most reliable — each store has its own domain)
-  const wholesaleDomain = process.env.SHOPIFY_WHOLESALE_STORE_DOMAIN || "";
-  const dtcDomain = process.env.SHOPIFY_DTC_STORE_DOMAIN || "";
+async function detectChannel(order: ShopifyOrder, shopDomain?: string): Promise<"shopify_dtc" | "shopify_wholesale"> {
+  // Primary: look up the channel for the shop domain in the connected stores DB.
   if (shopDomain) {
-    const domain = shopDomain.toLowerCase().replace(/^https?:\/\//, "");
-    if (wholesaleDomain && domain.includes(wholesaleDomain.toLowerCase())) return "shopify_wholesale";
-    if (dtcDomain && domain.includes(dtcDomain.toLowerCase())) return "shopify_dtc";
+    const cleaned = shopDomain.toLowerCase().replace(/^https?:\/\//, "").trim();
+    try {
+      const { listInstalledShops } = await import("@/modules/integrations/lib/shopify/admin-api");
+      const all = await listInstalledShops();
+      const match = all.find((s) => cleaned === s.shopDomain || cleaned.includes(s.shopDomain));
+      if (match?.channel === "wholesale") return "shopify_wholesale";
+      if (match?.channel === "retail") return "shopify_dtc";
+    } catch {
+      // DB unavailable — fall through to tag-based detection.
+    }
   }
   // Fallback: tags and source name
   const tags = (order.tags || "").toLowerCase();
@@ -113,7 +118,7 @@ async function findOrCreateCompany(order: ShopifyOrder, shopDomain?: string): Pr
   }
 
   // For wholesale orders, auto-create a company record
-  const channel = detectChannel(order, shopDomain);
+  const channel = await detectChannel(order, shopDomain);
   if (channel === "shopify_wholesale" && (companyName || email)) {
     const newCompany = db.insert(companies).values({
       name: companyName || email || "Unknown",
@@ -208,7 +213,7 @@ async function handleOrderCreate(order: ShopifyOrder, shopDomain?: string) {
   if (existing) return; // idempotent
 
   const companyId = await findOrCreateCompany(order, shopDomain);
-  const channel = detectChannel(order, shopDomain);
+  const channel = await detectChannel(order, shopDomain);
   const shipping = order.total_shipping_price_set?.shop_money?.amount
     ? parseFloat(order.total_shipping_price_set.shop_money.amount) : 0;
 

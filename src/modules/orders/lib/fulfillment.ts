@@ -80,7 +80,7 @@ export function updateOrderStatus(input: StatusUpdateInput) {
     // Push fulfillment back to Shopify if this order came from Shopify
     if (order.externalId && (order.channel === "shopify_dtc" || order.channel === "shopify_wholesale") && input.source !== "webhook") {
       const store: ShopifyStore = order.channel === "shopify_wholesale" ? "wholesale" : "dtc";
-      if (hasShopifyCredentials(store)) {
+      if (await hasShopifyCredentials(store)) {
         createShopifyFulfillment(store, order.externalId, input.trackingNumber, input.trackingCarrier)
           .catch((err) => console.error("[Fulfillment] Shopify push error:", err));
       }

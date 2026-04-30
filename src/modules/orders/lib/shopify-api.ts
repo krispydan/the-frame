@@ -1,34 +1,39 @@
 /**
  * Shopify Admin API helpers for DTC and Wholesale stores.
- * Credentials come from env vars (.env.local).
+ *
+ * Credentials are looked up from the shopify_shops table (DB-backed OAuth).
+ * The legacy "dtc"/"wholesale" type maps to the multi-shop channel strings
+ * "retail"/"wholesale" so callers don't need to change.
  */
+
+import {
+  getShopifyClientByChannel,
+  ShopifyAuthError,
+  type ShopifyClient,
+} from "@/modules/integrations/lib/shopify/admin-api";
+import { listInstalledShops } from "@/modules/integrations/lib/shopify/admin-api";
 
 export type ShopifyStore = "dtc" | "wholesale";
 
-interface ShopifyConfig {
-  domain: string;
-  accessToken: string;
+const STORE_TO_CHANNEL: Record<ShopifyStore, string> = {
+  dtc: "retail",
+  wholesale: "wholesale",
+};
+
+/**
+ * Returns true if a connected Shopify shop exists for the given logical
+ * store. Async because it hits the DB.
+ */
+export async function hasShopifyCredentials(store: ShopifyStore): Promise<boolean> {
+  const channel = STORE_TO_CHANNEL[store];
+  const all = await listInstalledShops();
+  return all.some((s) => s.channel === channel && s.isActive);
 }
 
-export function getShopifyConfig(store: ShopifyStore): ShopifyConfig {
-  if (store === "wholesale") {
-    return {
-      domain: process.env.SHOPIFY_WHOLESALE_STORE_DOMAIN || "",
-      accessToken: process.env.SHOPIFY_WHOLESALE_ACCESS_TOKEN || "",
-    };
-  }
-  return {
-    domain: process.env.SHOPIFY_DTC_STORE_DOMAIN || "",
-    accessToken: process.env.SHOPIFY_DTC_ACCESS_TOKEN || "",
-  };
+async function getClientForStore(store: ShopifyStore): Promise<ShopifyClient> {
+  const channel = STORE_TO_CHANNEL[store];
+  return getShopifyClientByChannel(channel);
 }
-
-export function hasShopifyCredentials(store: ShopifyStore): boolean {
-  const cfg = getShopifyConfig(store);
-  return !!(cfg.domain && cfg.accessToken);
-}
-
-const API_VERSION = "2024-01";
 
 export async function shopifyAdminRequest(
   store: ShopifyStore,
@@ -36,28 +41,16 @@ export async function shopifyAdminRequest(
   path: string,
   body?: unknown,
 ): Promise<unknown> {
-  const cfg = getShopifyConfig(store);
-  if (!cfg.domain || !cfg.accessToken) {
-    throw new Error(`Shopify ${store} credentials not configured`);
+  let client: ShopifyClient;
+  try {
+    client = await getClientForStore(store);
+  } catch (e) {
+    if (e instanceof ShopifyAuthError) {
+      throw new Error(`Shopify ${store} credentials not configured: ${e.message}`);
+    }
+    throw e;
   }
-
-  const url = `https://${cfg.domain}/admin/api/${API_VERSION}${path}`;
-  const res = await fetch(url, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Shopify-Access-Token": cfg.accessToken,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Shopify API ${res.status}: ${text}`);
-  }
-
-  if (res.status === 204) return null;
-  return res.json();
+  return client.rest(method, path, body);
 }
 
 // ── Product Create / Update ──
@@ -135,28 +128,8 @@ export async function shopifyGraphqlRequest<T = unknown>(
   query: string,
   variables?: Record<string, unknown>,
 ): Promise<T> {
-  const cfg = getShopifyConfig(store);
-  if (!cfg.domain || !cfg.accessToken) {
-    throw new Error(`Shopify ${store} credentials not configured`);
-  }
-  const url = `https://${cfg.domain}/admin/api/${API_VERSION}/graphql.json`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Shopify-Access-Token": cfg.accessToken,
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Shopify GraphQL ${res.status}: ${text}`);
-  }
-  const json = (await res.json()) as { data?: T; errors?: unknown };
-  if (json.errors) {
-    throw new Error(`Shopify GraphQL errors: ${JSON.stringify(json.errors)}`);
-  }
-  return json.data as T;
+  const client = await getClientForStore(store);
+  return client.graphql<T>(query, variables);
 }
 
 export interface ShopifyMetafieldDefinition {
