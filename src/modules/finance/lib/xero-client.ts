@@ -83,7 +83,12 @@ export function getXeroAuthUrl(): string | null {
   const config = getConfig();
   if (!config) return null;
 
-  const scopes = "openid profile email accounting.transactions accounting.contacts accounting.settings offline_access";
+  // New granular scopes (apps created after 2 Mar 2026). For older apps the
+  // broad "accounting.transactions / .contacts / .settings" still work.
+  // Override via XERO_SCOPES env var if Xero adds or renames any.
+  const scopes = process.env.XERO_SCOPES ||
+    "openid profile email offline_access " +
+    "accounting.transactions accounting.contacts accounting.settings.read accounting.journals.read";
   const state = crypto.randomUUID();
 
   return `https://login.xero.com/identity/connect/authorize?response_type=code&client_id=${config.clientId}&redirect_uri=${encodeURIComponent(config.redirectUri)}&scope=${encodeURIComponent(scopes)}&state=${state}`;
