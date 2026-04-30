@@ -1,24 +1,32 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { xeroAccountMappings, DEFAULT_PAYOUT_CATEGORIES } from "@/modules/integrations/schema/xero";
+import { xeroAccountMappings, getCategoriesForPlatform } from "@/modules/integrations/schema/xero";
 import { eq, and } from "drizzle-orm";
 
 /**
  * GET /api/v1/integrations/xero/mappings?platform=shopify_dtc
  *
- * Returns the saved account mappings for the requested source platform,
- * with an entry per default category — empty (xeroAccountCode = null) for
- * any category the user hasn't mapped yet, so the UI can render a complete
- * grid without per-row null checks.
+ * Returns the saved account mappings for the requested source platform.
+ * Each row corresponds to a category from the platform's category catalog
+ * (different per platform — Faire has commission/processing/shipping_labels,
+ * Shopify wholesale has only 4 categories, etc.). Suggested account codes
+ * from the mapping guide are returned so the UI can show them as
+ * placeholders / quick-fill defaults.
  *
  * Query:
- *   platform   required, e.g. "shopify_dtc", "shopify_wholesale", "faire"
+ *   platform   required, e.g. "shopify_dtc", "shopify_afterpay",
+ *              "shopify_wholesale", "faire", "amazon", "tiktok_shop"
  */
 export async function GET(req: NextRequest) {
   const platform = req.nextUrl.searchParams.get("platform");
   if (!platform) {
     return NextResponse.json({ error: "platform query param required" }, { status: 400 });
+  }
+
+  const catalog = getCategoriesForPlatform(platform);
+  if (catalog.length === 0) {
+    return NextResponse.json({ error: `Unknown platform "${platform}"` }, { status: 400 });
   }
 
   const saved = await db
@@ -28,10 +36,15 @@ export async function GET(req: NextRequest) {
 
   const byCategory = new Map(saved.map((m) => [m.category, m]));
 
-  const mappings = DEFAULT_PAYOUT_CATEGORIES.map((category) => {
-    const m = byCategory.get(category);
+  const mappings = catalog.map((c) => {
+    const m = byCategory.get(c.category);
     return {
-      category,
+      category: c.category,
+      label: c.label,
+      hint: c.hint,
+      side: c.side,
+      defaultAccountCode: c.defaultAccountCode ?? null,
+      defaultAccountName: c.defaultAccountName ?? null,
       xeroAccountCode: m?.xeroAccountCode ?? null,
       xeroAccountName: m?.xeroAccountName ?? null,
       notes: m?.notes ?? null,
