@@ -210,18 +210,13 @@ function calculatePnlForRange(startDate: string, endDate: string): {
     };
   });
 
-  // Expenses by category
-  const expenseData = sqlite.prepare(`
-    SELECT 
-      ec.name as category,
-      COALESCE(SUM(e.amount), 0) as amount,
-      ec.budget_monthly as budget
-    FROM expenses e
-    JOIN expense_categories ec ON e.category_id = ec.id
-    WHERE e.date >= ? AND e.date <= ?
-    GROUP BY ec.id, ec.name
-    ORDER BY amount DESC
-  `).all(startDate, endDate) as Array<{ category: string; amount: number; budget: number | null }>;
+  // Expenses are managed in Xero (per Daniel — Apr 2026). Locally tracked
+  // expenses are no longer factored into P&L. The expensesByCategory field is
+  // kept on the response shape (empty array) so existing UI components don't
+  // break, but we don't read from the local expenses table anymore.
+  // TODO: once Xero payout sync is wired up (Phase 2+), pull operating
+  // expenses from the Xero GL via the API and surface them here.
+  const expenseData: Array<{ category: string; amount: number; budget: number | null }> = [];
 
   // Totals
   const revenue = channels.reduce((s, c) => s + c.revenue, 0);
