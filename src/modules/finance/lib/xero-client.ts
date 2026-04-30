@@ -350,6 +350,41 @@ export async function pushInvoiceToXero(order: {
 /**
  * Pull chart of accounts from Xero.
  */
+/**
+ * Generic authenticated GET against the Xero Accounting API. Adds the
+ * tenant header and Accept: application/json. Returns parsed JSON or a
+ * structured error so callers can avoid duplicating the auth boilerplate.
+ */
+export async function xeroAdminFetch(
+  path: string,
+): Promise<{ success: true; data: unknown } | { success: false; error: string }> {
+  try {
+    const auth = await getAccessToken();
+    if (!auth) return { success: false, error: "Not authenticated with Xero" };
+
+    const url = path.startsWith("http") ? path : `https://api.xero.com${path}`;
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+        "Xero-tenant-id": auth.tenantId,
+        Accept: "application/json",
+      },
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      return { success: false, error: `Xero API ${res.status}: ${err.slice(0, 300)}` };
+    }
+
+    const data = await res.json();
+    return { success: true, data };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    console.error(`[Xero] GET ${path} error:`, e);
+    return { success: false, error: `Xero fetch failed: ${msg}` };
+  }
+}
+
 export async function getChartOfAccounts(): Promise<{
   success: boolean;
   accounts?: Array<{ code: string; name: string; type: string; status: string }>;
