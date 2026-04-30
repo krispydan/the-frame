@@ -4,18 +4,39 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "path";
 import fs from "fs";
 
+// ── Build-phase isolation ──
+// During `next build`'s page-data collection step Next spawns ~30 parallel
+// workers that all re-import this module. If they share one SQLite file,
+// they collide on:
+//   1. PRAGMA journal_mode = WAL (header write, requires exclusive access)
+//   2. ALTER TABLE / CREATE TABLE migrations
+// Both manifest as SQLITE_BUSY and abort the build.
+//
+// At runtime (production server) NEXT_PHASE is "phase-production-server"
+// so we open the real DB normally. During build we open an in-memory DB
+// per worker — they share nothing, never lock each other, and the
+// throwaway DBs evaporate when the worker exits.
+const IS_BUILD_PHASE =
+  process.env.NEXT_PHASE === "phase-production-build" ||
+  process.env.NEXT_PHASE === "phase-export";
+
 const DB_PATH = process.env.DATABASE_PATH || process.env.DATABASE_URL || path.join(process.cwd(), "data", "the-frame.db");
 
-// Ensure directory exists (important for Railway where /data is a volume)
-const dbDir = path.dirname(DB_PATH);
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+if (!IS_BUILD_PHASE) {
+  // Ensure directory exists (important for Railway where /data is a volume)
+  const dbDir = path.dirname(DB_PATH);
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
 }
 
-const sqlite = new Database(DB_PATH);
+const sqlite = new Database(IS_BUILD_PHASE ? ":memory:" : DB_PATH);
 
-// Performance PRAGMAs per CTO review
-sqlite.pragma("journal_mode = WAL");
+// Performance PRAGMAs per CTO review.
+// In-memory mode silently no-ops journal_mode=WAL (file-only), which is fine.
+if (!IS_BUILD_PHASE) {
+  sqlite.pragma("journal_mode = WAL");
+}
 sqlite.pragma("busy_timeout = 15000");
 sqlite.pragma("synchronous = NORMAL");
 sqlite.pragma("cache_size = -64000"); // 64MB
@@ -26,15 +47,6 @@ export const db = drizzle(sqlite);
 export { sqlite };
 
 // ── Skip migrations during `next build` ──
-// Next.js spawns ~30 parallel workers during the page-data-collection phase
-// of `next build`. Each worker re-imports this module and tries to run the
-// DDL below, which trips SQLITE_BUSY because better-sqlite3 only allows one
-// writer at a time. Migrations only need to execute when the running app
-// starts up, so skip them entirely during build.
-const IS_BUILD_PHASE =
-  process.env.NEXT_PHASE === "phase-production-build" ||
-  process.env.NEXT_PHASE === "phase-export";
-
 if (!IS_BUILD_PHASE) {
 
 // Ensure columns that ALTER TABLE can't add idempotently
