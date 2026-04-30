@@ -17,6 +17,31 @@ export function registerJobHandler(type: string, handler: JobHandler): void {
   handlers.set(type, handler);
 }
 
+// Built-in handler: ShipHero inventory sync (hourly, PST business hours)
+registerJobHandler("shiphero.sync-inventory", async () => {
+  const { syncShipHeroInventory, isDuringBusinessHours } = await import(
+    "@/modules/operations/lib/shiphero/sync-inventory"
+  );
+  if (!isDuringBusinessHours()) {
+    return { skipped: true, reason: "Outside PST business hours" };
+  }
+  return await syncShipHeroInventory() as unknown as Record<string, unknown>;
+});
+
+// Built-in handler: ShipHero order sync (hourly, PST business hours)
+registerJobHandler("shiphero.sync-orders", async () => {
+  const { syncShipHeroOrders } = await import(
+    "@/modules/operations/lib/shiphero/sync-orders"
+  );
+  const { isDuringBusinessHours } = await import(
+    "@/modules/operations/lib/shiphero/sync-inventory"
+  );
+  if (!isDuringBusinessHours()) {
+    return { skipped: true, reason: "Outside PST business hours" };
+  }
+  return await syncShipHeroOrders() as unknown as Record<string, unknown>;
+});
+
 // Built-in handler: run an agent via the orchestrator
 registerJobHandler("agent.run", async (input) => {
   const { agentName, agentInput = {} } = input;

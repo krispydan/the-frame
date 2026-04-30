@@ -445,6 +445,67 @@ try {
   }
 } catch (e) { console.error("[db] Image reset error:", e); }
 
+// ShipHero columns on orders table
+try { sqlite.exec("ALTER TABLE orders ADD COLUMN shiphero_order_id TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE orders ADD COLUMN shiphero_order_number TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE orders ADD COLUMN shiphero_fulfillment_status TEXT"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_orders_shiphero_id ON orders(shiphero_order_id)"); } catch { /* exists */ }
+
+// ShipHero shipments (multiple per order for partial fulfillments)
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS shiphero_shipments (
+    id TEXT PRIMARY KEY NOT NULL,
+    order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    shiphero_shipment_id TEXT NOT NULL UNIQUE,
+    shiphero_order_id TEXT NOT NULL,
+    carrier TEXT,
+    tracking_number TEXT,
+    tracking_url TEXT,
+    label_cost REAL,
+    status TEXT,
+    picked_up INTEGER DEFAULT 0,
+    total_packages INTEGER,
+    created_date TEXT,
+    synced_at TEXT NOT NULL
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_sh_shipments_order ON shiphero_shipments(order_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_sh_shipments_shiphero_order ON shiphero_shipments(shiphero_order_id)`);
+} catch (e) { console.error("[db] ShipHero shipments table error:", e); }
+
+// ShipHero order costs (from fulfillment invoices)
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS shiphero_order_costs (
+    id TEXT PRIMARY KEY NOT NULL,
+    order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    shiphero_order_id TEXT NOT NULL,
+    invoice_id TEXT,
+    invoice_date TEXT,
+    shipping_rate REAL NOT NULL DEFAULT 0,
+    processing_fee REAL NOT NULL DEFAULT 0,
+    picking_fee REAL NOT NULL DEFAULT 0,
+    overcharge_fee REAL NOT NULL DEFAULT 0,
+    total_cost REAL NOT NULL DEFAULT 0,
+    synced_at TEXT NOT NULL
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_sh_costs_order ON shiphero_order_costs(order_id)`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_sh_costs_order_invoice ON shiphero_order_costs(shiphero_order_id, invoice_id)`);
+} catch (e) { console.error("[db] ShipHero order costs table error:", e); }
+
+// ShipHero inventory cache
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS shiphero_inventory (
+    sku TEXT NOT NULL,
+    warehouse_id TEXT NOT NULL,
+    on_hand INTEGER NOT NULL DEFAULT 0,
+    allocated INTEGER NOT NULL DEFAULT 0,
+    available INTEGER NOT NULL DEFAULT 0,
+    synced_at TEXT NOT NULL,
+    PRIMARY KEY (sku, warehouse_id)
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shiphero_inv_sku ON shiphero_inventory(sku)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shiphero_inv_synced ON shiphero_inventory(synced_at)`);
+} catch (e) { console.error("[db] ShipHero inventory table error:", e); }
+
 // Auto-run migrations on startup (idempotent — safe to run every time)
 try {
   const migrationsFolder = path.join(process.cwd(), "drizzle", "migrations");

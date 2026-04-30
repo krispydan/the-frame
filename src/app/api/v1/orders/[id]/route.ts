@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, sqlite } from "@/lib/db";
 import { orders, orderItems, returns } from "@/modules/orders/schema";
 import { companies, contacts } from "@/modules/sales/schema";
 import { skus as catalogSkus } from "@/modules/catalog/schema";
@@ -82,6 +82,29 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     }
   }
 
+  // ShipHero shipments & costs
+  const shipments = sqlite.prepare(
+    "SELECT * FROM shiphero_shipments WHERE order_id = ? ORDER BY created_date ASC"
+  ).all(id) as Array<Record<string, unknown>>;
+
+  const fulfillmentCosts = sqlite.prepare(
+    "SELECT * FROM shiphero_order_costs WHERE order_id = ? ORDER BY invoice_date DESC"
+  ).all(id) as Array<Record<string, unknown>>;
+
+  // ShipHero dashboard link
+  let shipheroUrl: string | null = null;
+  const shipheroOrderId = (order as Record<string, unknown>).shiphero_order_id as string | null;
+  if (shipheroOrderId) {
+    // ShipHero base64 ID decodes to "Order:12345" — extract the numeric ID
+    try {
+      const decoded = Buffer.from(shipheroOrderId, "base64").toString("utf-8");
+      const numericId = decoded.replace("Order:", "");
+      shipheroUrl = `https://app.shiphero.com/dashboard/orders/details/${numericId}`;
+    } catch {
+      shipheroUrl = null;
+    }
+  }
+
   return NextResponse.json({
     ...order,
     company,
@@ -90,6 +113,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     returns: orderReturns,
     timeline,
     externalUrl,
+    shipheroUrl,
+    shipments,
+    fulfillmentCosts,
     profit: {
       itemsRevenue,
       totalCost: totalCostKnown ? totalCost : null,
