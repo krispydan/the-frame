@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { skus, products, images, imageTypes } from "@/modules/catalog/schema";
 import { eq } from "drizzle-orm";
 import { buildProductDescription, detectStyleCategory, getModelDescription, type ProductContext } from "@/modules/catalog/lib/prompt-engine";
+import { getCuratedAttrs } from "@/modules/catalog/lib/curated-attributes";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 
@@ -71,20 +72,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Product not found for SKU" }, { status: 404 });
   }
 
+  // Tags are the source of truth for category/shape/material/gender/lens.
+  const curated = await getCuratedAttrs(product.id);
+
   // Build prompt
   const style = detectStyleCategory({
-    frameShape: product.frameShape ?? null,
-    frameMaterial: product.frameMaterial ?? null,
-    gender: product.gender ?? null,
-    lensType: product.lensType ?? null,
+    frameShape: curated.frameShape,
+    frameMaterial: curated.frameMaterial,
+    gender: curated.gender,
+    lensType: curated.lensType,
   });
 
   const desc = [
     product.name,
     skuRow.colorName,
-    product.frameShape,
-    product.frameMaterial,
-    product.category,
+    curated.frameShape,
+    curated.frameMaterial,
+    curated.category,
   ]
     .filter(Boolean)
     .join(" ");

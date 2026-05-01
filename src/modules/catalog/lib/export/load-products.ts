@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { sqlite } from "@/lib/db";
 import { products, skus, images, imageTypes, tags } from "@/modules/catalog/schema";
 import { eq, inArray } from "drizzle-orm";
+import { curatedAttrsFromTags } from "@/modules/catalog/lib/curated-attributes";
 import type { ExportProduct } from "./types";
 
 export async function loadExportProducts(productIds?: string[]): Promise<ExportProduct[]> {
@@ -55,11 +56,18 @@ export async function loadExportProducts(productIds?: string[]): Promise<ExportP
     const productImages = productSkus.flatMap((s) => imgsBySku.get(s.id) || []);
     const productTags = tagsByProduct.get(p.id) || [];
 
+    // Tags are the source of truth for category/shape/material/gender —
+    // overlay derived values onto the product object. Legacy column reads
+    // would soon be dropped from the schema.
+    const curated = curatedAttrsFromTags(productTags);
+
     return {
       product: {
         id: p.id, skuPrefix: p.skuPrefix || "", name: p.name, description: p.description,
         shortDescription: p.shortDescription, bulletPoints: p.bulletPoints,
-        category: p.category, frameShape: p.frameShape, frameMaterial: p.frameMaterial, gender: p.gender,
+        category: curated.category, frameShape: curated.frameShape,
+        frameMaterial: curated.frameMaterial, gender: curated.gender,
+        lensType: curated.lensType,
       },
       skus: productSkus.map((s) => ({
         id: s.id, sku: s.sku, colorName: s.colorName, colorHex: s.colorHex,

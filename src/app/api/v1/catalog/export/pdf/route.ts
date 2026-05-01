@@ -119,7 +119,7 @@ function toCatalogProducts(exportProducts: ExportProduct[]): CatalogProduct[] {
       return {
         title: ep.product.name || ep.product.skuPrefix || "Untitled",
         skuPrefix: ep.product.skuPrefix,
-        lens: ep.product.frameShape === "polarized" || ep.product.name?.toLowerCase().includes("polarized") ? "Polarized" : "UV400",
+        lens: (ep.product.lensType ?? "").toLowerCase() === "polarized" || ep.product.name?.toLowerCase().includes("polarized") ? "Polarized" : "UV400",
         wholesale: ep.wholesalePrice || 7,
         retail: ep.retailPrice || 24,
         variants: ep.skus.map(s => ({

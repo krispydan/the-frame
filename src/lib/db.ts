@@ -54,6 +54,15 @@ try {
   sqlite.exec("ALTER TABLE marketing_seo_keywords ADD COLUMN difficulty INTEGER");
 } catch { /* column already exists */ }
 
+// ── Retire legacy single-value attribute columns on catalog_products ──
+// These are now derived from catalog_tags (see curated-attributes.ts).
+// SQLite supports DROP COLUMN since 3.35; throws if already gone.
+for (const col of ["category", "frame_shape", "frame_material", "gender", "lens_type"]) {
+  try {
+    sqlite.exec(`ALTER TABLE catalog_products DROP COLUMN ${col}`);
+  } catch { /* column already dropped */ }
+}
+
 try {
   sqlite.exec("ALTER TABLE companies ADD COLUMN disqualify_reason TEXT");
 } catch { /* column already exists */ }

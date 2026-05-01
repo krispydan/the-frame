@@ -189,7 +189,7 @@ function detectStyleAdjective(tagSet: Set<string>): string | null {
 }
 
 function isPolarized(ep: ExportProduct, tagSet: Set<string>): boolean {
-  return tagSet.has("polarized") || ep.product.frameShape?.toLowerCase() === "polarized";
+  return tagSet.has("polarized") || ep.product.lensType?.toLowerCase() === "polarized";
 }
 
 function formatShape(shape: string): string {

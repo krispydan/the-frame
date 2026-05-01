@@ -49,11 +49,9 @@ export const products = sqliteTable("catalog_products", {
   description: text("description"),
   shortDescription: text("short_description"),
   bulletPoints: text("bullet_points"),
-  category: text("category", { enum: ["sunglasses", "optical", "reading"] }),
-  frameShape: text("frame_shape"),
-  frameMaterial: text("frame_material"),
-  gender: text("gender"),
-  lensType: text("lens_type"),
+  // category, frame_shape, frame_material, gender, lens_type were dropped —
+  // those are now derived from catalog_tags. Use getCuratedAttrs() in
+  // src/modules/catalog/lib/curated-attributes.ts to read them.
   wholesalePrice: real("wholesale_price"),
   retailPrice: real("retail_price"),
   msrp: real("msrp"),

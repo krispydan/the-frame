@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { products, tags } from "@/modules/catalog/schema";
 import { eq } from "drizzle-orm";
 import { detectStyleCategory } from "@/modules/catalog/lib/prompt-engine";
+import { curatedAttrsFromTags } from "@/modules/catalog/lib/curated-attributes";
 
 /**
  * AI Tag Suggestion — rule-based fallback when no AI API key available.
@@ -22,9 +23,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Product not found" }, { status: 404 });
   }
 
-  const p = product[0];
   const existingTags = await db.select().from(tags).where(eq(tags.productId, productId));
   const existingNames = new Set(existingTags.map((t) => t.tagName?.toLowerCase()));
+  // Tags are the source of truth for curated attrs.
+  const curated = curatedAttrsFromTags(existingTags);
+  const p = { ...product[0], ...curated };
 
   const suggestions: { tagName: string; dimension: string }[] = [];
 

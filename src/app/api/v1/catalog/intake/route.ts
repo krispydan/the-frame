@@ -52,7 +52,9 @@ export async function POST(request: NextRequest) {
         id: productId,
         skuPrefix: item.skuPrefix,
         name: item.name || null,
-        category: (item.category as any) || null,
+        // category was dropped from the products schema — if the intake row
+        // includes it we materialize it as a productType tag below so the
+        // value isn't lost.
         factoryName: item.factoryName || null,
         factorySku: item.factorySku || null,
         wholesalePrice: item.wholesalePrice || null,
@@ -60,6 +62,17 @@ export async function POST(request: NextRequest) {
         purchaseOrderId: purchaseOrderId || null,
         status: "intake",
       });
+
+      if (item.category) {
+        const { tags } = await import("@/modules/catalog/schema");
+        await db.insert(tags).values({
+          id: crypto.randomUUID(),
+          productId,
+          tagName: String(item.category),
+          dimension: "productType",
+          source: "manual",
+        });
+      }
 
       // Create variants
       if (item.variants?.length) {

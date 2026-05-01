@@ -34,6 +34,7 @@ export interface ExportProduct {
     frameShape: string | null;
     frameMaterial: string | null;
     gender: string | null;
+    lensType: string | null;
   };
   skus: {
     id: string;

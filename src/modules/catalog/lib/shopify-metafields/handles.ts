@@ -129,7 +129,8 @@ export const COLOR_PATTERN_HANDLES = [
   "copper",
   "clear",
   "multicolor",
-  "tortoise", // common in eyewear; may not exist on every store — sync will log+skip if so
+  // Note: "tortoise" intentionally NOT included — neither retail nor wholesale
+  // store has it seeded and we won't add it. Tortoise variants map to "brown".
 ] as const;
 export type ColorPatternHandle = (typeof COLOR_PATTERN_HANDLES)[number];
 
@@ -145,7 +146,11 @@ export const AGE_GROUP_HANDLES = [
 ] as const;
 export type AgeGroupHandle = (typeof AGE_GROUP_HANDLES)[number];
 
-export const LENS_POLARIZATION_HANDLES = ["polarized", "non-polarized"] as const;
+// Two stores diverged here: retail uses a custom entry with handle "uv400",
+// wholesale uses the standard "non-polarized" with display renamed to "UV400".
+// Both lists are valid; the sync tries them in order and writes whichever
+// resolves first per store. See LENS_NON_POLARIZED_FALLBACKS in sync-from-tags.
+export const LENS_POLARIZATION_HANDLES = ["polarized", "uv400", "non-polarized"] as const;
 export type LensPolarizationHandle = (typeof LENS_POLARIZATION_HANDLES)[number];
 
 export const TARGET_GENDER_HANDLES = [
@@ -156,18 +161,16 @@ export const TARGET_GENDER_HANDLES = [
 ] as const;
 export type TargetGenderHandle = (typeof TARGET_GENDER_HANDLES)[number];
 
+// Shopify's actual eyewear-frame-design enum is only 6 values. Our internal
+// tag vocabulary is broader (square, oval, oversized, geometric, etc.) — we
+// remap those to the closest valid handle in tags-to-metafields.ts.
 export const EYEWEAR_FRAME_DESIGN_HANDLES = [
-  "round",
-  "square",
-  "rectangle",
-  "oval",
   "aviator",
   "cat-eye",
-  "wraparound",
-  "shield",
-  "geometric",
-  "browline",
-  "rimless",
+  "rectangle",
+  "round",
+  "wayfarer",
+  "other",
 ] as const;
 export type EyewearFrameDesignHandle = (typeof EYEWEAR_FRAME_DESIGN_HANDLES)[number];
 
@@ -256,7 +259,7 @@ export function validateAiCategorization(raw: unknown): {
 
   const target_gender = includesNarrow(TARGET_GENDER_HANDLES, cm.target_gender) ? cm.target_gender : (problems.push({ field: "category_metafields.target_gender", message: `invalid "${cm.target_gender}", defaulting to "unisex"` }), "unisex" as const);
 
-  const eyewear_frame_design = includesNarrow(EYEWEAR_FRAME_DESIGN_HANDLES, cm.eyewear_frame_design) ? cm.eyewear_frame_design : (problems.push({ field: "category_metafields.eyewear_frame_design", message: `invalid "${cm.eyewear_frame_design}", defaulting to "square"` }), "square" as const);
+  const eyewear_frame_design = includesNarrow(EYEWEAR_FRAME_DESIGN_HANDLES, cm.eyewear_frame_design) ? cm.eyewear_frame_design : (problems.push({ field: "category_metafields.eyewear_frame_design", message: `invalid "${cm.eyewear_frame_design}", defaulting to "other"` }), "other" as const);
 
   return {
     output: {

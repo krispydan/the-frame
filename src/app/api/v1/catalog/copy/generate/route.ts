@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { products, tags, copyVersions } from "@/modules/catalog/schema";
 import { eq } from "drizzle-orm";
 import { COPY_PROMPTS, detectStyleCategory } from "@/modules/catalog/lib/prompt-engine";
+import { curatedAttrsFromTags } from "@/modules/catalog/lib/curated-attributes";
 
 /**
  * AI Copy Generation
@@ -22,9 +23,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Product not found" }, { status: 404 });
   }
 
-  const p = product[0];
   const productTags = await db.select().from(tags).where(eq(tags.productId, productId));
   const tagNames = productTags.map((t) => t.tagName).filter(Boolean).join(", ");
+
+  // Tags are the source of truth for category/shape/material/gender/lens.
+  const curated = curatedAttrsFromTags(productTags);
+  const p = { ...product[0], ...curated };
 
   const details = [
     p.category && `Category: ${p.category}`,

@@ -262,21 +262,13 @@ export default function ProductDetailPage() {
                 {editing ? (
                   <>
                     <Field label="Name" value={editData.name || ""} onChange={(v) => setEditData({ ...editData, name: v })} />
-                    <div className="space-y-1">
-                      <Label className="text-xs">Category</Label>
-                      <Select value={editData.category || ""} onValueChange={(v) => setEditData({ ...editData, category: v })}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="sunglasses">Sunglasses</SelectItem>
-                          <SelectItem value="optical">Optical</SelectItem>
-                          <SelectItem value="reading">Reading</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <Field label="Frame Shape" value={editData.frameShape || ""} onChange={(v) => setEditData({ ...editData, frameShape: v })} />
-                    <Field label="Frame Material" value={editData.frameMaterial || ""} onChange={(v) => setEditData({ ...editData, frameMaterial: v })} />
-                    <Field label="Gender" value={editData.gender || ""} onChange={(v) => setEditData({ ...editData, gender: v })} />
-                    <Field label="Lens Type" value={editData.lensType || ""} onChange={(v) => setEditData({ ...editData, lensType: v })} />
+                    {/* Category, frame shape, material, gender, lens type are
+                        derived from catalog tags. Edit them on the Tags tab. */}
+                    <Row label="Category" value={product.category} hint="edit on Tags tab" />
+                    <Row label="Frame Shape" value={product.frameShape} hint="edit on Tags tab" />
+                    <Row label="Frame Material" value={product.frameMaterial} hint="edit on Tags tab" />
+                    <Row label="Gender" value={product.gender} hint="edit on Tags tab" />
+                    <Row label="Lens Type" value={product.lensType} hint="edit on Tags tab" />
                     <Field label="Factory" value={editData.factoryName || ""} onChange={(v) => setEditData({ ...editData, factoryName: v })} />
                     <Field label="Factory SKU" value={editData.factorySku || ""} onChange={(v) => setEditData({ ...editData, factorySku: v })} />
                   </>
@@ -486,11 +478,14 @@ export default function ProductDetailPage() {
   );
 }
 
-function Row({ label, value }: { label: string; value: string | null | undefined }) {
+function Row({ label, value, hint }: { label: string; value: string | null | undefined; hint?: string }) {
   return (
     <div className="flex justify-between text-sm">
       <span className="text-muted-foreground">{label}</span>
-      <span>{value || "—"}</span>
+      <span className="text-right">
+        <span>{value || "—"}</span>
+        {hint && <span className="block text-[10px] text-muted-foreground">{hint}</span>}
+      </span>
     </div>
   );
 }

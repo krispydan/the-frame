@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { products, skus, images, tags, copyVersions } from "@/modules/catalog/schema";
 import { eq, sql } from "drizzle-orm";
+import { curatedAttrsFromTags } from "@/modules/catalog/lib/curated-attributes";
 
 export async function GET(
   _request: NextRequest,
@@ -28,8 +29,14 @@ export async function GET(
       }))
     : [];
 
+  // Overlay tag-derived curated attrs (frameShape/lensType/gender/etc.).
+  // Tags are the source of truth; the legacy columns on products are no
+  // longer edited and will be dropped from the schema.
+  const curated = curatedAttrsFromTags(productTags);
+  const enriched = { ...product[0], ...curated };
+
   return NextResponse.json({
-    product: product[0],
+    product: enriched,
     skus: productSkus,
     tags: productTags,
     copyVersions: productCopy,
@@ -44,9 +51,11 @@ export async function PATCH(
   const { id } = await params;
   const body = await request.json();
 
+  // category, frameShape, frameMaterial, gender, lensType are intentionally
+  // excluded — those are now derived from catalog_tags. Edit them on the
+  // Tags tab, not here.
   const allowedFields = [
-    "name", "description", "shortDescription", "bulletPoints", "category",
-    "frameShape", "frameMaterial", "gender", "lensType",
+    "name", "description", "shortDescription", "bulletPoints",
     "wholesalePrice", "retailPrice", "msrp", "factoryName", "factorySku",
     "seoTitle", "metaDescription", "status",
     "aiCategorization", "aiCategorizedAt", "aiCategorizationModel",
