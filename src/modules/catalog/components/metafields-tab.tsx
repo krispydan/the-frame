@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RefreshCw, Send, Save, Loader2, Tags, CheckCircle2, AlertCircle } from "lucide-react";
+import { RefreshCw, Send, Save, Loader2, Tags, CheckCircle2, AlertCircle, Sparkles } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 interface AiCategorization {
   seo: { title: string; description: string };
@@ -28,6 +29,22 @@ interface MetafieldsTabProps {
   aiCategorizedAt: string | null;
   aiCategorizationModel: string | null;
   onRefresh: () => void;
+}
+
+/** Response shape from POST /products/:id/generate-seo */
+interface SeoPreview {
+  productId: string;
+  skuPrefix: string;
+  productName: string | null;
+  model: string;
+  current: { title: string | null; description: string | null };
+  generated: {
+    title: string;
+    description: string;
+    keywords_used: string[];
+    char_count: { title: number; description: number };
+  };
+  warnings: string[];
 }
 
 /** Response shape from POST /products/:id/sync-shopify-metafields-from-tags */
@@ -81,6 +98,14 @@ export function MetafieldsTab({
   const [tagSyncing, setTagSyncing] = useState(false);
   const [tagSyncResult, setTagSyncResult] = useState<TagSyncResponse | null>(null);
   const [tagSyncError, setTagSyncError] = useState<string | null>(null);
+
+  // Google Shopping SEO (Simprosys feed reads from Shopify product seo
+  // title + description on retail). Preview-then-save flow.
+  const [seoGenerating, setSeoGenerating] = useState(false);
+  const [seoSaving, setSeoSaving] = useState(false);
+  const [seoPreview, setSeoPreview] = useState<SeoPreview | null>(null);
+  const [seoError, setSeoError] = useState<string | null>(null);
+  const [seoSaved, setSeoSaved] = useState<string | null>(null);
 
   // Parse the JSON blob
   let parsed: AiCategorization | null = null;
@@ -154,6 +179,53 @@ export function MetafieldsTab({
     setSyncing(false);
   };
 
+  const handleGenerateSeo = async () => {
+    setSeoGenerating(true);
+    setSeoError(null);
+    setSeoSaved(null);
+    setSeoPreview(null);
+    try {
+      const res = await fetch(`/api/v1/catalog/products/${productId}/generate-seo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSeoError(data.error || `HTTP ${res.status}`);
+      } else {
+        setSeoPreview(data as SeoPreview);
+      }
+    } catch (err) {
+      setSeoError(err instanceof Error ? err.message : "unknown");
+    }
+    setSeoGenerating(false);
+  };
+
+  const handleSaveSeoNew = async (title: string, description: string) => {
+    setSeoSaving(true);
+    setSeoError(null);
+    setSeoSaved(null);
+    try {
+      const res = await fetch(`/api/v1/catalog/products/${productId}/save-seo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, description }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setSeoError(data.shopifyRetail?.error || data.error || `HTTP ${res.status}`);
+      } else {
+        setSeoSaved(`Saved + pushed to retail (Shopify product ${data.shopifyRetail.productId})`);
+        setSeoPreview(null);
+        onRefresh();
+      }
+    } catch (err) {
+      setSeoError(err instanceof Error ? err.message : "unknown");
+    }
+    setSeoSaving(false);
+  };
+
   const handleTagSync = async () => {
     setTagSyncing(true);
     setTagSyncError(null);
@@ -180,7 +252,7 @@ export function MetafieldsTab({
     setTagSyncing(false);
   };
 
-  const handleSaveSeo = async () => {
+  const handleSaveAiCategorizationSeo = async () => {
     if (!parsed) return;
     setSavingSeo(true);
     const updated = {
@@ -259,6 +331,163 @@ export function MetafieldsTab({
       {syncResult && (
         <div className="text-sm px-1 text-muted-foreground">{syncResult}</div>
       )}
+
+      {/* ── Google Shopping SEO (AI-generated, retail-only) ── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Sparkles className="h-4 w-4" />
+            Google Shopping SEO
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Generates a Google Shopping–optimised title and description with
+            Claude using this product&apos;s tags, curated keywords, and variants.
+            Saving pushes to the retail Shopify store&apos;s product SEO fields,
+            which Simprosys reads for the Google feed. Wholesale is not
+            updated (Google Shopping is retail-only).
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={handleGenerateSeo} disabled={seoGenerating || seoSaving}>
+              {seoGenerating ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <Sparkles className="h-3 w-3 mr-1" />
+              )}
+              Generate with AI
+            </Button>
+          </div>
+
+          {seoError && (
+            <div className="text-xs text-red-600 flex items-center gap-1">
+              <AlertCircle className="h-3 w-3" />
+              {seoError}
+            </div>
+          )}
+
+          {seoSaved && (
+            <div className="text-xs text-green-700 flex items-center gap-1">
+              <CheckCircle2 className="h-3 w-3" />
+              {seoSaved}
+            </div>
+          )}
+
+          {seoPreview && (
+            <div className="space-y-3 pt-2 border-t">
+              <div className="text-xs text-muted-foreground">
+                Generated by <span className="font-mono">{seoPreview.model}</span>
+                {seoPreview.warnings.length > 0 && (
+                  <span className="text-amber-700 ml-2">
+                    ⚠ {seoPreview.warnings.join("; ")}
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">Current title</Label>
+                  <div className="p-2 bg-muted/30 rounded border text-xs whitespace-pre-wrap min-h-[3rem]">
+                    {seoPreview.current.title || <span className="text-muted-foreground">(empty)</span>}
+                  </div>
+                  <Label className="text-xs text-muted-foreground">Current description</Label>
+                  <div className="p-2 bg-muted/30 rounded border text-xs whitespace-pre-wrap min-h-[5rem]">
+                    {seoPreview.current.description || <span className="text-muted-foreground">(empty)</span>}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs flex items-center justify-between">
+                    <span>New title</span>
+                    <span className="font-mono text-muted-foreground">
+                      {seoPreview.generated.char_count.title} chars
+                    </span>
+                  </Label>
+                  <Textarea
+                    value={seoPreview.generated.title}
+                    onChange={(e) =>
+                      setSeoPreview({
+                        ...seoPreview,
+                        generated: {
+                          ...seoPreview.generated,
+                          title: e.target.value,
+                          char_count: {
+                            ...seoPreview.generated.char_count,
+                            title: e.target.value.length,
+                          },
+                        },
+                      })
+                    }
+                    rows={2}
+                    className="text-xs"
+                  />
+                  <Label className="text-xs flex items-center justify-between">
+                    <span>New description</span>
+                    <span className="font-mono text-muted-foreground">
+                      {seoPreview.generated.char_count.description} chars
+                    </span>
+                  </Label>
+                  <Textarea
+                    value={seoPreview.generated.description}
+                    onChange={(e) =>
+                      setSeoPreview({
+                        ...seoPreview,
+                        generated: {
+                          ...seoPreview.generated,
+                          description: e.target.value,
+                          char_count: {
+                            ...seoPreview.generated.char_count,
+                            description: e.target.value.length,
+                          },
+                        },
+                      })
+                    }
+                    rows={6}
+                    className="text-xs"
+                  />
+                </div>
+              </div>
+
+              {seoPreview.generated.keywords_used.length > 0 && (
+                <div className="text-xs text-muted-foreground">
+                  Keywords used:{" "}
+                  {seoPreview.generated.keywords_used.map((k, i) => (
+                    <Badge key={i} variant="outline" className="text-[10px] mr-1">
+                      {k}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    handleSaveSeoNew(
+                      seoPreview.generated.title,
+                      seoPreview.generated.description,
+                    )
+                  }
+                  disabled={seoSaving}
+                >
+                  {seoSaving ? (
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <Save className="h-3 w-3 mr-1" />
+                  )}
+                  Save & push to retail
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setSeoPreview(null)}>
+                  Discard
+                </Button>
+                <Button size="sm" variant="outline" onClick={handleGenerateSeo}>
+                  <RefreshCw className="h-3 w-3 mr-1" />
+                  Regenerate
+                </Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* ── Tag-curated metafield sync (separate from AI sync) ── */}
       <Card>
@@ -400,7 +629,7 @@ export function MetafieldsTab({
               <Button
                 size="sm"
                 variant="outline"
-                onClick={handleSaveSeo}
+                onClick={handleSaveAiCategorizationSeo}
                 disabled={savingSeo}
               >
                 <Save className="h-3 w-3 mr-1" />
