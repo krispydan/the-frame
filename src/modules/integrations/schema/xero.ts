@@ -100,6 +100,29 @@ export const xeroTrackingMappings = sqliteTable("xero_tracking_mappings", {
 export type XeroTrackingMapping = typeof xeroTrackingMappings.$inferSelect;
 export type NewXeroTrackingMapping = typeof xeroTrackingMappings.$inferInsert;
 
+/**
+ * One row per JournalLine on a COGS journal — captures the SKU, qty, and
+ * unit_cost we used at sync time so future cost_price changes don't drift
+ * the audit trail.
+ */
+export const xeroJournalLogLines = sqliteTable("xero_journal_log_lines", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  journalLogId: text("journal_log_id").notNull(),
+  sku: text("sku"),
+  skuId: text("sku_id"),
+  productName: text("product_name"),
+  colorName: text("color_name"),
+  quantity: integer("quantity"),
+  unitCostAtSale: real("unit_cost_at_sale"),
+  lineTotal: real("line_total"),
+  side: text("side"),               // "debit" or "credit"
+  accountCode: text("account_code"),
+  trackingOptionId: text("tracking_option_id"),
+  createdAt: text("created_at").default(sql`(datetime('now'))`),
+});
+
+export type XeroJournalLogLine = typeof xeroJournalLogLines.$inferSelect;
+
 export type XeroAccountMapping = typeof xeroAccountMappings.$inferSelect;
 export type NewXeroAccountMapping = typeof xeroAccountMappings.$inferInsert;
 export type XeroSyncRun = typeof xeroSyncRuns.$inferSelect;

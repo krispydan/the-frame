@@ -452,6 +452,28 @@ try {
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
   )`);
+
+  // Per-line audit detail for COGS journals. Captures the unit_cost we used
+  // at sync time for each SKU so future cost_price changes don't corrupt
+  // the audit trail. Indexed by sku so accountants can query
+  // "show me every COGS line for SKU JX1001-BLK in March" cheaply.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS xero_journal_log_lines (
+    id TEXT PRIMARY KEY NOT NULL,
+    journal_log_id TEXT NOT NULL REFERENCES xero_journal_log(id) ON DELETE CASCADE,
+    sku TEXT,
+    sku_id TEXT,
+    product_name TEXT,
+    color_name TEXT,
+    quantity INTEGER,
+    unit_cost_at_sale REAL,
+    line_total REAL,
+    side TEXT,
+    account_code TEXT,
+    tracking_option_id TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_xero_journal_log_lines_log ON xero_journal_log_lines(journal_log_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_xero_journal_log_lines_sku ON xero_journal_log_lines(sku)`);
 } catch (e) { console.error("[db] Xero ops tables error:", e); }
 
 try {
