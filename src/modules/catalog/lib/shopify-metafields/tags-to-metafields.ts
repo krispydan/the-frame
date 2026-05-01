@@ -27,7 +27,9 @@ export type TagInput = { dimension: string; tagName: string | null };
 /**
  * Display labels for `custom.frame_shape` (list.single_line_text_field).
  * These match the Shopify metafield definition's `choices` validation
- * exactly — case and spacing matter.
+ * exactly — case and spacing matter. Trimmed from 10 to 6 because
+ * Oval/Geometric/Butterfly/Wayfarer were rarely used and merge cleanly
+ * into the kept set (see CUSTOM_FRAME_SHAPE_MAP for the redirects).
  */
 export const CUSTOM_FRAME_SHAPE_CHOICES = [
   "Aviator",
@@ -35,11 +37,7 @@ export const CUSTOM_FRAME_SHAPE_CHOICES = [
   "Rectangle",
   "Round",
   "Square",
-  "Oval",
   "Oversized",
-  "Geometric",
-  "Butterfly",
-  "Wayfarer",
 ] as const;
 export type CustomFrameShapeChoice = (typeof CUSTOM_FRAME_SHAPE_CHOICES)[number];
 
@@ -111,6 +109,13 @@ const FRAME_DESIGN_MAP: Record<string, EyewearFrameDesignHandle> = {
  * `custom.frame_shape` metafield (list.single_line_text_field with 10 choices).
  * Anything that doesn't match returns null and is dropped.
  */
+// Tag value (lowercase) → display label written to custom.frame_shape.
+// Confirmed mappings for legacy tags not in the 6-value set:
+//   oval → Round  (5 products)
+//   butterfly → Cat Eye  (1 product)
+//   geometric → Square  (2 products)
+//   wayfarer → Rectangle  (closest visually)
+// Underlying tags are preserved on the product for future re-vocabulary.
 const CUSTOM_FRAME_SHAPE_MAP: Record<string, CustomFrameShapeChoice> = {
   aviator: "Aviator",
   "cat-eye": "Cat Eye",
@@ -119,11 +124,12 @@ const CUSTOM_FRAME_SHAPE_MAP: Record<string, CustomFrameShapeChoice> = {
   rectangular: "Rectangle",
   round: "Round",
   square: "Square",
-  oval: "Oval",
   oversized: "Oversized",
-  geometric: "Geometric",
-  butterfly: "Butterfly",
-  wayfarer: "Wayfarer",
+  // Merged into closest neighbour
+  oval: "Round",
+  butterfly: "Cat Eye",
+  geometric: "Square",
+  wayfarer: "Rectangle",
 };
 
 /**

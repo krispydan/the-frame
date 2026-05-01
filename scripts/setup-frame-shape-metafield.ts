@@ -8,17 +8,16 @@
  */
 import { shopifyGraphqlRequest } from "@/modules/orders/lib/shopify-api";
 
+// Final vocabulary: 6 values. Oval/Geometric/Butterfly/Wayfarer were merged
+// into Round/Square/Cat Eye/Rectangle (see CUSTOM_FRAME_SHAPE_MAP in
+// tags-to-metafields.ts).
 const CHOICES = [
   "Aviator",
   "Cat Eye",
   "Rectangle",
   "Round",
   "Square",
-  "Oval",
   "Oversized",
-  "Geometric",
-  "Butterfly",
-  "Wayfarer",
 ];
 
 const FIND_Q = `
