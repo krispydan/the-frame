@@ -99,6 +99,7 @@ const insightsNav: NavItem[] = [
   { title: "Intelligence", href: "/intelligence", icon: BarChart3 },
   { title: "AI Center", href: "/ai", icon: Brain },
   { title: "Notifications", href: "/notifications", icon: Bell },
+  { title: "Scheduled Jobs", href: "/settings/cron", icon: Database },
   {
     title: "Integrations", href: "/settings/integrations", icon: Plug,
     children: [
