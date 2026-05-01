@@ -130,4 +130,30 @@ async function logEvent(p: LogPayload) {
   } catch (err) {
     console.error("[Shopify Webhook] Failed to log event:", err);
   }
+  void detectFlood();
+}
+
+// Rolling-window flood detector. Counts events in the last 60 seconds and
+// fires a single Slack alert when threshold is breached. Cooldown prevents
+// repeat alerts during a sustained burst.
+let lastFloodAlertAt = 0;
+const FLOOD_THRESHOLD = 100;        // events per window
+const FLOOD_WINDOW_SECONDS = 60;
+const FLOOD_COOLDOWN_MS = 10 * 60_000;  // 10 minutes between alerts
+
+async function detectFlood(): Promise<void> {
+  if (Date.now() - lastFloodAlertAt < FLOOD_COOLDOWN_MS) return;
+  try {
+    const { sqlite: rawDb } = await import("@/lib/db");
+    const row = rawDb.prepare(
+      "SELECT COUNT(*) AS c FROM shopify_webhook_events WHERE received_at > datetime('now', ?)"
+    ).get(`-${FLOOD_WINDOW_SECONDS} seconds`) as { c: number };
+    if ((row?.c ?? 0) >= FLOOD_THRESHOLD) {
+      lastFloodAlertAt = Date.now();
+      const { notifyWebhookFlood } = await import("@/modules/integrations/lib/slack/notifications");
+      await notifyWebhookFlood({ service: "Shopify", count: row.c, windowSeconds: FLOOD_WINDOW_SECONDS });
+    }
+  } catch (e) {
+    console.error("[shopify-webhook] flood detector error:", e);
+  }
 }
