@@ -476,6 +476,36 @@ try {
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_xero_journal_log_lines_sku ON xero_journal_log_lines(sku)`);
 } catch (e) { console.error("[db] Xero ops tables error:", e); }
 
+// ── Slack notifications ──
+// Channel routing: each notification "topic" (e.g. orders.wholesale) maps to
+// one Slack channel. UI lets the user override per topic. Bot token lives in
+// SLACK_BOT_TOKEN env var (Railway), not in DB.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS slack_channel_routing (
+    id TEXT PRIMARY KEY NOT NULL,
+    topic TEXT NOT NULL UNIQUE,
+    channel_id TEXT,
+    channel_name TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+
+  // Audit log of every Slack message we sent — useful for debugging and to
+  // show recent activity on the integrations page.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS slack_message_log (
+    id TEXT PRIMARY KEY NOT NULL,
+    topic TEXT,
+    channel_id TEXT,
+    channel_name TEXT,
+    text_preview TEXT,
+    ok INTEGER,
+    error TEXT,
+    sent_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_slack_message_log_sent ON slack_message_log(sent_at DESC)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_slack_message_log_topic ON slack_message_log(topic)`);
+} catch (e) { console.error("[db] Slack tables error:", e); }
+
 try {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS operations_exports (
     id TEXT PRIMARY KEY NOT NULL,
