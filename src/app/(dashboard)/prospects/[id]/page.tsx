@@ -735,6 +735,9 @@ export default function CompanyDetailPage() {
                 <InfoRow icon={<MapPin className="w-4 h-4" />} label="Address"
                   value={[company.address, company.city, company.state, company.zip].filter(Boolean).join(", ")} />
                 <InfoRow icon={<Globe className="w-4 h-4" />} label="Website" value={company.website} link isNew={newlyEnrichedFields.includes("website")} />
+                {company.instagram_url && (
+                  <InstagramRow url={company.instagram_url} isNew={newlyEnrichedFields.includes("instagram_url")} />
+                )}
                 {company.owner_name && <InfoRow icon={<UserPlus className="w-4 h-4" />} label="Owner" value={company.owner_name} isNew={newlyEnrichedFields.includes("owner_name")} />}
                 {company.google_rating && (
                   <InfoRow icon={<Star className="w-4 h-4" />} label="Rating"
@@ -1023,6 +1026,76 @@ export default function CompanyDetailPage() {
               )}
             </CardContent>
           </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Pull the @handle out of an Instagram URL.
+ * Accepts:
+ *   https://www.instagram.com/handle/         -> handle
+ *   https://instagram.com/handle              -> handle
+ *   instagram.com/handle/?utm=...             -> handle
+ *   https://www.instagram.com/handle/p/abc/   -> handle (drops the post path)
+ *   @handle                                    -> handle
+ *   handle                                     -> handle
+ */
+function extractInstagramHandle(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const cleaned = url.trim().replace(/^@/, "");
+  // Try to parse as URL first
+  const m = cleaned.match(/(?:^|\/\/)(?:www\.)?instagram\.com\/([A-Za-z0-9._]+)/i);
+  if (m) return m[1];
+  // Plain handle (no scheme/host)
+  if (/^[A-Za-z0-9._]+$/.test(cleaned)) return cleaned;
+  return null;
+}
+
+function InstagramRow({ url, isNew }: { url: string; isNew?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const handle = extractInstagramHandle(url);
+  const display = handle ? `@${handle}` : url;
+  const copyValue = handle ? `@${handle}` : url;
+  const igUrl = handle ? `https://www.instagram.com/${handle}` : url;
+
+  return (
+    <div className="flex items-start gap-2">
+      <span className="text-pink-500 mt-0.5">
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M12 2.16c3.2 0 3.58.01 4.85.07 1.17.05 1.8.25 2.23.41.56.22.96.48 1.38.9.42.42.68.82.9 1.38.16.42.36 1.06.41 2.23.06 1.27.07 1.65.07 4.85s-.01 3.58-.07 4.85c-.05 1.17-.25 1.8-.41 2.23-.22.56-.48.96-.9 1.38-.42.42-.82.68-1.38.9-.42.16-1.06.36-2.23.41-1.27.06-1.65.07-4.85.07s-3.58-.01-4.85-.07c-1.17-.05-1.8-.25-2.23-.41-.56-.22-.96-.48-1.38-.9-.42-.42-.68-.82-.9-1.38-.16-.42-.36-1.06-.41-2.23C2.17 15.58 2.16 15.2 2.16 12s.01-3.58.07-4.85c.05-1.17.25-1.8.41-2.23.22-.56.48-.96.9-1.38.42-.42.82-.68 1.38-.9.42-.16 1.06-.36 2.23-.41C8.42 2.17 8.8 2.16 12 2.16M12 0C8.74 0 8.33.01 7.05.07 5.78.13 4.9.33 4.14.63a5.6 5.6 0 0 0-2.03 1.32A5.6 5.6 0 0 0 .79 3.98C.49 4.74.29 5.62.23 6.89.17 8.17.16 8.58.16 11.84s.01 3.67.07 4.95c.06 1.27.26 2.15.56 2.91a5.6 5.6 0 0 0 1.32 2.03 5.6 5.6 0 0 0 2.03 1.32c.76.3 1.64.5 2.91.56 1.28.06 1.69.07 4.95.07s3.67-.01 4.95-.07c1.27-.06 2.15-.26 2.91-.56a5.6 5.6 0 0 0 2.03-1.32 5.6 5.6 0 0 0 1.32-2.03c.3-.76.5-1.64.56-2.91.06-1.28.07-1.69.07-4.95s-.01-3.67-.07-4.95c-.06-1.27-.26-2.15-.56-2.91a5.6 5.6 0 0 0-1.32-2.03A5.6 5.6 0 0 0 19.86.63C19.1.33 18.22.13 16.95.07 15.67.01 15.26 0 12 0Zm0 5.84a6.16 6.16 0 1 0 0 12.32 6.16 6.16 0 0 0 0-12.32Zm0 10.16a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm6.41-10.4a1.44 1.44 0 1 0 0-2.88 1.44 1.44 0 0 0 0 2.88Z"/></svg>
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs text-gray-500 flex items-center gap-1.5">
+          Instagram
+          {isNew && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-700 animate-pulse">NEW</span>
+          )}
+        </p>
+        <div className="flex items-center gap-1.5">
+          <a
+            href={igUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-pink-700 dark:text-pink-400 hover:underline font-medium truncate"
+            title="Open Instagram profile"
+          >
+            {display}
+          </a>
+          <button
+            onClick={async (e) => {
+              e.preventDefault();
+              try {
+                await navigator.clipboard.writeText(copyValue);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              } catch { /* clipboard unavailable */ }
+            }}
+            className="text-xs text-gray-500 hover:text-pink-600 hover:bg-pink-50 dark:hover:bg-pink-950 rounded px-1.5 py-0.5"
+            title="Copy handle to clipboard"
+          >
+            {copied ? "✓" : "Copy"}
+          </button>
         </div>
       </div>
     </div>
