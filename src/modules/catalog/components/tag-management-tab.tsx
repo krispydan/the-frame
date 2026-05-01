@@ -13,19 +13,25 @@ import {
 
 type TagItem = { id: string; tagName: string | null; dimension: string | null; source: string | null };
 
+// Dimension names match the actual catalog_tags data (camelCase). The
+// previous list used snake_case keys (frame_shape / lens_type) which silently
+// hid every curated camelCase tag from the UI. Source of truth: tag rows
+// in prod, by descending row count.
 const DIMENSIONS = [
-  "frame_shape", "style", "occasion", "material",
-  "lens_type", "gender", "season", "other",
+  "frameShape", "style", "color", "materialFrame",
+  "lens", "gender", "productType", "seasonal", "price", "other",
 ];
 
 const DIMENSION_LABELS: Record<string, string> = {
-  frame_shape: "Frame Shape",
+  frameShape: "Frame Shape",
   style: "Style",
-  occasion: "Occasion",
-  material: "Material",
-  lens_type: "Lens Type",
+  color: "Color",
+  materialFrame: "Material",
+  lens: "Lens Type",
   gender: "Gender",
-  season: "Season",
+  productType: "Product Type",
+  seasonal: "Season",
+  price: "Price",
   other: "Other",
 };
 
