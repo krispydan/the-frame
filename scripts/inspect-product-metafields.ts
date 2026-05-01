@@ -23,7 +23,8 @@ const Q = `
       mf_design:  metafield(namespace: "shopify", key: "eyewear-frame-design") { type value updatedAt references(first: 25) { edges { node { ... on Metaobject { handle displayName } } } } }
       mf_gender:  metafield(namespace: "shopify", key: "target-gender")        { type value updatedAt references(first: 25) { edges { node { ... on Metaobject { handle displayName } } } } }
       mf_color:   metafield(namespace: "shopify", key: "color-pattern")        { type value updatedAt references(first: 25) { edges { node { ... on Metaobject { handle displayName } } } } }
-      mf_custom_shape: metafield(namespace: "custom", key: "frame_shape")      { type value updatedAt }
+      mf_custom_shape: metafield(namespace: "custom", key: "frame_shape")  { type value updatedAt }
+      mf_custom_lens:  metafield(namespace: "custom", key: "lens_type")    { type value updatedAt }
     }
   }
 `;
@@ -39,6 +40,7 @@ interface Resp {
     mf_gender: MfRef;
     mf_color: MfRef;
     mf_custom_shape: MfText;
+    mf_custom_lens: MfText;
   } | null;
 }
 
@@ -85,6 +87,7 @@ async function inspectStore(store: "dtc" | "wholesale", skuPrefix: string) {
     ["shopify.target-gender", refDisplay(res.product.mf_gender), dt(res.product.mf_gender?.updatedAt)],
     ["shopify.color-pattern", refDisplay(res.product.mf_color), dt(res.product.mf_color?.updatedAt)],
     ["custom.frame_shape", textDisplay(res.product.mf_custom_shape), dt(res.product.mf_custom_shape?.updatedAt)],
+    ["custom.lens_type", textDisplay(res.product.mf_custom_lens), dt(res.product.mf_custom_lens?.updatedAt)],
   ];
   for (const [k, v, u] of rows) {
     console.log(`  ${k.padEnd(32)} ${v.padEnd(50)} ${u ? `(updated ${u})` : ""}`);

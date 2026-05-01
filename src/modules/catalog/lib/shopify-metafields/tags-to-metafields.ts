@@ -25,6 +25,22 @@ import {
 export type TagInput = { dimension: string; tagName: string | null };
 
 /**
+ * Display labels for `custom.lens_type` (single_line_text_field).
+ * The Shopify standard `shopify.lens-polarization` is also written
+ * (metaobject ref) — these coexist for theme flexibility.
+ */
+export const CUSTOM_LENS_TYPE_CHOICES = ["Polarized", "UV400"] as const;
+export type CustomLensTypeChoice = (typeof CUSTOM_LENS_TYPE_CHOICES)[number];
+
+const CUSTOM_LENS_TYPE_MAP: Record<string, CustomLensTypeChoice> = {
+  polarized: "Polarized",
+  uv400: "UV400",
+  uv: "UV400",
+  "non-polarized": "UV400",
+  nonpolarized: "UV400",
+};
+
+/**
  * Display labels for `custom.frame_shape` (list.single_line_text_field).
  * These match the Shopify metafield definition's `choices` validation
  * exactly — case and spacing matter. Trimmed from 10 to 6 because
@@ -47,12 +63,15 @@ export type TagsToMetafieldsResult = {
   eyewearFrameDesign: EyewearFrameDesignHandle | null;
   /** Full-vocab label for custom.frame_shape (single value, plain text). */
   customFrameShape: CustomFrameShapeChoice | null;
+  /** Plain-text label for custom.lens_type (Polarized / UV400). */
+  customLensType: CustomLensTypeChoice | null;
   targetGender: TargetGenderHandle | null;
   /** Source tag/value used per field, for debugging in the UI. */
   sources: {
     lensPolarization: string | null;
     eyewearFrameDesign: string | null;
     customFrameShape: string | null;
+    customLensType: string | null;
     targetGender: string | null;
   };
   /** Non-fatal warnings — unmapped values, ambiguous tags, etc. */
@@ -79,8 +98,12 @@ const LENS_MAP: Record<string, LensPolarizationHandle> = {
  * isn't in our tags but is in Shopify; cat-eye matches; etc.). Keep
  * aliases tight — drop anything we can't map confidently.
  */
-// Shopify's eyewear-frame-design enum is only: aviator, cat-eye, rectangle,
-// round, wayfarer, other. Map our broader vocabulary to those 6.
+// Map the-frame tag values to Shopify's 5 storefront-useful enum values
+// (aviator, cat-eye, rectangle, round, wayfarer). We deliberately don't
+// route anything to "other" — see the comment on EYEWEAR_FRAME_DESIGN_HANDLES
+// in handles.ts. Tags without a clean fit return null from this map and
+// the field is skipped on Shopify; their actual shape is still surfaced
+// through the richer custom.frame_shape metafield.
 const FRAME_DESIGN_MAP: Record<string, EyewearFrameDesignHandle> = {
   // Direct matches
   aviator: "aviator",
@@ -90,18 +113,14 @@ const FRAME_DESIGN_MAP: Record<string, EyewearFrameDesignHandle> = {
   rectangular: "rectangle",
   round: "round",
   wayfarer: "wayfarer",
-  // Remaps (confirmed mappings)
+  // Confirmed close-fit remaps
   square: "rectangle",
   oval: "round",
   butterfly: "cat-eye",
-  // Everything that doesn't have a closer match → "other"
-  oversized: "other",
-  geometric: "other",
-  wraparound: "other",
-  wrap: "other",
-  shield: "other",
-  browline: "other",
-  rimless: "other",
+  geometric: "rectangle",
+  // Tags with no useful storefront-filter equivalent are deliberately
+  // omitted — products with these tags skip the standard metafield:
+  //   oversized, wraparound, wrap, shield, browline, rimless
 };
 
 /**
@@ -210,9 +229,15 @@ export function mapTagsToMetafields(opts: {
 
   // Lens polarization — read from the `lens` tag dimension. Tags are now
   // the single source of truth (legacy products.lens_type column was dropped).
+  // Resolve the SAME tag through TWO maps in parallel so the Shopify
+  // standard handle and the custom-field label always agree on which tag
+  // they came from (mirrors the frame-shape pattern below).
   const lensFromTags = pickTagValue(opts.tags, "lens", LENS_MAP, warnings, "lens-polarization");
+  const customLensFromTags = pickTagValue(opts.tags, "lens", CUSTOM_LENS_TYPE_MAP, [], "custom.lens_type");
   let lensPolarization: LensPolarizationHandle | null = lensFromTags.value;
   let lensSource = lensFromTags.sourceRaw;
+  let customLensType: CustomLensTypeChoice | null = customLensFromTags.value;
+  let customLensSource = customLensFromTags.sourceRaw;
 
   // Eyewear frame design — `frameShape` dimension first; some legacy
   // products also have `frame_shape` (snake_case) so we accept both.
@@ -273,16 +298,22 @@ export function mapTagsToMetafields(opts: {
     warnings.push(`custom.frame_shape: dropped invalid choice "${customFrameShape}"`);
     customFrameShape = null;
   }
+  if (customLensType && !CUSTOM_LENS_TYPE_CHOICES.includes(customLensType)) {
+    warnings.push(`custom.lens_type: dropped invalid choice "${customLensType}"`);
+    customLensType = null;
+  }
 
   return {
     lensPolarization,
     eyewearFrameDesign: designLegacy,
     customFrameShape,
+    customLensType,
     targetGender,
     sources: {
       lensPolarization: lensSource,
       eyewearFrameDesign: designSource,
       customFrameShape: customFrameShapeSource,
+      customLensType: customLensSource,
       targetGender: genderSource,
     },
     warnings,

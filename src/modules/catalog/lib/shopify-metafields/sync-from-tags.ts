@@ -63,7 +63,8 @@ export interface ResolvedMetafield {
     | "eyewear-frame-design"
     | "target-gender"
     | "color-pattern"
-    | "custom.frame_shape";
+    | "custom.frame_shape"
+    | "custom.lens_type";
   /** The mapping guide handle(s) we picked from the-frame data. */
   handle: string;
   /** What it resolved to as a Shopify metaobject GID (null if not found). */
@@ -252,6 +253,26 @@ export async function syncMetafieldsFromTags(
         value: JSON.stringify(colorGids),
       });
     }
+  }
+
+  // ── custom.lens_type (single_line_text_field) ──
+  // Plain-text mirror of shopify.lens-polarization for theme convenience.
+  if (mapping.customLensType) {
+    inputs.push({
+      ownerId: productGid,
+      namespace: "custom",
+      key: "lens_type",
+      type: "single_line_text_field",
+      value: mapping.customLensType,
+    });
+    result.resolved.push({
+      field: "custom.lens_type",
+      handle: mapping.customLensType,
+      gid: null,
+      source: mapping.sources.customLensType,
+    });
+  } else {
+    result.skipReasons.push({ field: "custom.lens_type", reason: "no value mapped from the-frame data" });
   }
 
   // ── custom.frame_shape (list.single_line_text_field, full vocab) ──

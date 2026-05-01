@@ -161,16 +161,17 @@ export const TARGET_GENDER_HANDLES = [
 ] as const;
 export type TargetGenderHandle = (typeof TARGET_GENDER_HANDLES)[number];
 
-// Shopify's actual eyewear-frame-design enum is only 6 values. Our internal
-// tag vocabulary is broader (square, oval, oversized, geometric, etc.) — we
-// remap those to the closest valid handle in tags-to-metafields.ts.
+// Shopify's standard eyewear-frame-design enum has 6 values, but we
+// intentionally don't surface "other" — nobody filters by it on the
+// storefront, so products with shapes that don't fit cleanly (oversized,
+// niche geometric forms) simply skip this metafield. Their actual shape
+// still appears via custom.frame_shape.
 export const EYEWEAR_FRAME_DESIGN_HANDLES = [
   "aviator",
   "cat-eye",
   "rectangle",
   "round",
   "wayfarer",
-  "other",
 ] as const;
 export type EyewearFrameDesignHandle = (typeof EYEWEAR_FRAME_DESIGN_HANDLES)[number];
 
@@ -259,7 +260,7 @@ export function validateAiCategorization(raw: unknown): {
 
   const target_gender = includesNarrow(TARGET_GENDER_HANDLES, cm.target_gender) ? cm.target_gender : (problems.push({ field: "category_metafields.target_gender", message: `invalid "${cm.target_gender}", defaulting to "unisex"` }), "unisex" as const);
 
-  const eyewear_frame_design = includesNarrow(EYEWEAR_FRAME_DESIGN_HANDLES, cm.eyewear_frame_design) ? cm.eyewear_frame_design : (problems.push({ field: "category_metafields.eyewear_frame_design", message: `invalid "${cm.eyewear_frame_design}", defaulting to "other"` }), "other" as const);
+  const eyewear_frame_design = includesNarrow(EYEWEAR_FRAME_DESIGN_HANDLES, cm.eyewear_frame_design) ? cm.eyewear_frame_design : (problems.push({ field: "category_metafields.eyewear_frame_design", message: `invalid "${cm.eyewear_frame_design}", defaulting to "rectangle"` }), "rectangle" as const);
 
   return {
     output: {
