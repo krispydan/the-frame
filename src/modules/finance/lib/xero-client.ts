@@ -385,6 +385,82 @@ export async function xeroAdminFetch(
   }
 }
 
+/**
+ * Generic authenticated POST against the Xero Accounting API. Body is
+ * JSON-encoded; response is JSON-parsed. Same auth + error pattern as
+ * xeroAdminFetch.
+ */
+export async function xeroAdminPost(
+  path: string,
+  body: unknown,
+): Promise<{ success: true; data: unknown } | { success: false; error: string; status?: number }> {
+  try {
+    const auth = await getAccessToken();
+    if (!auth) return { success: false, error: "Not authenticated with Xero" };
+
+    const url = path.startsWith("http") ? path : `https://api.xero.com${path}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+        "Xero-tenant-id": auth.tenantId,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      return {
+        success: false,
+        status: res.status,
+        error: `Xero API ${res.status}: ${err.slice(0, 800)}`,
+      };
+    }
+
+    const data = await res.json();
+    return { success: true, data };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    console.error(`[Xero] POST ${path} error:`, e);
+    return { success: false, error: `Xero POST failed: ${msg}` };
+  }
+}
+
+/**
+ * Post a manual journal to Xero. Returns the created journal's ID and
+ * status from Xero, or a structured error.
+ */
+export async function postManualJournal(
+  payload: {
+    Narration: string;
+    Date: string;
+    Status: "POSTED" | "DRAFT";
+    JournalLines: Array<Record<string, unknown>>;
+  },
+): Promise<
+  | { success: true; manualJournalId: string; status: string; data: unknown }
+  | { success: false; error: string; status?: number }
+> {
+  const result = await xeroAdminPost("/api.xro/2.0/ManualJournals", {
+    ManualJournals: [payload],
+  });
+  if (!result.success) return result;
+
+  const data = result.data as { ManualJournals?: Array<{ ManualJournalID?: string; Status?: string }> };
+  const created = data.ManualJournals?.[0];
+  if (!created?.ManualJournalID) {
+    return { success: false, error: "Xero accepted the request but returned no ManualJournalID" };
+  }
+  return {
+    success: true,
+    manualJournalId: created.ManualJournalID,
+    status: created.Status || "UNKNOWN",
+    data: result.data,
+  };
+}
+
 export async function getChartOfAccounts(): Promise<{
   success: boolean;
   accounts?: Array<{ code: string; name: string; type: string; status: string }>;
