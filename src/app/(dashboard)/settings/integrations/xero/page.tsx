@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { XeroAccountMapping } from "@/modules/integrations/components/xero-account-mapping";
+import { XeroSharedMapping } from "@/modules/integrations/components/xero-shared-mapping";
 import { XeroTrackingMapping } from "@/modules/integrations/components/xero-tracking-mapping";
 import { XeroPayoutSync } from "@/modules/integrations/components/xero-payout-sync";
 
@@ -161,6 +162,7 @@ function XeroIntegrationsPageInner() {
       {status?.connected && (
         <div className="mt-6 space-y-6">
           <XeroAccountMapping />
+          <XeroSharedMapping />
           <XeroTrackingMapping />
           <XeroPayoutSync />
         </div>

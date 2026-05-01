@@ -177,8 +177,23 @@ export const PLATFORM_CATEGORY_SUGGESTIONS: Record<string, CategorySuggestion[]>
 
 export const SUPPORTED_PAYOUT_PLATFORMS = Object.keys(PLATFORM_CATEGORY_SUGGESTIONS);
 
+/**
+ * Special "_shared" pseudo-platform for category mappings that apply
+ * across every channel — currently the COGS expense account and the
+ * Inventory asset account, which post the same way regardless of source.
+ * Stored in xero_account_mappings with source_platform = "_shared" so we
+ * don't have to duplicate the mapping per platform.
+ */
+export const SHARED_PLATFORM_KEY = "_shared";
+
+export const SHARED_CATEGORY_SUGGESTIONS: CategorySuggestion[] = [
+  { category: "cogs",      label: "Cost of Goods Sold", hint: "Single expense account; tracking categories split per-channel COGS on the P&L. Typical: 5xxx Cost of Sales.", defaultAccountCode: "5100", defaultAccountName: "Cost of Goods Sold", side: "debit"  },
+  { category: "inventory", label: "Inventory",          hint: "Asset account inventory leaves when sold. Typical: 1400 Inventory.", defaultAccountCode: "1400", defaultAccountName: "Inventory", side: "credit" },
+];
+
 /** Get the category suggestion list for a platform. Returns [] if unknown. */
 export function getCategoriesForPlatform(platform: string): CategorySuggestion[] {
+  if (platform === SHARED_PLATFORM_KEY) return SHARED_CATEGORY_SUGGESTIONS;
   return PLATFORM_CATEGORY_SUGGESTIONS[platform] ?? [];
 }
 
