@@ -50,6 +50,16 @@ export async function GET(request: NextRequest) {
       .run();
   }
 
+  // Slack: announce the new connection so the team knows
+  void (async () => {
+    try {
+      const { notifyConnectedStore } = await import("@/modules/integrations/lib/slack/notifications");
+      await notifyConnectedStore({ service: "Xero", identifier: tokenData.tenantName || "Xero" });
+    } catch (e) {
+      console.error("[xero/callback] Slack connected_store alert failed:", e);
+    }
+  })();
+
   // Redirect using absolute URL so we don't bounce to localhost behind Railway proxy
   const url = absoluteUrl("/settings/integrations/xero", request);
   url.searchParams.set("connected", tokenData.tenantName || "Xero");

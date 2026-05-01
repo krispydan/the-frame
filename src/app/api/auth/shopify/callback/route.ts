@@ -117,6 +117,16 @@ export async function GET(request: NextRequest) {
     await db.run(sql`DELETE FROM shopify_oauth_states WHERE created_at < datetime('now', '-1 hour')`);
   } catch { /* ignore */ }
 
+  // Slack: announce the new connection so the team knows
+  void (async () => {
+    try {
+      const { notifyConnectedStore } = await import("@/modules/integrations/lib/slack/notifications");
+      await notifyConnectedStore({ service: "Shopify", identifier: shop });
+    } catch (e) {
+      console.error("[shopify/callback] Slack connected_store alert failed:", e);
+    }
+  })();
+
   // Redirect to settings (or where the caller asked). Use SHOPIFY_APP_URL as
   // the canonical base so we don't accidentally redirect to localhost:<port>
   // when the request came through Railway's reverse proxy.

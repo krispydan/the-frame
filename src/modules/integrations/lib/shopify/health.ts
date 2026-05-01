@@ -59,6 +59,7 @@ async function probeOne(shopId: string): Promise<ProbeResult | null> {
       entityId: shop.id,
       entityType: "shopify_shop",
     });
+    void notifyShopifyDown(shop.shopDomain, status, errorMessage).catch(() => {});
   } else if (previousStatus && previousStatus !== "ok" && status === "ok") {
     flipped = true;
     await db.insert(notifications).values({
@@ -92,4 +93,14 @@ export async function probeAllShops(): Promise<ProbeResult[]> {
     if (r) results.push(r);
   }
   return results;
+}
+
+/** Slack alert when Shopify connection flips ok -> non-ok. */
+async function notifyShopifyDown(shopDomain: string, status: string, errorMessage?: string): Promise<void> {
+  const { notifyIntegrationFailure } = await import("@/modules/integrations/lib/slack/notifications");
+  await notifyIntegrationFailure({
+    service: `Shopify (${shopDomain})`,
+    detail: `Health probe returned "${status}".${errorMessage ? ` ${errorMessage}` : ""} Reconnect to refresh the token.`,
+    fixUrl: "https://theframe.getjaxy.com/settings/integrations/shopify",
+  });
 }
