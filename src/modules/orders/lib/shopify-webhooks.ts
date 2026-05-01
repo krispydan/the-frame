@@ -251,6 +251,33 @@ export async function handleOrderCreate(order: ShopifyOrder, shopDomain?: string
     companyId: companyId || "",
     total: parseFloat(order.total_price),
   });
+
+  // Slack alert for wholesale orders only — Daniel deliberately opted out
+  // of high-value retail / first-time customer pings to keep noise down.
+  if (channel === "shopify_wholesale") {
+    try {
+      const { notifyWholesaleOrder } = await import("@/modules/integrations/lib/slack/notifications");
+      const topSkus = (order.line_items || []).slice(0, 5).map((li) => ({
+        sku: li.sku || "—",
+        name: li.title || "",
+        qty: li.quantity,
+      }));
+      const companyName = order.customer?.default_address?.company || null;
+      const shopUrl = shopDomain ? `https://${shopDomain.replace(/^https?:\/\//, "")}/admin/orders/${order.id}` : null;
+      await notifyWholesaleOrder({
+        orderNumber: order.name,
+        channel,
+        total: parseFloat(order.total_price),
+        currency: order.currency,
+        itemCount: order.line_items?.reduce((s, li) => s + li.quantity, 0) || 0,
+        companyName,
+        shopUrl,
+        topSkus,
+      });
+    } catch (e) {
+      console.error("[Shopify Webhook] Slack wholesale alert failed:", e);
+    }
+  }
 }
 
 export async function handleOrderUpdated(order: ShopifyOrder, shopDomain?: string) {
@@ -277,6 +304,27 @@ export async function handleOrderUpdated(order: ShopifyOrder, shopDomain?: strin
       ensureCustomerAccount(existing.companyId);
     } catch (e) {
       console.error("[Shopify Webhook] ensureCustomerAccount error:", e);
+    }
+  }
+
+  // Slack alerts on financial-status transitions: voided/refunded → payment_failed
+  // The "chargeback" topic is fired by the disputes/create webhook (handled separately
+  // when we wire it). Voided/refunded counts as a payment fail for our team's purposes.
+  const oldFinancial = (existing as { financialStatus?: string }).financialStatus;
+  const newFinancial = order.financial_status;
+  if (newFinancial !== oldFinancial && (newFinancial === "voided" || newFinancial === "refunded")) {
+    try {
+      const { notifyPaymentFailed } = await import("@/modules/integrations/lib/slack/notifications");
+      await notifyPaymentFailed({
+        orderNumber: order.name,
+        channel: existing.channel,
+        total: parseFloat(order.total_price),
+        currency: order.currency,
+        customerEmail: order.email || order.customer?.email || null,
+        reason: newFinancial === "voided" ? "voided" : "refunded",
+      });
+    } catch (e) {
+      console.error("[Shopify Webhook] Slack payment_failed alert failed:", e);
     }
   }
 }
