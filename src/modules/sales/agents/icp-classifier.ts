@@ -130,7 +130,7 @@ function classifyCompany(company: {
 
 // ── Agent Handler ──
 
-async function icpClassifierHandler(input: AgentInput): Promise<AgentOutput> {
+export async function icpClassifierHandler(input: AgentInput): Promise<AgentOutput> {
   const companyIds = input.companyIds as string[] | undefined;
 
   if (!companyIds || companyIds.length === 0) {

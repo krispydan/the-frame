@@ -110,6 +110,24 @@ export async function PATCH(
     return NextResponse.json({ error: "No valid fields" }, { status: 400 });
   }
 
+  // If the reviewer touched icp_score / icp_tier / icp_reasoning, treat the
+  // edit as a manual override so the auto-classifier doesn't undo it.
+  // Stamp icp_updated_by + icp_updated_at for audit + UI.
+  const editedIcp = ["icp_score", "icp_tier", "icp_reasoning"].some((k) => k in body);
+  if (editedIcp) {
+    sets.push("icp_manual_override = 1");
+    sets.push("icp_updated_at = datetime('now')");
+    // best-effort attribution; skip if no session helper available here
+    try {
+      const { getSessionUser } = await import("@/lib/get-session");
+      const user = await getSessionUser();
+      if (user?.id) {
+        sets.push("icp_updated_by = ?");
+        values.push(user.id);
+      }
+    } catch { /* no session, leave NULL */ }
+  }
+
   sets.push("updated_at = datetime('now')");
   values.push(id);
 
