@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RefreshCw, Send, Save, Loader2 } from "lucide-react";
+import { RefreshCw, Send, Save, Loader2, Tags, CheckCircle2, AlertCircle } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface AiCategorization {
   seo: { title: string; description: string };
@@ -27,6 +28,27 @@ interface MetafieldsTabProps {
   aiCategorizedAt: string | null;
   aiCategorizationModel: string | null;
   onRefresh: () => void;
+}
+
+/** Response shape from POST /products/:id/sync-shopify-metafields-from-tags */
+interface TagSyncResponse {
+  ok: boolean;
+  productId: string;
+  skuPrefix: string;
+  productName: string | null;
+  dryRun: boolean;
+  stores: Array<{
+    ok: boolean;
+    store: "dtc" | "wholesale";
+    skuPrefix: string;
+    shopifyProductId: string | null;
+    resolved: Array<{ field: string; handle: string; gid: string | null; source: string | null }>;
+    mappingWarnings: string[];
+    metafieldsAttempted: number;
+    metafieldsWritten: number;
+    metafieldErrors: string[];
+    skipReasons: Array<{ field: string; reason: string }>;
+  }>;
 }
 
 const METAFIELD_LABELS: Record<string, string> = {
@@ -50,6 +72,15 @@ export function MetafieldsTab({
   const [syncing, setSyncing] = useState(false);
   const [savingSeo, setSavingSeo] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+
+  // Tag-curated sync (separate flow from the AI-driven sync above).
+  // Pushes the 4 metafields the user curates via tags:
+  //   shopify.lens-polarization, shopify.eyewear-frame-design,
+  //   shopify.target-gender, shopify.color-pattern (+ custom.frame_shape).
+  const [tagSyncStore, setTagSyncStore] = useState<"both" | "dtc" | "wholesale">("both");
+  const [tagSyncing, setTagSyncing] = useState(false);
+  const [tagSyncResult, setTagSyncResult] = useState<TagSyncResponse | null>(null);
+  const [tagSyncError, setTagSyncError] = useState<string | null>(null);
 
   // Parse the JSON blob
   let parsed: AiCategorization | null = null;
@@ -121,6 +152,32 @@ export function MetafieldsTab({
       setSyncResult(`Error: ${err instanceof Error ? err.message : "unknown"}`);
     }
     setSyncing(false);
+  };
+
+  const handleTagSync = async () => {
+    setTagSyncing(true);
+    setTagSyncError(null);
+    setTagSyncResult(null);
+    try {
+      const stores = tagSyncStore === "both" ? ["dtc", "wholesale"] : [tagSyncStore];
+      const res = await fetch(
+        `/api/v1/catalog/products/${productId}/sync-shopify-metafields-from-tags`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ stores }),
+        },
+      );
+      const data = (await res.json()) as TagSyncResponse | { error: string };
+      if ("error" in data) {
+        setTagSyncError(data.error);
+      } else {
+        setTagSyncResult(data);
+      }
+    } catch (err) {
+      setTagSyncError(err instanceof Error ? err.message : "unknown");
+    }
+    setTagSyncing(false);
   };
 
   const handleSaveSeo = async () => {
@@ -202,6 +259,119 @@ export function MetafieldsTab({
       {syncResult && (
         <div className="text-sm px-1 text-muted-foreground">{syncResult}</div>
       )}
+
+      {/* ── Tag-curated metafield sync (separate from AI sync) ── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Tags className="h-4 w-4" />
+            Tag-curated metafields
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Pushes the 4 metafields the user curates via product tags
+            (lens-polarization, eyewear-frame-design, target-gender,
+            color-pattern) plus the custom <code>custom.frame_shape</code> field.
+            Uses the Tags tab as the single source of truth — no AI.
+          </p>
+          <div className="flex items-center gap-2">
+            <Select value={tagSyncStore} onValueChange={(v) => setTagSyncStore(v as typeof tagSyncStore)}>
+              <SelectTrigger className="w-44 h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="both">Both stores</SelectItem>
+                <SelectItem value="dtc">Retail (DTC) only</SelectItem>
+                <SelectItem value="wholesale">Wholesale only</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button size="sm" onClick={handleTagSync} disabled={tagSyncing}>
+              {tagSyncing ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <Send className="h-3 w-3 mr-1" />
+              )}
+              Sync from tags
+            </Button>
+          </div>
+
+          {tagSyncError && (
+            <div className="text-xs text-red-600 flex items-center gap-1">
+              <AlertCircle className="h-3 w-3" />
+              {tagSyncError}
+            </div>
+          )}
+
+          {tagSyncResult && (
+            <div className="space-y-2 pt-1">
+              {tagSyncResult.stores.map((s) => {
+                const fullySuccessful = s.ok && s.skipReasons.length === 0 && s.metafieldErrors.length === 0;
+                const colorClass = fullySuccessful
+                  ? "text-green-700 bg-green-50 border-green-200"
+                  : s.ok
+                  ? "text-amber-700 bg-amber-50 border-amber-200"
+                  : "text-red-700 bg-red-50 border-red-200";
+                return (
+                  <div key={s.store} className={`text-xs border rounded p-2 ${colorClass}`}>
+                    <div className="flex items-center gap-1 font-medium">
+                      {fullySuccessful ? (
+                        <CheckCircle2 className="h-3 w-3" />
+                      ) : (
+                        <AlertCircle className="h-3 w-3" />
+                      )}
+                      <span className="capitalize">
+                        {s.store === "dtc" ? "Retail (DTC)" : "Wholesale"}
+                      </span>
+                      <span className="ml-auto">
+                        {s.metafieldsWritten}/{s.metafieldsAttempted} written
+                      </span>
+                    </div>
+                    {s.resolved.length > 0 && (
+                      <ul className="mt-1 space-y-0.5">
+                        {s.resolved.map((r, i) => (
+                          <li key={i} className="flex items-center gap-1">
+                            <span className={r.gid || r.field === "custom.frame_shape" ? "text-green-700" : "text-amber-700"}>
+                              {r.gid || r.field === "custom.frame_shape" ? "✓" : "·"}
+                            </span>
+                            <span className="font-mono">{r.field}</span>
+                            <span>=</span>
+                            <span className="font-medium">{r.handle}</span>
+                            {r.source && <span className="text-muted-foreground">({r.source})</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {s.skipReasons.length > 0 && (
+                      <ul className="mt-1 space-y-0.5">
+                        {s.skipReasons.map((sr, i) => (
+                          <li key={i}>
+                            ⚠ <span className="font-mono">{sr.field}</span>: {sr.reason}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {s.metafieldErrors.length > 0 && (
+                      <ul className="mt-1 space-y-0.5">
+                        {s.metafieldErrors.map((e, i) => (
+                          <li key={i}>✗ {e}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {s.mappingWarnings.length > 0 && (
+                      <ul className="mt-1 space-y-0.5 text-muted-foreground">
+                        {s.mappingWarnings.map((w, i) => (
+                          <li key={i}>{w}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {parsed && (
         <>
