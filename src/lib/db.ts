@@ -506,6 +506,44 @@ try {
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_slack_message_log_topic ON slack_message_log(topic)`);
 } catch (e) { console.error("[db] Slack tables error:", e); }
 
+// ── Centralized cron scheduler ──
+// One Railway cron service hits /api/v1/cron/tick every minute. The
+// scheduler reads the in-code job registry, decides what's due, runs them,
+// and persists results here.
+try {
+  // Per-job runtime state — last_run, enabled toggle, schedule override.
+  // The job registry is in code (the source of truth), but this table lets
+  // the UI disable / re-enable jobs and see when they last fired.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS cron_job_state (
+    job_id TEXT PRIMARY KEY NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_run_id TEXT,
+    last_run_at TEXT,
+    last_status TEXT,
+    last_error TEXT,
+    last_duration_ms INTEGER,
+    in_progress INTEGER NOT NULL DEFAULT 0,
+    in_progress_since TEXT,
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+
+  // Run history. One row per job execution so the UI can show a sparkline
+  // and recent failures.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS cron_runs (
+    id TEXT PRIMARY KEY NOT NULL,
+    job_id TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT NOT NULL,
+    duration_ms INTEGER,
+    result TEXT,
+    error TEXT,
+    triggered_by TEXT
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cron_runs_job ON cron_runs(job_id, started_at DESC)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cron_runs_started ON cron_runs(started_at DESC)`);
+} catch (e) { console.error("[db] Cron scheduler tables error:", e); }
+
 try {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS operations_exports (
     id TEXT PRIMARY KEY NOT NULL,
