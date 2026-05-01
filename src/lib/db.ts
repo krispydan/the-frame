@@ -117,6 +117,13 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN enrichment_source TEXT"); } 
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN socials TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN contact_form_url TEXT"); } catch { /* exists */ }
 
+// ICP manual override — when a reviewer edits a prospect's tier/score the
+// classifier should leave it alone. icp_updated_by + icp_updated_at give us
+// "who changed this and when" for audit + UI.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN icp_manual_override INTEGER DEFAULT 0"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN icp_updated_by TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN icp_updated_at TEXT"); } catch { /* exists */ }
+
 // Image upload system: new columns on catalog_images
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN url TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN file_size INTEGER"); } catch { /* exists */ }

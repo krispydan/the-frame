@@ -27,6 +27,10 @@ export const companies = sqliteTable("companies", {
   icpTier: text("icp_tier", { enum: ["A", "B", "C", "D"] }),
   icpScore: integer("icp_score"),
   icpReasoning: text("icp_reasoning"),
+  // True when a reviewer manually set the tier/score. Classifier skips these.
+  icpManualOverride: integer("icp_manual_override", { mode: "boolean" }).default(false),
+  icpUpdatedBy: text("icp_updated_by"),
+  icpUpdatedAt: text("icp_updated_at"),
   ownerId: text("owner_id").references(() => users.id),
   tags: text("tags", { mode: "json" }).$type<string[]>(),
   notes: text("notes"),
