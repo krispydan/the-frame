@@ -216,10 +216,32 @@ function generateLowStockAlerts(): { lowStockCount: number; alertsCreated: numbe
        VALUES (?, 'inventory', ?, ?, ?, 'inventory', ?, 'sku', 0, 0, datetime('now'))`
     ).run(crypto.randomUUID(), title, message, severity, item.sku_id);
 
+    // Slack alert — only fire on the high-signal cases (out of stock or
+    // critically low). Below-reorder warnings are noisy and not Slack-worthy.
+    void slackStockAlert(item).catch((e) => console.error("[stock-sync] Slack alert failed:", e));
+
     created++;
   }
 
   return { lowStockCount: lowStockItems.length, alertsCreated: created };
+}
+
+async function slackStockAlert(item: Record<string, unknown>): Promise<void> {
+  const qty = Number(item.quantity);
+  const reorderPoint = Number(item.reorder_point);
+  const sku = String(item.sku);
+  const productName = String(item.product_name || "");
+  const colorName = item.color_name ? String(item.color_name) : null;
+
+  if (qty === 0) {
+    const { notifyOutOfStock } = await import("@/modules/integrations/lib/slack/notifications");
+    await notifyOutOfStock({ sku, productName, colorName });
+  } else if (qty <= reorderPoint * 0.25) {
+    const { notifyCriticalLowStock } = await import("@/modules/integrations/lib/slack/notifications");
+    await notifyCriticalLowStock({ sku, productName, colorName, quantity: qty, reorderPoint });
+  }
+  // Lower severities (below 50% reorder, below reorder point) are written to
+  // the in-app notifications table only — not Slack.
 }
 
 // ── Sync Status ──
