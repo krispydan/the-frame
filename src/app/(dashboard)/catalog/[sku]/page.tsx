@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, Save, Edit2, Check, X, Package, Tag, FileText,
-  Image as ImageIcon, Eye, ChevronRight,
+  Image as ImageIcon, Eye, ChevronRight, ExternalLink as ExternalLinkIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -206,6 +206,7 @@ export default function ProductDetailPage() {
           </div>
           <p className="text-muted-foreground font-mono">{product.skuPrefix}</p>
         </div>
+        {productId && <ExternalLinksRow productId={productId} />}
       </div>
 
       {/* Status Pipeline */}
@@ -495,6 +496,66 @@ function Field({ label, value, onChange, type = "text" }: { label: string; value
     <div className="space-y-1">
       <Label className="text-xs">{label}</Label>
       <Input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="h-8" />
+    </div>
+  );
+}
+
+/** Quick-jump links to this product on each external sales channel. */
+type ExternalLinkRow = {
+  channel: "shopify_retail" | "shopify_wholesale" | "faire" | "amazon" | "tiktok_shop";
+  label: string;
+  available: boolean;
+  url: string | null;
+  reason?: string;
+};
+
+function ExternalLinksRow({ productId }: { productId: string }) {
+  const [links, setLinks] = useState<ExternalLinkRow[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/v1/catalog/products/${productId}/external-links`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setLinks(d.links || []);
+      })
+      .catch(() => {
+        if (!cancelled) setLinks([]);
+      });
+    return () => { cancelled = true; };
+  }, [productId]);
+
+  // Always render the row (even while loading) so the page doesn't reflow
+  if (!links) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {links.map((link) => {
+        // Disabled state: not connected / integration not built
+        if (!link.available || !link.url) {
+          return (
+            <Button
+              key={link.channel}
+              size="sm"
+              variant="outline"
+              disabled
+              title={link.reason}
+              className="opacity-50"
+            >
+              <ExternalLinkIcon className="h-3 w-3 mr-1" />
+              {link.label}
+            </Button>
+          );
+        }
+        return (
+          <a key={link.channel} href={link.url} target="_blank" rel="noopener noreferrer">
+            <Button size="sm" variant="outline" title={link.reason}>
+              <ExternalLinkIcon className="h-3 w-3 mr-1" />
+              {link.label}
+            </Button>
+          </a>
+        );
+      })}
     </div>
   );
 }

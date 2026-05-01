@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { tags } from "@/modules/catalog/schema";
 import { eq, and } from "drizzle-orm";
+import { scheduleShopifyTagSync } from "@/modules/catalog/lib/shopify-metafields/auto-sync";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
@@ -34,6 +35,9 @@ export async function POST(request: NextRequest) {
     dimension: dimension || "other",
     source: source || "manual",
   });
+
+  // Auto-push to Shopify (debounced, fire-and-forget). Doesn't block the response.
+  scheduleShopifyTagSync(productId);
 
   return NextResponse.json({ tag: { id, productId, tagName, dimension, source } }, { status: 201 });
 }
