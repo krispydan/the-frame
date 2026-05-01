@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plug, ChevronRight, ShoppingBag, DollarSign, Warehouse, CheckCircle, AlertCircle, Circle } from "lucide-react";
+import { Plug, ChevronRight, ShoppingBag, DollarSign, Warehouse, MessageSquare, CheckCircle, AlertCircle, Circle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
@@ -18,6 +18,12 @@ type XeroStatus = {
   configured: boolean;
   connected: boolean;
   tenantName?: string;
+};
+
+type SlackStatus = {
+  configured: boolean;
+  auth: { ok: boolean; team?: string };
+  routing: Array<{ topic: string; channelId: string | null }>;
 };
 
 type ShipHeroStatus = {
@@ -49,6 +55,7 @@ export default function IntegrationsIndexPage() {
   const [shopifyShops, setShopifyShops] = useState<ShopifyShop[] | null>(null);
   const [xero, setXero] = useState<XeroStatus | null>(null);
   const [shiphero, setShiphero] = useState<ShipHeroStatus | null>(null);
+  const [slack, setSlack] = useState<SlackStatus | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/integrations/shopify")
@@ -63,6 +70,10 @@ export default function IntegrationsIndexPage() {
       .then((r) => r.json())
       .then((d) => setShiphero(d))
       .catch(() => setShiphero(null));
+    fetch("/api/v1/integrations/slack")
+      .then((r) => r.json())
+      .then((d) => setSlack(d))
+      .catch(() => setSlack({ configured: false, auth: { ok: false }, routing: [] }));
   }, []);
 
   const shopifyActive = shopifyShops?.filter((s) => s.isActive) ?? [];
@@ -87,6 +98,20 @@ export default function IntegrationsIndexPage() {
     !xero.configured ? "Not configured" :
     !xero.connected ? "Not connected" :
     `Connected: ${xero.tenantName || "Xero"}`;
+
+  const slackRouted = slack?.routing.filter((r) => r.channelId).length ?? 0;
+  const slackStatusKind: "ok" | "warn" | "off" =
+    slack === null ? "off" :
+    !slack.configured ? "off" :
+    !slack.auth.ok ? "warn" :
+    slackRouted === 0 ? "warn" :
+    "ok";
+  const slackLabel =
+    slack === null ? "Loading" :
+    !slack.configured ? "Not configured" :
+    !slack.auth.ok ? "Auth failed" :
+    slackRouted === 0 ? `Connected: ${slack.auth.team || "—"} (no routes)` :
+    `Connected: ${slack.auth.team || "—"} (${slackRouted} routes)`;
 
   return (
     <div className="container mx-auto p-6 max-w-5xl">
@@ -209,6 +234,24 @@ export default function IntegrationsIndexPage() {
             )}
           </CardContent>
         </Card>
+
+        <Link href="/settings/integrations/slack" className="block group cursor-pointer">
+          <Card className="transition-all group-hover:shadow-md group-hover:border-primary/40">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center justify-between text-base">
+                <span className="flex items-center gap-2">
+                  <MessageSquare className="h-5 w-5" />
+                  Slack
+                </span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </CardTitle>
+              <CardDescription>Real-time alerts + daily / weekly digests posted to your Slack channels.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <StatusBadge kind={slackStatusKind} label={slackLabel} />
+            </CardContent>
+          </Card>
+        </Link>
       </div>
 
       <p className="mt-6 text-xs text-muted-foreground">

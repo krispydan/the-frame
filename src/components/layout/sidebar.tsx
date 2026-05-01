@@ -104,6 +104,7 @@ const insightsNav: NavItem[] = [
     children: [
       { title: "Shopify", href: "/settings/integrations/shopify", icon: ShoppingBag },
       { title: "Xero", href: "/settings/integrations/xero", icon: DollarSign },
+      { title: "Slack", href: "/settings/integrations/slack", icon: Mail },
     ],
   },
 ];
