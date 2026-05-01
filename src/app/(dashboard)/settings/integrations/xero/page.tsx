@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { XeroAccountMapping } from "@/modules/integrations/components/xero-account-mapping";
 import { XeroTrackingMapping } from "@/modules/integrations/components/xero-tracking-mapping";
+import { XeroPayoutSync } from "@/modules/integrations/components/xero-payout-sync";
 
 type XeroStatus = {
   configured: boolean;
@@ -161,6 +162,7 @@ function XeroIntegrationsPageInner() {
         <div className="mt-6 space-y-6">
           <XeroAccountMapping />
           <XeroTrackingMapping />
+          <XeroPayoutSync />
         </div>
       )}
     </div>
