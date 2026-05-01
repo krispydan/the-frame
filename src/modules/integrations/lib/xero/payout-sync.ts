@@ -172,6 +172,24 @@ export async function syncShopifyPayouts(opts: SyncOpts = {}): Promise<SyncRunRe
             response: JSON.stringify({ manualJournalId: post.manualJournalId, status: post.status }),
           });
 
+          // Slack: payout synced 💸
+          void (async () => {
+            try {
+              const { notifyPayoutReceived } = await import("@/modules/integrations/lib/slack/notifications");
+              await notifyPayoutReceived({
+                payoutId: payout.id,
+                platform: summary.platform,
+                amount: summary.netPayoutAmount,
+                currency: summary.currency,
+                date: summary.payoutDate,
+                manualJournalId: post.manualJournalId,
+                reconciliationDelta: summary.reconciliationDelta,
+              });
+            } catch (e) {
+              console.error("[payout-sync] Slack payout alert failed:", e);
+            }
+          })();
+
           // ── COGS companion journal ──
           try {
             await postCogsCompanion({
@@ -211,6 +229,22 @@ export async function syncShopifyPayouts(opts: SyncOpts = {}): Promise<SyncRunRe
       completedAt: new Date().toISOString(),
     }).where(eq(xeroSyncRuns.id, runId));
 
+    // Slack: alert on per-payout failures (sent inline above per failure
+    // is too noisy for a multi-shop sync; aggregate at the run level).
+    if (result.failed > 0) {
+      void (async () => {
+        try {
+          const { notifyXeroSyncFailed } = await import("@/modules/integrations/lib/slack/notifications");
+          await notifyXeroSyncFailed({
+            payoutId: result.errors[0]?.payoutId ?? null,
+            platform: result.errors[0]?.platform ?? null,
+            errorMessage: `${result.failed} of ${result.totalPayouts} payouts failed. First error: ${result.errors[0]?.message ?? "unknown"}`,
+            fixUrl: "https://theframe.getjaxy.com/settings/integrations/xero",
+          });
+        } catch (e) { console.error("[payout-sync] Slack xero_sync_failed alert failed:", e); }
+      })();
+    }
+
     return result;
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown";
@@ -223,6 +257,20 @@ export async function syncShopifyPayouts(opts: SyncOpts = {}): Promise<SyncRunRe
       completedAt: new Date().toISOString(),
     }).where(eq(xeroSyncRuns.id, runId));
     result.errors.push({ payoutId: null, platform: null, message: `Fatal: ${message}` });
+
+    // Slack: fatal sync failure
+    void (async () => {
+      try {
+        const { notifyXeroSyncFailed } = await import("@/modules/integrations/lib/slack/notifications");
+        await notifyXeroSyncFailed({
+          payoutId: null,
+          platform: null,
+          errorMessage: `Sync run aborted: ${message}`,
+          fixUrl: "https://theframe.getjaxy.com/settings/integrations/xero",
+        });
+      } catch (slackError) { console.error("[payout-sync] Slack alert failed:", slackError); }
+    })();
+
     return result;
   }
 }
@@ -422,6 +470,24 @@ async function postCogsCompanion(opts: {
       trackingOptionId: tracking?.trackingOptionId ?? null,
     });
   }
+
+  // Slack: COGS journal posted 📚
+  void (async () => {
+    try {
+      const { notifyCogsPosted } = await import("@/modules/integrations/lib/slack/notifications");
+      await notifyCogsPosted({
+        payoutId: summary.payoutId,
+        platform: summary.platform,
+        totalCost: aggregation.totalCost,
+        currency: summary.currency,
+        totalUnits: aggregation.totalUnits,
+        skuCount: aggregation.lines.length,
+        manualJournalId: post.manualJournalId,
+      });
+    } catch (e) {
+      console.error("[payout-sync] Slack cogs alert failed:", e);
+    }
+  })();
 }
 
 /** Load the shared COGS + Inventory account mappings ("_shared" platform). */
