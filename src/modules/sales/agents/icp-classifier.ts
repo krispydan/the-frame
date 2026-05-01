@@ -151,9 +151,13 @@ async function icpClassifierHandler(input: AgentInput): Promise<AgentOutput> {
     const batch = companyIds.slice(i, i + batchSize);
     const placeholders = batch.map(() => "?").join(",");
 
+    // Skip rows with icp_manual_override = 1 — the reviewer's tier/score
+    // sticks until they explicitly hit "Reclassify".
     const companies = sqlite.prepare(`
       SELECT id, name, tags, source, type, state, email, phone, google_rating, google_review_count
-      FROM companies WHERE id IN (${placeholders})
+      FROM companies
+      WHERE id IN (${placeholders})
+        AND COALESCE(icp_manual_override, 0) = 0
     `).all(...batch) as Array<{
       id: string; name: string; tags: string | null; source: string | null;
       type: string | null; state: string | null; email: string | null; phone: string | null;
