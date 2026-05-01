@@ -15,6 +15,10 @@ const publicPaths = [
   "/api/v1/integrations/slack/scan-stuck-orders",
   "/api/v1/integrations/shopify/health-all",
   "/api/v1/integrations/xero/sync-payouts",
+  // Centralized cron scheduler — Railway cron pings tick every minute.
+  // jobs index + per-job state are also public so the UI can read them
+  // without auth in the same way the integrations pages do.
+  "/api/v1/cron/tick",
 ];
 
 function isPublicPath(pathname: string): boolean {
