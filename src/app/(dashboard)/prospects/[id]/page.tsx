@@ -42,6 +42,9 @@ interface Company {
   id: string; name: string; type: string; website: string; domain: string;
   phone: string; email: string; address: string; city: string; state: string; zip: string;
   status: string; source: string; icp_tier: string; icp_score: number; icp_reasoning: string;
+  icp_manual_override?: number | boolean | null;
+  icp_updated_by?: string | null;
+  icp_updated_at?: string | null;
   owner_id: string; owner_name: string; tags: string[]; notes: string;
   google_rating: number; google_review_count: number;
   enrichment_status: string;
@@ -124,6 +127,10 @@ export default function CompanyDetailPage() {
   const [editFields, setEditFields] = useState<Record<string, unknown>>({});
   const [newNote, setNewNote] = useState("");
   const [showAddContact, setShowAddContact] = useState<string | null>(null);
+  const [icpEditorOpen, setIcpEditorOpen] = useState(false);
+  const [icpDraft, setIcpDraft] = useState<{ tier: string; score: string; reasoning: string }>({ tier: "", score: "", reasoning: "" });
+  const [icpSaving, setIcpSaving] = useState(false);
+  const [reclassifying, setReclassifying] = useState(false);
   const [editingContact, setEditingContact] = useState<string | null>(null);
   const [contactForm, setContactForm] = useState<Record<string, string>>({});
   const updateContactForm = (key: string, value: string) => {
@@ -408,12 +415,151 @@ export default function CompanyDetailPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* ICP Badge */}
-          {company.icp_tier && (
-            <div className={`px-3 py-1.5 rounded-lg text-sm font-bold ${tierColors[company.icp_tier] || "bg-gray-100"}`}>
-              ICP {company.icp_tier} · {company.icp_score}
-            </div>
-          )}
+          {/* ICP — clickable badge that opens the inline editor */}
+          <div className="relative">
+            <button
+              onClick={() => {
+                setIcpDraft({
+                  tier: company.icp_tier || "",
+                  score: company.icp_score != null ? String(company.icp_score) : "",
+                  reasoning: company.icp_reasoning || "",
+                });
+                setIcpEditorOpen((o) => !o);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-sm font-bold inline-flex items-center gap-1.5 ${
+                company.icp_tier ? (tierColors[company.icp_tier] || "bg-gray-100") : "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
+              }`}
+              title="Click to edit ICP tier and score"
+            >
+              ICP {company.icp_tier || "—"}{company.icp_score != null ? ` · ${company.icp_score}` : ""}
+              {company.icp_manual_override ? (
+                <span title={`Manually set${company.icp_updated_at ? " · " + new Date(company.icp_updated_at).toLocaleDateString() : ""}`}>✓</span>
+              ) : null}
+            </button>
+
+            {icpEditorOpen && (
+              <div className="absolute right-0 top-full mt-2 w-80 bg-white dark:bg-gray-800 border rounded-lg shadow-lg z-50 p-4 space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Tier</label>
+                  <div className="flex gap-1">
+                    {(["A", "B", "C", "D", "F"] as const).map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => setIcpDraft((d) => ({ ...d, tier: t }))}
+                        className={`flex-1 py-1.5 rounded text-sm font-bold ${
+                          icpDraft.tier === t
+                            ? tierColors[t] || "bg-gray-200"
+                            : "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200"
+                        }`}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setIcpDraft((d) => ({ ...d, tier: "" }))}
+                      className={`flex-1 py-1.5 rounded text-sm ${
+                        icpDraft.tier === ""
+                          ? "bg-gray-300 dark:bg-gray-600"
+                          : "bg-gray-100 dark:bg-gray-700 hover:bg-gray-200"
+                      }`}
+                    >
+                      —
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Score (0–10)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={10}
+                    value={icpDraft.score}
+                    onChange={(e) => setIcpDraft((d) => ({ ...d, score: e.target.value }))}
+                    className="w-full px-3 py-1.5 border rounded text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Reasoning</label>
+                  <textarea
+                    value={icpDraft.reasoning}
+                    onChange={(e) => setIcpDraft((d) => ({ ...d, reasoning: e.target.value }))}
+                    rows={3}
+                    placeholder="Why this tier? (e.g. 12 LA boutique locations, exact ICP fit)"
+                    className="w-full px-3 py-1.5 border rounded text-sm"
+                  />
+                </div>
+
+                {company.icp_manual_override && (
+                  <div className="text-xs text-muted-foreground">
+                    ✓ Manually set{company.icp_updated_at ? ` on ${new Date(company.icp_updated_at).toLocaleString()}` : ""}.
+                    Auto-classifier won&apos;t change this until you click Reclassify below.
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2 pt-1 border-t">
+                  <button
+                    onClick={async () => {
+                      setIcpSaving(true);
+                      const body: Record<string, unknown> = {
+                        icp_tier: icpDraft.tier || null,
+                        icp_reasoning: icpDraft.reasoning || null,
+                      };
+                      if (icpDraft.score !== "") body.icp_score = Number(icpDraft.score);
+                      try {
+                        const r = await fetch(`/api/v1/sales/prospects/${id}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(body),
+                        });
+                        if (r.ok) {
+                          setIcpEditorOpen(false);
+                          // Refetch the company
+                          const cr = await fetch(`/api/v1/sales/prospects/${id}`);
+                          if (cr.ok) setCompany(await cr.json());
+                        }
+                      } finally {
+                        setIcpSaving(false);
+                      }
+                    }}
+                    disabled={icpSaving}
+                    className="flex-1 px-3 py-1.5 bg-primary text-primary-foreground rounded text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {icpSaving ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!confirm("Re-classify this prospect using the auto-classifier? Your manual override will be cleared.")) return;
+                      setReclassifying(true);
+                      try {
+                        const r = await fetch(`/api/v1/sales/prospects/${id}/reclassify`, { method: "POST" });
+                        if (r.ok) {
+                          setIcpEditorOpen(false);
+                          const cr = await fetch(`/api/v1/sales/prospects/${id}`);
+                          if (cr.ok) setCompany(await cr.json());
+                        }
+                      } finally {
+                        setReclassifying(false);
+                      }
+                    }}
+                    disabled={reclassifying}
+                    className="px-3 py-1.5 border rounded text-sm font-medium hover:bg-muted disabled:opacity-50"
+                    title="Clear manual override and let the classifier re-rate"
+                  >
+                    {reclassifying ? "..." : "↻ Reclassify"}
+                  </button>
+                  <button
+                    onClick={() => setIcpEditorOpen(false)}
+                    className="px-3 py-1.5 border rounded text-sm hover:bg-muted"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
 
           {/* Status dropdown */}
           <div className="relative">
