@@ -374,6 +374,90 @@ async function handleFulfillmentCreate(fulfillment: ShopifyFulfillment) {
   });
 }
 
+async function handleFulfillmentUpdate(fulfillment: ShopifyFulfillment) {
+  // Update tracking details if they've changed
+  const existing = db.select().from(orders)
+    .where(eq(orders.externalId, String(fulfillment.order_id)))
+    .get();
+  if (!existing) return;
+
+  if (fulfillment.tracking_number || fulfillment.tracking_company) {
+    db.update(orders).set({
+      trackingNumber: fulfillment.tracking_number || existing.trackingNumber,
+      trackingCarrier: fulfillment.tracking_company || existing.trackingCarrier,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(orders.id, existing.id)).run();
+  }
+}
+
+interface ShopifyRefund {
+  id: number;
+  order_id: number;
+  created_at: string;
+  note?: string;
+  refund_line_items?: Array<{
+    quantity: number;
+    line_item: { sku?: string };
+  }>;
+  transactions?: Array<{
+    amount: string;
+    kind: string;
+    status: string;
+  }>;
+}
+
+async function handleRefundCreate(refund: ShopifyRefund) {
+  const existing = db.select().from(orders)
+    .where(eq(orders.externalId, String(refund.order_id)))
+    .get();
+  if (!existing) return;
+
+  // Compute refund total from transactions
+  const refundTotal = (refund.transactions ?? [])
+    .filter((t) => t.kind === "refund" && t.status === "success")
+    .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+
+  if (refundTotal > 0) {
+    db.update(orders).set({
+      status: "cancelled",
+      updatedAt: new Date().toISOString(),
+    }).where(eq(orders.id, existing.id)).run();
+  }
+}
+
+interface ShopifyInventoryLevel {
+  inventory_item_id: number;
+  location_id: number;
+  available: number | null;
+  updated_at: string;
+}
+
+async function handleInventoryLevelUpdate(level: ShopifyInventoryLevel, shopDomain?: string) {
+  // Log only — our inventory source of truth is ShipHero (synced via cron).
+  // We don't overwrite ShipHero data with Shopify changes, but we log the
+  // event for observability. The shopify_webhook_events table captures the raw
+  // payload; this handler is a no-op placeholder.
+  void level;
+  void shopDomain;
+}
+
+interface ShopifyProductUpdate {
+  id: number;
+  title: string;
+  handle: string;
+  status: string;
+  updated_at: string;
+  variants?: Array<{ sku: string; inventory_quantity: number }>;
+}
+
+async function handleProductUpdate(product: ShopifyProductUpdate, _shopDomain?: string) {
+  // Products are managed from the-frame → Shopify (not the reverse).
+  // Log only — the raw payload is in shopify_webhook_events.
+  // If we detect a SKU rename or status change we could surface a warning,
+  // but for now we treat Shopify product edits as out-of-band.
+  void product;
+}
+
 // ── Register with Webhook Infrastructure ──
 
 webhookRegistry.register("shopify", async (payload) => {
@@ -396,7 +480,8 @@ webhookRegistry.register("shopify", async (payload) => {
       await handleOrderCreate(order, shopDomain);
       break;
     }
-    case "orders/updated": {
+    case "orders/updated":
+    case "orders/paid": {
       const order = payload.parsedBody as ShopifyOrder;
       await handleOrderUpdated(order, shopDomain);
       break;
@@ -411,6 +496,32 @@ webhookRegistry.register("shopify", async (payload) => {
       await handleFulfillmentCreate(fulfillment);
       break;
     }
+    case "fulfillments/update": {
+      const fulfillment = payload.parsedBody as ShopifyFulfillment;
+      await handleFulfillmentUpdate(fulfillment);
+      break;
+    }
+    case "refunds/create": {
+      const refund = payload.parsedBody as ShopifyRefund;
+      await handleRefundCreate(refund);
+      break;
+    }
+    case "inventory_levels/update": {
+      const level = payload.parsedBody as ShopifyInventoryLevel;
+      await handleInventoryLevelUpdate(level, shopDomain);
+      break;
+    }
+    case "customers/create":
+    case "customers/update": {
+      // Customer data is managed via order webhooks (ensureCustomerAccount).
+      // These events are logged in shopify_webhook_events for observability.
+      break;
+    }
+    case "products/update": {
+      const product = payload.parsedBody as ShopifyProductUpdate;
+      await handleProductUpdate(product, shopDomain);
+      break;
+    }
     default:
       return { ok: true, message: `Unhandled topic: ${topic}` };
   }
@@ -421,26 +532,16 @@ webhookRegistry.register("shopify", async (payload) => {
   return { ok: true, message: `Processed ${topic} for ${name}` };
 });
 
-// ── Webhook Registration Guide ──
-// 
-// Register these webhooks in Shopify Admin → Settings → Notifications → Webhooks:
+// ── Webhook Registration ──
 //
-// | Topic                | URL                                                  |
-// |----------------------|------------------------------------------------------|
-// | orders/create        | https://<your-domain>/api/webhooks/shopify            |
-// | orders/updated       | https://<your-domain>/api/webhooks/shopify            |
-// | orders/cancelled     | https://<your-domain>/api/webhooks/shopify            |
-// | fulfillments/create  | https://<your-domain>/api/webhooks/shopify            |
+// All subscriptions are managed programmatically via:
 //
-// Set format to JSON. Set SHOPIFY_WEBHOOK_SECRET env var to the webhook signing secret.
+//   POST /api/v1/integrations/shopify/setup-webhooks
+//   GET  /api/v1/integrations/shopify/setup-webhooks  (status check)
 //
-// Or register programmatically via Shopify Admin API:
+// Or from Railway SSH:
+//   npx tsx scripts/setup-shopify-webhooks.ts          # dry run
+//   npx tsx scripts/setup-shopify-webhooks.ts --apply  # register
 //
-//   POST /admin/api/2024-01/webhooks.json
-//   {
-//     "webhook": {
-//       "topic": "orders/create",
-//       "address": "https://<your-domain>/api/webhooks/shopify",
-//       "format": "json"
-//     }
-//   }
+// All topics point to: ${SHOPIFY_APP_URL}/api/v1/webhooks/shopify
+// HMAC is verified against SHOPIFY_API_SECRET (shared across both stores).
