@@ -23,6 +23,7 @@ import { syncShopifyPayouts } from "@/modules/integrations/lib/xero/payout-sync"
 import { postDailyDigest, postWeeklyDigest } from "@/modules/integrations/lib/slack/digests";
 import { syncShipHeroOrders } from "@/modules/operations/lib/shiphero/sync-orders";
 import { syncShipHeroInventory, isDuringBusinessHours } from "@/modules/operations/lib/shiphero/sync-inventory";
+import { runShopifyMetafieldSync } from "@/modules/catalog/lib/shopify-metafields/bulk-sync-job";
 
 export type CronJob = {
   id: string;                         // stable, kebab-case
@@ -42,6 +43,17 @@ export type CronJob = {
 };
 
 export const CRON_JOBS: CronJob[] = [
+  // ── Catalog metafield sync ──
+  // Catch-all nightly sweep to keep Shopify metafields in sync with
+  // the-frame's tag data. Immediate syncs happen on tag mutations
+  // (auto-sync.ts debounced per-product). This handles any drift.
+  {
+    id: "shopify-metafield-sync",
+    schedule: "0 3 * * *",  // 03:00 UTC ≈ 8pm PT (low-traffic window)
+    description: "Sync tag-curated metafields (lens, frame shape, gender, color) to retail + wholesale Shopify for all products",
+    handler: runShopifyMetafieldSync,
+  },
+
   // ── Health probes ──
   {
     id: "shopify-health-probe",
