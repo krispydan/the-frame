@@ -36,7 +36,7 @@ const STYLE_KEYWORDS: Record<StyleCategory, string[]> = {
   sporty: ["sport", "sporty", "athletic", "wrap", "shield", "rectangular", "active", "running", "cycling", "polarized", "mirrored"],
   professional: ["professional", "classic", "rectangular", "square", "metal", "titanium", "rimless", "semi-rimless", "business", "office"],
   fashion: ["fashion", "bold", "oversized", "cat-eye", "cat eye", "geometric", "butterfly", "aviator", "statement", "trendy", "gradient"],
-  casual: ["casual", "everyday", "wayfarer", "round", "simple", "lightweight", "comfortable", "versatile"],
+  casual: ["casual", "everyday", "round", "simple", "lightweight", "comfortable", "versatile"],
 };
 
 export function detectStyleCategory(product: {
@@ -118,13 +118,13 @@ export function formatDimensionsLine(context: Pick<ProductContext, "lensWidth" |
 /** Copy generation prompt templates */
 export const COPY_PROMPTS = {
   description: (name: string, details: string) =>
-    `Write a compelling product description for "${name}" sunglasses by Jaxy. Details: ${details}. Keep it 2-3 paragraphs, focus on style and lifestyle appeal. Brand voice: confident, approachable, modern.`,
+    `Write a compelling product description for "${name}" sunglasses by Jaxy. Details: ${details}. Keep it 2-3 paragraphs, focus on style and lifestyle appeal. Brand voice: confident, approachable, modern. Never mention price, affordability, value, retail pricing, wholesale pricing, MSRP, cost, discounts, or anything being inexpensive/expensive. Never use the word "wayfarer" or "wayfarer-inspired". The copy must work unchanged for both retail and wholesale.`,
   
   shortDescription: (name: string, details: string) =>
-    `Write a short product description (1-2 sentences, max 160 chars) for "${name}" by Jaxy. Details: ${details}.`,
+    `Write a short product description (1-2 sentences, max 160 chars) for "${name}" by Jaxy. Details: ${details}. Never mention price, affordability, value, retail pricing, wholesale pricing, MSRP, cost, discounts, or anything being inexpensive/expensive. Never use the word "wayfarer" or "wayfarer-inspired".`,
 
   bulletPoints: (name: string, details: string) =>
-    `Write 5 bullet points for "${name}" sunglasses by Jaxy. Details: ${details}. Each bullet should highlight a key feature or benefit. Keep each bullet under 100 characters.`,
+    `Write 5 bullet points for "${name}" sunglasses by Jaxy. Details: ${details}. Each bullet should highlight a key feature or benefit. Keep each bullet under 100 characters. Never mention price, affordability, value, retail pricing, wholesale pricing, MSRP, cost, discounts, or anything being inexpensive/expensive. Never use the word "wayfarer" or "wayfarer-inspired".`,
 
   seoTitle: (name: string, category: string) =>
     `Write an SEO-optimized title for "${name}" ${category} by Jaxy. Max 60 characters. Include brand name.`,
