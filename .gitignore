@@ -50,3 +50,6 @@ data/scrape-import/
 
 # script output artifacts (regenerated per run)
 scripts/*-report.json
+
+# Local DB backups
+backups/
