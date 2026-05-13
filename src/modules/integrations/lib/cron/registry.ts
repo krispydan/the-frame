@@ -24,6 +24,7 @@ import { postDailyDigest, postWeeklyDigest } from "@/modules/integrations/lib/sl
 import { syncShipHeroOrders } from "@/modules/operations/lib/shiphero/sync-orders";
 import { syncShipHeroInventory, isDuringBusinessHours } from "@/modules/operations/lib/shiphero/sync-inventory";
 import { runShopifyMetafieldSync } from "@/modules/catalog/lib/shopify-metafields/bulk-sync-job";
+import { syncSettlementsAllShops } from "@/modules/finance/lib/shopify-settlements";
 
 export type CronJob = {
   id: string;                         // stable, kebab-case
@@ -87,6 +88,17 @@ export const CRON_JOBS: CronJob[] = [
     schedule: "0 15 * * *",  // 15:00 UTC ≈ 8am PT (after Shopify settles overnight)
     description: "Pull recent Shopify payouts and post paired revenue + COGS journals to Xero",
     handler: () => syncShopifyPayouts({}),
+  },
+
+  // ── Shopify Payments settlement sync ──
+  // Pulls payouts via the Admin API and writes rows into the `settlements`
+  // table so the Finance > Settlements UI auto-populates. Runs an hour
+  // after xero-payout-sync so the two pipelines stay independent.
+  {
+    id: "shopify-settlements-sync",
+    schedule: "0 16 * * *",  // 16:00 UTC ≈ 9am PT
+    description: "Pull Shopify Payments payouts via Admin API into the local settlements table",
+    handler: syncSettlementsAllShops,
   },
 
   // ── ShipHero ──

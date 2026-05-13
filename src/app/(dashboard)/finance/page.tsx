@@ -240,6 +240,8 @@ function FinancePageContent() {
 
   const [stlRefreshing, setStlRefreshing] = useState(false);
   const [stlLastRefreshed, setStlLastRefreshed] = useState<Date | null>(null);
+  const [stlSyncing, setStlSyncing] = useState(false);
+  const [stlSyncResult, setStlSyncResult] = useState<string | null>(null);
   const loadSettlements = useCallback(async () => {
     setStlRefreshing(true);
     try {
@@ -251,6 +253,31 @@ function FinancePageContent() {
       setStlRefreshing(false);
     }
   }, []);
+
+  const handleSyncSettlementsFromShopify = useCallback(async () => {
+    setStlSyncing(true);
+    setStlSyncResult(null);
+    try {
+      const res = await fetch("/api/v1/finance/settlements/sync", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok && res.status !== 207) {
+        setStlSyncResult(`✗ ${data.error || "Sync failed"}`);
+        return;
+      }
+      const { synced, skipped } = data.totals || { synced: 0, skipped: 0 };
+      const errors = (data.perShop || []).filter((s: { error?: string }) => s.error);
+      let msg = `✓ Synced ${synced} new payout${synced === 1 ? "" : "s"}, skipped ${skipped} already imported`;
+      if (errors.length > 0) {
+        msg += ` — ${errors.length} shop${errors.length === 1 ? "" : "s"} errored (${errors.map((e: { channel: string }) => e.channel).join(", ")})`;
+      }
+      setStlSyncResult(msg);
+      if (synced > 0) await loadSettlements();
+    } catch (e) {
+      setStlSyncResult(`✗ ${e instanceof Error ? e.message : "Sync failed"}`);
+    } finally {
+      setStlSyncing(false);
+    }
+  }, [loadSettlements]);
 
   const loadExpenses = useCallback(async () => {
     const res = await fetch("/api/v1/finance/expenses?limit=50");
@@ -413,6 +440,9 @@ function FinancePageContent() {
           onRefresh={loadSettlements}
           refreshing={stlRefreshing}
           lastRefreshedAt={stlLastRefreshed}
+          onSyncFromShopify={handleSyncSettlementsFromShopify}
+          syncing={stlSyncing}
+          syncResult={stlSyncResult}
         />
       )}
       {tab === "reconciliation" && (
@@ -651,31 +681,54 @@ function SettlementsTab({
   onRefresh,
   refreshing,
   lastRefreshedAt,
+  onSyncFromShopify,
+  syncing,
+  syncResult,
 }: {
   settlements: Settlement[];
   onSyncToXero: (id: string) => void;
   onRefresh: () => void;
   refreshing: boolean;
   lastRefreshedAt: Date | null;
+  onSyncFromShopify: () => void;
+  syncing: boolean;
+  syncResult: string | null;
 }) {
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <div>
           <h3 className="font-semibold">Settlement History</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Imported via CSV upload. Shopify Payments doesn&apos;t expose payouts as webhooks — fresh data only arrives when you re-upload a payout CSV.
+            Auto-pulled from Shopify Payments daily at 9am PT. Use &ldquo;Sync from Shopify&rdquo; to pull immediately, or upload a payout CSV to backfill older data.
             {lastRefreshedAt && <> &middot; Last refreshed {lastRefreshedAt.toLocaleTimeString()}</>}
           </p>
+          {syncResult && (
+            <p className={`text-xs mt-1 ${syncResult.startsWith("✓") ? "text-green-600" : "text-red-600"}`}>
+              {syncResult}
+            </p>
+          )}
         </div>
-        <button
-          onClick={onRefresh}
-          disabled={refreshing}
-          className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-          {refreshing ? "Refreshing…" : "Refresh"}
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={onSyncFromShopify}
+            disabled={syncing}
+            className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Pull new payouts from Shopify Payments"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+            {syncing ? "Syncing…" : "Sync from Shopify"}
+          </button>
+          <button
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Re-query local data without hitting Shopify"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+            {refreshing ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
       </div>
 
       <div className="rounded-lg border bg-card overflow-x-auto">

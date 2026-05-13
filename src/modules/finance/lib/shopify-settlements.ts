@@ -30,15 +30,17 @@ interface ShopifyPayoutTransaction {
 
 /**
  * Sync Shopify Payments payouts for a given store.
- * Uses Shopify Admin API: GET /admin/api/2024-01/shopify_payments/payouts.json
+ * Uses Shopify Admin API: GET /admin/api/{apiVersion}/shopify_payments/payouts.json
+ * Requires `read_shopify_payments_payouts` scope on the access token.
  */
 export async function syncShopifySettlements(
   storeDomain: string,
   accessToken: string,
   channel: "shopify_dtc" | "shopify_wholesale",
-  options: { sinceId?: string } = {}
+  options: { sinceId?: string; apiVersion?: string } = {}
 ): Promise<{ synced: number; skipped: number }> {
-  const baseUrl = `https://${storeDomain}/admin/api/2024-01`;
+  const apiVersion = options.apiVersion || "2025-07";
+  const baseUrl = `https://${storeDomain}/admin/api/${apiVersion}`;
   const headers = { "X-Shopify-Access-Token": accessToken, "Content-Type": "application/json" };
 
   // Fetch payouts
@@ -157,6 +159,81 @@ export async function syncShopifySettlements(
   }
 
   return { synced, skipped };
+}
+
+/**
+ * Orchestrator: loop every active Shopify shop in the DB and sync its
+ * Payments payouts via the Admin API. Skips shops that don't have
+ * Shopify Payments enabled (we detect via 402/422 on the payouts endpoint).
+ *
+ * Wired up from:
+ *   - POST /api/v1/finance/settlements/sync  (UI button)
+ *   - cron registry "shopify-settlements-sync"
+ *
+ * Idempotent — re-runs skip payouts already imported (via external_id).
+ */
+export async function syncSettlementsAllShops(): Promise<{
+  ok: boolean;
+  totals: { synced: number; skipped: number };
+  perShop: Array<{
+    channel: string;
+    shopDomain: string;
+    synced: number;
+    skipped: number;
+    error?: string;
+  }>;
+}> {
+  // Lazy import to keep this module light when called from non-server contexts
+  const { listInstalledShops } = await import("@/modules/integrations/lib/shopify/admin-api");
+  const shops = await listInstalledShops();
+
+  const perShop: Array<{ channel: string; shopDomain: string; synced: number; skipped: number; error?: string }> = [];
+  let totalSynced = 0;
+  let totalSkipped = 0;
+
+  for (const shop of shops) {
+    // Map admin-api channel ("retail"/"wholesale") → settlements.channel enum
+    const settlementChannel: "shopify_dtc" | "shopify_wholesale" | null =
+      shop.channel === "retail" ? "shopify_dtc"
+      : shop.channel === "wholesale" ? "shopify_wholesale"
+      : null;
+    if (!settlementChannel) {
+      perShop.push({
+        channel: shop.channel,
+        shopDomain: shop.shopDomain,
+        synced: 0,
+        skipped: 0,
+        error: `Unsupported channel "${shop.channel}" — settlements table only models shopify_dtc / shopify_wholesale`,
+      });
+      continue;
+    }
+
+    try {
+      const r = await syncShopifySettlements(
+        shop.shopDomain,
+        shop.accessToken,
+        settlementChannel,
+        { apiVersion: shop.apiVersion || undefined },
+      );
+      perShop.push({ channel: shop.channel, shopDomain: shop.shopDomain, ...r });
+      totalSynced += r.synced;
+      totalSkipped += r.skipped;
+    } catch (e) {
+      perShop.push({
+        channel: shop.channel,
+        shopDomain: shop.shopDomain,
+        synced: 0,
+        skipped: 0,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  return {
+    ok: perShop.every((s) => !s.error),
+    totals: { synced: totalSynced, skipped: totalSkipped },
+    perShop,
+  };
 }
 
 /**

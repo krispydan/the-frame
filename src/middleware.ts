@@ -16,6 +16,7 @@ const publicPaths = [
   "/api/v1/integrations/shopify/health-all",
   "/api/v1/integrations/xero/sync-payouts",
   "/api/v1/orders/shopify-sync",
+  "/api/v1/finance/settlements/sync",
   // Centralized cron scheduler — Railway cron pings tick every minute.
   // jobs index + per-job state are also public so the UI can read them
   // without auth in the same way the integrations pages do.
