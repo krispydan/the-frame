@@ -134,10 +134,20 @@ async function logEvent(p: LogPayload) {
 }
 
 // Rolling-window flood detector. Counts events in the last 60 seconds and
-// fires a single Slack alert when threshold is breached. Cooldown prevents
-// repeat alerts during a sustained burst.
+// fires a single Slack alert when something looks WRONG — high volume alone
+// is not enough. Cooldown prevents repeat alerts during a sustained burst.
+//
+// Trigger Slack only when the window has:
+//   - any HMAC failures (security / misconfig signal), OR
+//   - any handler failures, OR
+//   - >= ABSURD_THRESHOLD events (rate-limit-territory volume, even if all OK)
+//
+// Healthy backlog drains (e.g., Shopify replaying a queue after we fix a
+// delivery URL) trip the count but post nothing — no action is needed and
+// the noise was actively unhelpful per Daniel's feedback on the last one.
 let lastFloodAlertAt = 0;
-const FLOOD_THRESHOLD = 100;        // events per window
+const FLOOD_THRESHOLD = 100;        // events per window (informational only)
+const ABSURD_THRESHOLD = 1000;      // events per window — escalate even if all OK
 const FLOOD_WINDOW_SECONDS = 60;
 const FLOOD_COOLDOWN_MS = 10 * 60_000;  // 10 minutes between alerts
 
@@ -146,26 +156,46 @@ async function detectFlood(): Promise<void> {
   try {
     const { sqlite: rawDb } = await import("@/lib/db");
     const sinceClause = `-${FLOOD_WINDOW_SECONDS} seconds`;
-    const row = rawDb.prepare(
-      "SELECT COUNT(*) AS c, SUM(CASE WHEN handler_ok = 1 THEN 1 ELSE 0 END) AS ok FROM shopify_webhook_events WHERE received_at > datetime('now', ?)"
-    ).get(sinceClause) as { c: number; ok: number };
-    if ((row?.c ?? 0) >= FLOOD_THRESHOLD) {
-      lastFloodAlertAt = Date.now();
-      // Build the per-topic/per-shop breakdown so the Slack alert is
-      // self-diagnostic — usually you can tell at a glance whether it's
-      // a backlog replay, a real spike, or a loop.
-      const breakdown = rawDb.prepare(
-        "SELECT topic, shop_domain AS shopDomain, COUNT(*) AS count FROM shopify_webhook_events WHERE received_at > datetime('now', ?) GROUP BY topic, shop_domain ORDER BY count DESC"
-      ).all(sinceClause) as Array<{ topic: string; shopDomain: string | null; count: number }>;
-      const { notifyWebhookFlood } = await import("@/modules/integrations/lib/slack/notifications");
-      await notifyWebhookFlood({
-        service: "Shopify",
-        count: row.c,
-        windowSeconds: FLOOD_WINDOW_SECONDS,
-        breakdown,
-        allHandlerOk: row.c > 0 ? row.ok === row.c : undefined,
-      });
+    const row = rawDb.prepare(`
+      SELECT
+        COUNT(*) AS c,
+        SUM(CASE WHEN handler_ok = 1 THEN 1 ELSE 0 END) AS ok_count,
+        SUM(CASE WHEN handler_ok = 0 THEN 1 ELSE 0 END) AS fail_count,
+        SUM(CASE WHEN hmac_valid = 0 THEN 1 ELSE 0 END) AS hmac_fail_count
+      FROM shopify_webhook_events
+      WHERE received_at > datetime('now', ?)
+    `).get(sinceClause) as { c: number; ok_count: number; fail_count: number; hmac_fail_count: number };
+
+    const total = row?.c ?? 0;
+    if (total < FLOOD_THRESHOLD) return;
+
+    const failCount = row?.fail_count ?? 0;
+    const hmacFailCount = row?.hmac_fail_count ?? 0;
+    const allHandlerOk = total > 0 && failCount === 0 && hmacFailCount === 0;
+    const absurdVolume = total >= ABSURD_THRESHOLD;
+
+    // Healthy high volume — skip the Slack post, but log for visibility.
+    if (allHandlerOk && !absurdVolume) {
+      console.log(`[shopify-webhook] high volume (${total}/${FLOOD_WINDOW_SECONDS}s), all handlers OK — no alert.`);
+      return;
     }
+
+    lastFloodAlertAt = Date.now();
+
+    // Build the per-topic/per-shop breakdown so the Slack alert is
+    // self-diagnostic — at a glance you can tell whether it's a real
+    // spike, a loop, or something specific failing.
+    const breakdown = rawDb.prepare(
+      "SELECT topic, shop_domain AS shopDomain, COUNT(*) AS count FROM shopify_webhook_events WHERE received_at > datetime('now', ?) GROUP BY topic, shop_domain ORDER BY count DESC"
+    ).all(sinceClause) as Array<{ topic: string; shopDomain: string | null; count: number }>;
+    const { notifyWebhookFlood } = await import("@/modules/integrations/lib/slack/notifications");
+    await notifyWebhookFlood({
+      service: "Shopify",
+      count: total,
+      windowSeconds: FLOOD_WINDOW_SECONDS,
+      breakdown,
+      allHandlerOk,
+    });
   } catch (e) {
     console.error("[shopify-webhook] flood detector error:", e);
   }
