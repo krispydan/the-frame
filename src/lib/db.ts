@@ -490,6 +490,48 @@ try {
   )`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_xero_journal_log_lines_log ON xero_journal_log_lines(journal_log_id)`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_xero_journal_log_lines_sku ON xero_journal_log_lines(sku)`);
+
+  // Per-order revenue recognition log. Written by the shipment-revenue cron
+  // when a previously-deferred order ships and revenue moves from Deferred
+  // Revenue (2200) → Sales Revenue under accrual. Used for idempotency and
+  // audit trail.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS order_revenue_recognitions (
+    id TEXT PRIMARY KEY NOT NULL,
+    order_id TEXT NOT NULL,
+    external_order_id TEXT,
+    payout_external_id TEXT,
+    channel TEXT NOT NULL,
+    recognized_at TEXT NOT NULL,
+    revenue_amount REAL NOT NULL,
+    cogs_amount REAL DEFAULT 0,
+    currency TEXT DEFAULT 'USD',
+    xero_manual_journal_id TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_orr_order_id ON order_revenue_recognitions(order_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_orr_channel ON order_revenue_recognitions(channel)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_orr_recognized_at ON order_revenue_recognitions(recognized_at)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_orr_payout_external_id ON order_revenue_recognitions(payout_external_id)`);
+
+  // Accrual model needs two more account mappings (added 2026-05-13 when
+  // we moved from "recognize revenue on payout" → "defer at payout, recognize
+  // at shipment" under ASC 606 accrual rules).
+  //   - receivables_holding: where the NET payout amount parks before the
+  //     bank transaction sweeps it into the BANK clearing account (the old
+  //     "post manual journal directly to BANK" approach got rejected by Xero
+  //     validation for non-Adviser-role users).
+  //   - deferred_revenue: where the GROSS revenue parks until the order
+  //     ships and recognition fires.
+  // Both are "_shared" because they aren't channel-specific — channel split
+  // is done via the Sales Channel tracking category.
+  sqlite.exec(`
+    INSERT OR IGNORE INTO xero_account_mappings (id, source_platform, category, xero_account_code, xero_account_name, notes)
+    VALUES
+      (lower(hex(randomblob(16))), '_shared', 'receivables_holding', '1100', 'Receivables Holding — All Channels',
+       'Non-bank clearing for net payouts; cleared by BankTransaction into 101x BANK accounts'),
+      (lower(hex(randomblob(16))), '_shared', 'deferred_revenue',      '2200', 'Deferred Revenue',
+       'Liability for paid-but-unshipped orders; cleared into Sales Revenue at shipment')
+  `);
 } catch (e) { console.error("[db] Xero ops tables error:", e); }
 
 // ── Slack notifications ──

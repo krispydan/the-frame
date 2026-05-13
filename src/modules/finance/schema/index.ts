@@ -50,6 +50,39 @@ export const settlementLineItems = sqliteTable("settlement_line_items", {
   index("idx_sli_type").on(table.type),
 ]);
 
+// ── Order Revenue Recognitions ──
+//
+// One row per (order, payout) — written by the shipment-revenue-recognition
+// cron when a previously-deferred order actually ships. Lets us:
+//   - know exactly which orders have had revenue + COGS recognized
+//   - run the recognition job idempotently (existing rows = already done)
+//   - audit / reverse a single order if needed (cancellation, refund)
+//
+// The accrual flow under-pinning this:
+//   payout arrives → revenue parks in 2200 Deferred Revenue (liability)
+//   order ships    → moves from 2200 → 4030/4000 (Sales Revenue) + COGS
+//
+// `recognizedAt` is the shipment date (when control transferred to the
+// customer = the accrual-correct revenue recognition trigger under ASC 606).
+export const orderRevenueRecognitions = sqliteTable("order_revenue_recognitions", {
+  id: id(),
+  orderId: text("order_id").notNull(),               // local orders.id
+  externalOrderId: text("external_order_id"),        // shopify order id
+  payoutExternalId: text("payout_external_id"),      // "shopify_payout_XXX" — for trace
+  channel: text("channel").notNull(),                // shopify_dtc, shopify_wholesale, etc.
+  recognizedAt: text("recognized_at").notNull(),     // shipped_at, ISO date
+  revenueAmount: real("revenue_amount").notNull(),   // gross revenue moved out of deferral
+  cogsAmount: real("cogs_amount").default(0),        // COGS at recognition time (FIFO)
+  currency: text("currency").default("USD"),
+  xeroManualJournalId: text("xero_manual_journal_id"),
+  createdAt: timestamp("created_at"),
+}, (table) => [
+  index("idx_orr_order_id").on(table.orderId),
+  index("idx_orr_channel").on(table.channel),
+  index("idx_orr_recognized_at").on(table.recognizedAt),
+  index("idx_orr_payout_external_id").on(table.payoutExternalId),
+]);
+
 // ── Expense Categories ──
 export const expenseCategories = sqliteTable("expense_categories", {
   id: id(),
