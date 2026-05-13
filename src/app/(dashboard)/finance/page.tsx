@@ -238,10 +238,18 @@ function FinancePageContent() {
     setCashFlow(data);
   }, []);
 
+  const [stlRefreshing, setStlRefreshing] = useState(false);
+  const [stlLastRefreshed, setStlLastRefreshed] = useState<Date | null>(null);
   const loadSettlements = useCallback(async () => {
-    const res = await fetch("/api/v1/finance/settlements?limit=50");
-    const data = await res.json();
-    setStlList(data.settlements || []);
+    setStlRefreshing(true);
+    try {
+      const res = await fetch("/api/v1/finance/settlements?limit=50");
+      const data = await res.json();
+      setStlList(data.settlements || []);
+      setStlLastRefreshed(new Date());
+    } finally {
+      setStlRefreshing(false);
+    }
   }, []);
 
   const loadExpenses = useCallback(async () => {
@@ -403,6 +411,8 @@ function FinancePageContent() {
           settlements={stlList}
           onSyncToXero={handleSyncToXero}
           onRefresh={loadSettlements}
+          refreshing={stlRefreshing}
+          lastRefreshedAt={stlLastRefreshed}
         />
       )}
       {tab === "reconciliation" && (
@@ -639,17 +649,32 @@ function SettlementsTab({
   settlements,
   onSyncToXero,
   onRefresh,
+  refreshing,
+  lastRefreshedAt,
 }: {
   settlements: Settlement[];
   onSyncToXero: (id: string) => void;
   onRefresh: () => void;
+  refreshing: boolean;
+  lastRefreshedAt: Date | null;
 }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold">Settlement History</h3>
-        <button onClick={onRefresh} className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted">
-          <RefreshCw className="h-4 w-4" /> Refresh
+        <div>
+          <h3 className="font-semibold">Settlement History</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Imported via CSV upload. Shopify Payments doesn&apos;t expose payouts as webhooks — fresh data only arrives when you re-upload a payout CSV.
+            {lastRefreshedAt && <> &middot; Last refreshed {lastRefreshedAt.toLocaleTimeString()}</>}
+          </p>
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+          {refreshing ? "Refreshing…" : "Refresh"}
         </button>
       </div>
 
