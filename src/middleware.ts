@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 
 const publicPaths = [
-  "/login", "/api/auth", "/api/webhooks", "/api/health", "/api/seed", "/api/migrate",
+  "/login", "/api/auth", "/api/webhooks", "/api/v1/webhooks", "/api/health", "/api/seed", "/api/migrate",
   "/api/debug-auth", "/api/auth/manual-login", "/api/admin", "/api/v1/ext", "/api/v1/proxy",
   "/api/mcp", "/api/images",
   "/api/v1/catalog/images/upload-raw", "/api/v1/catalog/images/bulk-delete",
