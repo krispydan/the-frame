@@ -41,18 +41,25 @@ interface Prospect {
   source_id: string | null;
   source_query: string | null;
   segment: string | null;
+  industry: string | null;
+}
+
+interface IndustryOption {
+  industry: string;
+  label: string;
+  tier: "A" | "B" | "C" | "D" | "F";
+  description: string;
+  count: number;
 }
 
 interface FilterOptions {
   states: { state: string; count: number }[];
   statuses: { status: string; count: number }[];
   sources: { source: string; count: number }[];
-  categories: { category: string; count: number }[];
-  segments: { segment: string; count: number }[];
-  companyCategories: { category: string; count: number }[];
+  industries: IndustryOption[];               // NEW: curated industry buckets
+  productsCarried: { category: string; count: number }[];  // renamed from companyCategories
   icpRange: { min: number; max: number };
   sourceTypes: { source_type: string; count: number }[];
-  sourceIds: { source_type: string; source_id: string; count: number }[];
 }
 
 interface SmartList {
@@ -197,16 +204,17 @@ function ProspectsPage() {
   const sort = searchParams.get("sort") || "name";
   const order = searchParams.get("order") || "asc";
   const stateFilter = searchParams.getAll("state");
-  const categoryFilter = searchParams.getAll("category");
+  const industryFilter = searchParams.getAll("industry");
   const sourceFilter = searchParams.getAll("source");
   const statusFilter = searchParams.getAll("status");
-  const segmentFilter = searchParams.getAll("segment");
   const hasEmail = searchParams.get("has_email");
   const hasPhone = searchParams.get("has_phone");
   const icpMin = searchParams.get("icp_min");
   const icpMax = searchParams.get("icp_max");
   const sourceTypeFilter = searchParams.getAll("source_type");
-  const sourceIdFilter = searchParams.getAll("source_id");
+  // Old `category`, `segment`, `source_id` filters are retired (May 2026).
+  // The API still honors `category` if a bookmarked URL has it.
+  const legacyCategoryFilter = searchParams.getAll("category");
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
@@ -272,16 +280,16 @@ function ProspectsPage() {
   const [mergePrimaryId, setMergePrimaryId] = useState<string | null>(null);
   const [mergeSuccess, setMergeSuccess] = useState<string | null>(null);
 
-  const activeFilterCount = stateFilter.length + categoryFilter.length + sourceFilter.length + statusFilter.length + segmentFilter.length
-    + sourceTypeFilter.length + sourceIdFilter.length
+  const activeFilterCount = stateFilter.length + industryFilter.length + sourceFilter.length + statusFilter.length
+    + sourceTypeFilter.length + legacyCategoryFilter.length
     + (hasEmail ? 1 : 0) + (hasPhone ? 1 : 0) + (icpMin ? 1 : 0) + (icpMax ? 1 : 0);
 
   const buildUrl = useCallback((overrides: Record<string, string | string[] | null>) => {
     const p = new URLSearchParams();
     const vals: Record<string, string | string[] | null> = {
       page: String(page), search, sort, order,
-      state: stateFilter, category: categoryFilter, source: sourceFilter, status: statusFilter, segment: segmentFilter,
-      source_type: sourceTypeFilter, source_id: sourceIdFilter,
+      state: stateFilter, industry: industryFilter, source: sourceFilter, status: statusFilter,
+      source_type: sourceTypeFilter, category: legacyCategoryFilter,
       has_email: hasEmail, has_phone: hasPhone, icp_min: icpMin, icp_max: icpMax,
       ...overrides,
     };
@@ -291,23 +299,22 @@ function ProspectsPage() {
       else p.set(k, v);
     }
     return `/prospects?${p.toString()}`;
-  }, [page, search, sort, order, stateFilter, categoryFilter, sourceFilter, statusFilter, segmentFilter, sourceTypeFilter, sourceIdFilter, hasEmail, hasPhone, icpMin, icpMax]);
+  }, [page, search, sort, order, stateFilter, industryFilter, sourceFilter, statusFilter, sourceTypeFilter, legacyCategoryFilter, hasEmail, hasPhone, icpMin, icpMax]);
 
   const currentFilters = useCallback(() => {
     const f: Record<string, unknown> = {};
     if (stateFilter.length) f.state = stateFilter;
-    if (categoryFilter.length) f.category = categoryFilter;
+    if (industryFilter.length) f.industry = industryFilter;
     if (sourceFilter.length) f.source = sourceFilter;
     if (statusFilter.length) f.status = statusFilter;
-    if (segmentFilter.length) f.segment = segmentFilter;
     if (sourceTypeFilter.length) f.source_type = sourceTypeFilter;
-    if (sourceIdFilter.length) f.source_id = sourceIdFilter;
+    if (legacyCategoryFilter.length) f.category = legacyCategoryFilter;
     if (hasEmail) f.has_email = hasEmail;
     if (hasPhone) f.has_phone = hasPhone;
     if (icpMin) f.icp_min = icpMin;
     if (icpMax) f.icp_max = icpMax;
     return f;
-  }, [stateFilter, categoryFilter, sourceFilter, statusFilter, segmentFilter, sourceTypeFilter, sourceIdFilter, hasEmail, hasPhone, icpMin, icpMax]);
+  }, [stateFilter, industryFilter, sourceFilter, statusFilter, sourceTypeFilter, legacyCategoryFilter, hasEmail, hasPhone, icpMin, icpMax]);
 
   // Fetch data
   useEffect(() => {
@@ -634,13 +641,38 @@ function ProspectsPage() {
             </div>
           </div>
           <div>
-            <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Category</h4>
-            <div className="max-h-48 overflow-y-auto space-y-1">
-              {filterOptions.categories.map(c => (
-                <label key={c.category} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 px-1 rounded">
-                  <input type="checkbox" checked={categoryFilter.includes(c.category)} onChange={() => toggleFilterValue("category", c.category, categoryFilter)} className="rounded" />
-                  <span className="text-gray-700 dark:text-gray-300">{c.category}</span>
-                  <span className="text-gray-400 text-xs ml-auto">{c.count.toLocaleString()}</span>
+            <div className="flex items-baseline justify-between mb-2">
+              <h4 className="text-xs font-semibold text-gray-500 uppercase">Industry</h4>
+              <button
+                type="button"
+                className="text-xs text-blue-600 hover:underline"
+                onClick={() => {
+                  const aBuckets = (filterOptions.industries || []).filter(i => i.tier === "A").map(i => i.industry);
+                  const p = new URLSearchParams(searchParams.toString());
+                  p.delete("industry");
+                  aBuckets.forEach(b => p.append("industry", b));
+                  p.set("page", "1");
+                  router.push(`/prospects?${p.toString()}`);
+                }}
+                title="Show only A-tier industries (Boutique, Bookstores, Eyewear, Resort, etc.)"
+              >
+                A-tier only
+              </button>
+            </div>
+            <div className="max-h-72 overflow-y-auto space-y-1">
+              {(filterOptions.industries || []).map(i => (
+                <label key={i.industry} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 px-1 rounded" title={i.description}>
+                  <input type="checkbox" checked={industryFilter.includes(i.industry)} onChange={() => toggleFilterValue("industry", i.industry, industryFilter)} className="rounded" />
+                  <span
+                    className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${
+                      i.tier === "A" ? "bg-green-500" :
+                      i.tier === "B" ? "bg-blue-500" :
+                      i.tier === "C" ? "bg-gray-400" :
+                      i.tier === "D" ? "bg-orange-400" : "bg-red-400"
+                    }`}
+                  />
+                  <span className="text-gray-700 dark:text-gray-300 truncate">{i.label}</span>
+                  <span className="text-gray-400 text-xs ml-auto shrink-0">{i.count.toLocaleString()}</span>
                 </label>
               ))}
             </div>
@@ -657,20 +689,7 @@ function ProspectsPage() {
               ))}
             </div>
           </div>
-          {filterOptions.segments?.length > 0 && (
-            <div>
-              <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Segment</h4>
-              <div className="max-h-48 overflow-y-auto space-y-1">
-                {filterOptions.segments.map(s => (
-                  <label key={s.segment} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 px-1 rounded">
-                    <input type="checkbox" checked={segmentFilter.includes(s.segment)} onChange={() => toggleFilterValue("segment", s.segment, segmentFilter)} className="rounded" />
-                    <span className="text-gray-700 dark:text-gray-300">{s.segment}</span>
-                    <span className="text-gray-400 text-xs ml-auto">{s.count.toLocaleString()}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* Segment filter removed — single-value filter is not useful. */}
           {filterOptions.sourceTypes?.length > 0 && (
             <div>
               <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Source Type</h4>
@@ -1250,7 +1269,7 @@ function ProspectsPage() {
                 <th className="px-4 py-3 cursor-pointer hover:text-gray-900" onClick={() => toggleSort("name")}>Name {sortIcon("name")}</th>
                 <th className="px-4 py-3">City</th>
                 <th className="px-4 py-3 cursor-pointer hover:text-gray-900" onClick={() => toggleSort("state")}>State {sortIcon("state")}</th>
-                <th className="px-4 py-3">Category</th>
+                <th className="px-4 py-3">Industry</th>
                 <th className="px-4 py-3">Segment</th>
                 <th className="px-4 py-3">Source</th>
                 <th className="px-4 py-3">Phone</th>
@@ -1274,10 +1293,9 @@ function ProspectsPage() {
                     if (sort !== "name") navParams.set("sort", sort);
                     if (order !== "asc") navParams.set("order", order);
                     stateFilter.forEach(v => navParams.append("state", v));
-                    categoryFilter.forEach(v => navParams.append("category", v));
+                    industryFilter.forEach(v => navParams.append("industry", v));
                     sourceFilter.forEach(v => navParams.append("source", v));
                     statusFilter.forEach(v => navParams.append("status", v));
-                    segmentFilter.forEach(v => navParams.append("segment", v));
                     if (hasEmail) navParams.set("has_email", hasEmail);
                     if (hasPhone) navParams.set("has_phone", hasPhone);
                     if (icpMin) navParams.set("icp_min", icpMin);
@@ -1305,10 +1323,9 @@ function ProspectsPage() {
                       if (sort !== "name") navParams.set("sort", sort);
                       if (order !== "asc") navParams.set("order", order);
                       stateFilter.forEach(v => navParams.append("state", v));
-                      categoryFilter.forEach(v => navParams.append("category", v));
+                      industryFilter.forEach(v => navParams.append("industry", v));
                       sourceFilter.forEach(v => navParams.append("source", v));
                       statusFilter.forEach(v => navParams.append("status", v));
-                      segmentFilter.forEach(v => navParams.append("segment", v));
                       if (hasEmail) navParams.set("has_email", hasEmail);
                       if (hasPhone) navParams.set("has_phone", hasPhone);
                       if (icpMin) navParams.set("icp_min", icpMin);
@@ -1334,11 +1351,27 @@ function ProspectsPage() {
                   </td>
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{p.city}</td>
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{p.state}</td>
-                  <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{p.tags?.[0] || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
+                    {(() => {
+                      const meta = (filterOptions?.industries || []).find(i => i.industry === p.industry);
+                      if (!meta) return <span className="text-gray-400">—</span>;
+                      return (
+                        <span className="inline-flex items-center gap-1.5" title={meta.description}>
+                          <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                            meta.tier === "A" ? "bg-green-500" :
+                            meta.tier === "B" ? "bg-blue-500" :
+                            meta.tier === "C" ? "bg-gray-400" :
+                            meta.tier === "D" ? "bg-orange-400" : "bg-red-400"
+                          }`} />
+                          {meta.label}
+                        </span>
+                      );
+                    })()}
+                  </td>
                   <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                     <SegmentCell
                       value={p.segment}
-                      segments={filterOptions?.segments || []}
+                      segments={[]}
                       onChange={async (newSegment) => {
                         try {
                           await fetch(`/api/v1/sales/prospects/${p.id}`, {

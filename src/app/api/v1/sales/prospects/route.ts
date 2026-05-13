@@ -14,16 +14,17 @@ export async function GET(request: NextRequest) {
   
   // Filters
   const stateFilter = params.getAll("state");
-  const categoryFilter = params.getAll("category");
+  const industryFilter = params.getAll("industry");      // NEW: curated bucket
+  const categoryFilter = params.getAll("category");      // DEPRECATED: kept for backwards compat with bookmarked URLs
   const sourceFilter = params.getAll("source");
   const statusFilter = params.getAll("status");
   const icpMin = params.get("icp_min");
   const icpMax = params.get("icp_max");
-  const segmentFilter = params.getAll("segment");
   const hasEmail = params.get("has_email");
   const hasPhone = params.get("has_phone");
   const sourceTypeFilter = params.getAll("source_type");
-  const sourceIdFilter = params.getAll("source_id");
+  // segment + source_id filters dropped (1-value and 32K-values respectively
+  // — useless as filters). If someone bookmarked URLs with them, just ignore.
 
   const offset = (page - 1) * limit;
 
@@ -55,8 +56,21 @@ export async function GET(request: NextRequest) {
     whereParams.push(...stateFilter);
   }
 
+  // Industry filter — uses the curated bucket column populated by the
+  // industry-mapping backfill. Replaces the old tags-LIKE category filter
+  // (which was unreliable + slow).
+  if (industryFilter.length > 0) {
+    whereClauses.push(`c.industry IN (${industryFilter.map(() => "?").join(",")})`);
+    whereParams.push(...industryFilter);
+  } else {
+    // Default view: hide out_of_scope rows so the list shows actual ICP.
+    // Caller can pass industry=out_of_scope explicitly to see them.
+    whereClauses.push(`(c.industry IS NULL OR c.industry != 'out_of_scope')`);
+  }
+
+  // Legacy category filter (tag-based). Only honored if someone bookmarked
+  // an old URL — new UI doesn't generate this.
   if (categoryFilter.length > 0) {
-    // Category is in tags JSON array
     const catConditions = categoryFilter.map(() => `c.tags LIKE ?`);
     whereClauses.push(`(${catConditions.join(" OR ")})`);
     whereParams.push(...categoryFilter.map(c => `%${c}%`));
@@ -66,11 +80,6 @@ export async function GET(request: NextRequest) {
     const srcConditions = sourceFilter.map(() => `c.source LIKE ?`);
     whereClauses.push(`(${srcConditions.join(" OR ")})`);
     whereParams.push(...sourceFilter.map(s => `%${s}%`));
-  }
-
-  if (segmentFilter.length > 0) {
-    whereClauses.push(`c.segment IN (${segmentFilter.map(() => "?").join(",")})`);
-    whereParams.push(...segmentFilter);
   }
 
   if (statusFilter.length > 0) {
@@ -100,11 +109,7 @@ export async function GET(request: NextRequest) {
     whereClauses.push(`c.source_type IN (${sourceTypeFilter.map(() => "?").join(",")})`);
     whereParams.push(...sourceTypeFilter);
   }
-
-  if (sourceIdFilter.length > 0) {
-    whereClauses.push(`c.source_id IN (${sourceIdFilter.map(() => "?").join(",")})`);
-    whereParams.push(...sourceIdFilter);
-  }
+  // source_id filter dropped — 32K+ near-unique values made it useless.
 
   if (hasPhone === "true") {
     whereClauses.push(`c.phone IS NOT NULL AND c.phone != ''`);
@@ -130,9 +135,9 @@ export async function GET(request: NextRequest) {
 
   // Data query
   const rows = sqlite.prepare(`
-    SELECT c.id, c.name, c.city, c.state, c.type, c.source, c.phone, c.email, 
+    SELECT c.id, c.name, c.city, c.state, c.type, c.source, c.phone, c.email,
            c.icp_score, c.status, c.tags, c.website, c.domain, c.enrichment_status, c.segment, c.category,
-           c.source_type, c.source_id, c.source_query
+           c.industry, c.source_type, c.source_id, c.source_query
     FROM companies c
     ${whereSQL}
     ORDER BY ${sortCol} ${order} NULLS LAST
