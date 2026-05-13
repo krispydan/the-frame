@@ -469,6 +469,65 @@ export async function postManualJournal(
   };
 }
 
+/**
+ * Post a Bank Receive transaction (RECEIVE money) to Xero.
+ *
+ * Used by the payout sweep: net payout amount moves from "Receivables Holding"
+ * (CURRENT_ASSET, non-bank) into the BANK clearing account so the bank-rec
+ * features in Xero still work for matching payouts against the actual bank
+ * deposit.
+ *
+ * Equivalent double-entry:
+ *   DR  <bankAccountCode>          (the BANK account, e.g. 1015)
+ *   CR  <contraAccountCode>        (Receivables Holding, e.g. 1100)
+ *
+ * Xero requires a Contact on every BankTransaction; we accept one by name so
+ * the caller can pick a sensible per-channel label ("Shopify Payments",
+ * "Faire Payouts", etc.) — Xero auto-creates the contact if it doesn't exist.
+ */
+export async function postBankTransactionReceive(opts: {
+  bankAccountCode: string;        // BANK-type account (e.g. "1015")
+  contraAccountCode: string;      // Non-bank account (e.g. "1100")
+  amount: number;                 // Positive amount
+  date: string;                   // ISO date
+  reference: string;              // External id / payout id — for trace
+  description: string;            // Line item description
+  contactName: string;            // Contact name (Xero auto-creates)
+  tracking?: Array<{ TrackingCategoryID?: string; Name?: string; Option: string }>;
+}): Promise<
+  | { success: true; bankTransactionId: string; data: unknown }
+  | { success: false; error: string; status?: number }
+> {
+  const body = {
+    BankTransactions: [{
+      Type: "RECEIVE",
+      Contact: { Name: opts.contactName },
+      Date: opts.date,
+      Reference: opts.reference,
+      LineAmountTypes: "NoTax",
+      BankAccount: { Code: opts.bankAccountCode },
+      LineItems: [{
+        Description: opts.description,
+        Quantity: 1,
+        UnitAmount: opts.amount,
+        AccountCode: opts.contraAccountCode,
+        TaxType: "NONE",
+        Tracking: opts.tracking,
+      }],
+    }],
+  };
+
+  const result = await xeroAdminPost("/api.xro/2.0/BankTransactions", body);
+  if (!result.success) return result;
+
+  const data = result.data as { BankTransactions?: Array<{ BankTransactionID?: string }> };
+  const id = data.BankTransactions?.[0]?.BankTransactionID;
+  if (!id) {
+    return { success: false, error: "Xero accepted the request but returned no BankTransactionID" };
+  }
+  return { success: true, bankTransactionId: id, data: result.data };
+}
+
 export async function getChartOfAccounts(): Promise<{
   success: boolean;
   accounts?: Array<{ code: string; name: string; type: string; status: string }>;

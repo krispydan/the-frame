@@ -24,7 +24,7 @@ import {
   SHARED_PLATFORM_KEY,
 } from "@/modules/integrations/schema/xero";
 import { listInstalledShops } from "@/modules/integrations/lib/shopify/admin-api";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { fetchShopifyPayouts, fetchShopifyPayoutTransactions } from "./shopify-payouts";
 import { aggregatePayoutTransactions, type PayoutSummary } from "./payout-aggregator";
 import { buildPayoutJournal, type AccountMapping, type TrackingMapping } from "./journal-builder";
@@ -168,9 +168,33 @@ export async function syncShopifyPayouts(opts: SyncOpts = {}): Promise<SyncRunRe
             status: "success",
             amount: summary.netPayoutAmount,
             currency: summary.currency,
-            payload: JSON.stringify({ kind: "revenue", summary, journal: built.payload, warnings: built.warnings }),
+            payload: JSON.stringify({ kind: "deferred_revenue", summary, journal: built.payload, warnings: built.warnings }),
             response: JSON.stringify({ manualJournalId: post.manualJournalId, status: post.status }),
           });
+
+          // ── Bank receive (sweep Receivables Holding → BANK clearing) ──
+          // The manual journal above debited Receivables Holding (1100, non-bank).
+          // Now post a BankTransaction that moves the same amount into the BANK
+          // clearing account (1010/1015/etc.) so Xero's bank reconciliation
+          // features can match it against the actual deposit on your operating
+          // bank.
+          try {
+            await postPayoutBankReceive({
+              runId,
+              summary,
+              tracking,
+              platformMappings: mappings,
+              date: built.payload.Date,
+            });
+          } catch (e) {
+            const message = e instanceof Error ? e.message : "Unknown";
+            console.error(`[payout-sync] Bank receive failed for payout ${payout.id}:`, e);
+            result.errors.push({
+              payoutId: payout.id,
+              platform: summary.platform,
+              message: `Deferred-revenue journal posted, but bank receive failed: ${message}`,
+            });
+          }
 
           // Slack: payout synced 💸
           void (async () => {
@@ -190,26 +214,12 @@ export async function syncShopifyPayouts(opts: SyncOpts = {}): Promise<SyncRunRe
             }
           })();
 
-          // ── COGS companion journal ──
-          try {
-            await postCogsCompanion({
-              runId,
-              channel: shop.channel,
-              summary,
-              tracking,
-              status,
-            });
-          } catch (e) {
-            // Don't fail the payout sync if COGS can't post — log it as a
-            // warning so the user can re-run with a fix later.
-            const message = e instanceof Error ? e.message : "Unknown";
-            console.error(`[xero/payout-sync] COGS companion failed for payout ${payout.id}:`, e);
-            result.errors.push({
-              payoutId: payout.id,
-              platform: summary.platform,
-              message: `Revenue journal posted, but COGS companion failed: ${message}`,
-            });
-          }
+          // ── COGS companion journal — DISABLED under accrual model ──
+          // COGS used to fire here (at payout time) but under ASC 606 it has
+          // to match the revenue recognition timing, which is now at shipment.
+          // The shopify-shipment-revenue-recognition cron picks it up there.
+          // Leaving the old function in place for now in case we need to
+          // restore it for any platform that doesn't use the new model.
 
           result.successful++;
         } catch (e) {
@@ -276,16 +286,25 @@ export async function syncShopifyPayouts(opts: SyncOpts = {}): Promise<SyncRunRe
 }
 
 async function loadAccountMappings(platform: string): Promise<Map<string, AccountMapping>> {
-  const rows = await db.select().from(xeroAccountMappings).where(eq(xeroAccountMappings.sourcePlatform, platform));
+  // Load both platform-specific and shared (_shared) mappings so the builder
+  // can reach the accrual accounts (receivables_holding, deferred_revenue,
+  // cogs, inventory) without each channel having to duplicate them.
+  const rows = await db
+    .select()
+    .from(xeroAccountMappings)
+    .where(inArray(xeroAccountMappings.sourcePlatform, [platform, SHARED_PLATFORM_KEY]));
   const map = new Map<string, AccountMapping>();
   for (const r of rows) {
     if (!r.xeroAccountCode) continue;
-    map.set(r.category, {
-      category: r.category,
-      xeroAccountCode: r.xeroAccountCode,
-      xeroAccountName: r.xeroAccountName ?? null,
-      side: "debit",  // unused — builder consults SIDE_FROM_GUIDE
-    });
+    // Platform-specific row wins over _shared if both define the same category.
+    if (r.sourcePlatform === platform || !map.has(r.category)) {
+      map.set(r.category, {
+        category: r.category,
+        xeroAccountCode: r.xeroAccountCode,
+        xeroAccountName: r.xeroAccountName ?? null,
+        side: "debit",  // unused — builder consults SIDE_FROM_GUIDE
+      });
+    }
   }
   return map;
 }
@@ -299,6 +318,96 @@ async function loadTrackingMapping(platform: string): Promise<TrackingMapping | 
     trackingOptionId: row.trackingOptionId,
     trackingOptionName: row.trackingOptionName ?? null,
   };
+}
+
+/**
+ * Sweep the net payout from "Receivables Holding" (1100, current asset) into
+ * the platform's BANK clearing account (1010/1015/etc.). Posts a Xero
+ * BankTransaction so bank-reconciliation features still work for matching
+ * the deposit against your operating bank's incoming wire / ACH.
+ *
+ * Double-entry result:
+ *   DR  <clearing account> (BANK, e.g. 1015)
+ *   CR  <receivables_holding> (1100, current asset)
+ */
+async function postPayoutBankReceive(opts: {
+  runId: string;
+  summary: PayoutSummary;
+  tracking: TrackingMapping | null;
+  platformMappings: Map<string, AccountMapping>;
+  date: string;
+}): Promise<void> {
+  const { runId, summary, tracking, platformMappings, date } = opts;
+  const { postBankTransactionReceive } = await import("@/modules/finance/lib/xero-client");
+
+  // The platform-specific "clearing" mapping is the BANK account
+  // (e.g. 1015 Shopify Wholesale Clearing). The _shared "receivables_holding"
+  // mapping is the non-bank contra (1100).
+  const bankClearing = platformMappings.get("clearing");
+  const receivablesHolding = platformMappings.get("receivables_holding");
+  if (!bankClearing?.xeroAccountCode || !receivablesHolding?.xeroAccountCode) {
+    const missing = [
+      !bankClearing?.xeroAccountCode ? "clearing (platform-specific BANK account)" : null,
+      !receivablesHolding?.xeroAccountCode ? "receivables_holding (shared CURRENT_ASSET)" : null,
+    ].filter(Boolean).join(", ");
+    throw new Error(`Cannot post bank receive — missing mapping: ${missing}`);
+  }
+
+  const platform = humanPlatformForBank(summary.platform);
+  const trackingTag = tracking
+    ? [{
+        TrackingCategoryID: tracking.trackingCategoryId,
+        Name: tracking.trackingCategoryName ?? undefined,
+        Option: tracking.trackingOptionName ?? "",
+      }]
+    : undefined;
+
+  const res = await postBankTransactionReceive({
+    bankAccountCode: bankClearing.xeroAccountCode,
+    contraAccountCode: receivablesHolding.xeroAccountCode,
+    amount: summary.netPayoutAmount,
+    date,
+    reference: `payout_${summary.payoutId}`,
+    description: `${platform} payout #${summary.payoutId} — net deposit (sweep from Receivables Holding)`,
+    contactName: `${platform} Payouts`,
+    tracking: trackingTag,
+  });
+
+  await db.insert(xeroJournalLog).values({
+    syncRunId: runId,
+    sourcePlatform: summary.platform,
+    sourceId: String(summary.payoutId),
+    xeroObjectType: "bank_transaction",
+    xeroObjectId: res.success ? res.bankTransactionId : null,
+    status: res.success ? "success" : "failed",
+    amount: summary.netPayoutAmount,
+    currency: summary.currency,
+    payload: JSON.stringify({
+      kind: "bank_receive",
+      payoutId: summary.payoutId,
+      bankAccountCode: bankClearing.xeroAccountCode,
+      contraAccountCode: receivablesHolding.xeroAccountCode,
+      amount: summary.netPayoutAmount,
+    }),
+    response: res.success ? JSON.stringify({ bankTransactionId: res.bankTransactionId }) : null,
+    errorMessage: res.success ? null : res.error,
+  });
+
+  if (!res.success) {
+    throw new Error(res.error);
+  }
+}
+
+function humanPlatformForBank(platform: string): string {
+  switch (platform) {
+    case "shopify_dtc": return "Shopify Retail";
+    case "shopify_wholesale": return "Shopify Wholesale";
+    case "shopify_afterpay": return "Shopify Afterpay";
+    case "faire": return "Faire";
+    case "amazon": return "Amazon";
+    case "tiktok_shop": return "TikTok Shop";
+    default: return platform;
+  }
 }
 
 async function logJournalFailure(

@@ -25,6 +25,7 @@ import { syncShipHeroOrders } from "@/modules/operations/lib/shiphero/sync-order
 import { syncShipHeroInventory, isDuringBusinessHours } from "@/modules/operations/lib/shiphero/sync-inventory";
 import { runShopifyMetafieldSync } from "@/modules/catalog/lib/shopify-metafields/bulk-sync-job";
 import { syncSettlementsAllShops } from "@/modules/finance/lib/shopify-settlements";
+import { runShipmentRevenueRecognition } from "@/modules/finance/lib/shipment-revenue-recognition";
 
 export type CronJob = {
   id: string;                         // stable, kebab-case
@@ -88,6 +89,19 @@ export const CRON_JOBS: CronJob[] = [
     schedule: "0 15 * * *",  // 15:00 UTC ≈ 8am PT (after Shopify settles overnight)
     description: "Pull recent Shopify payouts and post paired revenue + COGS journals to Xero",
     handler: () => syncShopifyPayouts({}),
+  },
+
+  // ── Shipment-driven revenue recognition (accrual / ASC 606) ──
+  // Stage 2 of the accrual flow. Finds orders that shipped (control
+  // transferred to customer) but whose revenue is still parked in
+  // Deferred Revenue (2200), and posts a per-order Manual Journal that
+  // moves it to Sales Revenue + recognizes COGS. Runs after the daily
+  // Shopify orders sync + payout sync so the data it walks is up to date.
+  {
+    id: "shopify-shipment-revenue-recognition",
+    schedule: "30 16 * * *",  // 16:30 UTC ≈ 9:30am PT (after payout-sync at 15:00 and settlements-sync at 16:00)
+    description: "Recognize Sales Revenue + COGS for shipped orders previously deferred (accrual / ASC 606)",
+    handler: runShipmentRevenueRecognition,
   },
 
   // ── Shopify Payments settlement sync ──

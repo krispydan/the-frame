@@ -92,14 +92,36 @@ export function buildPayoutJournal(opts: {
 
   const lines: XeroJournalLine[] = [];
 
+  // ── Accrual rerouting ──
+  // Under ASC 606 we can't recognize revenue at payout time — the
+  // performance obligation isn't satisfied until the order ships. So two
+  // categories from the aggregator get rerouted at journal-build time:
+  //   sales    → credits Deferred Revenue (2200, liability) instead of
+  //              the platform's sales-revenue account. Sales revenue is
+  //              recognized later by the shipment-revenue-recognition cron.
+  //   clearing → debits Receivables Holding (1100, current asset) instead
+  //              of the platform's BANK clearing account. A BankTransaction
+  //              posted alongside this journal sweeps Receivables Holding
+  //              into the BANK account (Xero forbids manual journals from
+  //              touching BANK accounts; using a non-bank intermediate
+  //              account is the standard pattern).
+  const CATEGORY_REROUTE: Record<string, string> = {
+    sales: "deferred_revenue",
+    clearing: "receivables_holding",
+  };
+
   for (const bucket of summary.categories) {
-    const mapping = mappings.get(bucket.category);
+    const effectiveCategory = CATEGORY_REROUTE[bucket.category] ?? bucket.category;
+    const mapping = mappings.get(effectiveCategory);
     if (!mapping || !mapping.xeroAccountCode) {
-      missingMappings.push(bucket.category);
+      missingMappings.push(effectiveCategory);
       continue;
     }
 
     // Determine sign from the mapping guide convention.
+    // Use the ORIGINAL category to pick the side — deferring revenue still
+    // credits (same side as recognizing it would). Receivables Holding gets
+    // the same debit treatment as the BANK clearing would have.
     const side = SIDE_FROM_GUIDE[bucket.category] ?? "debit";
     // Xero LineAmount: positive = debit, negative = credit
     let lineAmount = side === "debit" ? bucket.amount : -bucket.amount;
@@ -168,11 +190,11 @@ function descriptionFor(
   const txLabel = txCount === 1 ? "1 tx" : `${txCount} txs`;
   const platform = humanPlatform(summary.platform);
   switch (category) {
-    case "sales":       return `Gross sales — ${platform} payout ${summary.payoutId} (${txLabel})`;
+    case "sales":       return `Deferred revenue (gross sales) — ${platform} payout ${summary.payoutId} (${txLabel}) — recognized at shipment`;
     case "refunds":     return `Refunds — ${platform} payout ${summary.payoutId} (${txLabel})`;
     case "fees":        return `Processing fees — ${platform} payout ${summary.payoutId} (${txLabel})`;
     case "adjustments": return `Adjustments — ${platform} payout ${summary.payoutId} (${txLabel}, signed ${amount >= 0 ? "+" : ""}${amount.toFixed(2)})`;
-    case "clearing":    return `Net payout to clearing — ${platform} payout ${summary.payoutId}`;
+    case "clearing":    return `Receivables holding (net payout) — ${platform} payout ${summary.payoutId} — swept to bank via BankTransaction`;
     default:            return `${category} — ${platform} payout ${summary.payoutId} (${txLabel})`;
   }
 }
