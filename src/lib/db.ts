@@ -112,6 +112,11 @@ try {
 } catch { /* column already exists */ }
 
 // JAX-334: Enrichment fields
+// Industry bucket (curated, replaces the 317-distinct-values tags mess).
+// Populated by scripts/backfill-industry.ts and on insert by the import engine.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN industry TEXT"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_companies_industry ON companies (industry)"); } catch { /* exists */ }
+
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN owner_name TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN business_hours TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN facebook_url TEXT"); } catch { /* exists */ }

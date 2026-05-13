@@ -37,6 +37,12 @@ export const companies = sqliteTable("companies", {
   disqualifyReason: text("disqualify_reason"),
   segment: text("segment"),
   category: text("category"),
+  // Curated ICP-aligned industry bucket. Derived from `tags` by
+  // industry-mapping.ts and backfilled by scripts/backfill-industry.ts.
+  // Replaces the long-tail 317-distinct-values mess we had in `tags` for
+  // filter/segmentation. See INDUSTRY_DISPLAY for the canonical list of
+  // values.
+  industry: text("industry"),
   leadSourceDetail: text("lead_source_detail"),
   sourceType: text("source_type", { enum: ["storemapper", "outscraper", "manual", "csv", "chrome-ext"] }),
   sourceId: text("source_id"),
