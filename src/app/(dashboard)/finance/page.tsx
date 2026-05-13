@@ -124,6 +124,25 @@ interface Settlement {
   xeroTransactionId: string | null;
 }
 
+interface TrajectoryBucket {
+  key: string;
+  label: string;
+  revenue: number;
+  orders: number;
+  byChannel: Record<string, number>;
+}
+
+interface Trajectory {
+  channels: string[];
+  monthly: TrajectoryBucket[];
+  weekly: TrajectoryBucket[];
+  mom: {
+    thisMonth: { label: string; revenue: number; orders: number; aov: number };
+    lastMonth: { label: string; revenue: number; orders: number; aov: number };
+    delta: { revenue: number | null; orders: number | null; aov: number | null };
+  };
+}
+
 interface SettlementLineItem {
   id: string;
   type: "sale" | "refund" | "fee" | "adjustment" | string;
@@ -234,6 +253,7 @@ function FinancePageContent() {
   const tab = searchParams.get("tab") || "pnl";
 
   const [pnl, setPnl] = useState<PnlSummary | null>(null);
+  const [trajectory, setTrajectory] = useState<Trajectory | null>(null);
   const [cashFlow, setCashFlow] = useState<CashFlowSummary | null>(null);
   const [stlList, setStlList] = useState<Settlement[]>([]);
   const [expenseList, setExpenseList] = useState<Expense[]>([]);
@@ -260,6 +280,12 @@ function FinancePageContent() {
     const data = await res.json();
     setPnl(data);
   }, [period, customStart, customEnd]);
+
+  const loadTrajectory = useCallback(async () => {
+    const res = await fetch("/api/v1/finance/trajectory");
+    if (!res.ok) return;
+    setTrajectory(await res.json());
+  }, []);
 
   const loadCashFlow = useCallback(async () => {
     const res = await fetch("/api/v1/finance/cash-flow");
@@ -343,9 +369,9 @@ function FinancePageContent() {
     // are disabled. Their endpoints still exist but we don't need to hit them
     // on every Finance page load until the data is real.
     setLoading(true);
-    Promise.all([loadPnl(), loadSettlements(), loadReconciliation()])
+    Promise.all([loadPnl(), loadTrajectory(), loadSettlements(), loadReconciliation()])
       .finally(() => setLoading(false));
-  }, [loadPnl, loadSettlements, loadReconciliation]);
+  }, [loadPnl, loadTrajectory, loadSettlements, loadReconciliation]);
 
   const setTab = (t: string) => {
     router.push(`/finance?tab=${t}`);
@@ -478,7 +504,7 @@ function FinancePageContent() {
       </div>
 
       {/* Tab Content */}
-      {tab === "pnl" && pnl && <PnlTab pnl={pnl} onExportCsv={handleExportCsv} />}
+      {tab === "pnl" && pnl && <PnlTab pnl={pnl} trajectory={trajectory} onExportCsv={handleExportCsv} />}
       {tab === "settlements" && (
         <>
           <SettlementsTab
@@ -515,9 +541,206 @@ function FinancePageContent() {
   );
 }
 
+// ── Trajectory Charts ──
+
+/**
+ * MoM headline cards + monthly and weekly revenue trend bar charts.
+ * Renders inside the P&L tab so users see the trajectory before drilling
+ * into the period's exact numbers below.
+ */
+
+// Channel display names + bar colors (Tailwind classes). New channels we
+// haven't styled fall through to a neutral grey.
+const CHANNEL_DISPLAY: Record<string, { label: string; color: string }> = {
+  shopify_dtc: { label: "Retail", color: "bg-blue-500" },
+  shopify_wholesale: { label: "Wholesale", color: "bg-purple-500" },
+  faire: { label: "Faire", color: "bg-orange-500" },
+  direct: { label: "Direct", color: "bg-emerald-500" },
+  phone: { label: "Phone", color: "bg-amber-500" },
+};
+
+function channelMeta(ch: string) {
+  return CHANNEL_DISPLAY[ch] || { label: ch.replace(/_/g, " "), color: "bg-gray-400" };
+}
+
+function formatDelta(d: number | null): { text: string; cls: string } {
+  if (d === null || !isFinite(d)) return { text: "—", cls: "text-muted-foreground" };
+  const pct = d * 100;
+  const sign = pct > 0 ? "+" : "";
+  if (pct === 0) return { text: "0%", cls: "text-muted-foreground" };
+  return {
+    text: `${sign}${pct.toFixed(0)}%`,
+    cls: pct > 0 ? "text-green-600" : "text-red-600",
+  };
+}
+
+function TrajectoryCharts({ trajectory }: { trajectory: Trajectory }) {
+  const { mom, monthly, weekly, channels } = trajectory;
+
+  return (
+    <div className="space-y-4">
+      {/* MoM headline cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <MomCard
+          label="Revenue"
+          subLabel={mom.thisMonth.label}
+          value={fmt(mom.thisMonth.revenue)}
+          prior={fmt(mom.lastMonth.revenue)}
+          priorLabel={mom.lastMonth.label}
+          delta={mom.delta.revenue}
+        />
+        <MomCard
+          label="Orders"
+          subLabel={mom.thisMonth.label}
+          value={mom.thisMonth.orders.toString()}
+          prior={mom.lastMonth.orders.toString()}
+          priorLabel={mom.lastMonth.label}
+          delta={mom.delta.orders}
+        />
+        <MomCard
+          label="AOV"
+          subLabel={mom.thisMonth.label}
+          value={fmt(mom.thisMonth.aov)}
+          prior={fmt(mom.lastMonth.aov)}
+          priorLabel={mom.lastMonth.label}
+          delta={mom.delta.aov}
+        />
+      </div>
+
+      {/* Stacked bar charts: monthly + weekly trends side-by-side on wide screens */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <TrendChart
+          title="Monthly Revenue (last 12 months)"
+          buckets={monthly}
+          channels={channels}
+        />
+        <TrendChart
+          title="Weekly Revenue (last 12 weeks)"
+          buckets={weekly}
+          channels={channels}
+        />
+      </div>
+    </div>
+  );
+}
+
+function MomCard({
+  label,
+  subLabel,
+  value,
+  prior,
+  priorLabel,
+  delta,
+}: {
+  label: string;
+  subLabel: string;
+  value: string;
+  prior: string;
+  priorLabel: string;
+  delta: number | null;
+}) {
+  const d = formatDelta(delta);
+  return (
+    <div className="rounded-lg border bg-card p-4">
+      <div className="flex items-baseline justify-between">
+        <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+        <div className={`text-xs font-medium ${d.cls}`}>{d.text}</div>
+      </div>
+      <div className="mt-1 text-2xl font-semibold">{value}</div>
+      <div className="text-xs text-muted-foreground mt-0.5">
+        {subLabel} · vs {prior} in {priorLabel}
+      </div>
+    </div>
+  );
+}
+
+function TrendChart({
+  title,
+  buckets,
+  channels,
+}: {
+  title: string;
+  buckets: TrajectoryBucket[];
+  channels: string[];
+}) {
+  const max = Math.max(1, ...buckets.map((b) => b.revenue));
+  const hasAnyData = buckets.some((b) => b.revenue > 0);
+
+  return (
+    <div className="rounded-lg border bg-card">
+      <div className="p-4 border-b">
+        <h3 className="font-semibold text-sm">{title}</h3>
+        {channels.length > 0 && (
+          <div className="flex flex-wrap gap-3 mt-2 text-xs">
+            {channels.map((ch) => {
+              const m = channelMeta(ch);
+              return (
+                <span key={ch} className="inline-flex items-center gap-1.5 text-muted-foreground">
+                  <span className={`inline-block w-2.5 h-2.5 rounded ${m.color}`} />
+                  {m.label}
+                </span>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      <div className="p-4">
+        {!hasAnyData ? (
+          <p className="text-center text-sm text-muted-foreground py-8">No revenue in this window yet.</p>
+        ) : (
+          <div className="flex items-end gap-1" style={{ height: 180 }}>
+            {buckets.map((b) => {
+              const barH = max > 0 ? (b.revenue / max) * 160 : 0;
+              const segments = channels
+                .map((ch) => ({ ch, amt: b.byChannel[ch] || 0 }))
+                .filter((s) => s.amt > 0);
+              return (
+                <div key={b.key} className="flex-1 flex flex-col items-center gap-1 group relative min-w-0">
+                  {/* Tooltip */}
+                  <div className="absolute bottom-full mb-2 hidden group-hover:block z-10 bg-popover border rounded-md shadow-md p-2 text-xs whitespace-nowrap pointer-events-none">
+                    <div className="font-semibold">{b.label}</div>
+                    <div>Revenue: {fmt(b.revenue)}</div>
+                    <div className="text-muted-foreground">{b.orders} order{b.orders === 1 ? "" : "s"}</div>
+                    {segments.length > 1 && (
+                      <div className="mt-1 pt-1 border-t space-y-0.5">
+                        {segments.map((s) => (
+                          <div key={s.ch} className="flex items-center gap-1.5">
+                            <span className={`inline-block w-2 h-2 rounded ${channelMeta(s.ch).color}`} />
+                            <span>{channelMeta(s.ch).label}: {fmt(s.amt)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {/* Stacked bar (rendered top-to-bottom in DOM, stacks via flex-col-reverse to keep largest at bottom) */}
+                  <div className="w-full flex flex-col-reverse" style={{ height: Math.max(2, barH) }}>
+                    {segments.length > 0 ? segments.map((s, i) => {
+                      const segH = (s.amt / b.revenue) * Math.max(2, barH);
+                      return (
+                        <div
+                          key={s.ch}
+                          className={`${channelMeta(s.ch).color} ${i === segments.length - 1 ? "rounded-t" : ""}`}
+                          style={{ height: segH }}
+                        />
+                      );
+                    }) : (
+                      <div className="bg-gray-200 rounded-t" style={{ height: Math.max(2, barH) }} />
+                    )}
+                  </div>
+                  <span className="text-[10px] text-muted-foreground truncate w-full text-center">{b.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── P&L Tab ──
 
-function PnlTab({ pnl, onExportCsv }: { pnl: PnlSummary; onExportCsv: () => void }) {
+function PnlTab({ pnl, trajectory, onExportCsv }: { pnl: PnlSummary; trajectory: Trajectory | null; onExportCsv: () => void }) {
   const comp = pnl.comparison;
 
   return (
@@ -531,6 +754,9 @@ function PnlTab({ pnl, onExportCsv }: { pnl: PnlSummary; onExportCsv: () => void
           <Download className="h-4 w-4" /> Export CSV
         </button>
       </div>
+
+      {/* Trajectory: MoM cards + monthly/weekly trend bars */}
+      {trajectory && <TrajectoryCharts trajectory={trajectory} />}
 
       {/* Summary Cards with Comparison */}
       {(() => {
