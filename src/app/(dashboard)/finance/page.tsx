@@ -2,6 +2,14 @@
 
 import { Suspense, useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
 import {
   DollarSign,
   TrendingUp,
@@ -20,6 +28,7 @@ import {
   AlertTriangle,
   CheckCircle,
   Scale,
+  ChevronRight,
 } from "lucide-react";
 
 // ── Types ──
@@ -113,6 +122,26 @@ interface Settlement {
   status: string;
   receivedAt: string | null;
   xeroTransactionId: string | null;
+}
+
+interface SettlementLineItem {
+  id: string;
+  type: "sale" | "refund" | "fee" | "adjustment" | string;
+  description: string | null;
+  amount: number;
+  orderId: string | null;          // Shopify order ID (external)
+  localOrderId: string | null;     // local order row id, if matched
+  localOrderNumber: string | null; // local order_number, if matched
+  createdAt: string | null;
+}
+
+interface SettlementDetail extends Settlement {
+  currency: string;
+  externalId: string | null;
+  xeroSyncedAt: string | null;
+  notes: string | null;
+  lineItems: SettlementLineItem[];
+  shopifyAdminUrl: string | null;
 }
 
 interface Expense {
@@ -242,6 +271,23 @@ function FinancePageContent() {
   const [stlLastRefreshed, setStlLastRefreshed] = useState<Date | null>(null);
   const [stlSyncing, setStlSyncing] = useState(false);
   const [stlSyncResult, setStlSyncResult] = useState<string | null>(null);
+  const [stlOpen, setStlOpen] = useState<SettlementDetail | null>(null);
+  const [stlDetailLoading, setStlDetailLoading] = useState(false);
+  const handleOpenSettlement = useCallback(async (settlementId: string) => {
+    setStlDetailLoading(true);
+    setStlOpen({ id: settlementId } as SettlementDetail);
+    try {
+      const res = await fetch(`/api/v1/finance/settlements/${settlementId}`);
+      if (!res.ok) {
+        setStlOpen(null);
+        return;
+      }
+      const data = (await res.json()) as SettlementDetail;
+      setStlOpen(data);
+    } finally {
+      setStlDetailLoading(false);
+    }
+  }, []);
   const loadSettlements = useCallback(async () => {
     setStlRefreshing(true);
     try {
@@ -434,16 +480,29 @@ function FinancePageContent() {
       {/* Tab Content */}
       {tab === "pnl" && pnl && <PnlTab pnl={pnl} onExportCsv={handleExportCsv} />}
       {tab === "settlements" && (
-        <SettlementsTab
-          settlements={stlList}
-          onSyncToXero={handleSyncToXero}
-          onRefresh={loadSettlements}
-          refreshing={stlRefreshing}
-          lastRefreshedAt={stlLastRefreshed}
-          onSyncFromShopify={handleSyncSettlementsFromShopify}
-          syncing={stlSyncing}
-          syncResult={stlSyncResult}
-        />
+        <>
+          <SettlementsTab
+            settlements={stlList}
+            onSyncToXero={handleSyncToXero}
+            onRefresh={loadSettlements}
+            refreshing={stlRefreshing}
+            lastRefreshedAt={stlLastRefreshed}
+            onSyncFromShopify={handleSyncSettlementsFromShopify}
+            syncing={stlSyncing}
+            syncResult={stlSyncResult}
+            onOpenDetail={handleOpenSettlement}
+          />
+          <SettlementDetailSheet
+            settlement={stlOpen}
+            loading={stlDetailLoading}
+            onClose={() => setStlOpen(null)}
+            onSyncToXero={async (id) => {
+              await handleSyncToXero(id);
+              // Refresh the open drawer + the list
+              handleOpenSettlement(id);
+            }}
+          />
+        </>
       )}
       {tab === "reconciliation" && (
         <ReconciliationTab
@@ -684,6 +743,7 @@ function SettlementsTab({
   onSyncFromShopify,
   syncing,
   syncResult,
+  onOpenDetail,
 }: {
   settlements: Settlement[];
   onSyncToXero: (id: string) => void;
@@ -693,6 +753,7 @@ function SettlementsTab({
   onSyncFromShopify: () => void;
   syncing: boolean;
   syncResult: string | null;
+  onOpenDetail: (id: string) => void;
 }) {
   return (
     <div className="space-y-4">
@@ -747,7 +808,11 @@ function SettlementsTab({
           </thead>
           <tbody>
             {settlements.map((s) => (
-              <tr key={s.id} className="border-b hover:bg-muted/30">
+              <tr
+                key={s.id}
+                className="border-b hover:bg-muted/30 cursor-pointer"
+                onClick={() => onOpenDetail(s.id)}
+              >
                 <td className="p-3">
                   <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${CHANNEL_COLORS[s.channel] || "bg-gray-100"}`}>
                     {s.channel.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}
@@ -764,18 +829,21 @@ function SettlementsTab({
                 </td>
                 <td className="p-3 text-muted-foreground">{s.receivedAt || "—"}</td>
                 <td className="text-right p-3">
-                  {s.status !== "synced_to_xero" && !s.xeroTransactionId && (
-                    <button
-                      onClick={() => onSyncToXero(s.id)}
-                      className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-muted"
-                      title="Sync to Xero"
-                    >
-                      <ExternalLink className="h-3 w-3" /> Xero
-                    </button>
-                  )}
-                  {s.xeroTransactionId && (
-                    <span className="text-xs text-green-600">✓ Synced</span>
-                  )}
+                  <div className="inline-flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    {s.status !== "synced_to_xero" && !s.xeroTransactionId && (
+                      <button
+                        onClick={() => onSyncToXero(s.id)}
+                        className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                        title="Sync to Xero"
+                      >
+                        <ExternalLink className="h-3 w-3" /> Xero
+                      </button>
+                    )}
+                    {s.xeroTransactionId && (
+                      <span className="text-xs text-green-600">✓ Synced</span>
+                    )}
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  </div>
                 </td>
               </tr>
             ))}
@@ -786,6 +854,193 @@ function SettlementsTab({
         </table>
       </div>
     </div>
+  );
+}
+
+// ── Settlement Detail Sheet (side drawer) ──
+
+function SettlementDetailSheet({
+  settlement,
+  loading,
+  onClose,
+  onSyncToXero,
+}: {
+  settlement: SettlementDetail | null;
+  loading: boolean;
+  onClose: () => void;
+  onSyncToXero: (id: string) => void;
+}) {
+  // Distinguish three states: closed, loading-into-empty-shell, loaded
+  const isOpen = settlement !== null;
+  const isHydrated = !!settlement?.lineItems;
+
+  return (
+    <Sheet open={isOpen} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <SheetContent side="right" className="w-full sm:max-w-lg md:max-w-xl flex flex-col gap-0">
+        <SheetHeader className="border-b">
+          <SheetTitle>Settlement Details</SheetTitle>
+          <SheetDescription>
+            {isHydrated && settlement
+              ? `${settlement.periodStart} → ${settlement.periodEnd} · ${settlement.channel.replace("_", " ")}`
+              : "Loading…"}
+          </SheetDescription>
+        </SheetHeader>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {!isHydrated || loading ? (
+            <div className="flex items-center justify-center py-12">
+              <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : settlement ? (
+            <>
+              {/* Summary card */}
+              <div className="rounded-lg border bg-card p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${CHANNEL_COLORS[settlement.channel] || "bg-gray-100"}`}>
+                    {settlement.channel.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                  </span>
+                  <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[settlement.status] || "bg-gray-100"}`}>
+                    {settlement.status.replace("_", " ")}
+                  </span>
+                </div>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                  <dt className="text-muted-foreground">Gross</dt>
+                  <dd className="text-right">{fmt(settlement.grossAmount)} {settlement.currency}</dd>
+                  <dt className="text-muted-foreground">Fees</dt>
+                  <dd className="text-right text-red-600">{fmt(settlement.fees)} {settlement.currency}</dd>
+                  {settlement.adjustments !== 0 && (
+                    <>
+                      <dt className="text-muted-foreground">Adjustments</dt>
+                      <dd className="text-right">{fmt(settlement.adjustments)} {settlement.currency}</dd>
+                    </>
+                  )}
+                  <dt className="font-medium border-t pt-2">Net</dt>
+                  <dd className="text-right font-medium border-t pt-2">{fmt(settlement.netAmount)} {settlement.currency}</dd>
+                </dl>
+              </div>
+
+              {/* Metadata */}
+              <div className="rounded-lg border bg-card p-4 space-y-2 text-sm">
+                <h4 className="font-medium mb-2">Source</h4>
+                {settlement.externalId && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">External ID</span>
+                    <code className="text-xs">{settlement.externalId}</code>
+                  </div>
+                )}
+                {settlement.receivedAt && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Received</span>
+                    <span>{settlement.receivedAt}</span>
+                  </div>
+                )}
+                {settlement.shopifyAdminUrl && (
+                  <a
+                    href={settlement.shopifyAdminUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                  >
+                    <ExternalLink className="h-3 w-3" /> View in Shopify admin
+                  </a>
+                )}
+              </div>
+
+              {/* Xero state */}
+              <div className="rounded-lg border bg-card p-4 space-y-2 text-sm">
+                <h4 className="font-medium mb-2">Xero</h4>
+                {settlement.xeroTransactionId ? (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Status</span>
+                      <span className="text-green-600">✓ Synced</span>
+                    </div>
+                    {settlement.xeroSyncedAt && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Synced at</span>
+                        <span>{new Date(settlement.xeroSyncedAt).toLocaleString()}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Transaction</span>
+                      <code className="text-xs">{settlement.xeroTransactionId}</code>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-muted-foreground">Not yet synced to Xero.</p>
+                    <button
+                      onClick={() => onSyncToXero(settlement.id)}
+                      className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                    >
+                      <ExternalLink className="h-3 w-3" /> Sync to Xero
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {/* Line items */}
+              <div className="rounded-lg border bg-card overflow-hidden">
+                <div className="px-4 py-3 border-b flex items-center justify-between">
+                  <h4 className="font-medium">Line Items</h4>
+                  <span className="text-xs text-muted-foreground">{settlement.lineItems.length} transaction{settlement.lineItems.length === 1 ? "" : "s"}</span>
+                </div>
+                {settlement.lineItems.length === 0 ? (
+                  <p className="p-4 text-sm text-muted-foreground text-center">No line items recorded for this settlement.</p>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/30">
+                        <th className="text-left p-2 font-medium text-xs uppercase text-muted-foreground">Type</th>
+                        <th className="text-left p-2 font-medium text-xs uppercase text-muted-foreground">Description</th>
+                        <th className="text-right p-2 font-medium text-xs uppercase text-muted-foreground">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {settlement.lineItems.map((li) => (
+                        <tr key={li.id} className="border-b last:border-0">
+                          <td className="p-2">
+                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${
+                              li.type === "sale" ? "bg-green-50 text-green-700"
+                              : li.type === "refund" ? "bg-orange-50 text-orange-700"
+                              : li.type === "fee" ? "bg-red-50 text-red-700"
+                              : "bg-gray-50 text-gray-700"
+                            }`}>{li.type}</span>
+                          </td>
+                          <td className="p-2 text-muted-foreground">
+                            {li.localOrderId ? (
+                              <Link
+                                href={`/orders/${li.localOrderId}`}
+                                className="text-blue-600 hover:underline"
+                                onClick={onClose}
+                              >
+                                {li.localOrderNumber || li.description}
+                              </Link>
+                            ) : (
+                              li.description || "—"
+                            )}
+                          </td>
+                          <td className={`text-right p-2 font-mono ${li.amount < 0 ? "text-red-600" : ""}`}>
+                            {fmt(li.amount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {settlement.notes && (
+                <div className="rounded-lg border bg-card p-4 text-sm">
+                  <h4 className="font-medium mb-1">Notes</h4>
+                  <p className="text-muted-foreground whitespace-pre-wrap">{settlement.notes}</p>
+                </div>
+              )}
+            </>
+          ) : null}
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 
