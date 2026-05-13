@@ -239,17 +239,41 @@ export async function notifyWebhookFlood(opts: {
   service: string;
   count: number;
   windowSeconds: number;
+  /** Breakdown of `${topic} (${shop})` → count for the same window. */
+  breakdown?: Array<{ topic: string; shopDomain: string | null; count: number }>;
+  /** Whether all events in the window had handler_ok=1. */
+  allHandlerOk?: boolean;
 }) {
+  const lines: string[] = [
+    `🌊 *Webhook flood from ${opts.service}*`,
+    `${opts.count} webhooks in the last ${opts.windowSeconds}s.`,
+  ];
+
+  if (opts.breakdown && opts.breakdown.length > 0) {
+    const top = opts.breakdown.slice(0, 6);
+    lines.push("", "*Top topics in this window:*");
+    for (const b of top) {
+      lines.push(`• \`${b.topic}\` × ${b.count}${b.shopDomain ? ` _(${b.shopDomain.replace(/\.myshopify\.com$/, "")})_` : ""}`);
+    }
+    if (opts.breakdown.length > top.length) {
+      const rest = opts.breakdown.slice(top.length).reduce((s, b) => s + b.count, 0);
+      lines.push(`• _… ${opts.breakdown.length - top.length} more topics, ${rest} events_`);
+    }
+  }
+
+  if (opts.allHandlerOk === true) {
+    lines.push("", "✅ All events processed successfully — likely a Shopify retry queue draining (e.g., after we fixed a delivery URL). Should taper within a few minutes; no action needed.");
+  } else if (opts.allHandlerOk === false) {
+    lines.push("", "⚠️ Some events are failing — check `shopify_webhook_events` for handler errors.");
+  }
+
   await postSlack({
     topic: "ops.webhook_flood",
     text: `🌊 ${opts.service} webhook flood: ${opts.count} hits in ${opts.windowSeconds}s`,
     blocks: [
       {
         type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `🌊 *Webhook flood from ${opts.service}*\n${opts.count} webhooks in the last ${opts.windowSeconds}s. Could be a replay or something looped — worth a quick look.`,
-        },
+        text: { type: "mrkdwn", text: lines.join("\n") },
       },
     ],
   });

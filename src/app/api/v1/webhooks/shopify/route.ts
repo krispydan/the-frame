@@ -145,13 +145,26 @@ async function detectFlood(): Promise<void> {
   if (Date.now() - lastFloodAlertAt < FLOOD_COOLDOWN_MS) return;
   try {
     const { sqlite: rawDb } = await import("@/lib/db");
+    const sinceClause = `-${FLOOD_WINDOW_SECONDS} seconds`;
     const row = rawDb.prepare(
-      "SELECT COUNT(*) AS c FROM shopify_webhook_events WHERE received_at > datetime('now', ?)"
-    ).get(`-${FLOOD_WINDOW_SECONDS} seconds`) as { c: number };
+      "SELECT COUNT(*) AS c, SUM(CASE WHEN handler_ok = 1 THEN 1 ELSE 0 END) AS ok FROM shopify_webhook_events WHERE received_at > datetime('now', ?)"
+    ).get(sinceClause) as { c: number; ok: number };
     if ((row?.c ?? 0) >= FLOOD_THRESHOLD) {
       lastFloodAlertAt = Date.now();
+      // Build the per-topic/per-shop breakdown so the Slack alert is
+      // self-diagnostic — usually you can tell at a glance whether it's
+      // a backlog replay, a real spike, or a loop.
+      const breakdown = rawDb.prepare(
+        "SELECT topic, shop_domain AS shopDomain, COUNT(*) AS count FROM shopify_webhook_events WHERE received_at > datetime('now', ?) GROUP BY topic, shop_domain ORDER BY count DESC"
+      ).all(sinceClause) as Array<{ topic: string; shopDomain: string | null; count: number }>;
       const { notifyWebhookFlood } = await import("@/modules/integrations/lib/slack/notifications");
-      await notifyWebhookFlood({ service: "Shopify", count: row.c, windowSeconds: FLOOD_WINDOW_SECONDS });
+      await notifyWebhookFlood({
+        service: "Shopify",
+        count: row.c,
+        windowSeconds: FLOOD_WINDOW_SECONDS,
+        breakdown,
+        allHandlerOk: row.c > 0 ? row.ok === row.c : undefined,
+      });
     }
   } catch (e) {
     console.error("[shopify-webhook] flood detector error:", e);
