@@ -118,7 +118,12 @@ export function buildPayoutJournal(opts: {
       Description: descriptionFor(bucket.category, summary, bucket.amount, bucket.txCount),
       Tracking: tracking
         ? [{
+            // Send Name + Option — Xero resolves tracking by name pair, not
+            // by ID. Without Name, Xero logs a warning "...for category ''
+            // is not recognised" and drops the tracking from the journal.
+            // TrackingCategoryID is kept for forward-compat / audit.
             TrackingCategoryID: tracking.trackingCategoryId,
+            Name: tracking.trackingCategoryName ?? undefined,
             Option: tracking.trackingOptionName ?? "",
           }]
         : undefined,

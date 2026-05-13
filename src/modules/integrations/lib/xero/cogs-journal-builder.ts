@@ -49,7 +49,14 @@ export function buildCogsJournal(opts: {
   }
 
   const trackingTag = tracking
-    ? [{ TrackingCategoryID: tracking.trackingCategoryId, Option: tracking.trackingOptionName ?? "" }]
+    ? [{
+        // See journal-builder.ts — Xero resolves tracking by Name+Option pair,
+        // not by ID. Omitting Name causes the tracking to be silently dropped
+        // with a warning. ID kept for forward-compat / audit.
+        TrackingCategoryID: tracking.trackingCategoryId,
+        Name: tracking.trackingCategoryName ?? undefined,
+        Option: tracking.trackingOptionName ?? "",
+      }]
     : undefined;
 
   const lines: XeroJournalLine[] = [];

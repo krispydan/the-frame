@@ -373,7 +373,11 @@ export async function xeroAdminFetch(
 
     if (!res.ok) {
       const err = await res.text();
-      return { success: false, error: `Xero API ${res.status}: ${err.slice(0, 300)}` };
+      // Log full body to console — Xero ValidationErrors live deep in the
+      // response and are often >1KB. Truncating here hid blocking errors
+      // (e.g. "Account code X is not a valid code for this document").
+      console.error(`[Xero] GET ${path} → ${res.status}\n${err}`);
+      return { success: false, error: `Xero API ${res.status}: ${err.slice(0, 4000)}` };
     }
 
     const data = await res.json();
@@ -412,10 +416,14 @@ export async function xeroAdminPost(
 
     if (!res.ok) {
       const err = await res.text();
+      // Log full body to console — Xero ValidationErrors live deep in the
+      // response and are often >1KB. Truncating here hid blocking errors
+      // (e.g. "Account code X is not a valid code for this document").
+      console.error(`[Xero] POST ${path} → ${res.status}\n${err}`);
       return {
         success: false,
         status: res.status,
-        error: `Xero API ${res.status}: ${err.slice(0, 800)}`,
+        error: `Xero API ${res.status}: ${err.slice(0, 4000)}`,
       };
     }
 
