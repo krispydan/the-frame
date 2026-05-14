@@ -28,10 +28,6 @@ type SlackStatus = {
 
 type ShipHeroStatus = {
   configured: boolean;
-  health: "ok" | "warn" | "off";
-  inventory: { lastSyncedAt: string | null; skuCount: number; skusWithStock: number };
-  orders: { lastSyncedAt: string | null; matchedOrders: number; shipmentCount: number };
-  recentJobs: Array<{ type: string; status: string; error: string | null; completedAt: string | null }>;
 };
 
 function timeAgo(iso: string): string {
@@ -67,9 +63,15 @@ export default function IntegrationsIndexPage() {
       .then((d) => setXero(d))
       .catch(() => setXero({ configured: false, connected: false }));
     fetch("/api/v1/integrations/shiphero")
-      .then((r) => r.json())
-      .then((d) => setShiphero(d))
-      .catch(() => setShiphero(null));
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
+        // Older response shape included a bunch of derived fields; we only
+        // need configured here. Guard so a partial response doesn't render
+        // "Not configured" when the endpoint actually returned 200.
+        setShiphero({ configured: !!d.configured });
+      })
+      .catch(() => setShiphero({ configured: false }));
     fetch("/api/v1/integrations/slack")
       .then((r) => r.json())
       .then((d) => setSlack(d))
@@ -167,73 +169,32 @@ export default function IntegrationsIndexPage() {
           </Card>
         </Link>
 
-        {/* ShipHero */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center justify-between text-base">
-              <span className="flex items-center gap-2">
-                <Warehouse className="h-5 w-5" />
-                ShipHero
-              </span>
-            </CardTitle>
-            <CardDescription>Warehouse inventory levels and order fulfillment tracking. Syncs hourly during PST business hours.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <StatusBadge
-              kind={shiphero?.health ?? "off"}
-              label={
-                shiphero === null ? "Loading" :
-                !shiphero.configured ? "Not configured" :
-                shiphero.health === "ok" ? "Syncing" :
-                shiphero.health === "warn" ? "Sync issue" :
-                "Inactive"
-              }
-            />
-            {shiphero?.configured && (
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Inventory SKUs</span>
-                  <span className="font-medium">{shiphero.inventory.skuCount} ({shiphero.inventory.skusWithStock} in stock)</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Orders matched</span>
-                  <span className="font-medium">{shiphero.orders.matchedOrders}</span>
-                </div>
-                {shiphero.inventory.lastSyncedAt && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Last inventory sync</span>
-                    <span className="font-medium">{timeAgo(shiphero.inventory.lastSyncedAt)}</span>
-                  </div>
-                )}
-                {shiphero.orders.lastSyncedAt && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Last order sync</span>
-                    <span className="font-medium">{timeAgo(shiphero.orders.lastSyncedAt)}</span>
-                  </div>
-                )}
-                {shiphero.recentJobs.length > 0 && (
-                  <div className="pt-2 border-t">
-                    <p className="text-xs text-muted-foreground mb-1">Recent jobs</p>
-                    <div className="space-y-1">
-                      {shiphero.recentJobs.slice(0, 4).map((j, i) => (
-                        <div key={i} className="flex items-center justify-between text-xs">
-                          <span className="text-muted-foreground">{j.type.replace("sync-", "")}</span>
-                          <span className="flex items-center gap-1.5">
-                            {j.status === "completed" && <CheckCircle className="h-3 w-3 text-green-500" />}
-                            {j.status === "failed" && <AlertCircle className="h-3 w-3 text-red-500" />}
-                            {j.status === "pending" && <Circle className="h-3 w-3 text-muted-foreground" />}
-                            {j.status === "running" && <Circle className="h-3 w-3 text-blue-500" />}
-                            {j.completedAt ? timeAgo(j.completedAt) : j.status}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <Link href="/settings/integrations/shiphero" className="block group cursor-pointer">
+          <Card className="transition-all group-hover:shadow-md group-hover:border-primary/40">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center justify-between text-base">
+                <span className="flex items-center gap-2">
+                  <Warehouse className="h-5 w-5" />
+                  ShipHero
+                </span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </CardTitle>
+              <CardDescription>3PL warehouse. Order Allocated and Shipment Update webhooks; Faire packing-slip attachment.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <StatusBadge
+                kind={shiphero === null ? "off" : shiphero.configured ? "ok" : "off"}
+                label={
+                  shiphero === null
+                    ? "Loading"
+                    : shiphero.configured
+                    ? "Configured"
+                    : "Not configured"
+                }
+              />
+            </CardContent>
+          </Card>
+        </Link>
 
         <Link href="/settings/integrations/slack" className="block group cursor-pointer">
           <Card className="transition-all group-hover:shadow-md group-hover:border-primary/40">
