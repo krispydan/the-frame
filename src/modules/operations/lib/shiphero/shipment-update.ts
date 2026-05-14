@@ -107,7 +107,12 @@ async function handleShipmentUpdate(
 
   sqlite.prepare(`UPDATE orders SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
 
-  // Emit only on the non-shipped → shipped transition.
+  // Emit only on the non-shipped → shipped transition. Two side effects
+  // are guarded by this gate:
+  //   1. eventBus "order.shipped" (downstream listeners — Slack digest etc.)
+  //   2. Slack "📦 order fulfilled" alert posted via the shared notifier.
+  // The Shopify webhook path fires the same Slack alert; both call the
+  // same helper so messages are identical regardless of origin.
   if (!wasShipped) {
     try {
       eventBus.emit("order.shipped", {
@@ -118,6 +123,16 @@ async function handleShipmentUpdate(
     } catch (e) {
       console.error("[shiphero/shipment-update] eventBus emit failed:", e);
     }
+    void (async () => {
+      const { notifyOrderShippedById } = await import("@/modules/orders/lib/notify-fulfilled");
+      await notifyOrderShippedById({
+        orderId: row.id,
+        trackingNumber,
+        trackingCarrier: carrier,
+        trackingUrl: body.tracking_url ?? null,
+        shipheroOrderId,
+      });
+    })();
   }
 
   return {
