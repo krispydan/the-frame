@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Plug, ChevronRight, ShoppingBag, DollarSign, Warehouse, MessageSquare, CheckCircle, AlertCircle, Circle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { ApiKeyCard } from "./api-key-card";
 
 type ShopifyShop = {
   id: string;
@@ -215,8 +216,35 @@ export default function IntegrationsIndexPage() {
         </Link>
       </div>
 
+      <div className="mt-10">
+        <h2 className="text-lg font-semibold mb-1">API key integrations</h2>
+        <p className="text-sm text-muted-foreground mb-4">
+          Integrations that haven&apos;t been upgraded to OAuth yet — just paste an API key.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <ApiKeyCard
+            title="Klaviyo"
+            description="Email marketing and customer data platform"
+            settingKey="klaviyo_api_key"
+            testSlug="klaviyo"
+          />
+          <ApiKeyCard
+            title="Instantly"
+            description="Cold-email campaign automation for the sales pipeline"
+            settingKey="instantly_api_key"
+            testSlug="instantly"
+          />
+          <ApiKeyCard
+            title="Outscraper"
+            description="Business data enrichment — Google Maps reviews, emails, phones"
+            settingKey="outscraper_api_key"
+            testSlug="outscraper"
+          />
+        </div>
+      </div>
+
       <p className="mt-6 text-xs text-muted-foreground">
-        Other integrations (Klaviyo, Resend, Anthropic, OpenAI, etc.) are still configured under Settings via API keys. They&apos;ll move into this page over time as they&apos;re upgraded to OAuth. Faire is configured via the <code>FAIRE_API_TOKEN</code> environment variable.
+        Anthropic, OpenAI, Resend keys are set via environment variables on Railway. Faire uses <code>FAIRE_API_TOKEN</code>.
       </p>
     </div>
   );

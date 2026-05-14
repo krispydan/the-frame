@@ -299,13 +299,12 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground">Configure The Frame — profile, integrations, and preferences</p>
+        <p className="text-muted-foreground">Profile and preferences. External integrations live on <Link href="/settings/integrations" className="underline">/settings/integrations</Link>.</p>
       </div>
 
       <Tabs defaultValue="profile" className="space-y-4">
         <TabsList>
           <TabsTrigger value="profile" className="gap-2"><User className="h-4 w-4" /> Profile</TabsTrigger>
-          <TabsTrigger value="integrations" className="gap-2"><Plug className="h-4 w-4" /> Integrations</TabsTrigger>
           <TabsTrigger value="notifications" className="gap-2"><Bell className="h-4 w-4" /> Notifications</TabsTrigger>
           <TabsTrigger value="data" className="gap-2"><Database className="h-4 w-4" /> Data</TabsTrigger>
           <TabsTrigger value="about" className="gap-2"><Info className="h-4 w-4" /> About</TabsTrigger>
@@ -449,103 +448,11 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
 
-        {/* ── Integrations ── */}
-        <TabsContent value="integrations">
-          <div className="grid gap-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Instantly</CardTitle>
-                <CardDescription>Email campaign automation — provide your API key to enable outreach</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid gap-2">
-                  <Label htmlFor="instantly_api_key">API Key</Label>
-                  <ApiKeyInput
-                    id="instantly_api_key"
-                    value={settings.instantly_api_key ?? ""}
-                    onChange={(v) => update("instantly_api_key", v)}
-                    integration="instantly_api_key"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" onClick={() => save("instantly_api_key")} disabled={saving}>
-                    <Save className="h-4 w-4 mr-2" /> Save
-                  </Button>
-                  <TestConnectionButton integration="instantly" settings={settings} />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Outscraper</CardTitle>
-                <CardDescription>Business data enrichment — Google Maps reviews, emails, phones</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid gap-2">
-                  <Label htmlFor="outscraper_api_key">API Key</Label>
-                  <ApiKeyInput
-                    id="outscraper_api_key"
-                    value={settings.outscraper_api_key ?? ""}
-                    onChange={(v) => update("outscraper_api_key", v)}
-                    integration="outscraper_api_key"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" onClick={() => save("outscraper_api_key")} disabled={saving}>
-                    <Save className="h-4 w-4 mr-2" /> Save
-                  </Button>
-                  <TestConnectionButton integration="outscraper" settings={settings} />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Shopify</CardTitle>
-                <CardDescription>
-                  Shopify connections are now managed via OAuth on a dedicated page.
-                  Tokens are issued by Shopify when a merchant approves install scopes.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Link
-                  href="/settings/integrations/shopify"
-                  className="inline-flex items-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
-                >
-                  <Link2 className="h-4 w-4 mr-2" />
-                  Open Shopify integrations
-                  <ChevronRight className="h-4 w-4 ml-2" />
-                </Link>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Klaviyo</CardTitle>
-                <CardDescription>Email marketing and customer data platform</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid gap-2">
-                  <Label htmlFor="klaviyo_api_key">API Key</Label>
-                  <ApiKeyInput
-                    id="klaviyo_api_key"
-                    value={settings.klaviyo_api_key ?? ""}
-                    onChange={(v) => update("klaviyo_api_key", v)}
-                    integration="klaviyo_api_key"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" onClick={() => save("klaviyo_api_key")} disabled={saving}>
-                    <Save className="h-4 w-4 mr-2" /> Save
-                  </Button>
-                  <TestConnectionButton integration="klaviyo" settings={settings} />
-                </div>
-              </CardContent>
-            </Card>
-            <XeroIntegrationCard settings={settings} onReload={load} />
-          </div>
-        </TabsContent>
+        {/* Integrations moved to /settings/integrations — see the link in the
+            page header. ApiKeyInput / TestConnectionButton / XeroIntegrationCard
+            are unused now; we leave them defined in this file for the moment
+            since they're imported below and removing them is a separate
+            cleanup pass. */}
 
         {/* ── Notifications ── */}
         <TabsContent value="notifications">
