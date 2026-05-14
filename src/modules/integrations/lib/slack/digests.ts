@@ -21,17 +21,58 @@ function pct(n: number): string {
 type ChannelRevenue = { channel: string; revenue: number; orders: number };
 type SkuTopRow = { sku: string; product_name: string; color_name: string | null; qty: number };
 
-function loadChannelRevenue(sinceIso: string): ChannelRevenue[] {
+/**
+ * Compute the UTC bounds for "yesterday in Pacific Time" — handles DST
+ * correctly by reading the actual PT offset from Intl rather than hard-coding
+ * -7 or -8. Returns ISO strings suitable for SQLite datetime() comparisons.
+ *
+ * Returns end (exclusive) — i.e. midnight at the start of today PT.
+ */
+function ptYesterdayBounds(): { startIso: string; endIso: string; ptDate: string } {
+  const ptDateOf = (d: Date) =>
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Los_Angeles",
+      year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(d);
+
+  const yesterdayPt = ptDateOf(new Date(Date.now() - 24 * 3600_000)); // "YYYY-MM-DD"
+
+  // Discover PT offset for yesterday (DST-safe): format noon UTC as the PT
+  // hour-of-day; the difference vs 12 is the offset.
+  const [yy, mm, dd] = yesterdayPt.split("-").map(Number);
+  const noonUtcYesterday = new Date(Date.UTC(yy, mm - 1, dd, 12));
+  const ptHourAtNoonUtc = parseInt(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Los_Angeles", hourCycle: "h23", hour: "2-digit",
+    }).format(noonUtcYesterday),
+    10,
+  );
+  const offsetHours = ptHourAtNoonUtc - 12; // -7 in PDT, -8 in PST
+
+  // Midnight PT yesterday in UTC = yesterday's date at (-offsetHours) UTC.
+  const startUtc = new Date(Date.UTC(yy, mm - 1, dd, -offsetHours));
+  const endUtc = new Date(startUtc.getTime() + 24 * 3600_000);
+
+  return {
+    startIso: startUtc.toISOString(),
+    endIso: endUtc.toISOString(),
+    ptDate: yesterdayPt,
+  };
+}
+
+function loadChannelRevenue(startIso: string, endIso: string): ChannelRevenue[] {
   return sqlite.prepare(`
     SELECT channel, ROUND(SUM(total), 2) AS revenue, COUNT(*) AS orders
     FROM orders
-    WHERE placed_at >= ? AND status != 'cancelled'
+    WHERE datetime(placed_at) >= datetime(?)
+      AND datetime(placed_at) <  datetime(?)
+      AND status != 'cancelled'
     GROUP BY channel
     ORDER BY revenue DESC
-  `).all(sinceIso) as ChannelRevenue[];
+  `).all(startIso, endIso) as ChannelRevenue[];
 }
 
-function loadTopSkus(sinceIso: string, limit = 5): SkuTopRow[] {
+function loadTopSkus(startIso: string, endIso: string, limit = 5): SkuTopRow[] {
   return sqlite.prepare(`
     SELECT oi.sku AS sku,
            COALESCE(oi.product_name, p.name) AS product_name,
@@ -41,11 +82,14 @@ function loadTopSkus(sinceIso: string, limit = 5): SkuTopRow[] {
     JOIN orders o ON o.id = oi.order_id
     LEFT JOIN catalog_skus s ON s.sku = oi.sku
     LEFT JOIN catalog_products p ON p.id = s.product_id
-    WHERE o.placed_at >= ? AND o.status != 'cancelled' AND oi.sku IS NOT NULL
+    WHERE datetime(o.placed_at) >= datetime(?)
+      AND datetime(o.placed_at) <  datetime(?)
+      AND o.status != 'cancelled'
+      AND oi.sku IS NOT NULL
     GROUP BY oi.sku
     ORDER BY qty DESC
     LIMIT ?
-  `).all(sinceIso, limit) as SkuTopRow[];
+  `).all(startIso, endIso, limit) as SkuTopRow[];
 }
 
 type StockAlertRow = { sku: string; quantity: number; product_name: string; color_name: string | null };
@@ -93,14 +137,15 @@ function skuLabel(s: SkuTopRow): string {
  * Daily digest — yesterday's activity. Designed to fire at ~7am PT.
  */
 export async function postDailyDigest(): Promise<{ ok: boolean }> {
-  // "Yesterday in PT" — start at midnight 24h ago (server time is UTC).
-  // Slightly fuzzy: digest covers the last 24h ending now.
-  const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+  // "Yesterday in PT" = midnight-to-midnight in America/Los_Angeles.
+  // ptYesterdayBounds() handles PDT/PST so digest covers a full day even
+  // when it fires later in the morning.
+  const { startIso, endIso, ptDate } = ptYesterdayBounds();
 
-  const channels = loadChannelRevenue(since);
+  const channels = loadChannelRevenue(startIso, endIso);
   const totalRevenue = channels.reduce((s, c) => s + c.revenue, 0);
   const totalOrders = channels.reduce((s, c) => s + c.orders, 0);
-  const topSkus = loadTopSkus(since, 5);
+  const topSkus = loadTopSkus(startIso, endIso, 5);
   const lowStock = loadLowStock();
   const stuck = loadStuckOrders();
 
@@ -127,7 +172,7 @@ export async function postDailyDigest(): Promise<{ ok: boolean }> {
     },
     {
       type: "section",
-      text: { type: "mrkdwn", text: `*Yesterday at a glance*\nTotal: *${money(totalRevenue)}* across *${totalOrders}* order${totalOrders === 1 ? "" : "s"}` },
+      text: { type: "mrkdwn", text: `*Yesterday at a glance* — ${new Date(`${ptDate}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: "America/Los_Angeles" })}\nTotal: *${money(totalRevenue)}* across *${totalOrders}* order${totalOrders === 1 ? "" : "s"}` },
     },
     { type: "section", text: { type: "mrkdwn", text: `*Revenue by channel*\n${channelLines}` } },
     { type: "section", text: { type: "mrkdwn", text: `*Top sellers*\n${skuLines}` } },
@@ -148,19 +193,17 @@ export async function postDailyDigest(): Promise<{ ok: boolean }> {
  * Weekly digest — last 7 days vs prior 7 days. Designed to fire Monday ~8am PT.
  */
 export async function postWeeklyDigest(): Promise<{ ok: boolean }> {
-  const now = Date.now();
-  const since7 = new Date(now - 7 * 24 * 3600_000).toISOString();
-  const since14 = new Date(now - 14 * 24 * 3600_000).toISOString();
+  const nowIso = new Date().toISOString();
+  const sevenDaysAgoIso = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+  const fourteenDaysAgoIso = new Date(Date.now() - 14 * 24 * 3600_000).toISOString();
 
-  const last7 = loadChannelRevenue(since7);
-  const prior7 = loadChannelRevenue(since14).map((c) => ({
-    ...c,
-    revenue: c.revenue - (last7.find((x) => x.channel === c.channel)?.revenue ?? 0),
-    orders: c.orders - (last7.find((x) => x.channel === c.channel)?.orders ?? 0),
-  }));
+  // Last 7 days (now - 7d → now)
+  const last7 = loadChannelRevenue(sevenDaysAgoIso, nowIso);
+  // Prior 7 days (now - 14d → now - 7d) — distinct window, no subtraction math.
+  const prior7 = loadChannelRevenue(fourteenDaysAgoIso, sevenDaysAgoIso);
 
   const totalLast7 = last7.reduce((s, c) => s + c.revenue, 0);
-  const totalPrior = prior7.reduce((s, c) => s + Math.max(c.revenue, 0), 0);
+  const totalPrior = prior7.reduce((s, c) => s + c.revenue, 0);
   const wow = totalPrior > 0 ? ((totalLast7 - totalPrior) / totalPrior) * 100 : 0;
 
   const channelLines = last7.length === 0
@@ -170,7 +213,7 @@ export async function postWeeklyDigest(): Promise<{ ok: boolean }> {
         return `• *${platformLabel(c.channel)}* — ${money(c.revenue)} (${share.toFixed(0)}% of total, ${c.orders} order${c.orders === 1 ? "" : "s"})`;
       }).join("\n");
 
-  const topSkus = loadTopSkus(since7, 5);
+  const topSkus = loadTopSkus(sevenDaysAgoIso, nowIso, 5);
   const skuLines = topSkus.length === 0
     ? "_No items sold._"
     : topSkus.map((s, i) => `${i + 1}. ${skuLabel(s)} \`${s.sku}\` × ${s.qty}`).join("\n");
