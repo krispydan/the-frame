@@ -87,6 +87,15 @@ export async function POST(req: NextRequest) {
   const hmacValid = topic ? verifyShipHeroHmac(body, signatureHeader, topic) : false;
 
   if (!hmacValid) {
+    // Diagnostic context — captures enough to debug a signing mismatch
+    // without exposing the full signature. sig8 = first 8 chars of the
+    // header value; sigLen = its byte length. If signing ever drifts
+    // again we can see at a glance whether the header is missing
+    // (sigLen=0), the wrong format (length doesn't match a base64-encoded
+    // SHA256 digest = 44), or just a different secret (length matches
+    // but contents diverge).
+    const sigLen = signatureHeader.length;
+    const sig8 = signatureHeader.slice(0, 8);
     await logEvent({
       topic,
       shipheroId,
@@ -95,7 +104,7 @@ export async function POST(req: NextRequest) {
       hmacValid: false,
       handlerOk: false,
       handlerMessage: signatureHeader
-        ? "HMAC verification failed"
+        ? `HMAC verification failed (sigLen=${sigLen}, sig8=${sig8})`
         : "Missing signature header",
       payloadSize: body.length,
       payloadPreview: body.slice(0, 500),
@@ -169,14 +178,20 @@ export async function POST(req: NextRequest) {
  * Verify a ShipHero webhook HMAC.
  *
  * ShipHero signs the raw body with HMAC-SHA256 using the per-subscription
- * shared_secret that webhook_create returned at registration time. We look
- * up the secret by topic (the subscription's `name` field — see api-client).
- * The signature is hex-encoded (NOT base64 like Shopify).
+ * shared_secret that webhook_create returned at registration time. The
+ * resulting digest is BASE64-encoded (NOT hex like an earlier draft of
+ * this file assumed — confirmed against the developer docs at
+ * https://developer.shiphero.com/webhooks/ which show
+ * `base64.b64encode(hmac.new(secret, body, sha256).digest())`).
+ *
+ * The shared secret is returned as a 64-char hex string by webhook_create.
+ * We try the secret first as a UTF-8 string (the literal characters of the
+ * hex) and fall back to the hex-decoded raw bytes, because different
+ * receivers in the wild use either convention and the docs don't specify.
  */
 function verifyShipHeroHmac(body: string, signature: string, topic: string): boolean {
   if (!signature) return false;
   try {
-    // Drizzle would work here but the receiver is hot-path; use raw sqlite.
     const row = sqlite
       .prepare(
         `SELECT shared_secret FROM shiphero_webhook_subscriptions
@@ -186,11 +201,21 @@ function verifyShipHeroHmac(body: string, signature: string, topic: string): boo
       .get(topic) as { shared_secret: string } | undefined;
     if (!row?.shared_secret) return false;
 
-    const expected = createHmac("sha256", row.shared_secret).update(body, "utf8").digest("hex");
-    const a = Buffer.from(expected);
-    const b = Buffer.from(signature.trim().toLowerCase());
-    if (a.length !== b.length) return false;
-    return timingSafeEqual(a, b);
+    const provided = Buffer.from(signature.trim(), "base64");
+
+    // Variant A: secret used as a UTF-8 string (most common).
+    const a = createHmac("sha256", row.shared_secret).update(body, "utf8").digest();
+    if (a.length === provided.length && timingSafeEqual(a, provided)) return true;
+
+    // Variant B: secret used as hex-decoded raw bytes (if ShipHero treats
+    // the 64-char hex as bytes-on-the-wire). 64 hex chars → 32 raw bytes.
+    if (/^[0-9a-f]{64}$/i.test(row.shared_secret)) {
+      const secretBytes = Buffer.from(row.shared_secret, "hex");
+      const b = createHmac("sha256", secretBytes).update(body, "utf8").digest();
+      if (b.length === provided.length && timingSafeEqual(b, provided)) return true;
+    }
+
+    return false;
   } catch (e) {
     console.error("[shiphero-webhook] HMAC verify error:", e);
     return false;
