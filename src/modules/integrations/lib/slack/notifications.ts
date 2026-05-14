@@ -35,6 +35,35 @@ function relativeTime(iso: string | null | undefined): string {
   return `${Math.round(ms / 86_400_000)} days ago`;
 }
 
+/**
+ * Build a Faire brand-portal URL from a Shopify order name, IFF the order
+ * looks like it originated from Faire.
+ *
+ * Faire syncs orders into Shopify using the Faire booking ID as the order
+ * name — always 10 chars, alphanumeric, uppercase (e.g. "#CV78JYQU29"). The
+ * matching Faire portal URL uses the same ID lowercased and prefixed `bo_`:
+ *   #CV78JYQU29 → https://www.faire.com/brand-portal/orders/bo_cv78jyqu29/order-fulfilment
+ *
+ * Returns null for any order that doesn't match the Faire ID pattern.
+ */
+export function faireOrderUrlFromName(orderName: string | null | undefined): string | null {
+  if (!orderName) return null;
+  const m = /^#?([A-Z0-9]{10})$/.exec(orderName.trim());
+  if (!m) return null;
+  return `https://www.faire.com/brand-portal/orders/bo_${m[1].toLowerCase()}/order-fulfilment`;
+}
+
+/**
+ * Build the Shopify admin order URL.
+ *   getjaxy.myshopify.com + 6959466381461 → https://admin.shopify.com/store/getjaxy/orders/6959466381461
+ * Returns null if we can't form a clean URL.
+ */
+export function shopifyAdminOrderUrl(shopDomain: string | null | undefined, externalOrderId: string | null | undefined): string | null {
+  if (!shopDomain || !externalOrderId) return null;
+  const handle = shopDomain.replace(/\.myshopify\.com$/i, "").replace(/^https?:\/\//, "");
+  return `https://admin.shopify.com/store/${handle}/orders/${externalOrderId}`;
+}
+
 /* ── Wholesale order ── */
 
 export async function notifyWholesaleOrder(opts: {
@@ -78,6 +107,76 @@ export async function notifyWholesaleOrder(opts: {
   await postSlack({
     topic: "orders.wholesale",
     text: `🛍️ New wholesale order ${opts.orderNumber} from ${opts.companyName || "a new account"} — ${total}`,
+    blocks,
+  });
+}
+
+/* ── Order fulfilled (shipped) ── */
+
+export async function notifyOrderFulfilled(opts: {
+  orderNumber: string;
+  channel: string;
+  total: number;
+  currency: string;
+  itemCount: number;
+  companyName: string | null;
+  trackingNumber: string | null;
+  trackingCarrier: string | null;
+  trackingUrl?: string | null;
+  shopifyAdminUrl?: string | null;
+  /** Faire brand-portal URL — only set for Faire-originated orders. */
+  faireUrl?: string | null;
+  /** Top SKUs in the fulfillment for context. */
+  topSkus?: Array<{ sku: string; name: string; qty: number }>;
+}) {
+  const channelLabel =
+    opts.channel === "shopify_dtc" ? "Retail"
+    : opts.channel === "shopify_wholesale" ? (opts.faireUrl ? "Faire (via Wholesale)" : "Wholesale")
+    : opts.channel === "faire" ? "Faire"
+    : opts.channel;
+  const customer = opts.companyName ? `*${opts.companyName}*` : "the customer";
+  const total = money(opts.total, opts.currency);
+
+  // First line — the lead sentence.
+  const intro = `📦 *Order fulfilled* — ${customer}'s order is on the way (${total}, ${pluralize(opts.itemCount, "frame", "frames")})`;
+
+  // Tracking sub-line. Carrier name + number; link out if we have a URL.
+  const trackingLine = (() => {
+    if (!opts.trackingNumber) return null;
+    const carrier = opts.trackingCarrier ? `${opts.trackingCarrier} ` : "";
+    const num = opts.trackingUrl
+      ? `<${opts.trackingUrl}|${opts.trackingNumber}>`
+      : `\`${opts.trackingNumber}\``;
+    return `🚚 ${carrier}${num}`;
+  })();
+
+  // Context line: order #, channel, plus deep links.
+  const links: string[] = [];
+  if (opts.shopifyAdminUrl) links.push(`<${opts.shopifyAdminUrl}|Shopify>`);
+  if (opts.faireUrl) links.push(`<${opts.faireUrl}|Faire>`);
+  const contextLine = `Order *${opts.orderNumber}* · ${channelLabel}${links.length ? ` · ${links.join(" · ")}` : ""}`;
+
+  const skuLine = opts.topSkus && opts.topSkus.length > 0
+    ? opts.topSkus.map((s) => `• \`${s.sku}\` ${s.name} × ${s.qty}`).join("\n")
+    : null;
+
+  const blocks: SlackBlock[] = [
+    { type: "section", text: { type: "mrkdwn", text: intro } },
+  ];
+  if (trackingLine) {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: trackingLine } });
+  }
+  blocks.push({
+    type: "context",
+    elements: [{ type: "mrkdwn", text: contextLine }],
+  });
+  if (skuLine) {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: skuLine } });
+  }
+
+  await postSlack({
+    topic: "orders.fulfilled",
+    text: `📦 Order ${opts.orderNumber} fulfilled${opts.trackingNumber ? ` — ${opts.trackingNumber}` : ""}`,
     blocks,
   });
 }

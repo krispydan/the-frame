@@ -348,7 +348,7 @@ async function handleOrderCancelled(order: ShopifyOrder, _shopDomain?: string) {
   }
 }
 
-async function handleFulfillmentCreate(fulfillment: ShopifyFulfillment) {
+async function handleFulfillmentCreate(fulfillment: ShopifyFulfillment, shopDomain?: string) {
   // Find the order by Shopify order_id
   const existing = db.select().from(orders)
     .where(eq(orders.externalId, String(fulfillment.order_id)))
@@ -372,6 +372,62 @@ async function handleFulfillmentCreate(fulfillment: ShopifyFulfillment) {
     trackingNumber: fulfillment.tracking_number || undefined,
     carrier: fulfillment.tracking_company || undefined,
   });
+
+  // Slack: "📦 order shipped" with deep links to Shopify + Faire (if applicable)
+  void (async () => {
+    try {
+      const {
+        notifyOrderFulfilled,
+        faireOrderUrlFromName,
+        shopifyAdminOrderUrl,
+      } = await import("@/modules/integrations/lib/slack/notifications");
+
+      const companyName = existing.companyId
+        ? db.select({ name: companies.name }).from(companies).where(eq(companies.id, existing.companyId)).get()?.name ?? null
+        : null;
+
+      // Resolve top SKUs from local order_items (more accurate than the
+      // fulfillment.line_items shape, which lacks product_name in some cases)
+      const lineItemsRows = db
+        .select({
+          sku: orderItems.sku,
+          productName: orderItems.productName,
+          colorName: orderItems.colorName,
+          quantity: orderItems.quantity,
+        })
+        .from(orderItems)
+        .where(eq(orderItems.orderId, existing.id))
+        .all();
+      const itemCount = lineItemsRows.reduce((s, r) => s + (r.quantity || 0), 0);
+      const topSkus = lineItemsRows
+        .slice(0, 5)
+        .map((r) => ({
+          sku: r.sku ?? "—",
+          name: r.colorName ? `${r.productName ?? ""} (${r.colorName})` : r.productName ?? "",
+          qty: r.quantity || 0,
+        }));
+
+      const faireUrl = faireOrderUrlFromName(existing.orderNumber);
+      const shopifyUrl = shopifyAdminOrderUrl(shopDomain, existing.externalId);
+
+      await notifyOrderFulfilled({
+        orderNumber: existing.orderNumber,
+        channel: existing.channel,
+        total: existing.total,
+        currency: existing.currency || "USD",
+        itemCount,
+        companyName,
+        trackingNumber: fulfillment.tracking_number ?? null,
+        trackingCarrier: fulfillment.tracking_company ?? null,
+        trackingUrl: fulfillment.tracking_url ?? null,
+        shopifyAdminUrl: shopifyUrl,
+        faireUrl,
+        topSkus,
+      });
+    } catch (e) {
+      console.error("[Shopify Webhook] Slack fulfilled alert failed:", e);
+    }
+  })();
 }
 
 async function handleFulfillmentUpdate(fulfillment: ShopifyFulfillment) {
@@ -493,7 +549,7 @@ webhookRegistry.register("shopify", async (payload) => {
     }
     case "fulfillments/create": {
       const fulfillment = payload.parsedBody as ShopifyFulfillment;
-      await handleFulfillmentCreate(fulfillment);
+      await handleFulfillmentCreate(fulfillment, shopDomain);
       break;
     }
     case "fulfillments/update": {

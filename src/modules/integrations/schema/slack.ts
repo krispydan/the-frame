@@ -47,6 +47,7 @@ export type SlackMessageLog = typeof slackMessageLog.$inferSelect;
 export type SlackTopic =
   // Real-time alerts
   | "orders.wholesale"
+  | "orders.fulfilled"
   | "stock.out_of_stock"
   | "stock.critical_low"
   | "orders.payment_failed"
@@ -66,6 +67,7 @@ export type SlackTopic =
 export const SLACK_TOPICS: { topic: SlackTopic; label: string; defaultChannel: string; group: string; description: string }[] = [
   // Orders
   { topic: "orders.wholesale",        label: "Wholesale order placed",       defaultChannel: "jaxy-orders-live",   group: "Orders",       description: "Pings the moment a wholesale order lands. Faire orders too." },
+  { topic: "orders.fulfilled",        label: "Order fulfilled (shipped)",     defaultChannel: "jaxy-orders-live",   group: "Orders",       description: "Pings when a Shopify order is marked fulfilled. Faire orders include a deep link to the Faire brand portal." },
   { topic: "orders.payment_failed",   label: "Payment failed",                defaultChannel: "jaxy-ops-alerts",    group: "Orders",       description: "An order's payment was declined or voided." },
   { topic: "orders.chargeback",       label: "Chargeback / dispute",          defaultChannel: "jaxy-ops-alerts",    group: "Orders",       description: "Customer disputed a charge through their bank." },
   { topic: "orders.stuck",            label: "Order stuck > 48h",             defaultChannel: "jaxy-ops-alerts",    group: "Orders",       description: "Confirmed but not shipped after 48 hours." },
