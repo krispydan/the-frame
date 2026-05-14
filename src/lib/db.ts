@@ -582,21 +582,33 @@ try {
   // Accrual model needs two more account mappings (added 2026-05-13 when
   // we moved from "recognize revenue on payout" → "defer at payout, recognize
   // at shipment" under ASC 606 accrual rules).
-  //   - receivables_holding: where the NET payout amount parks before the
-  //     bank transaction sweeps it into the BANK clearing account (the old
-  //     "post manual journal directly to BANK" approach got rejected by Xero
-  //     validation for non-Adviser-role users).
-  //   - deferred_revenue: where the GROSS revenue parks until the order
-  //     ships and recognition fires.
-  // Both are "_shared" because they aren't channel-specific — channel split
-  // is done via the Sales Channel tracking category.
+  //   - receivables_holding (1100): non-bank clearing for NET payouts —
+  //     swept into the 101x BANK accounts via BankTransaction so the old
+  //     "post manual journal directly to BANK" validation failure goes away.
+  //   - deferred_revenue (2050): GROSS revenue lives here until the order
+  //     ships and recognition fires. 2050 matches the existing Xero CoA;
+  //     earlier seed used 2200 which didn't exist on Jaxy's books.
+  // Both are "_shared" — channel split is done via Sales Channel tracking.
   sqlite.exec(`
     INSERT OR IGNORE INTO xero_account_mappings (id, source_platform, category, xero_account_code, xero_account_name, notes)
     VALUES
-      (lower(hex(randomblob(16))), '_shared', 'receivables_holding', '1100', 'Receivables Holding — All Channels',
+      (lower(hex(randomblob(16))), '_shared', 'receivables_holding', '1100', 'Receivables Holding',
        'Non-bank clearing for net payouts; cleared by BankTransaction into 101x BANK accounts'),
-      (lower(hex(randomblob(16))), '_shared', 'deferred_revenue',      '2200', 'Deferred Revenue',
+      (lower(hex(randomblob(16))), '_shared', 'deferred_revenue',      '2050', 'Deferred Revenue',
        'Liability for paid-but-unshipped orders; cleared into Sales Revenue at shipment')
+  `);
+
+  // One-shot corrective: fixes installs that seeded the wrong deferred-
+  // revenue code (the 2026-05-13 first seed used 2200 which doesn't exist
+  // in the live CoA — actual account is 2050). UPDATE is idempotent.
+  sqlite.exec(`
+    UPDATE xero_account_mappings
+       SET xero_account_code = '2050',
+           xero_account_name = 'Deferred Revenue',
+           updated_at = datetime('now')
+     WHERE source_platform = '_shared'
+       AND category = 'deferred_revenue'
+       AND xero_account_code = '2200'
   `);
 } catch (e) { console.error("[db] Xero ops tables error:", e); }
 

@@ -5,7 +5,7 @@
  *
  *   1100  Receivables Holding (CURRENT_ASSET)
  *           — parks the NET payout before BankTransaction sweeps to 101x
- *   2200  Deferred Revenue (CURRENT_LIABILITY)
+ *   2050  Deferred Revenue (CURRENT_LIABILITY)
  *           — holds GROSS revenue until shipment under ASC 606
  *
  * If either is missing, the script prints precise Xero UI instructions
@@ -31,7 +31,7 @@ const REQUIRED: RequiredAccount[] = [
     description: "Non-bank clearing account for net Shopify payouts before BankTransaction sweeps to 101x clearing.",
   },
   {
-    code: "2200",
+    code: "2050",
     name: "Deferred Revenue",
     type: "CURRLIAB",
     description: "Liability for paid-but-unshipped orders. Cleared into Sales Revenue at shipment under accrual / ASC 606.",
