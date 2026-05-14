@@ -134,6 +134,18 @@ function skuLabel(s: SkuTopRow): string {
 }
 
 /**
+ * Render an "age" for stuck orders in friendly units:
+ *   < 48 hours -> "32h"
+ *   48 hours+  -> "5d"   (rounded down to whole days)
+ * Avoids "555h" which is technically correct but takes mental
+ * arithmetic to interpret.
+ */
+function ageLabel(hours: number): string {
+  if (hours < 48) return `${Math.round(hours)}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+/**
  * Daily digest — yesterday's activity. Designed to fire at ~7am PT.
  */
 export async function postDailyDigest(): Promise<{ ok: boolean }> {
@@ -163,7 +175,7 @@ export async function postDailyDigest(): Promise<{ ok: boolean }> {
 
   const stuckLine = stuck.count === 0
     ? "✅ No stuck orders"
-    : `📦 ${stuck.count} order${stuck.count === 1 ? "" : "s"} stuck > 12h, oldest ${stuck.oldestHours}h`;
+    : `📦 ${stuck.count} order${stuck.count === 1 ? "" : "s"} stuck > 12h, oldest ${ageLabel(stuck.oldestHours)}`;
 
   const blocks: SlackBlock[] = [
     {
