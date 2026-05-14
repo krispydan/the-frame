@@ -17,6 +17,11 @@ const publicPaths = [
   "/api/v1/integrations/xero/sync-payouts",
   "/api/v1/orders/shopify-sync",
   "/api/v1/finance/settlements/sync",
+  // Classifier worker endpoints — auth via header X-Classifier-Token
+  // checked inside each route (middleware allows the path; route gates
+  // the actual access).
+  "/api/v1/sales/prospects/unclassified",
+  "/api/v1/sales/prospects/llm-classify-batch",
   // Centralized cron scheduler — Railway cron pings tick every minute.
   // jobs index + per-job state are also public so the UI can read them
   // without auth in the same way the integrations pages do.
