@@ -117,6 +117,18 @@ try {
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN industry TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_industry ON companies (industry)"); } catch { /* exists */ }
 
+// Enrichment cache — what the LLM classifier saw when it decided. Set by the
+// Mac-mini classifier worker after scraping the homepage or pulling Brave
+// Search snippets. Keep it cheap-to-recompute (90-day TTL).
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN enrichment_text TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN enrichment_source TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN enrichment_fetched_at TEXT"); } catch { /* exists */ }
+
+// Contact form URL — when scraping a prospect for classification, we ALSO
+// harvest contact info. If we found a contact-us page but no direct email,
+// stash the URL here for later outreach (manual form submission or scraper).
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN contact_form_url TEXT"); } catch { /* exists */ }
+
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN owner_name TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN business_hours TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN facebook_url TEXT"); } catch { /* exists */ }
@@ -620,6 +632,34 @@ try {
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_operations_exports_type ON operations_exports(export_type)`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_operations_exports_created ON operations_exports(created_at)`);
 } catch (e) { console.error("[db] Operations exports table error:", e); }
+
+// LLM classification audit log. One row per classification — the Mac-mini
+// classifier worker writes here every time it processes a prospect, even on
+// re-classifications. Lets us:
+//   - Track which prompt version produced which verdict
+//   - A/B compare verdicts after a prompt tweak
+//   - Audit "why did this row get rejected" months later
+//   - Re-train / fine-tune off the human review corrections later
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS prospect_llm_classifications (
+    id TEXT PRIMARY KEY NOT NULL,
+    company_id TEXT NOT NULL,
+    model_name TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    industry TEXT,
+    is_chain INTEGER,
+    confidence REAL,
+    reasoning TEXT,
+    flags TEXT,
+    raw_response TEXT,
+    verdict TEXT,
+    enrichment_source TEXT,
+    classified_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_plc_company ON prospect_llm_classifications(company_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_plc_classified_at ON prospect_llm_classifications(classified_at DESC)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_plc_prompt_version ON prospect_llm_classifications(prompt_version)`);
+} catch (e) { console.error("[db] LLM classifications table error:", e); }
 
 // Ensure brand_accounts + company_brand_links + magic_link_tokens exist (idempotent)
 try {

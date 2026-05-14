@@ -43,6 +43,15 @@ export const companies = sqliteTable("companies", {
   // filter/segmentation. See INDUSTRY_DISPLAY for the canonical list of
   // values.
   industry: text("industry"),
+  // Cached homepage excerpt (or Brave Search snippets) used by the LLM
+  // classifier. Refreshed every 90 days by the worker.
+  enrichmentText: text("enrichment_text"),
+  enrichmentSource: text("enrichment_source"),         // "homepage" | "brave" | "none"
+  enrichmentFetchedAt: text("enrichment_fetched_at"),  // ISO timestamp
+  // Contact form URL: when scraping a prospect for classification, we ALSO
+  // harvest contact info. When there's no public email but there IS a
+  // contact-us page, stash the URL for later outreach.
+  contactFormUrl: text("contact_form_url"),
   leadSourceDetail: text("lead_source_detail"),
   sourceType: text("source_type", { enum: ["storemapper", "outscraper", "manual", "csv", "chrome-ext"] }),
   sourceId: text("source_id"),
@@ -55,9 +64,7 @@ export const companies = sqliteTable("companies", {
   linkedinUrl: text("linkedin_url"),
   yelpUrl: text("yelp_url"),
   enrichedAt: text("enriched_at"),
-  enrichmentSource: text("enrichment_source"),
   socials: text("socials"),  // JSON: {"instagram": "...", "facebook": "..."}
-  contactFormUrl: text("contact_form_url"),
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 }, (table) => [
@@ -172,3 +179,28 @@ export const smartLists = sqliteTable("smart_lists", {
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 });
+
+// ── LLM classification audit log ──
+// One row per classification run. Lets us see WHY a prospect got its current
+// industry/status — useful when tuning the prompt or investigating an edge
+// case months later. The actual industry/verdict ends up on `companies`;
+// this table is the history.
+export const prospectLlmClassifications = sqliteTable("prospect_llm_classifications", {
+  id: id(),
+  companyId: text("company_id").notNull(),
+  modelName: text("model_name").notNull(),       // e.g. "qwen2.5:7b-instruct-q4_K_M"
+  promptVersion: text("prompt_version").notNull(),
+  industry: text("industry"),                    // LLM's industry pick
+  isChain: integer("is_chain", { mode: "boolean" }),
+  confidence: real("confidence"),
+  reasoning: text("reasoning"),
+  flags: text("flags", { mode: "json" }).$type<string[]>(),
+  rawResponse: text("raw_response"),             // full LLM JSON for debugging
+  verdict: text("verdict"),                      // "approve" | "reject" | "needs_human"
+  enrichmentSource: text("enrichment_source"),   // "homepage" | "brave" | "none"
+  classifiedAt: timestamp("classified_at"),
+}, (table) => [
+  index("idx_plc_company").on(table.companyId),
+  index("idx_plc_classified_at").on(table.classifiedAt),
+  index("idx_plc_prompt_version").on(table.promptVersion),
+]);

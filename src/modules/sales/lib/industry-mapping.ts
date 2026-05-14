@@ -129,10 +129,11 @@ const RULES: Rule[] = [
   // include used, rare, religious, general
   { pattern: /\b(book ?store|used book|rare book|book shop|bookseller|book ?stores?)\b/, industry: "bookstore", reason: "bookstore" },
 
-  // Vintage / antique / record stores / collectibles / second-hand
-  // "Sports memorabilia" + "Collectibles" + "Second hand" all share the
-  // vintage curation vibe.
-  { pattern: /\b(vintage|antique|record store|collectibles|sports memorabilia|second hand|secondhand)\b/, industry: "vintage", reason: "vintage / antique / collectibles" },
+  // Vintage / antique / record stores / collectibles / second-hand / thrift.
+  // Sports memorabilia + collectibles + second hand + thrift all share the
+  // vintage curation vibe. Per product decision (May 2026), thrift moved out
+  // of low_fit and into vintage — we sell to a lot of thrift stores.
+  { pattern: /\b(vintage|antique|record store|collectibles|sports memorabilia|second hand|secondhand|thrift)\b/, industry: "vintage", reason: "vintage / antique / thrift / collectibles" },
 
   // Souvenir & tourist (do this BEFORE resort_beach so a "tourist souvenir
   // shop" doesn't get swallowed by the beach bucket). Christmas stores are
@@ -159,8 +160,8 @@ const RULES: Rule[] = [
   // Apparel & fashion (not caught as boutique above)
   { pattern: /\b(clothing store|apparel|dress store|men['']?s? clothing|formal wear|t-?shirt store|shoe store|boot store|hat store|sportswear|outerwear|outdoor clothing)\b/, industry: "apparel_fashion", reason: "general apparel" },
 
-  // Low-fit
-  { pattern: /\b(convenience store|liquor|wine store|gas station|smoke shop|vape|tobacco|pawn|thrift|dollar store|check cashing|cannabis|adult store)\b/, industry: "low_fit", reason: "low-fit retail" },
+  // Low-fit (thrift removed — now in vintage)
+  { pattern: /\b(convenience store|liquor|wine store|gas station|smoke shop|vape|tobacco|pawn|dollar store|check cashing|cannabis|adult store)\b/, industry: "low_fit", reason: "low-fit retail" },
 
   // General retail (catch-alls — only reached if nothing more specific matched).
   // Includes sporting / outdoor goods, markets, toy stores (note: explicit
