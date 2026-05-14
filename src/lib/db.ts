@@ -403,6 +403,55 @@ try {
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shopify_webhook_events_topic ON shopify_webhook_events(topic)`);
 } catch (e) { console.error("[db] Shopify shops table error:", e); }
 
+// ── ShipHero webhook tables ──
+// shiphero_webhook_events    every received webhook lands here for observability
+// shiphero_webhook_subscriptions  what we've registered with ShipHero
+// shiphero_attachment_logs   idempotency key for packing-slip attaches
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS shiphero_webhook_events (
+    id TEXT PRIMARY KEY NOT NULL,
+    topic TEXT,
+    shiphero_id TEXT,
+    external_id TEXT,
+    triggered_at TEXT,
+    received_at TEXT DEFAULT (datetime('now')),
+    hmac_valid INTEGER,
+    handler_ok INTEGER,
+    handler_message TEXT,
+    payload_size INTEGER,
+    payload_preview TEXT
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shiphero_webhook_events_received ON shiphero_webhook_events(received_at DESC)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shiphero_webhook_events_topic ON shiphero_webhook_events(topic)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shiphero_webhook_events_shiphero_id ON shiphero_webhook_events(shiphero_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shiphero_webhook_events_external_id ON shiphero_webhook_events(external_id)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS shiphero_webhook_subscriptions (
+    id TEXT PRIMARY KEY NOT NULL,
+    topic TEXT NOT NULL,
+    url TEXT NOT NULL,
+    shared_secret TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    deactivated_at TEXT
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shiphero_webhook_subscriptions_topic ON shiphero_webhook_subscriptions(topic)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS shiphero_attachment_logs (
+    id TEXT PRIMARY KEY NOT NULL,
+    shiphero_order_id TEXT NOT NULL,
+    external_id TEXT,
+    faire_order_id TEXT,
+    filename TEXT NOT NULL,
+    status TEXT NOT NULL,
+    error_message TEXT,
+    attached_at TEXT DEFAULT (datetime('now'))
+  )`);
+  // Idempotency key: one successful attach per (shiphero_order_id, filename)
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_shiphero_attachment_logs_success
+    ON shiphero_attachment_logs(shiphero_order_id, filename) WHERE status = 'success'`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shiphero_attachment_logs_order ON shiphero_attachment_logs(shiphero_order_id)`);
+} catch (e) { console.error("[db] ShipHero webhook tables error:", e); }
+
 // ── Xero integration tables ──
 // Account mappings (category -> Xero GL account code), sync runs,
 // journal log audit trail, and per-payout idempotency.
