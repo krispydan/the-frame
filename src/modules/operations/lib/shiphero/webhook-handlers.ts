@@ -29,6 +29,13 @@ export function registerShipHeroTopicHandler(topic: string, handler: TopicHandle
 }
 
 webhookRegistry.register("shiphero", async (payload) => {
+  // Lazy-load topic handlers via dynamic side-effect imports. Each handler
+  // registers itself with registerShipHeroTopicHandler() at module init.
+  // We do this inside the registry callback (instead of at file top) to
+  // avoid circular import loops between this module and the handlers.
+  await import("./order-allocated");
+  await import("./shipment-update");
+
   const body = payload.parsedBody as Record<string, unknown> | null;
   const topic =
     (body?.["webhook_type"] as string | undefined) ||
