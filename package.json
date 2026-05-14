@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "shiphero:register-webhooks": "tsx scripts/register-shiphero-webhooks.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.1",
