@@ -127,16 +127,20 @@ export async function notifyOrderFulfilled(opts: {
   /** Faire brand-portal URL — only set for Faire-originated orders. */
   faireUrl?: string | null;
 }) {
+  // Channel becomes the *headline* descriptor so the team can tell at a
+  // glance which side of the business this came from. Faire-via-Wholesale
+  // is its own label because it changes who needs to act (you don't reply
+  // to a Faire customer in Shopify).
   const channelLabel =
     opts.channel === "shopify_dtc" ? "Retail"
-    : opts.channel === "shopify_wholesale" ? (opts.faireUrl ? "Faire (via Wholesale)" : "Wholesale")
+    : opts.channel === "shopify_wholesale" ? (opts.faireUrl ? "Faire" : "Wholesale")
     : opts.channel === "faire" ? "Faire"
     : opts.channel;
   const customer = opts.companyName ? `*${opts.companyName}*` : "the customer";
   const total = money(opts.total, opts.currency);
 
-  // Lead line — who, how much, how many frames.
-  const intro = `📦 *Order fulfilled* — ${customer}'s order is on the way (${total}, ${pluralize(opts.itemCount, "frame", "frames")})`;
+  // Lead line — channel up front so it's the first thing you see.
+  const intro = `📦 *${channelLabel} order fulfilled* — ${customer}'s order is on the way (${total}, ${pluralize(opts.itemCount, "frame", "frames")})`;
 
   // Tracking sub-line. Carrier name + number; link out if we have a URL.
   const trackingLine = (() => {
@@ -148,11 +152,12 @@ export async function notifyOrderFulfilled(opts: {
     return `🚚 ${carrier}${num}`;
   })();
 
-  // Context line: order #, channel, plus deep links.
+  // Context line: just the order # + the deep links. Channel is in the
+  // lead line above so we don't repeat ourselves here.
   const links: string[] = [];
   if (opts.shopifyAdminUrl) links.push(`<${opts.shopifyAdminUrl}|Shopify>`);
   if (opts.faireUrl) links.push(`<${opts.faireUrl}|Faire>`);
-  const contextLine = `Order *${opts.orderNumber}* · ${channelLabel}${links.length ? ` · ${links.join(" · ")}` : ""}`;
+  const contextLine = `Order *${opts.orderNumber}*${links.length ? ` · ${links.join(" · ")}` : ""}`;
 
   const blocks: SlackBlock[] = [
     { type: "section", text: { type: "mrkdwn", text: intro } },
