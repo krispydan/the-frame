@@ -23,6 +23,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { isConfigured } from "@/modules/operations/lib/shiphero/api-client";
 import { RegisterWebhooksButton } from "./register-button";
+import { BackfillFaireSlipsButtons } from "./backfill-button";
 
 export const dynamic = "force-dynamic";
 
@@ -307,12 +308,19 @@ export default function ShipHeroIntegrationPage() {
       {/* Attachment audit */}
       <Card>
         <CardHeader>
-          <CardTitle>Packing-slip attachment audit</CardTitle>
-          <CardDescription>Last 25 attempts to attach a Faire packing slip to a ShipHero order.</CardDescription>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <CardTitle>Packing-slip attachment audit</CardTitle>
+              <CardDescription>
+                Last 25 attempts to attach a Faire packing slip to a ShipHero order. Run a backfill to scan unfulfilled orders from the last 90 days — idempotent, already-attached orders skip safely.
+              </CardDescription>
+            </div>
+            <BackfillFaireSlipsButtons />
+          </div>
         </CardHeader>
         <CardContent>
           {attachments.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No attachment attempts recorded yet.</p>
+            <p className="text-sm text-muted-foreground">No attachment attempts recorded yet. Click <em>Run backfill</em> above to process existing Faire orders.</p>
           ) : (
             <Table>
               <TableHeader>
