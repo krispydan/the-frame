@@ -87,11 +87,19 @@ export function getXeroAuthUrl(): string | null {
   //   openid / profile / email   - identity
   //   offline_access              - refresh tokens
   //   accounting.manualjournals   - read + write manual journals (Phase 2)
+  //   accounting.transactions     - bank transactions / receive money / spend
+  //                                 money (Phase 3 accrual flow — needed for
+  //                                 the BankTransaction sweep that moves the
+  //                                 net payout from Receivables Holding into
+  //                                 the BANK clearing account)
+  //   accounting.contacts         - auto-create the "Shopify Payouts" /
+  //                                 "Faire Payouts" contacts referenced by
+  //                                 BankTransactions
   //   accounting.settings.read    - chart of accounts (Phase 1 mapping UI)
   //   files                       - attach payout CSVs to journals
   // Override via XERO_SCOPES env var if Xero adds or renames scopes.
   const scopes = process.env.XERO_SCOPES ||
-    "openid profile email offline_access accounting.manualjournals accounting.settings.read files";
+    "openid profile email offline_access accounting.manualjournals accounting.transactions accounting.contacts accounting.settings.read files";
   const state = crypto.randomUUID();
 
   return `https://login.xero.com/identity/connect/authorize?response_type=code&client_id=${config.clientId}&redirect_uri=${encodeURIComponent(config.redirectUri)}&scope=${encodeURIComponent(scopes)}&state=${state}`;
