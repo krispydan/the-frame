@@ -261,3 +261,201 @@ export async function getOrders(opts?: {
 export function isConfigured(): boolean {
   return !!ACCESS_TOKEN;
 }
+
+// ── Webhooks ──
+//
+// ShipHero exposes webhook lifecycle as GraphQL mutations. The `name` field
+// of `CreateWebhookInput` is actually the webhook *topic* (e.g.
+// "Order Allocated", "Shipment Update") — ShipHero overloaded the field.
+// The `shared_secret` returned by webhook_create is what we HMAC-verify
+// incoming events against, so it must be persisted server-side.
+
+export interface ShipHeroWebhook {
+  id: string;
+  name: string;
+  url: string;
+  shop_name?: string | null;
+  shared_signature_secret?: string | null;
+}
+
+interface WebhookCreateResponse {
+  data: {
+    webhook_create: {
+      request_id: string;
+      complexity: number;
+      webhook: ShipHeroWebhook;
+    };
+  };
+}
+
+/**
+ * Register a webhook subscription with ShipHero.
+ * Returns the subscription id and the shared secret used for HMAC verification.
+ * The shared secret is only returned at creation time — persist it immediately.
+ */
+export async function webhookCreate(opts: {
+  /** Webhook topic, e.g. "Order Allocated", "Shipment Update". */
+  name: string;
+  /** Public URL ShipHero will POST events to. */
+  url: string;
+  /** For 3PL multi-account contexts. Usually omitted. */
+  shopName?: string;
+}): Promise<{ id: string; sharedSecret: string | null; webhook: ShipHeroWebhook }> {
+  const query = `mutation WebhookCreate($data: CreateWebhookInput!) {
+    webhook_create(data: $data) {
+      request_id
+      complexity
+      webhook {
+        id
+        name
+        url
+        shop_name
+        shared_signature_secret
+      }
+    }
+  }`;
+  const variables = {
+    data: {
+      name: opts.name,
+      url: opts.url,
+      ...(opts.shopName ? { shop_name: opts.shopName } : {}),
+    },
+  };
+  const res = await gql<WebhookCreateResponse>(query, variables);
+  const wh = res.data.webhook_create.webhook;
+  return { id: wh.id, sharedSecret: wh.shared_signature_secret ?? null, webhook: wh };
+}
+
+interface WebhooksListResponse {
+  data: {
+    webhooks: {
+      request_id: string;
+      complexity: number;
+      data: {
+        edges: Array<{ node: ShipHeroWebhook }>;
+      };
+    };
+  };
+}
+
+/** List all webhooks currently registered for this account. */
+export async function webhookList(): Promise<ShipHeroWebhook[]> {
+  const query = `{
+    webhooks {
+      request_id
+      complexity
+      data(first: 100) {
+        edges {
+          node {
+            id
+            name
+            url
+            shop_name
+            shared_signature_secret
+          }
+        }
+      }
+    }
+  }`;
+  const res = await gql<WebhooksListResponse>(query);
+  return res.data.webhooks.data.edges.map((e) => e.node);
+}
+
+interface WebhookDeleteResponse {
+  data: { webhook_delete: { request_id: string; complexity: number } };
+}
+
+/** Delete a webhook by its topic name (ShipHero's API quirk — id-by-name). */
+export async function webhookDelete(name: string): Promise<void> {
+  const query = `mutation WebhookDelete($data: DeleteWebhookInput!) {
+    webhook_delete(data: $data) {
+      request_id
+      complexity
+    }
+  }`;
+  await gql<WebhookDeleteResponse>(query, { data: { name } });
+}
+
+interface WebhookUpdateUrlResponse {
+  data: {
+    webhook_update_url: {
+      request_id: string;
+      complexity: number;
+      webhook: ShipHeroWebhook;
+    };
+  };
+}
+
+/** Update the URL of an existing webhook (e.g. moving prod hostnames). */
+export async function webhookUpdateUrl(opts: {
+  name: string;
+  url: string;
+}): Promise<ShipHeroWebhook> {
+  const query = `mutation WebhookUpdateUrl($data: UpdateWebhookUrlInput!) {
+    webhook_update_url(data: $data) {
+      request_id
+      complexity
+      webhook {
+        id
+        name
+        url
+        shop_name
+        shared_signature_secret
+      }
+    }
+  }`;
+  const res = await gql<WebhookUpdateUrlResponse>(query, {
+    data: { name: opts.name, url: opts.url },
+  });
+  return res.data.webhook_update_url.webhook;
+}
+
+// ── Order attachments ──
+//
+// IMPORTANT architectural quirk: `order_add_attachment` takes a `url` field,
+// not a base64-encoded body. ShipHero PULLS the document from the URL we
+// provide. That means for Faire packing slips we cannot just stream the
+// PDF — we must host a signed proxy endpoint (e.g.
+// `/api/v1/integrations/faire/packing-slip?order=...&exp=...&sig=...`) that
+// re-fetches from Faire when ShipHero hits it. Handler in Phase 3 builds the
+// signed URL and passes it here.
+
+interface OrderAddAttachmentResponse {
+  data: {
+    order_add_attachment: {
+      request_id: string;
+      complexity: number;
+    };
+  };
+}
+
+export async function orderAddAttachment(opts: {
+  /** ShipHero base64 GraphQL order id, e.g. "T3JkZXI6MTIzNDU=". */
+  orderId: string;
+  /** Public URL ShipHero will fetch the document from. */
+  url: string;
+  filename?: string;
+  /** MIME type — typically "application/pdf" for packing slips. */
+  fileType?: string;
+  description?: string;
+  /** For 3PL multi-account contexts. Usually omitted. */
+  customerAccountId?: string;
+}): Promise<void> {
+  const query = `mutation OrderAddAttachment($data: OrderAddAttachmentInput!) {
+    order_add_attachment(data: $data) {
+      request_id
+      complexity
+    }
+  }`;
+  const variables = {
+    data: {
+      order_id: opts.orderId,
+      url: opts.url,
+      ...(opts.filename ? { filename: opts.filename } : {}),
+      ...(opts.fileType ? { file_type: opts.fileType } : {}),
+      ...(opts.description ? { description: opts.description } : {}),
+      ...(opts.customerAccountId ? { customer_account_id: opts.customerAccountId } : {}),
+    },
+  };
+  await gql<OrderAddAttachmentResponse>(query, variables);
+}
