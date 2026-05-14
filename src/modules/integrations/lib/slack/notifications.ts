@@ -126,8 +126,6 @@ export async function notifyOrderFulfilled(opts: {
   shopifyAdminUrl?: string | null;
   /** Faire brand-portal URL — only set for Faire-originated orders. */
   faireUrl?: string | null;
-  /** Top SKUs in the fulfillment for context. */
-  topSkus?: Array<{ sku: string; name: string; qty: number }>;
 }) {
   const channelLabel =
     opts.channel === "shopify_dtc" ? "Retail"
@@ -137,7 +135,7 @@ export async function notifyOrderFulfilled(opts: {
   const customer = opts.companyName ? `*${opts.companyName}*` : "the customer";
   const total = money(opts.total, opts.currency);
 
-  // First line — the lead sentence.
+  // Lead line — who, how much, how many frames.
   const intro = `📦 *Order fulfilled* — ${customer}'s order is on the way (${total}, ${pluralize(opts.itemCount, "frame", "frames")})`;
 
   // Tracking sub-line. Carrier name + number; link out if we have a URL.
@@ -156,10 +154,6 @@ export async function notifyOrderFulfilled(opts: {
   if (opts.faireUrl) links.push(`<${opts.faireUrl}|Faire>`);
   const contextLine = `Order *${opts.orderNumber}* · ${channelLabel}${links.length ? ` · ${links.join(" · ")}` : ""}`;
 
-  const skuLine = opts.topSkus && opts.topSkus.length > 0
-    ? opts.topSkus.map((s) => `• \`${s.sku}\` ${s.name} × ${s.qty}`).join("\n")
-    : null;
-
   const blocks: SlackBlock[] = [
     { type: "section", text: { type: "mrkdwn", text: intro } },
   ];
@@ -170,9 +164,6 @@ export async function notifyOrderFulfilled(opts: {
     type: "context",
     elements: [{ type: "mrkdwn", text: contextLine }],
   });
-  if (skuLine) {
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: skuLine } });
-  }
 
   await postSlack({
     topic: "orders.fulfilled",

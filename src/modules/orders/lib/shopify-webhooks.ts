@@ -386,26 +386,15 @@ async function handleFulfillmentCreate(fulfillment: ShopifyFulfillment, shopDoma
         ? db.select({ name: companies.name }).from(companies).where(eq(companies.id, existing.companyId)).get()?.name ?? null
         : null;
 
-      // Resolve top SKUs from local order_items (more accurate than the
-      // fulfillment.line_items shape, which lacks product_name in some cases)
-      const lineItemsRows = db
-        .select({
-          sku: orderItems.sku,
-          productName: orderItems.productName,
-          colorName: orderItems.colorName,
-          quantity: orderItems.quantity,
-        })
+      // Total frame count for the lead line — sum quantities on the local
+      // order rather than the webhook payload (more accurate, and stable
+      // even for partial-fulfillment webhooks).
+      const totals = db
+        .select({ qty: orderItems.quantity })
         .from(orderItems)
         .where(eq(orderItems.orderId, existing.id))
         .all();
-      const itemCount = lineItemsRows.reduce((s, r) => s + (r.quantity || 0), 0);
-      const topSkus = lineItemsRows
-        .slice(0, 5)
-        .map((r) => ({
-          sku: r.sku ?? "—",
-          name: r.colorName ? `${r.productName ?? ""} (${r.colorName})` : r.productName ?? "",
-          qty: r.quantity || 0,
-        }));
+      const itemCount = totals.reduce((s, r) => s + (r.qty || 0), 0);
 
       const faireUrl = faireOrderUrlFromName(existing.orderNumber);
       const shopifyUrl = shopifyAdminOrderUrl(shopDomain, existing.externalId);
@@ -422,7 +411,6 @@ async function handleFulfillmentCreate(fulfillment: ShopifyFulfillment, shopDoma
         trackingUrl: fulfillment.tracking_url ?? null,
         shopifyAdminUrl: shopifyUrl,
         faireUrl,
-        topSkus,
       });
     } catch (e) {
       console.error("[Shopify Webhook] Slack fulfilled alert failed:", e);
