@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { LlmVerdictCard } from "@/modules/sales/components/llm-verdict-card";
 import {
   Command,
   CommandInput,
@@ -526,6 +527,9 @@ function ReviewQueueInner() {
                   </Badge>
                 </div>
               </div>
+
+              {/* LLM verdict card — informational; approve/reject still via existing buttons */}
+              <LlmVerdictCard prospectId={current.id} />
 
               {/* Location */}
               {(current.address || current.city) && (
