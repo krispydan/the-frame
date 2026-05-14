@@ -57,16 +57,6 @@ export async function POST(request: NextRequest) {
         return { ok: false, message: `HTTP ${resV2.status}: Authentication failed. Check API key format.` };
       },
 
-      faire: async () => {
-        const key = db.select().from(settings).where(eq(settings.key, "faire_api_key")).get();
-        if (!key?.value) return { ok: false, message: "API key is required" };
-        const res = await fetch("https://www.faire.com/external-api/v2/brand-view", {
-          headers: { "X-FAIRE-ACCESS-TOKEN": key.value },
-        });
-        if (res.ok) return { ok: true, message: "Connected to Faire" };
-        return { ok: false, message: `HTTP ${res.status}: Authentication failed` };
-      },
-
       klaviyo: async () => {
         const key = db.select().from(settings).where(eq(settings.key, "klaviyo_api_key")).get();
         if (!key?.value) return { ok: false, message: "API key is required" };

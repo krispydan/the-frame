@@ -57,7 +57,6 @@ function validateApiKeyFormat(integration: string, value: string): string | null
   const rules: Record<string, { pattern: RegExp; hint: string }> = {
     shopify_access_token: { pattern: /^shpat_[a-f0-9]{32,}$/i, hint: "Should start with 'shpat_' followed by hex characters" },
     instantly_api_key: { pattern: /^.{10,}$/, hint: "Should be at least 10 characters" },
-    faire_api_key: { pattern: /^.{10,}$/, hint: "Should be at least 10 characters" },
     klaviyo_api_key: { pattern: /^.{10,}$/, hint: "Should be at least 10 characters" },
     outscraper_api_key: { pattern: /^.{10,}$/, hint: "Should be at least 10 characters" },
   };
@@ -518,30 +517,6 @@ export default function SettingsPage() {
                   Open Shopify integrations
                   <ChevronRight className="h-4 w-4 ml-2" />
                 </Link>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Faire</CardTitle>
-                <CardDescription>Wholesale marketplace integration</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid gap-2">
-                  <Label htmlFor="faire_api_key">API Key</Label>
-                  <ApiKeyInput
-                    id="faire_api_key"
-                    value={settings.faire_api_key ?? ""}
-                    onChange={(v) => update("faire_api_key", v)}
-                    integration="faire_api_key"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" onClick={() => save("faire_api_key")} disabled={saving}>
-                    <Save className="h-4 w-4 mr-2" /> Save
-                  </Button>
-                  <TestConnectionButton integration="faire" settings={settings} />
-                </div>
               </CardContent>
             </Card>
 

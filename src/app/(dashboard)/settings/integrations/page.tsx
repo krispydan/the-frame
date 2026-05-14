@@ -255,7 +255,7 @@ export default function IntegrationsIndexPage() {
       </div>
 
       <p className="mt-6 text-xs text-muted-foreground">
-        Other integrations (Faire, Klaviyo, Resend, Anthropic, OpenAI, etc.) are still configured under Settings via API keys. They&apos;ll move into this page over time as they&apos;re upgraded to OAuth.
+        Other integrations (Klaviyo, Resend, Anthropic, OpenAI, etc.) are still configured under Settings via API keys. They&apos;ll move into this page over time as they&apos;re upgraded to OAuth. Faire is configured via the <code>FAIRE_API_TOKEN</code> environment variable.
       </p>
     </div>
   );
