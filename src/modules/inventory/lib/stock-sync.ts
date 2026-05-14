@@ -1,7 +1,12 @@
 /**
  * Stock Sync Engine
- * Pulls inventory from Shopify DTC, Shopify Wholesale, and Faire,
+ * Pulls inventory from Shopify DTC and Shopify Wholesale,
  * updates inventory table, records movements, and generates low-stock alerts.
+ *
+ * Faire is intentionally NOT polled — Faire's inventory is fed automatically
+ * from the wholesale Shopify store via the Faire→Shopify channel integration,
+ * so syncing it again from Faire's API would be (a) redundant and (b) hit a
+ * deprecated v1 endpoint that no longer responds.
  */
 
 import { sqlite } from "@/lib/db";
@@ -19,7 +24,7 @@ interface ShopifyProduct {
 }
 
 interface ChannelStock {
-  channel: "shopify_dtc" | "shopify_wholesale" | "faire";
+  channel: "shopify_dtc" | "shopify_wholesale";
   skuQuantities: Map<string, number>;
   productCount: number;
   variantCount: number;
@@ -95,55 +100,6 @@ async function fetchShopifyWholesale(): Promise<ChannelStock> {
     channel: "shopify_wholesale",
     skuQuantities,
     productCount: products.length,
-    variantCount: skuQuantities.size,
-  };
-}
-
-async function fetchFaire(): Promise<ChannelStock> {
-  const apiKey = process.env.FAIRE_API_KEY;
-
-  if (!apiKey) {
-    throw new Error("FAIRE_API_KEY must be set");
-  }
-
-  // Faire API: GET /api/v1/products to get inventory
-  // Faire's API is limited — they primarily manage orders, not real-time inventory.
-  // We fetch products and use available_quantity from their product variants.
-  const skuQuantities = new Map<string, number>();
-  let page = 1;
-  let hasMore = true;
-
-  while (hasMore) {
-    const res = await fetch(`https://www.faire.com/api/v1/products?page=${page}&page_size=50`, {
-      headers: {
-        "X-FAIRE-ACCESS-TOKEN": apiKey,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!res.ok) {
-      throw new Error(`Faire API ${res.status}: ${await res.text()}`);
-    }
-
-    const data = await res.json();
-    const products = data.products || [];
-
-    for (const product of products) {
-      for (const option of product.options || []) {
-        if (option.sku && option.available_quantity != null) {
-          skuQuantities.set(option.sku, (skuQuantities.get(option.sku) || 0) + option.available_quantity);
-        }
-      }
-    }
-
-    hasMore = products.length === 50;
-    page++;
-  }
-
-  return {
-    channel: "faire",
-    skuQuantities,
-    productCount: 0, // Faire doesn't separate products/variants the same way
     variantCount: skuQuantities.size,
   };
 }
@@ -312,11 +268,8 @@ export async function runStockSync(): Promise<SyncResult> {
       fetch: fetchShopifyWholesale,
       required: false,
     },
-    {
-      name: "faire",
-      fetch: fetchFaire,
-      required: false,
-    },
+    // Faire intentionally omitted — its inventory mirrors the wholesale
+    // Shopify store via Faire's Shopify channel integration.
   ];
 
   let hasAnyData = false;
