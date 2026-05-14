@@ -429,6 +429,62 @@ interface OrderAddAttachmentResponse {
   };
 }
 
+interface OrderUpdateResponse {
+  data: {
+    order_update: {
+      request_id: string;
+      complexity: number;
+    };
+  };
+}
+
+/**
+ * Set the "Note for warehouse packer" field on a ShipHero order. This is
+ * what prints alongside the picklist so the packer sees the instruction.
+ *
+ * We use it to flag Faire orders ("print the attached Faire packing list")
+ * so the warehouse doesn't ship a Faire order with only the default
+ * ShipHero slip.
+ */
+export async function orderUpdatePackingNote(opts: {
+  orderId: string;
+  packingNote: string;
+}): Promise<void> {
+  const query = `mutation OrderUpdatePackingNote($data: UpdateOrderInput!) {
+    order_update(data: $data) {
+      request_id
+      complexity
+    }
+  }`;
+  await gql<OrderUpdateResponse>(query, {
+    data: {
+      order_id: opts.orderId,
+      packing_note: opts.packingNote,
+    },
+  });
+}
+
+/**
+ * Fetch the current packing_note on a ShipHero order. Used to avoid
+ * clobbering a human-authored note when we set our Faire instruction —
+ * we only write if the existing note is empty or already contains our
+ * marker string.
+ */
+export async function getOrderPackingNote(orderId: string): Promise<string | null> {
+  const query = `query OrderPackingNote($id: String!) {
+    order(id: $id) {
+      data {
+        id
+        packing_note
+      }
+    }
+  }`;
+  const res = await gql<{
+    data: { order: { data: { id: string; packing_note: string | null } | null } };
+  }>(query, { id: orderId });
+  return res.data.order.data?.packing_note ?? null;
+}
+
 export async function orderAddAttachment(opts: {
   /** ShipHero base64 GraphQL order id, e.g. "T3JkZXI6MTIzNDU=". */
   orderId: string;
