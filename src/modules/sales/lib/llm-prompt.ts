@@ -122,10 +122,10 @@ HOTEL / RESORT / LODGE / MARINA RULE
 If a hotel, resort, lodge, inn, marina, or spa property clearly has an
 on-site gift shop, boutique, sundry shop, retail shop, resort wear store,
 or tourist/gift merchandise, it CAN be a fit.
-- Classify those as `resort_beach`, `souvenir_tourist`, `boutique_gift`,
-  or `general_retail`, depending on the merchandise signal.
+- Classify those as \`resort_beach\`, \`souvenir_tourist\`, \`boutique_gift\`,
+  or \`general_retail\`, depending on the merchandise signal.
 - Do NOT reject purely because it is attached to a hotel property.
-- Reject as `out_of_scope` only when the business appears to be lodging or
+- Reject as \`out_of_scope\` only when the business appears to be lodging or
   hospitality-only, with no meaningful retail/gift/shop signal.
 
 ═══════════════════════════════════════════════════════════════════
