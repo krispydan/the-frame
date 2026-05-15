@@ -434,7 +434,12 @@ function FinancePageContent() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Finance</h1>
-          <p className="text-muted-foreground">P&L, settlements, and reconciliation. Expenses and cash flow live in Xero.</p>
+          <p className="text-muted-foreground">
+            P&L, settlements, and reconciliation. Expenses and cash flow live in Xero.{" "}
+            <a href="/finance/xero" className="text-blue-600 hover:underline">
+              Xero playbook →
+            </a>
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <select
