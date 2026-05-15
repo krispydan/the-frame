@@ -107,12 +107,11 @@ async function handleShipmentUpdate(
 
   sqlite.prepare(`UPDATE orders SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
 
-  // Emit only on the non-shipped → shipped transition. Two side effects
-  // are guarded by this gate:
+  // Emit only on the non-shipped → shipped transition. Side effects gated:
   //   1. eventBus "order.shipped" (downstream listeners — Slack digest etc.)
   //   2. Slack "📦 order fulfilled" alert posted via the shared notifier.
-  // The Shopify webhook path fires the same Slack alert; both call the
-  // same helper so messages are identical regardless of origin.
+  //   3. Mark the order shipped in Faire (US only) or post a manual-ship
+  //      alert (non-US). Mirrors what Shopify ships do at the destination.
   if (!wasShipped) {
     try {
       eventBus.emit("order.shipped", {
@@ -131,6 +130,15 @@ async function handleShipmentUpdate(
         trackingCarrier: carrier,
         trackingUrl: body.tracking_url ?? null,
         shipheroOrderId,
+      });
+    })();
+    void (async () => {
+      const { markFaireShippedIfApplicable } = await import("./mark-faire-shipped");
+      await markFaireShippedIfApplicable({
+        localOrderId: row.id,
+        orderNumber: orderNumber || (row as unknown as { order_number: string }).order_number || null,
+        trackingNumber,
+        carrier,
       });
     })();
   }

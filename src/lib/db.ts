@@ -450,6 +450,30 @@ try {
   sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_shiphero_attachment_logs_success
     ON shiphero_attachment_logs(shiphero_order_id, filename) WHERE status = 'success'`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shiphero_attachment_logs_order ON shiphero_attachment_logs(shiphero_order_id)`);
+
+  // Audit + idempotency for Faire shipment marks.
+  // status: success | error | skipped_non_us | skipped_unknown_carrier | skipped_no_tracking
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS faire_shipment_marks (
+    id TEXT PRIMARY KEY NOT NULL,
+    faire_order_id TEXT,
+    order_number TEXT,
+    country_code TEXT,
+    carrier TEXT,
+    tracking_code TEXT,
+    maker_cost_cents INTEGER,
+    status TEXT NOT NULL,
+    response_status INTEGER,
+    response_body TEXT,
+    error_message TEXT,
+    marked_at TEXT DEFAULT (datetime('now'))
+  )`);
+  // One successful mark per Faire order. Re-runs short-circuit on the
+  // partial-unique index for safety even if the transition gate in
+  // shipment-update.ts doesn't fire (e.g. manual replay through scripts).
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_faire_shipment_marks_success
+    ON faire_shipment_marks(faire_order_id) WHERE status = 'success'`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_faire_shipment_marks_order
+    ON faire_shipment_marks(order_number)`);
 } catch (e) { console.error("[db] ShipHero webhook tables error:", e); }
 
 // ── Xero integration tables ──
