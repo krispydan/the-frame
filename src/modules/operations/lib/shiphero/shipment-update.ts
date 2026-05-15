@@ -21,35 +21,73 @@ import { registerShipHeroTopicHandler } from "./webhook-handlers";
 import { eventBus } from "@/modules/core/lib/event-bus";
 import { logOrderActivity } from "@/modules/orders/lib/activity-log";
 
-interface ShipmentUpdateBody {
+interface ShipmentUpdateFields {
   order_id?: string;
+  shiphero_id?: number | string;
   order_number?: string;
   partner_order_id?: string;
   tracking_number?: string;
   tracking_url?: string;
   carrier?: string;
   shipping_carrier?: string;
+  shipping_name?: string;
   shipped_at?: string;
   shipping_method?: string;
 }
 
-function pickTracking(body: ShipmentUpdateBody): {
+interface ShipmentUpdateBody extends ShipmentUpdateFields {
+  /** ShipHero nests the actual payload under `fulfillment` on Shipment
+   *  Update events. Older / other event shapes put fields at the root. */
+  fulfillment?: ShipmentUpdateFields;
+}
+
+/**
+ * Flatten ShipHero's Shipment Update payload. The webhook delivers the
+ * useful fields under a `fulfillment` key (confirmed via captured prod
+ * payloads), but other ShipHero event shapes put them at the root. We
+ * prefer the nested fields when present, falling back to the root.
+ */
+function flattenPayload(body: ShipmentUpdateBody): ShipmentUpdateFields {
+  const f = body.fulfillment ?? {};
+  return {
+    order_id: f.order_id ?? body.order_id,
+    shiphero_id: f.shiphero_id ?? body.shiphero_id,
+    order_number: f.order_number ?? body.order_number,
+    partner_order_id: f.partner_order_id ?? body.partner_order_id,
+    tracking_number: f.tracking_number ?? body.tracking_number,
+    tracking_url: f.tracking_url ?? body.tracking_url,
+    carrier: f.carrier ?? body.carrier,
+    shipping_carrier: f.shipping_carrier ?? body.shipping_carrier,
+    shipping_name: f.shipping_name ?? body.shipping_name,
+    shipped_at: f.shipped_at ?? body.shipped_at,
+    shipping_method: f.shipping_method ?? body.shipping_method,
+  };
+}
+
+function pickTracking(fields: ShipmentUpdateFields): {
   trackingNumber: string | null;
   carrier: string | null;
   shippedAt: string | null;
 } {
   return {
-    trackingNumber: body.tracking_number ?? null,
-    carrier: body.carrier ?? body.shipping_carrier ?? null,
-    shippedAt: body.shipped_at ?? new Date().toISOString(),
+    trackingNumber: fields.tracking_number ?? null,
+    // ShipHero uses `shipping_name` for the carrier name in some events
+    // (e.g. "UPS Ground"); accept whichever variant fires.
+    carrier:
+      fields.carrier ??
+      fields.shipping_carrier ??
+      fields.shipping_name ??
+      null,
+    shippedAt: fields.shipped_at ?? new Date().toISOString(),
   };
 }
 
 async function handleShipmentUpdate(
   payload: WebhookPayload,
 ): Promise<{ ok: boolean; message?: string }> {
-  const body = payload.parsedBody as ShipmentUpdateBody | null;
-  if (!body) return { ok: true, message: "Empty body" };
+  const rawBody = payload.parsedBody as ShipmentUpdateBody | null;
+  if (!rawBody) return { ok: true, message: "Empty body" };
+  const body = flattenPayload(rawBody);
 
   const orderNumber = (body.order_number || body.partner_order_id || "").replace(/^#/, "").trim();
   const shipheroOrderId = body.order_id || null;
