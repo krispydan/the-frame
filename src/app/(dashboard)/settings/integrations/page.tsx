@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plug, ChevronRight, ShoppingBag, DollarSign, Warehouse, MessageSquare, CheckCircle, AlertCircle, Circle } from "lucide-react";
+import { Plug, ChevronRight, ShoppingBag, DollarSign, Warehouse, MessageSquare, Store, CheckCircle, AlertCircle, Circle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ApiKeyCard } from "./api-key-card";
@@ -193,6 +193,24 @@ export default function IntegrationsIndexPage() {
                     : "Not configured"
                 }
               />
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link href="/settings/integrations/faire" className="block group cursor-pointer">
+          <Card className="transition-all group-hover:shadow-md group-hover:border-primary/40">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center justify-between text-base">
+                <span className="flex items-center gap-2">
+                  <Store className="h-5 w-5" />
+                  Faire
+                </span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </CardTitle>
+              <CardDescription>Wholesale marketplace. Auto-marks US Faire orders shipped via the API; configurable postage tiers.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <StatusBadge kind="ok" label="Env-configured" />
             </CardContent>
           </Card>
         </Link>
