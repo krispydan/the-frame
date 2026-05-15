@@ -31,6 +31,7 @@ import {
   normalizeCarrierForFaire,
 } from "@/modules/integrations/lib/faire/shipments";
 import { getPostageCentsForOrderTotal } from "@/modules/integrations/lib/faire/postage-tiers";
+import { logOrderActivity } from "@/modules/orders/lib/activity-log";
 
 type MarkStatus =
   | "success"
@@ -43,6 +44,9 @@ type MarkStatus =
   | "skipped_already_marked";
 
 function logMark(opts: {
+  /** Local orders.id. When present, the same event is mirrored onto the
+   *  order activity feed so /orders/[id] shows what happened. */
+  localOrderId?: string | null;
   faireOrderId: string | null;
   orderNumber: string | null;
   countryCode: string | null;
@@ -82,6 +86,22 @@ function logMark(opts: {
   } catch (e) {
     console.error("[mark-faire-shipped] log insert failed:", e);
   }
+  // Mirror onto the order activity timeline.
+  if (opts.localOrderId) {
+    logOrderActivity({
+      orderId: opts.localOrderId,
+      eventType: `faire.ship_mark.${opts.status}`,
+      data: {
+        faireOrderId: opts.faireOrderId,
+        countryCode: opts.countryCode,
+        carrier: opts.carrier,
+        trackingCode: opts.trackingCode,
+        makerCostCents: opts.makerCostCents,
+        responseStatus: opts.responseStatus ?? null,
+        errorMessage: opts.errorMessage ?? null,
+      },
+    });
+  }
 }
 
 interface MarkFaireShippedArgs {
@@ -103,6 +123,7 @@ export async function markFaireShippedIfApplicable(
   }
   if (!args.trackingNumber) {
     logMark({
+      localOrderId: args.localOrderId,
       faireOrderId: null,
       orderNumber: args.orderNumber,
       countryCode: null,
@@ -136,6 +157,7 @@ export async function markFaireShippedIfApplicable(
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     logMark({
+      localOrderId: args.localOrderId,
       faireOrderId: null,
       orderNumber: args.orderNumber,
       countryCode: null,
@@ -168,6 +190,7 @@ export async function markFaireShippedIfApplicable(
   const isUS = country === "US" || country === "USA" || country === "UNITED STATES";
   if (!isUS) {
     logMark({
+      localOrderId: args.localOrderId,
       faireOrderId: match.faireOrderId,
       orderNumber: args.orderNumber,
       countryCode: country,
@@ -199,6 +222,7 @@ export async function markFaireShippedIfApplicable(
   const faireCarrier = normalizeCarrierForFaire(args.carrier);
   if (!faireCarrier) {
     logMark({
+      localOrderId: args.localOrderId,
       faireOrderId: match.faireOrderId,
       orderNumber: args.orderNumber,
       countryCode: country,
@@ -238,6 +262,7 @@ export async function markFaireShippedIfApplicable(
       makerCostCents,
     });
     logMark({
+      localOrderId: args.localOrderId,
       faireOrderId: match.faireOrderId,
       orderNumber: args.orderNumber,
       countryCode: country,
@@ -259,6 +284,7 @@ export async function markFaireShippedIfApplicable(
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     logMark({
+      localOrderId: args.localOrderId,
       faireOrderId: match.faireOrderId,
       orderNumber: args.orderNumber,
       countryCode: country,

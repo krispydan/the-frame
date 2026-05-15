@@ -19,6 +19,7 @@ import { sqlite } from "@/lib/db";
 import type { WebhookPayload } from "@/modules/core/lib/webhooks";
 import { registerShipHeroTopicHandler } from "./webhook-handlers";
 import { eventBus } from "@/modules/core/lib/event-bus";
+import { logOrderActivity } from "@/modules/orders/lib/activity-log";
 
 interface ShipmentUpdateBody {
   order_id?: string;
@@ -106,6 +107,24 @@ async function handleShipmentUpdate(
   vals.push(row.id);
 
   sqlite.prepare(`UPDATE orders SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+
+  // Order activity timeline — record every Shipment Update we apply,
+  // including duplicates (so ops can see ShipHero re-deliveries). The
+  // "wasShipped" branching below decides whether to fire side effects,
+  // but the audit row goes in either way.
+  logOrderActivity({
+    orderId: row.id,
+    eventType: wasShipped
+      ? "shiphero.shipment_update.duplicate"
+      : "shiphero.shipment_update.shipped",
+    data: {
+      shipheroOrderId: shipheroOrderId,
+      trackingNumber: trackingNumber,
+      trackingCarrier: carrier,
+      trackingUrl: body.tracking_url ?? null,
+      shippedAt,
+    },
+  });
 
   // Emit only on the non-shipped → shipped transition. Side effects gated:
   //   1. eventBus "order.shipped" (downstream listeners — Slack digest etc.)

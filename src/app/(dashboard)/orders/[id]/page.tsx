@@ -18,6 +18,11 @@ import {
   Building2,
   CalendarDays,
   ExternalLink,
+  Paperclip,
+  Globe,
+  AlertTriangle,
+  StickyNote,
+  RefreshCw,
 } from "lucide-react";
 
 // ── Types ──
@@ -175,8 +180,29 @@ function timelineLabel(eventType: string): { label: string; icon: React.ElementT
     "return.approved": { label: "Return approved", icon: CheckCircle2, color: "text-green-500" },
     "return.received": { label: "Return received", icon: Package, color: "text-blue-500" },
     "return.refunded": { label: "Refund issued", icon: CheckCircle2, color: "text-green-600" },
+
+    // ShipHero — Faire packing slip attach pipeline.
+    "shiphero.slip.success": { label: "Faire packing slip attached in ShipHero", icon: Paperclip, color: "text-green-500" },
+    "shiphero.slip.error": { label: "Faire packing slip attach failed", icon: AlertTriangle, color: "text-red-500" },
+    "shiphero.slip.skipped_not_faire": { label: "Skipped slip attach (not a Faire order)", icon: Paperclip, color: "text-gray-400" },
+    "shiphero.slip.skipped_no_slip": { label: "Faire packing slip not ready yet", icon: Clock, color: "text-yellow-500" },
+    "shiphero.slip.skipped_no_order_id": { label: "Skipped slip attach (missing order id)", icon: Paperclip, color: "text-gray-400" },
+
+    // ShipHero — Shipment Update webhook.
+    "shiphero.shipment_update.shipped": { label: "ShipHero marked order shipped", icon: Truck, color: "text-cyan-500" },
+    "shiphero.shipment_update.duplicate": { label: "ShipHero re-sent shipment update", icon: RefreshCw, color: "text-gray-400" },
+
+    // Faire — auto ship-mark pipeline.
+    "faire.ship_mark.success": { label: "Marked order shipped in Faire (US auto)", icon: Globe, color: "text-green-500" },
+    "faire.ship_mark.error": { label: "Faire ship-mark API rejected", icon: AlertTriangle, color: "text-red-500" },
+    "faire.ship_mark.skipped_non_us": { label: "Non-US Faire order — manual mark required", icon: Globe, color: "text-orange-500" },
+    "faire.ship_mark.skipped_unknown_carrier": { label: "Unknown carrier — Faire mark needs manual review", icon: AlertTriangle, color: "text-orange-500" },
+    "faire.ship_mark.skipped_no_tracking": { label: "No tracking — skipped Faire ship-mark", icon: AlertTriangle, color: "text-gray-400" },
+    "faire.ship_mark.skipped_not_faire": { label: "Skipped Faire ship-mark (not a Faire order)", icon: Globe, color: "text-gray-400" },
+    "faire.ship_mark.skipped_already_marked": { label: "Faire ship-mark skipped (already marked)", icon: Globe, color: "text-gray-400" },
+    "faire.ship_mark.skipped_no_order": { label: "Skipped Faire ship-mark (no local order)", icon: AlertTriangle, color: "text-gray-400" },
   };
-  return map[eventType] || { label: eventType, icon: Clock, color: "text-gray-400" };
+  return map[eventType] || { label: eventType, icon: StickyNote, color: "text-gray-400" };
 }
 
 // ── KPI Tile ──

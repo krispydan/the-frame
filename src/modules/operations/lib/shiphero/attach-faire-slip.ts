@@ -20,6 +20,10 @@ import {
   orderUpdatePackingNote,
   getOrderPackingNote,
 } from "./api-client";
+import {
+  findLocalOrderIdByShipHeroSignals,
+  logOrderActivity,
+} from "@/modules/orders/lib/activity-log";
 
 export type AttachStatus =
   | "success"
@@ -79,6 +83,26 @@ function logAttachment(opts: {
       );
   } catch (e) {
     console.error("[shiphero/attach-faire-slip] log insert failed:", e);
+  }
+  // Mirror onto the order activity timeline so the order detail page
+  // shows what happened. Best-effort — if Shopify hasn't synced the
+  // local order row yet (Order Allocated can beat Shopify webhooks),
+  // we skip silently rather than block the attach.
+  const orderId = findLocalOrderIdByShipHeroSignals({
+    shipheroOrderId: opts.shipheroOrderId,
+    externalId: opts.externalId,
+    orderNumber: opts.externalId,
+  });
+  if (orderId) {
+    logOrderActivity({
+      orderId,
+      eventType: `shiphero.slip.${opts.status}`,
+      data: {
+        filename: opts.filename,
+        faireOrderId: opts.faireOrderId,
+        errorMessage: opts.errorMessage ?? null,
+      },
+    });
   }
 }
 
