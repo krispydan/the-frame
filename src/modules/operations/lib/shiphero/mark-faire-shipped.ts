@@ -41,7 +41,19 @@ type MarkStatus =
   | "skipped_no_tracking"
   | "skipped_not_faire"
   | "skipped_no_order"
-  | "skipped_already_marked";
+  | "skipped_already_marked"
+  | "skipped_already_shipped_in_faire";
+
+/** Faire order states that mean a shipment already exists. Posting to
+ *  the shipments endpoint when the order is in one of these would
+ *  either be rejected or — worst case — create a duplicate shipment
+ *  record. Skip + audit instead. */
+const ALREADY_SHIPPED_FAIRE_STATES = new Set([
+  "PRE_TRANSIT",
+  "IN_TRANSIT",
+  "DELIVERED",
+  "BACKORDERED",
+]);
 
 function logMark(opts: {
   /** Local orders.id. When present, the same event is mirrored onto the
@@ -173,7 +185,7 @@ export async function markFaireShippedIfApplicable(
     return "skipped_not_faire";
   }
 
-  // Idempotency check.
+  // Idempotency check 1: we've already POSTed a success row.
   const existing = sqlite
     .prepare(
       `SELECT 1 FROM faire_shipment_marks
@@ -182,6 +194,27 @@ export async function markFaireShippedIfApplicable(
     .get(match.faireOrderId) as { 1: number } | undefined;
   if (existing) {
     return "skipped_already_marked";
+  }
+
+  // Idempotency check 2: Faire already considers this order shipped
+  // (because someone marked it manually in the brand portal, or via a
+  // prior integration). Posting again could create a duplicate
+  // shipment record in Faire — skip + audit instead. The matcher
+  // returns the current state on the same paginate response we used
+  // to resolve the order id, so this is free.
+  if (ALREADY_SHIPPED_FAIRE_STATES.has(match.state)) {
+    logMark({
+      localOrderId: args.localOrderId,
+      faireOrderId: match.faireOrderId,
+      orderNumber: args.orderNumber,
+      countryCode: match.shipToCountry || null,
+      carrier: args.carrier,
+      trackingCode: args.trackingNumber,
+      makerCostCents: null,
+      status: "skipped_already_shipped_in_faire",
+      errorMessage: `Faire state is ${match.state} — skipped to avoid duplicate shipment`,
+    });
+    return "skipped_already_shipped_in_faire";
   }
 
   // Non-US: send a manual-ship Slack alert + log. We don't auto-mark

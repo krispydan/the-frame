@@ -200,6 +200,7 @@ function timelineLabel(eventType: string): { label: string; icon: React.ElementT
     "faire.ship_mark.skipped_no_tracking": { label: "No tracking — skipped Faire ship-mark", icon: AlertTriangle, color: "text-gray-400" },
     "faire.ship_mark.skipped_not_faire": { label: "Skipped Faire ship-mark (not a Faire order)", icon: Globe, color: "text-gray-400" },
     "faire.ship_mark.skipped_already_marked": { label: "Faire ship-mark skipped (already marked)", icon: Globe, color: "text-gray-400" },
+    "faire.ship_mark.skipped_already_shipped_in_faire": { label: "Faire already showed this as shipped — left alone", icon: Globe, color: "text-gray-400" },
     "faire.ship_mark.skipped_no_order": { label: "Skipped Faire ship-mark (no local order)", icon: AlertTriangle, color: "text-gray-400" },
   };
   return map[eventType] || { label: eventType, icon: StickyNote, color: "text-gray-400" };
