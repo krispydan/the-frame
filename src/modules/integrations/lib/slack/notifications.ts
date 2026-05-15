@@ -177,6 +177,33 @@ export async function notifyOrderFulfilled(opts: {
   });
 }
 
+/* ── Faire non-US — manual ship-mark required ── */
+
+export async function notifyFaireManualShipRequired(opts: {
+  orderNumber: string;
+  faireDisplayId: string;
+  countryCode: string | null;
+  trackingNumber: string | null;
+  trackingCarrier: string | null;
+  /** Faire brand-portal URL for the order. */
+  faireUrl?: string | null;
+}) {
+  const country = opts.countryCode || "non-US";
+  const tracking = opts.trackingNumber
+    ? ` (${opts.trackingCarrier ? `${opts.trackingCarrier} ` : ""}\`${opts.trackingNumber}\`)`
+    : "";
+  const link = opts.faireUrl ? ` · <${opts.faireUrl}|open in Faire>` : "";
+  const intro = `🛫 *Faire ${country} order needs manual ship-mark* — ${opts.orderNumber} just shipped${tracking}. We auto-mark US orders via Faire's API, but ${country} orders need someone to mark this one shipped in the Faire brand portal.${link}`;
+
+  await postSlack({
+    topic: "orders.faire_manual_ship_required",
+    text: `🛫 Mark ${opts.orderNumber} shipped manually in Faire (${country})`,
+    blocks: [
+      { type: "section", text: { type: "mrkdwn", text: intro } },
+    ],
+  });
+}
+
 /* ── Stock alerts ── */
 
 export async function notifyOutOfStock(opts: {

@@ -48,6 +48,7 @@ export type SlackTopic =
   // Real-time alerts
   | "orders.wholesale"
   | "orders.fulfilled"
+  | "orders.faire_manual_ship_required"
   | "stock.out_of_stock"
   | "stock.critical_low"
   | "orders.payment_failed"
@@ -68,6 +69,7 @@ export const SLACK_TOPICS: { topic: SlackTopic; label: string; defaultChannel: s
   // Orders
   { topic: "orders.wholesale",        label: "Wholesale order placed",       defaultChannel: "jaxy-orders-live",   group: "Orders",       description: "Pings the moment a wholesale order lands. Faire orders too." },
   { topic: "orders.fulfilled",        label: "Order fulfilled (shipped)",     defaultChannel: "jaxy-orders-live",   group: "Orders",       description: "Pings when a Shopify order is marked fulfilled. Faire orders include a deep link to the Faire brand portal." },
+  { topic: "orders.faire_manual_ship_required", label: "Faire non-US order — mark shipped manually", defaultChannel: "jaxy-ops-alerts", group: "Orders", description: "We auto-mark US Faire orders as shipped via the API. For Canada / other countries, we need someone to mark it manually in the Faire brand portal." },
   { topic: "orders.payment_failed",   label: "Payment failed",                defaultChannel: "jaxy-ops-alerts",    group: "Orders",       description: "An order's payment was declined or voided." },
   { topic: "orders.chargeback",       label: "Chargeback / dispute",          defaultChannel: "jaxy-ops-alerts",    group: "Orders",       description: "Customer disputed a charge through their bank." },
   { topic: "orders.stuck",            label: "Order stuck > 48h",             defaultChannel: "jaxy-ops-alerts",    group: "Orders",       description: "Confirmed but not shipped after 48 hours." },

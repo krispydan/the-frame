@@ -23,12 +23,23 @@ export interface FaireOrderMatch {
   /** Faire order state, e.g. "PROCESSING", "DELIVERED". Useful for handlers
    *  that want to verify the order is still in a shippable state. */
   state: string;
+  /** ISO 3166-1 alpha-2 country code of the SHIPPING address (e.g. "US",
+   *  "CA"). null if Faire didn't include it. The Faire shipments-mark
+   *  pipeline uses this to gate the US-only auto-mark path. */
+  shipToCountry: string | null;
+}
+
+interface FaireAddressShape {
+  country?: string;
+  country_code?: string;
 }
 
 interface FaireOrderListItem {
   id: string;
   display_id: string;
   state: string;
+  address?: FaireAddressShape;
+  shipping_address?: FaireAddressShape;
 }
 
 interface FaireOrderListResponse {
@@ -94,10 +105,17 @@ export async function findFaireOrderByOrderNumber(
 
     for (const order of orders) {
       if (order.display_id?.toUpperCase() === target) {
+        const addr = order.shipping_address ?? order.address;
+        // Faire returns either full country names or 2-letter codes; we
+        // normalize to upper for downstream comparison and shrug at the
+        // rare "United States" full-name response (handled by callers
+        // doing startsWith("US") / equals("US")).
+        const country = addr?.country_code ?? addr?.country ?? null;
         return {
           faireOrderId: order.id,
           displayId: order.display_id,
           state: order.state,
+          shipToCountry: country ? country.toUpperCase() : null,
         };
       }
     }
