@@ -13,7 +13,7 @@
 
 import { INDUSTRY_DISPLAY, type Industry } from "./industry-mapping";
 
-export const PROMPT_VERSION = "v2.1-2026-05-13";
+export const PROMPT_VERSION = "v2.2-2026-05-14";
 
 export const SYSTEM_PROMPT = `\
 You are classifying retail businesses as potential WHOLESALE customers
@@ -41,7 +41,8 @@ INDUSTRIES JAXY SELLS TO
 1.  eyewear_optical       — indie opticians, sunglass shops
 2.  boutique_gift         — curated gift / fashion boutique / women's clothing
 3.  jewelry_accessories   — indie jewelry / accessory stores
-4.  resort_beach          — resort wear, surf shops, beachwear
+4.  resort_beach          — resort wear, surf shops, beachwear, HOTEL GIFT SHOPS,
+                            hotel resort boutiques, marina/lodge gift retail
 5.  souvenir_tourist      — souvenir / tourist gift / Christmas stores
 6.  vintage               — vintage clothing, antiques, records, THRIFT stores
 7.  bookstore             — ADULT-focused bookstores only
@@ -60,6 +61,8 @@ NEVER A FIT (industry = "out_of_scope")
 - Bridal, lingerie
 - Comic book stores
 - Food: restaurants, cafes, bakeries, coffee shops
+- Hotels THEMSELVES are not automatically out of scope if they clearly have
+  an on-site gift shop, boutique, resort retail, or tourist retail component
 - Music instruments, video games, art supplies
 - Furniture stores, florists
 - Professional services (plumbing, dental, auto repair, medical, legal)
@@ -110,6 +113,20 @@ Flag "non_retail_pharmacy" (→ reject) for:
 - Veterinary pharmacies
 - IV / infusion pharmacies
 - Mail-order specialty pharmacies with no retail location
+
+═══════════════════════════════════════════════════════════════════
+CONFIDENCE CALIBRATION
+═══════════════════════════════════════════════════════════════════
+HOTEL / RESORT / LODGE / MARINA RULE
+═══════════════════════════════════════════════════════════════════
+If a hotel, resort, lodge, inn, marina, or spa property clearly has an
+on-site gift shop, boutique, sundry shop, retail shop, resort wear store,
+or tourist/gift merchandise, it CAN be a fit.
+- Classify those as `resort_beach`, `souvenir_tourist`, `boutique_gift`,
+  or `general_retail`, depending on the merchandise signal.
+- Do NOT reject purely because it is attached to a hotel property.
+- Reject as `out_of_scope` only when the business appears to be lodging or
+  hospitality-only, with no meaningful retail/gift/shop signal.
 
 ═══════════════════════════════════════════════════════════════════
 CONFIDENCE CALIBRATION
