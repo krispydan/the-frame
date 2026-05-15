@@ -92,6 +92,10 @@ export async function runShipmentRevenueRecognition(): Promise<RecognitionRunRes
   // payout the order belonged to; the join through xero_payout_syncs confirms
   // Deferred Revenue exists in Xero (otherwise we'd debit a non-existent
   // liability balance).
+  //
+  // External IDs can be either `shopify_payout_<id>` (Shopify Payments) or
+  // `faire_payout_<id>` (Faire per-order synthetic settlement). Strip
+  // whichever prefix is present before joining to xero_payout_syncs.
   const orders = sqlite.prepare(`
     SELECT
       o.id              AS orderId,
@@ -105,7 +109,10 @@ export async function runShipmentRevenueRecognition(): Promise<RecognitionRunRes
     FROM orders o
     INNER JOIN settlement_line_items sli ON sli.order_id = o.id
     INNER JOIN settlements s             ON s.id          = sli.settlement_id
-    INNER JOIN xero_payout_syncs xps     ON xps.source_payout_id = REPLACE(s.external_id, 'shopify_payout_', '')
+    INNER JOIN xero_payout_syncs xps     ON xps.source_payout_id IN (
+        REPLACE(s.external_id, 'shopify_payout_', ''),
+        REPLACE(s.external_id, 'faire_payout_', '')
+      )
     WHERE o.shipped_at IS NOT NULL
       AND (o.status IS NULL OR o.status != 'cancelled')
       AND o.channel IN (${SUPPORTED_CHANNELS.map(() => "?").join(",")})

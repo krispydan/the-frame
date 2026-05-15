@@ -26,6 +26,7 @@ import { syncShipHeroInventory, isDuringBusinessHours } from "@/modules/operatio
 import { runShopifyMetafieldSync } from "@/modules/catalog/lib/shopify-metafields/bulk-sync-job";
 import { syncSettlementsAllShops } from "@/modules/finance/lib/shopify-settlements";
 import { runShipmentRevenueRecognition } from "@/modules/finance/lib/shipment-revenue-recognition";
+import { syncFairePayouts } from "@/modules/integrations/lib/faire/payout-sync";
 
 export type CronJob = {
   id: string;                         // stable, kebab-case
@@ -89,6 +90,19 @@ export const CRON_JOBS: CronJob[] = [
     schedule: "0 15 * * *",  // 15:00 UTC ≈ 8am PT (after Shopify settles overnight)
     description: "Pull recent Shopify payouts and post paired revenue + COGS journals to Xero",
     handler: () => syncShopifyPayouts({}),
+  },
+
+  // ── Faire payout sync (accrual / ASC 606) ──
+  // Faire doesn't expose a /payouts endpoint — payout data is on each order
+  // under `payout_costs`. Walks recent Faire orders, finds the ones Faire
+  // has paid out (`payment_initiated_at` set), and posts per-order journals
+  // following the same defer-at-payout model used for Shopify. Runs after
+  // Shopify payout sync so all the day's accrual journals land together.
+  {
+    id: "faire-payout-sync",
+    schedule: "15 16 * * *",  // 16:15 UTC ≈ 9:15am PT
+    description: "Pull Faire orders, post per-order deferred-revenue journals + bank sweep for paid orders",
+    handler: () => syncFairePayouts({}),
   },
 
   // ── Shipment-driven revenue recognition (accrual / ASC 606) ──
