@@ -355,7 +355,18 @@ async function handleFulfillmentCreate(fulfillment: ShopifyFulfillment, shopDoma
     .get();
   if (!existing) return;
 
-  // Update order with tracking info
+  // Transition gate. The SAME physical shipment reaches us twice: once
+  // here (ShipHero → Shopify channel → Shopify fulfillments/create
+  // webhook) and once via the ShipHero Shipment Update webhook
+  // (modules/operations/lib/shiphero/shipment-update.ts). Whichever
+  // handler runs its synchronous read→update block first "wins" — the
+  // other sees status already 'shipped' and must NOT re-fire the
+  // event / Slack alert. better-sqlite3 is synchronous and Node is
+  // single-threaded, and there is no `await` between this read and the
+  // update below, so the block is atomic relative to the other handler.
+  const wasShipped = existing.status === "shipped" || existing.status === "delivered";
+
+  // Update order with tracking info (idempotent — same values on a repeat)
   db.update(orders).set({
     status: "shipped",
     trackingNumber: fulfillment.tracking_number || null,
@@ -366,6 +377,13 @@ async function handleFulfillmentCreate(fulfillment: ShopifyFulfillment, shopDoma
 
   // Create inventory movements for fulfilled items
   createInventoryMovements(fulfillment, existing.id);
+
+  if (wasShipped) {
+    // Already shipped by the other webhook path — tracking is refreshed
+    // above (cheap, idempotent) but the one-shot side effects (event +
+    // Slack) were already fired by whoever won the race. Stop here.
+    return;
+  }
 
   eventBus.emit("order.shipped", {
     orderId: existing.id,

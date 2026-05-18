@@ -164,11 +164,13 @@ async function handleShipmentUpdate(
     },
   });
 
-  // Emit only on the non-shipped → shipped transition. Side effects gated:
-  //   1. eventBus "order.shipped" (downstream listeners — Slack digest etc.)
-  //   2. Slack "📦 order fulfilled" alert posted via the shared notifier.
-  //   3. Mark the order shipped in Faire (US only) or post a manual-ship
-  //      alert (non-US). Mirrors what Shopify ships do at the destination.
+  // One-shot side effects — gated on the non-shipped → shipped
+  // transition so they fire exactly once even though the SAME physical
+  // shipment also reaches us via the Shopify fulfillments/create webhook
+  // (ShipHero → Shopify channel). Whichever handler flips the local
+  // status first wins; the other sees wasShipped and skips these:
+  //   1. eventBus "order.shipped" (downstream listeners — digests etc.)
+  //   2. Slack "📦 order fulfilled" alert via the shared notifier.
   if (!wasShipped) {
     try {
       eventBus.emit("order.shipped", {
@@ -189,16 +191,27 @@ async function handleShipmentUpdate(
         shipheroOrderId,
       });
     })();
-    void (async () => {
-      const { markFaireShippedIfApplicable } = await import("./mark-faire-shipped");
-      await markFaireShippedIfApplicable({
-        localOrderId: row.id,
-        orderNumber: orderNumber || (row as unknown as { order_number: string }).order_number || null,
-        trackingNumber,
-        carrier,
-      });
-    })();
   }
+
+  // Faire ship-mark runs on EVERY Shipment Update, regardless of the
+  // local transition gate. This is deliberate: the Shopify
+  // fulfillments/create webhook can win the race and flip the local
+  // status to 'shipped' first — if the Faire mark were gated on
+  // !wasShipped, that race would silently skip marking the order in
+  // Faire. markFaireShippedIfApplicable is fully idempotent on its own
+  // (unique success row in faire_shipment_marks + Faire-state check +
+  // already-marked short-circuit), so running it on duplicates is a
+  // cheap no-op rather than a double-post. This is also the ONLY path
+  // that talks to Faire — the Shopify webhook handler never does.
+  void (async () => {
+    const { markFaireShippedIfApplicable } = await import("./mark-faire-shipped");
+    await markFaireShippedIfApplicable({
+      localOrderId: row.id,
+      orderNumber: orderNumber || (row as unknown as { order_number: string }).order_number || null,
+      trackingNumber,
+      carrier,
+    });
+  })();
 
   return {
     ok: true,
