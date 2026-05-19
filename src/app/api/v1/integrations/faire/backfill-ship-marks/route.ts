@@ -44,7 +44,17 @@ export async function POST(req: NextRequest) {
        FROM orders o
        LEFT JOIN faire_shipment_marks m
          ON m.order_number IN (o.order_number, REPLACE(o.order_number, '#', ''))
-         AND m.status = 'success'
+         AND m.status IN (
+           -- "Resolved" statuses: a decision was reached and re-running
+           -- would just repeat it. Excluding these lets batched runs
+           -- (small --limit, repeated) actually drain instead of
+           -- re-processing the same already-handled orders forever.
+           'success',
+           'skipped_already_shipped_in_faire',
+           'skipped_non_us',
+           'skipped_unknown_carrier',
+           'skipped_not_faire'
+         )
        WHERE o.channel IN ('shopify_wholesale', 'faire')
          AND o.status = 'shipped'
          AND o.tracking_number IS NOT NULL
