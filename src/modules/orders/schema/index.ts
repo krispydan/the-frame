@@ -30,6 +30,9 @@ export const orders = sqliteTable("orders", {
   shipheroOrderId: text("shiphero_order_id"),
   shipheroOrderNumber: text("shiphero_order_number"),
   shipheroFulfillmentStatus: text("shiphero_fulfillment_status"),
+  // Recipient from the order's shipping address (company || person name).
+  // Captured at order-create; used directly in the fulfilled Slack alert.
+  shipToName: text("ship_to_name"),
   trackingNumber: text("tracking_number"),
   trackingCarrier: text("tracking_carrier"),
   placedAt: text("placed_at"),

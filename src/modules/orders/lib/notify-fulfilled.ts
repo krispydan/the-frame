@@ -37,13 +37,18 @@ export async function notifyOrderShippedById(opts: {
       return;
     }
 
-    const companyName = order.companyId
-      ? db
-          .select({ name: companies.name })
-          .from(companies)
-          .where(eq(companies.id, order.companyId))
-          .get()?.name ?? null
-      : null;
+    // Prefer the recipient captured straight off the order's shipping
+    // address. Fall back to the CRM company name only for older orders
+    // created before ship_to_name existed.
+    const companyName =
+      order.shipToName?.trim() ||
+      (order.companyId
+        ? db
+            .select({ name: companies.name })
+            .from(companies)
+            .where(eq(companies.id, order.companyId))
+            .get()?.name ?? null
+        : null);
 
     const itemRows = db
       .select({ qty: orderItems.quantity })

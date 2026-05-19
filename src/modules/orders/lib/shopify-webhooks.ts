@@ -69,7 +69,32 @@ interface ShopifyOrder {
       company: string;
     };
   };
+  shipping_address?: {
+    name?: string;
+    first_name?: string;
+    last_name?: string;
+    company?: string;
+  };
   fulfillments?: ShopifyFulfillment[];
+}
+
+/**
+ * The "ship to" label we show in the fulfilled Slack alert. Straight off
+ * the order's shipping address — company first (wholesale/Faire buyers
+ * are businesses), then the recipient's name, then customer name as a
+ * last resort. No CRM lookup: matching companies by shared free-email
+ * domain was mis-attributing orders.
+ */
+function deriveShipToName(order: ShopifyOrder): string | null {
+  const sa = order.shipping_address;
+  const company = sa?.company?.trim();
+  if (company) return company;
+  const saName = sa?.name?.trim()
+    || [sa?.first_name, sa?.last_name].filter(Boolean).join(" ").trim();
+  if (saName) return saName;
+  const custName = [order.customer?.first_name, order.customer?.last_name]
+    .filter(Boolean).join(" ").trim();
+  return custName || null;
 }
 
 // ── Channel Detection ──
@@ -259,6 +284,7 @@ export async function handleOrderCreate(order: ShopifyOrder, shopDomain?: string
     currency: order.currency,
     notes: order.note || null,
     externalId: String(order.id),
+    shipToName: deriveShipToName(order),
     placedAt: order.created_at,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -317,6 +343,11 @@ export async function handleOrderUpdated(order: ShopifyOrder, shopDomain?: strin
   }
 
   const newStatus = mapStatus(order);
+  // Heal ship_to_name for orders created before the column existed: only
+  // write when we currently have none, so we never clobber a good value.
+  const healedShipTo = existing.shipToName?.trim()
+    ? existing.shipToName
+    : deriveShipToName(order);
   db.update(orders).set({
     status: newStatus,
     subtotal: parseFloat(order.subtotal_price),
@@ -324,6 +355,7 @@ export async function handleOrderUpdated(order: ShopifyOrder, shopDomain?: strin
     tax: parseFloat(order.total_tax),
     total: parseFloat(order.total_price),
     notes: order.note || existing.notes,
+    shipToName: healedShipTo,
     updatedAt: new Date().toISOString(),
   }).where(eq(orders.id, existing.id)).run();
 
@@ -429,9 +461,13 @@ async function handleFulfillmentCreate(fulfillment: ShopifyFulfillment, shopDoma
         shopifyAdminOrderUrl,
       } = await import("@/modules/integrations/lib/slack/notifications");
 
-      const companyName = existing.companyId
-        ? db.select({ name: companies.name }).from(companies).where(eq(companies.id, existing.companyId)).get()?.name ?? null
-        : null;
+      // Ship-to recipient from the order itself; CRM lookup only as a
+      // fallback for orders created before ship_to_name existed.
+      const companyName =
+        existing.shipToName?.trim() ||
+        (existing.companyId
+          ? db.select({ name: companies.name }).from(companies).where(eq(companies.id, existing.companyId)).get()?.name ?? null
+          : null);
 
       // Total frame count for the lead line — sum quantities on the local
       // order rather than the webhook payload (more accurate, and stable

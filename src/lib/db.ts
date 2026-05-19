@@ -839,6 +839,11 @@ try { sqlite.exec("ALTER TABLE orders ADD COLUMN shiphero_order_id TEXT"); } cat
 try { sqlite.exec("ALTER TABLE orders ADD COLUMN shiphero_order_number TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE orders ADD COLUMN shiphero_fulfillment_status TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_orders_shiphero_id ON orders(shiphero_order_id)"); } catch { /* exists */ }
+// Ship-to recipient captured straight from the Shopify order's shipping
+// address (company, falling back to person name). Used verbatim in the
+// "order fulfilled" Slack alert — no CRM company lookup, which was
+// mis-attributing orders that shared a free-email domain.
+try { sqlite.exec("ALTER TABLE orders ADD COLUMN ship_to_name TEXT"); } catch { /* exists */ }
 
 // ShipHero shipments (multiple per order for partial fulfillments)
 try {
