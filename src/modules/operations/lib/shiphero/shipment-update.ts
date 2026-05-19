@@ -19,7 +19,7 @@ import { sqlite } from "@/lib/db";
 import type { WebhookPayload } from "@/modules/core/lib/webhooks";
 import { registerShipHeroTopicHandler } from "./webhook-handlers";
 import { eventBus } from "@/modules/core/lib/event-bus";
-import { logOrderActivity } from "@/modules/orders/lib/activity-log";
+import { logOrderActivity, findLocalOrderIdByShipHeroSignals } from "@/modules/orders/lib/activity-log";
 
 interface ShipmentUpdateFields {
   order_id?: string;
@@ -89,35 +89,47 @@ async function handleShipmentUpdate(
   if (!rawBody) return { ok: true, message: "Empty body" };
   const body = flattenPayload(rawBody);
 
-  const orderNumber = (body.order_number || body.partner_order_id || "").replace(/^#/, "").trim();
+  // Keep the raw order_number (Faire display id, e.g. "#2DJPVRJBUX") for
+  // the Faire matcher downstream — only strip the "#" for messaging.
+  const rawOrderNumber = body.order_number || body.partner_order_id || null;
+  const orderNumber = (rawOrderNumber || "").replace(/^#/, "").trim();
   const shipheroOrderId = body.order_id || null;
 
-  if (!orderNumber && !shipheroOrderId) {
+  if (!rawOrderNumber && !shipheroOrderId) {
     return { ok: true, message: "No order identifier in payload" };
   }
 
   const { trackingNumber, carrier, shippedAt } = pickTracking(body);
 
-  // Find the local row first so we know whether the status was already
-  // 'shipped' (to gate the event emit). Match by external_id (Shopify order
-  // id propagates as ShipHero's partner_order_id), order_number, or
-  // shiphero_order_id as a last resort.
-  const row = sqlite
-    .prepare(
-      `SELECT id, status, tracking_number, company_id, total
-       FROM orders
-       WHERE (order_number = ? OR external_id = ? OR shiphero_order_id = ?)
-       ORDER BY created_at DESC
-       LIMIT 1`,
-    )
-    .get(orderNumber, orderNumber, shipheroOrderId) as
-    | { id: string; status: string; tracking_number: string | null; company_id: string | null; total: number }
-    | undefined;
+  // Resolve the local order via the shared resolver. It tries
+  // shiphero_order_id, then external_id (= ShipHero partner_order_id =
+  // the Shopify numeric order id), then order_number BOTH with and
+  // without the leading "#". The previous inline query stripped the "#"
+  // and exact-matched, but local orders store "#2DJPVRJBUX" WITH the
+  // hash — so the match silently failed and the Faire ship-mark never
+  // ran (Briars & Brambles #2DJPVRJBUX). The resolver also String()-
+  // coerces numeric ShipHero ids.
+  const localId = findLocalOrderIdByShipHeroSignals({
+    orderNumber: body.order_number ?? null,
+    externalId: body.partner_order_id ?? null,
+    shipheroOrderId: body.order_id ?? null,
+  });
+
+  const row = localId
+    ? (sqlite
+        .prepare(
+          `SELECT id, status, tracking_number, company_id, total
+           FROM orders WHERE id = ? LIMIT 1`,
+        )
+        .get(localId) as
+        | { id: string; status: string; tracking_number: string | null; company_id: string | null; total: number }
+        | undefined)
+    : undefined;
 
   if (!row) {
     return {
       ok: true,
-      message: `No local order matched (order_number=${orderNumber}, shiphero_id=${shipheroOrderId})`,
+      message: `No local order matched (order_number=${orderNumber}, partner_order_id=${body.partner_order_id ?? "null"}, shiphero_id=${shipheroOrderId})`,
     };
   }
 

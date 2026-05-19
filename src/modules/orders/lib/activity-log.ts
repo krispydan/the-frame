@@ -27,14 +27,23 @@ import { sqlite } from "@/lib/db";
  * docs/shiphero-webhooks-and-faire-slips.md.
  */
 export function findLocalOrderIdByShipHeroSignals(opts: {
-  orderNumber?: string | null;
-  externalId?: string | null;
-  shipheroOrderId?: string | null;
+  orderNumber?: string | number | null;
+  externalId?: string | number | null;
+  shipheroOrderId?: string | number | null;
 }): string | null {
-  const orderNumber = opts.orderNumber?.replace(/^#/, "").trim() || null;
+  // ShipHero sends ids as numbers in some payload shapes (e.g.
+  // order_id: 815262993, shiphero_id: 807574618.0). Coerce to string
+  // before any .replace()/.trim() — passing a number used to throw
+  // "e.shipheroOrderId?.trim is not a function" and abort the handler.
+  const s = (v: string | number | null | undefined): string | null => {
+    if (v == null) return null;
+    const str = String(v).trim();
+    return str || null;
+  };
+  const orderNumber = s(opts.orderNumber)?.replace(/^#/, "").trim() || null;
   const orderNumberHashed = orderNumber ? `#${orderNumber}` : null;
-  const externalId = opts.externalId?.trim() || null;
-  const shipheroOrderId = opts.shipheroOrderId?.trim() || null;
+  const externalId = s(opts.externalId);
+  const shipheroOrderId = s(opts.shipheroOrderId);
 
   // Try the most-specific signal first. shiphero_order_id is unique once
   // we've recorded it; order_number is also unique within a shop;
