@@ -97,33 +97,62 @@ async function detectChannel(order: ShopifyOrder, shopDomain?: string): Promise<
 
 // ── Company Matching / Auto-Create ──
 
+// Consumer / free email providers. A shared domain here means NOTHING
+// about the businesses being related — matching companies on these
+// silently collapses unrelated retailers (e.g. a Faire buyer and an
+// unrelated stockist both on @hotmail.com → order attributed to the
+// wrong company in the "order fulfilled" Slack alert). Domain matching
+// is only meaningful for genuine business domains.
+const FREE_EMAIL_DOMAINS = new Set([
+  "gmail.com", "googlemail.com", "hotmail.com", "hotmail.co.uk",
+  "outlook.com", "live.com", "msn.com", "yahoo.com", "yahoo.co.uk",
+  "ymail.com", "aol.com", "icloud.com", "me.com", "mac.com",
+  "proton.me", "protonmail.com", "gmx.com", "mail.com", "comcast.net",
+  "verizon.net", "att.net", "sbcglobal.net", "bellsouth.net",
+  "cox.net", "earthlink.net", "frontier.com",
+]);
+
 async function findOrCreateCompany(order: ShopifyOrder, shopDomain?: string): Promise<string | null> {
   const email = order.email || order.customer?.email;
   const companyName = order.customer?.default_address?.company;
 
-  // Try existing matches
+  // 1. Exact email match — most specific, always safe.
   if (email) {
-    const domain = email.split("@")[1];
-    if (domain) {
-      const match = db.select().from(companies).where(eq(companies.domain, domain)).get();
-      if (match) return match.id;
-    }
     const emailMatch = db.select().from(companies).where(eq(companies.email, email)).get();
     if (emailMatch) return emailMatch.id;
   }
 
+  // 2. Exact company-name match — for wholesale/Faire the buyer's store
+  //    name comes through default_address.company.
   if (companyName) {
     const nameMatch = db.select().from(companies).where(eq(companies.name, companyName)).get();
     if (nameMatch) return nameMatch.id;
   }
 
-  // For wholesale orders, auto-create a company record
+  // 3. Business-domain match — ONLY for non-free domains. Skipping free
+  //    providers is the fix for the Molly Monkey mis-attribution: a
+  //    coincidental shared @hotmail.com no longer collapses two
+  //    unrelated companies.
+  if (email) {
+    const domain = email.split("@")[1]?.toLowerCase();
+    if (domain && !FREE_EMAIL_DOMAINS.has(domain)) {
+      const match = db.select().from(companies).where(eq(companies.domain, domain)).get();
+      if (match) return match.id;
+    }
+  }
+
+  // For wholesale orders, auto-create a company record. Only persist a
+  // domain when it's a real business domain — storing "hotmail.com"
+  // would make this new company a future false-match magnet for every
+  // other hotmail buyer.
   const channel = await detectChannel(order, shopDomain);
   if (channel === "shopify_wholesale" && (companyName || email)) {
+    const rawDomain = email ? email.split("@")[1]?.toLowerCase() : null;
+    const businessDomain = rawDomain && !FREE_EMAIL_DOMAINS.has(rawDomain) ? rawDomain : null;
     const newCompany = db.insert(companies).values({
       name: companyName || email || "Unknown",
       email: email || null,
-      domain: email ? email.split("@")[1] : null,
+      domain: businessDomain,
       source: "shopify",
     }).returning().get();
     return newCompany.id;
