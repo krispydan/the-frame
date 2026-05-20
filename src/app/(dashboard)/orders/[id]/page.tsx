@@ -54,6 +54,10 @@ interface OrderDetail {
   id: string;
   orderNumber: string;
   companyId: string | null;
+  /** Recipient captured from the order's shipping address — the
+   *  authoritative "shipped to" label. Preferred over company.name to
+   *  avoid CRM-attribution drift. */
+  shipToName: string | null;
   channel: string;
   status: string;
   subtotal: number;
@@ -424,13 +428,15 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             label="Customer"
             value={
               <span className="text-base font-semibold leading-tight block truncate">
-                {order.contact?.name || order.company?.name || "—"}
+                {order.shipToName || order.contact?.name || order.company?.name || "—"}
               </span>
             }
             sub={
-              order.company?.name && order.contact?.name
-                ? order.company.name
-                : order.contact?.email || undefined
+              order.contact?.name && order.contact.name !== order.shipToName
+                ? order.contact.name
+                : order.company?.name && order.company.name !== order.shipToName
+                  ? order.company.name
+                  : order.contact?.email || undefined
             }
             accent="muted"
           />
@@ -811,8 +817,13 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               <div className="flex items-start gap-2">
                 <Building2 className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
                 <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">Company</p>
-                  <p className="font-medium truncate">{order.company?.name || "—"}</p>
+                  <p className="text-xs text-muted-foreground">Ship to</p>
+                  <p className="font-medium truncate">{order.shipToName || order.company?.name || "—"}</p>
+                  {order.shipToName && order.company?.name && order.shipToName !== order.company.name && (
+                    <p className="text-xs text-muted-foreground truncate" title={`CRM company: ${order.company.name}`}>
+                      CRM: {order.company.name}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="flex items-start gap-2">
