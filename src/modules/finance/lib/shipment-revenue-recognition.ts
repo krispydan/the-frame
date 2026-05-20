@@ -37,7 +37,15 @@ interface ShippedOrderRow {
   total: number;
   currency: string | null;
   shippedAt: string;
-  payoutExternalId: string;       // "shopify_payout_..."
+  payoutExternalId: string;       // "shopify_payout_..." or "faire_payout_..."
+  /**
+   * Where the payout originated — `shopify_dtc`, `shopify_wholesale`, or
+   * `faire`. This is the AUTHORITATIVE source-of-truth for which Xero
+   * Sales account + tracking option to use, not the local `channel`
+   * column on the order (which is `shopify_wholesale` for everything in
+   * the wholesale store, INCLUDING Faire orders that get synced in).
+   */
+  payoutPlatform: string;
 }
 
 interface CogsLineRow {
@@ -98,14 +106,15 @@ export async function runShipmentRevenueRecognition(): Promise<RecognitionRunRes
   // whichever prefix is present before joining to xero_payout_syncs.
   const orders = sqlite.prepare(`
     SELECT
-      o.id              AS orderId,
-      o.external_id     AS externalOrderId,
-      o.order_number    AS orderNumber,
-      o.channel         AS channel,
-      o.total           AS total,
-      o.currency        AS currency,
-      o.shipped_at      AS shippedAt,
-      s.external_id     AS payoutExternalId
+      o.id                  AS orderId,
+      o.external_id         AS externalOrderId,
+      o.order_number        AS orderNumber,
+      o.channel             AS channel,
+      o.total               AS total,
+      o.currency            AS currency,
+      o.shipped_at          AS shippedAt,
+      s.external_id         AS payoutExternalId,
+      xps.source_platform   AS payoutPlatform
     FROM orders o
     INNER JOIN settlement_line_items sli ON sli.order_id = o.id
     INNER JOIN settlements s             ON s.id          = sli.settlement_id
@@ -125,22 +134,29 @@ export async function runShipmentRevenueRecognition(): Promise<RecognitionRunRes
     return result;
   }
 
-  // Resolve account + tracking mappings per channel (cache them so we don't
-  // re-query for every order in the same channel).
-  const channelMappings = new Map<string, ChannelXeroConfig | null>();
-  for (const ch of SUPPORTED_CHANNELS) {
-    channelMappings.set(ch, await loadChannelXeroConfig(ch));
+  // Resolve account + tracking mappings per PAYOUT PLATFORM (not local
+  // order channel). Faire orders live in our orders table as
+  // `shopify_wholesale` because Faire syncs them into our Shopify
+  // wholesale store, but the revenue + tracking must follow the Faire
+  // platform so they hit 4040 Sales — Faire Wholesale with the Faire
+  // tracking option, not 4030 / Shopify - Wholesale.
+  //
+  // We pre-load configs for all platforms that might appear in
+  // xero_payout_syncs.source_platform: the Shopify channel set + `faire`.
+  const platformMappings = new Map<string, ChannelXeroConfig | null>();
+  for (const platform of [...SUPPORTED_CHANNELS, "faire"]) {
+    platformMappings.set(platform, await loadChannelXeroConfig(platform));
   }
 
   for (const order of orders) {
     result.attempted++;
-    const cfg = channelMappings.get(order.channel) ?? null;
+    const cfg = platformMappings.get(order.payoutPlatform) ?? null;
     if (!cfg) {
       result.skipped++;
       result.details.push({
         orderNumber: order.orderNumber,
         status: "skipped",
-        reason: `Missing Xero account mappings for channel ${order.channel}`,
+        reason: `Missing Xero account mappings for payout platform ${order.payoutPlatform}`,
       });
       continue;
     }
@@ -249,7 +265,10 @@ function buildShipmentRecognitionJournal(
   cogsTotal: number,
   cfg: ChannelXeroConfig,
 ) {
-  const platform = HUMAN_PLATFORM[order.channel] ?? order.channel;
+  // Narration follows the payout platform — Faire orders read as
+  // "Faire order #X" even though they live in our orders table as
+  // channel=shopify_wholesale.
+  const platform = HUMAN_PLATFORM[order.payoutPlatform] ?? order.payoutPlatform;
   const tracking = cfg.trackingCategoryId
     ? [{
         TrackingCategoryID: cfg.trackingCategoryId,
