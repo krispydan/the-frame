@@ -16,6 +16,29 @@ import { db } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { orders, orderItems } from "@/modules/orders/schema";
 import { companies } from "@/modules/sales/schema";
+import { shopifyShops } from "@/modules/integrations/schema/shopify";
+import { and } from "drizzle-orm";
+
+/**
+ * Derive the Shopify shop domain from the order's channel. Used when the
+ * caller doesn't have shop context handy (e.g. the ShipHero shipment-
+ * update path knows only the local order id). Without this, the alert
+ * footer was inconsistent: orders where the Shopify webhook won the race
+ * got a "Shopify" link; orders where the ShipHero webhook won didn't.
+ */
+function shopDomainForOrderChannel(channel: string): string | null {
+  const shopChannel =
+    channel === "shopify_dtc" ? "retail"
+    : channel === "shopify_wholesale" ? "wholesale"
+    : null;
+  if (!shopChannel) return null;
+  const row = db
+    .select({ shopDomain: shopifyShops.shopDomain })
+    .from(shopifyShops)
+    .where(and(eq(shopifyShops.channel, shopChannel), eq(shopifyShops.isActive, true)))
+    .get();
+  return row?.shopDomain ?? null;
+}
 
 export async function notifyOrderShippedById(opts: {
   orderId: string;
@@ -64,9 +87,12 @@ export async function notifyOrderShippedById(opts: {
     } = await import("@/modules/integrations/lib/slack/notifications");
 
     const faireUrl = faireOrderUrlFromName(order.orderNumber);
-    const shopifyUrl = opts.shopDomain
-      ? shopifyAdminOrderUrl(opts.shopDomain, order.externalId)
-      : null;
+    // Resolve shopDomain from the caller, else derive from the order's
+    // channel so the alert always has a Shopify link regardless of which
+    // webhook path (Shopify fulfillments/create vs ShipHero Shipment
+    // Update) fired the notification.
+    const shopDomain = opts.shopDomain ?? shopDomainForOrderChannel(order.channel);
+    const shopifyUrl = shopifyAdminOrderUrl(shopDomain, order.externalId);
 
     await notifyOrderFulfilled({
       orderNumber: order.orderNumber,
