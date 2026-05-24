@@ -29,6 +29,12 @@ interface GenerateResponse {
   }>;
 }
 
+// One product per click. Opus vision averages 30-90s per product on a
+// 5-8 image batch; Cloudflare drops the connection at ~100s. Earlier
+// limits of 5 caused 524s — the server kept generating but the browser
+// never saw the toast / page-reload. limit=1 keeps every call under
+// the edge timeout so the operator gets immediate feedback on each
+// generation.
 async function callGenerate(opts: { dryRun: boolean; regenerate?: boolean }): Promise<GenerateResponse> {
   const res = await fetch("/api/v1/integrations/amazon/generate", {
     method: "POST",
@@ -36,7 +42,7 @@ async function callGenerate(opts: { dryRun: boolean; regenerate?: boolean }): Pr
     body: JSON.stringify({
       dryRun: opts.dryRun,
       regenerate: !!opts.regenerate,
-      limit: 5,
+      limit: 1,
     }),
   });
   if (!res.ok) {
@@ -71,7 +77,7 @@ export function GenerateListingsButtons() {
   async function onRun() {
     if (
       !window.confirm(
-        "Run AI listing generation?\n\nClaude will look at each product's Shopify photos plus its tags + keyword research and write Amazon-ready title / 5 bullets / description / search keywords. Processes 5 products per click; re-run to keep draining the queue.",
+        "Run AI listing generation on 1 product?\n\nClaude will look at the product's Shopify photos plus its tags + keyword research and write Amazon-ready title / 5 bullets / description / search keywords. Takes 30-90 seconds. Re-click to process the next product.",
       )
     ) {
       return;
@@ -103,7 +109,7 @@ export function GenerateListingsButtons() {
       </Button>
       <Button size="sm" onClick={onRun} disabled={busy !== "none"}>
         <Sparkles className={`h-3 w-3 mr-1 ${busy === "run" ? "animate-pulse" : ""}`} />
-        Generate (next 5)
+        Generate next
       </Button>
     </div>
   );
