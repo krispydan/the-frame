@@ -251,6 +251,37 @@ try {
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_listing_product_platform ON catalog_product_listing_images(product_id, platform)`);
 } catch (e) { console.error("[db] Image editor table creation error:", e); }
 
+// ── Amazon Listings (AI-generated Amazon-specific copy per product) ──
+// One row per product. Regeneration upserts; audit trail goes to
+// catalog_copy_versions with fieldName='amazon_listing'.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS catalog_amazon_listings (
+    id TEXT PRIMARY KEY NOT NULL,
+    product_id TEXT NOT NULL REFERENCES catalog_products(id) ON DELETE CASCADE,
+    amazon_title TEXT,
+    bullet_point_1 TEXT,
+    bullet_point_2 TEXT,
+    bullet_point_3 TEXT,
+    bullet_point_4 TEXT,
+    bullet_point_5 TEXT,
+    product_description TEXT,
+    generic_keywords TEXT,
+    suggested_color_map TEXT,
+    suggested_lens_material TEXT,
+    suggested_frame_material TEXT,
+    suggested_polarization TEXT,
+    suggested_item_shape TEXT,
+    model_used TEXT,
+    prompt_version TEXT,
+    generated_at TEXT,
+    approved_at TEXT,
+    approved_by TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_amazon_listing_product ON catalog_amazon_listings(product_id)`);
+} catch (e) { console.error("[db] catalog_amazon_listings creation error:", e); }
+
 // Image editor: seed angle-based image types
 try {
   const angleTypes = [

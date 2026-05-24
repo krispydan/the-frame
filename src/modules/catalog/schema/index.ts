@@ -277,6 +277,41 @@ export const productListingImages = sqliteTable("catalog_product_listing_images"
   index("idx_listing_product_platform").on(table.productId, table.platform),
 ]);
 
+// ── Amazon Listings (AI-generated Amazon-specific copy per product) ──
+//
+// One row per product holds the current Amazon listing copy. Regeneration
+// upserts the row (audit history goes to catalog_copy_versions with
+// fieldName='amazon_listing'). Suggested* columns capture the AI's pick for
+// Amazon's categorical enums (lens_color_map, frame_material_type, etc.) —
+// downstream the column-mapper prefers these over tag-derived defaults
+// since the model saw the actual product photos.
+export const amazonListings = sqliteTable("catalog_amazon_listings", {
+  id: id(),
+  productId: text("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
+  amazonTitle: text("amazon_title"),
+  bulletPoint1: text("bullet_point_1"),
+  bulletPoint2: text("bullet_point_2"),
+  bulletPoint3: text("bullet_point_3"),
+  bulletPoint4: text("bullet_point_4"),
+  bulletPoint5: text("bullet_point_5"),
+  productDescription: text("product_description"),
+  genericKeywords: text("generic_keywords"),
+  suggestedColorMap: text("suggested_color_map"),
+  suggestedLensMaterial: text("suggested_lens_material"),
+  suggestedFrameMaterial: text("suggested_frame_material"),
+  suggestedPolarization: text("suggested_polarization"),
+  suggestedItemShape: text("suggested_item_shape"),
+  modelUsed: text("model_used"),
+  promptVersion: text("prompt_version"),
+  generatedAt: text("generated_at"),
+  approvedAt: text("approved_at"),
+  approvedBy: text("approved_by"),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  uniqueIndex("uq_amazon_listing_product").on(table.productId),
+]);
+
 // Factory map
 export const FACTORY_MAP: Record<string, string> = {
   JX1: "TAGA",
