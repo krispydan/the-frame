@@ -86,10 +86,23 @@ export default function AmazonIntegrationPage() {
   );
   const retailOk = (shopifyConnected?.c ?? 0) > 0;
 
-  // Env presence check happens at runtime; we approximate by reading any
-  // recent generation row that succeeded — if anything was ever generated,
-  // the env is fine. Otherwise we surface a hint.
-  const anyGenerated = withListing > 0;
+  // Anthropic readiness: check the actual env var on the server, and use
+  // a successful generation as the stronger evidence the key works. The
+  // tri-state UI (configured-untested vs healthy vs missing) is the
+  // honest read — silent "Untested" with a setup instruction was wrong
+  // when the key was already set on Railway.
+  const anthropicEnvSet = !!process.env.ANTHROPIC_API_KEY;
+  const anthropicHealthy = anthropicEnvSet && withListing > 0;
+  const anthropicValue = !anthropicEnvSet
+    ? "Not configured"
+    : anthropicHealthy
+      ? "Healthy (validated by recent generation)"
+      : "Configured (no generations yet)";
+  const anthropicSub = !anthropicEnvSet
+    ? "Set ANTHROPIC_API_KEY in Railway env, then click Generate."
+    : anthropicHealthy
+      ? undefined
+      : "Click Generate to confirm the key works against Claude vision.";
 
   // Last validation summary (stored in settings table on each validate
   // call) — optional, falls through to null when not present.
@@ -149,10 +162,10 @@ export default function AmazonIntegrationPage() {
             sub={retailOk ? undefined : "Connect retail in /settings/integrations/shopify before generating."}
           />
           <ReadinessRow
-            ok={anyGenerated}
+            ok={anthropicEnvSet}
             label="Anthropic API"
-            value={anyGenerated ? "Validated by recent run" : "Untested"}
-            sub={anyGenerated ? undefined : "Set ANTHROPIC_API_KEY in Railway env."}
+            value={anthropicValue}
+            sub={anthropicSub}
           />
           <ReadinessRow
             ok={totalEligible > 0}
