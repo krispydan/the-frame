@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plug, ChevronRight, ShoppingBag, DollarSign, Warehouse, MessageSquare, Store, CheckCircle, AlertCircle, Circle } from "lucide-react";
+import { Plug, ChevronRight, ShoppingBag, DollarSign, Warehouse, MessageSquare, Store, Package, CheckCircle, AlertCircle, Circle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ApiKeyCard } from "./api-key-card";
@@ -229,6 +229,26 @@ export default function IntegrationsIndexPage() {
             </CardHeader>
             <CardContent>
               <StatusBadge kind={slackStatusKind} label={slackLabel} />
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link href="/settings/integrations/amazon" className="block group cursor-pointer">
+          <Card className="transition-all group-hover:shadow-md group-hover:border-primary/40">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center justify-between text-base">
+                <span className="flex items-center gap-2">
+                  <Package className="h-5 w-5" />
+                  Amazon
+                </span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </CardTitle>
+              <CardDescription>
+                AI-generated listing copy + template-validated Seller Central upload spreadsheet.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <StatusBadge kind="ok" label="Configured" />
             </CardContent>
           </Card>
         </Link>

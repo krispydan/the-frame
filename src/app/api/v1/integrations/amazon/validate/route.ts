@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 import { NextRequest, NextResponse } from "next/server";
+import { sqlite } from "@/lib/db";
 import { composeAmazonRows } from "@/modules/catalog/lib/amazon/compose-rows";
 import {
   validateAmazonBatch,
@@ -59,6 +60,26 @@ export async function POST(req: NextRequest) {
     missingListing: composed.filter((c) => !c.hasListing).length,
     missingImages: composed.filter((c) => !c.hasImages).length,
   };
+
+  // Persist a tiny summary (settings k/v table) so the page can render
+  // "last validation" without re-running the full batch on every load.
+  try {
+    sqlite
+      .prepare(
+        `INSERT INTO settings (key, value, type, module, updated_at)
+         VALUES ('amazon_last_validation', ?, 'json', 'catalog', datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+      )
+      .run(JSON.stringify({
+        ready: summary.ready,
+        warning: summary.warning,
+        blocked: summary.blocked,
+        productCount: composed.length,
+        at: new Date().toISOString(),
+      }));
+  } catch (e) {
+    console.error("[amazon validate] persist summary failed:", e);
+  }
 
   return NextResponse.json({
     ok: true,
