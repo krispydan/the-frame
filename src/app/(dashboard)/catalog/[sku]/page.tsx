@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/table";
 import { FACTORY_MAP } from "@/modules/catalog/schema";
 import { ImageManagementTab } from "@/modules/catalog/components/image-management-tab";
+import { AmazonListingTab } from "./amazon-tab";
 import { CopyManagementTab } from "@/modules/catalog/components/copy-management-tab";
 import { TagManagementTab } from "@/modules/catalog/components/tag-management-tab";
 import { KeywordsTab } from "@/modules/catalog/components/keywords-tab";
@@ -238,6 +239,7 @@ export default function ProductDetailPage() {
           <TabsTrigger value="tags">Tags ({tagsList.length})</TabsTrigger>
           <TabsTrigger value="keywords">Keywords</TabsTrigger>
           <TabsTrigger value="metafields">Metafields</TabsTrigger>
+          <TabsTrigger value="amazon">Amazon</TabsTrigger>
           <TabsTrigger value="export">Export Preview</TabsTrigger>
         </TabsList>
 
@@ -451,6 +453,11 @@ export default function ProductDetailPage() {
               onRefresh={loadProduct}
             />
           )}
+        </TabsContent>
+
+        {/* Amazon Tab */}
+        <TabsContent value="amazon">
+          <AmazonListingTab productId={productId} />
         </TabsContent>
 
         <TabsContent value="export">
