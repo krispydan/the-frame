@@ -175,7 +175,7 @@ export const exports_ = sqliteTable("catalog_exports", {
 export const copyVersions = sqliteTable("catalog_copy_versions", {
   id: id(),
   productId: text("product_id").references(() => products.id).notNull(),
-  fieldName: text("field_name", { enum: ["name", "description", "short_description", "bullet_points"] }),
+  fieldName: text("field_name", { enum: ["name", "description", "short_description", "bullet_points", "amazon_listing"] }),
   content: text("content"),
   aiModel: text("ai_model"),
   createdAt: timestamp("created_at"),
