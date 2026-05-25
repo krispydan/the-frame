@@ -31,6 +31,7 @@ import {
 import { ValidateButton } from "./validate-button";
 import { DownloadButton } from "./download-button";
 import { ListingsTable, type ListingRow } from "./listings-table";
+import { UpcImportCard } from "./upc-import-card";
 
 function tryAll<T>(sql: string, params: unknown[] = []): T[] {
   try {
@@ -203,6 +204,9 @@ export default function AmazonIntegrationPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* UPC import — surface here so missing UPCs don't block validation */}
+      <UpcImportCard />
 
       {/* Validate / Download */}
       <Card>
