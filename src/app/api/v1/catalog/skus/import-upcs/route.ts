@@ -36,15 +36,39 @@ export async function POST(req: NextRequest) {
   let body: { csv?: string; dryRun?: boolean } = {};
   try {
     body = (await req.json()) as typeof body;
-  } catch {
-    return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[import-upcs] JSON parse failed:", msg);
+    return NextResponse.json(
+      { ok: false, error: `Invalid JSON body: ${msg}` },
+      { status: 400 },
+    );
   }
   if (!body.csv || typeof body.csv !== "string") {
-    return NextResponse.json({ ok: false, error: "csv field is required" }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, error: "csv field is required (got type: " + typeof body.csv + ")" },
+      { status: 400 },
+    );
   }
-  const dryRun = !!body.dryRun;
 
-  const { rows, errors: parseErrors } = parseCsv(body.csv);
+  const dryRun = !!body.dryRun;
+  console.log(`[import-upcs] received ${body.csv.length} bytes, dryRun=${dryRun}`);
+
+  let rows: string[][];
+  let parseErrors: string[];
+  try {
+    const parsed = parseCsv(body.csv);
+    rows = parsed.rows;
+    parseErrors = parsed.errors;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[import-upcs] CSV parser threw:", msg);
+    return NextResponse.json(
+      { ok: false, error: `CSV parse failed: ${msg}` },
+      { status: 400 },
+    );
+  }
+
   if (rows.length === 0) {
     return NextResponse.json(
       { ok: false, error: "No rows parsed from CSV", parseErrors },

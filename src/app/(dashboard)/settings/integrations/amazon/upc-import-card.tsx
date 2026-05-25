@@ -77,10 +77,33 @@ export function UpcImportCard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ csv: text, dryRun }),
       });
-      const data = (await res.json()) as ImportResponse | { ok: false; error: string };
-      if (!res.ok || data.ok === false) {
-        toast.error("Import failed", {
-          description: "error" in data ? data.error : `HTTP ${res.status}`,
+
+      // Parse defensively — when the route 4xx/5xxs with HTML or empty
+      // body, res.json() throws unhelpfully and we lose the real error.
+      // Read text first, then attempt JSON, then surface whatever we
+      // got so the operator can actually diagnose.
+      const rawText = await res.text();
+      let data: ImportResponse | { ok: false; error: string } | null = null;
+      try {
+        data = rawText ? JSON.parse(rawText) : null;
+      } catch {
+        data = null;
+      }
+
+      if (!res.ok || !data || (data as { ok?: boolean }).ok === false) {
+        const description = data && "error" in data && data.error
+          ? data.error
+          : rawText
+            ? rawText.slice(0, 400)
+            : `HTTP ${res.status} ${res.statusText}`;
+        console.error("[upc-import] failed", {
+          status: res.status,
+          statusText: res.statusText,
+          rawText: rawText.slice(0, 1000),
+        });
+        toast.error(`Import failed (HTTP ${res.status})`, {
+          description,
+          duration: 14000,
         });
         return;
       }
@@ -98,6 +121,7 @@ export function UpcImportCard() {
         });
       }
     } catch (e) {
+      console.error("[upc-import] network/parse error", e);
       toast.error("Import failed", {
         description: e instanceof Error ? e.message : String(e),
       });

@@ -364,7 +364,7 @@ export function ListingsTable({ initialRows }: Props) {
                     className={someChecked ? "data-[state=checked]:bg-primary/50" : undefined}
                   />
                 </TableHead>
-                <TableHead className="w-16">Image</TableHead>
+                <TableHead className="w-20">Image</TableHead>
                 <TableHead>Product</TableHead>
                 <TableHead className="w-24">Status</TableHead>
                 <TableHead className="w-32">AI listing</TableHead>
@@ -396,18 +396,19 @@ export function ListingsTable({ initialRows }: Props) {
                     </TableCell>
                     <TableCell>
                       {p.thumbnailUrl ? (
-                        // Native img — Next.js Image would need width/height
-                        // perfect-fit + remote-pattern config for catalog
-                        // image hosts; raw <img> is fine here at 40x40.
+                        // object-contain preserves the photo's aspect ratio so
+                        // wider-than-tall frames don't get cropped or stretched;
+                        // letterbox bg matches the page so it blends. Slightly
+                        // taller box than wide gives sunglasses room to breathe.
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={p.thumbnailUrl}
                           alt={p.skuPrefix}
-                          className="h-10 w-10 object-cover rounded bg-muted"
+                          className="h-12 w-16 object-contain rounded bg-muted"
                           loading="lazy"
                         />
                       ) : (
-                        <div className="h-10 w-10 rounded bg-muted flex items-center justify-center">
+                        <div className="h-12 w-16 rounded bg-muted flex items-center justify-center">
                           <ImageOff className="h-4 w-4 text-muted-foreground" />
                         </div>
                       )}
