@@ -1,32 +1,36 @@
 /**
  * /settings/integrations/amazon
  *
- * Operator surface for the Amazon listings pipeline. Three sections:
+ * Operator surface for the Amazon listings pipeline. Server component
+ * fetches initial state; the products table is a client island
+ * (ListingsTable) that owns selection, the row-click sheet, and the
+ * sequential batch generation flow.
  *
- *   1. Connection / readiness — env config, Shopify retail link, snapshot
- *      version, candidate counts. Lets ops see at a glance whether the
- *      pipeline can run.
- *   2. Listings status — per-product table with "has AI copy?" /
- *      "has Shopify images?" so ops knows what's blocking each product
- *      from being releasable.
- *   3. Actions — Generate / Validate / Download buttons. Download is
- *      disabled until validation reports zero blocked.
- *
- * Server component — reads sqlite directly for speed. The three buttons
- * are client islands. Last validation result lives in a settings row so
- * a refresh doesn't lose state.
+ *   1. Readiness card — template-snapshot version, Shopify retail
+ *      connection, Anthropic env, eligible counts, last validation.
+ *   2. Actions strip — Validate + Download (generation lives in the
+ *      table's bulk-action bar now).
+ *   3. Products table — checkboxes, thumbnails, row-click → side sheet
+ *      hosting the AmazonListingTab editor. Bulk action bar offers
+ *      "Generate selected", "Regenerate selected", or "Generate all
+ *      pending" with sequential one-product-at-a-time POSTs.
  */
 export const dynamic = "force-dynamic";
 
 import { sqlite } from "@/lib/db";
-import { getSnapshotSource, getAmazonColumns } from "@/modules/catalog/lib/amazon/template-snapshot";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CheckCircle, AlertTriangle, Circle, Warehouse, Image as ImageIcon, Sparkles } from "lucide-react";
-import { GenerateListingsButtons } from "./generate-button";
+import {
+  getSnapshotSource, getAmazonColumns,
+} from "@/modules/catalog/lib/amazon/template-snapshot";
+import { catalogImageUrl } from "@/lib/storage/image-url";
+import {
+  Card, CardContent, CardDescription, CardHeader, CardTitle,
+} from "@/components/ui/card";
+import {
+  CheckCircle, AlertTriangle, Warehouse,
+} from "lucide-react";
 import { ValidateButton } from "./validate-button";
 import { DownloadButton } from "./download-button";
+import { ListingsTable, type ListingRow } from "./listings-table";
 
 function tryAll<T>(sql: string, params: unknown[] = []): T[] {
   try {
@@ -53,6 +57,8 @@ interface ProductRow {
   has_listing: number;
   generated_at: string | null;
   model_used: string | null;
+  amazon_title: string | null;
+  hero_file_path: string | null;
 }
 
 export default function AmazonIntegrationPage() {
@@ -60,16 +66,21 @@ export default function AmazonIntegrationPage() {
   const columnCount = getAmazonColumns().length;
   const requiredColumnCount = getAmazonColumns().filter((c) => c.required).length;
 
-  // Catalog candidate set: approved products (not intake/processing).
+  // Approved products joined with their Amazon listing + hero image.
+  // The hero is picked by isBest DESC, position ASC (matches the order
+  // the AI vision pipeline implicitly uses).
   const eligible = tryAll<ProductRow>(`
     SELECT
-      p.id,
-      p.sku_prefix,
-      p.name,
-      p.status,
+      p.id, p.sku_prefix, p.name, p.status,
       CASE WHEN al.id IS NULL THEN 0 ELSE 1 END AS has_listing,
-      al.generated_at,
-      al.model_used
+      al.generated_at, al.model_used, al.amazon_title,
+      (
+        SELECT ci.file_path FROM catalog_images ci
+        JOIN catalog_skus cs ON ci.sku_id = cs.id
+        WHERE cs.product_id = p.id
+        ORDER BY ci.is_best DESC, ci.position ASC, ci.id ASC
+        LIMIT 1
+      ) AS hero_file_path
     FROM catalog_products p
     LEFT JOIN catalog_amazon_listings al ON al.product_id = p.id
     WHERE p.status NOT IN ('intake', 'processing')
@@ -80,17 +91,26 @@ export default function AmazonIntegrationPage() {
   const withListing = eligible.filter((r) => r.has_listing === 1).length;
   const withoutListing = totalEligible - withListing;
 
+  // Convert SQL rows → typed ListingRow[] for the client island.
+  const initialRows: ListingRow[] = eligible.map((r) => ({
+    id: r.id,
+    skuPrefix: r.sku_prefix,
+    name: r.name,
+    status: r.status,
+    hasListing: r.has_listing === 1,
+    generatedAt: r.generated_at,
+    modelUsed: r.model_used,
+    amazonTitle: r.amazon_title,
+    thumbnailUrl: catalogImageUrl(r.hero_file_path),
+  }));
+
   // Shopify retail connection check (image-URL source).
   const shopifyConnected = tryGet<{ c: number }>(
     `SELECT COUNT(*) AS c FROM shopify_shops WHERE channel = 'retail' AND is_active = 1`,
   );
   const retailOk = (shopifyConnected?.c ?? 0) > 0;
 
-  // Anthropic readiness: check the actual env var on the server, and use
-  // a successful generation as the stronger evidence the key works. The
-  // tri-state UI (configured-untested vs healthy vs missing) is the
-  // honest read — silent "Untested" with a setup instruction was wrong
-  // when the key was already set on Railway.
+  // Anthropic readiness — env presence + evidence-of-working state.
   const anthropicEnvSet = !!process.env.ANTHROPIC_API_KEY;
   const anthropicHealthy = anthropicEnvSet && withListing > 0;
   const anthropicValue = !anthropicEnvSet
@@ -104,8 +124,8 @@ export default function AmazonIntegrationPage() {
       ? undefined
       : "Click Generate to confirm the key works against Claude vision.";
 
-  // Last validation summary (stored in settings table on each validate
-  // call) — optional, falls through to null when not present.
+  // Last validation summary (persisted by /validate so it survives page
+  // refresh).
   const lastValidation = tryGet<{ value: string }>(
     `SELECT value FROM settings WHERE key = 'amazon_last_validation'`,
   );
@@ -116,9 +136,7 @@ export default function AmazonIntegrationPage() {
     at: string;
   } | null = null;
   try {
-    if (lastValidation?.value) {
-      lastSummary = JSON.parse(lastValidation.value);
-    }
+    if (lastValidation?.value) lastSummary = JSON.parse(lastValidation.value);
   } catch {
     /* ignore */
   }
@@ -129,18 +147,18 @@ export default function AmazonIntegrationPage() {
     (lastSummary != null && lastSummary.blocked > 0);
 
   return (
-    <div className="container mx-auto p-6 max-w-6xl space-y-6">
+    <div className="container mx-auto p-6 max-w-7xl space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
           <Warehouse className="h-7 w-7" />
           Amazon listings
         </h1>
         <p className="text-muted-foreground mt-2">
-          Vision-AI listing copy → snapshot-validated spreadsheet → Seller Central upload. See <code>docs/amazon-listings.md</code> for the full flow.
+          Vision-AI listing copy → snapshot-validated spreadsheet → Seller Central upload.
         </p>
       </div>
 
-      {/* Readiness card */}
+      {/* Readiness */}
       <Card>
         <CardHeader>
           <CardTitle>Pipeline readiness</CardTitle>
@@ -186,21 +204,16 @@ export default function AmazonIntegrationPage() {
         </CardContent>
       </Card>
 
-      {/* Action row */}
+      {/* Validate / Download */}
       <Card>
         <CardHeader>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <CardTitle>Actions</CardTitle>
-              <CardDescription>
-                Generate AI copy for products that don't have it yet, validate the batch, then download the spreadsheet.
-              </CardDescription>
-            </div>
-          </div>
+          <CardTitle>Validate &amp; download</CardTitle>
+          <CardDescription>
+            After listings are generated, validate the batch and download the Seller-Central-ready spreadsheet. Download is gated until validation reports zero blocked.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap items-center gap-2">
-            <GenerateListingsButtons />
             <ValidateButton />
             <DownloadButton disabled={downloadDisabled} />
           </div>
@@ -214,65 +227,16 @@ export default function AmazonIntegrationPage() {
         </CardContent>
       </Card>
 
-      {/* Per-product status */}
+      {/* Products table (client island — owns selection + sheet) */}
       <Card>
         <CardHeader>
           <CardTitle>Products ({totalEligible})</CardTitle>
           <CardDescription>
-            Pending generation surface to the top so you know what to click Generate for next.
+            Click a row to edit Claude&apos;s draft. Check rows to bulk-generate / regenerate. Pending products are pinned to the top.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {eligible.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No approved products in the catalog yet.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Product</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>AI listing</TableHead>
-                  <TableHead>Last generated</TableHead>
-                  <TableHead>Model</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {eligible.slice(0, 100).map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell className="font-mono text-xs">
-                      <div>{p.sku_prefix}</div>
-                      <div className="text-muted-foreground truncate max-w-md">{p.name ?? "—"}</div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">{p.status}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      {p.has_listing === 1 ? (
-                        <span className="inline-flex items-center gap-1 text-green-600 text-xs">
-                          <CheckCircle className="h-3 w-3" /> ready
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-yellow-600 text-xs">
-                          <Sparkles className="h-3 w-3" /> needs Generate
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {p.generated_at?.slice(0, 16).replace("T", " ") ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground truncate max-w-[200px]">
-                      {p.model_used ?? "—"}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-          {eligible.length > 100 && (
-            <p className="text-xs text-muted-foreground mt-3">
-              Showing first 100 of {eligible.length}. Generate / validate run over the full set.
-            </p>
-          )}
+          <ListingsTable initialRows={initialRows} />
         </CardContent>
       </Card>
     </div>
@@ -302,8 +266,3 @@ function ReadinessRow({
     </div>
   );
 }
-
-// Silence unused-import warning — ImageIcon + Circle are reserved for the
-// future per-product drilldown drawer (Phase 4 extension).
-void ImageIcon;
-void Circle;
