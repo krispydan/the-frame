@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ImageOff, Sparkles, RefreshCw, X, CheckCircle, AlertTriangle,
+  ShieldCheck, Download,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -166,37 +167,162 @@ export function ListingsTable({ initialRows }: Props) {
 
   const pendingCount = rows.filter((r) => !r.hasListing).length;
 
+  // ── Validate + Download — both honour selection when present, fall back
+  //    to "all approved" when nothing checked. The endpoints already
+  //    accept productIds; we just gate the request shape.
+
+  const [validating, setValidating] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  async function onValidate() {
+    const ids = selected.size > 0 ? [...selected] : undefined;
+    const label = ids ? `${ids.length} selected` : "all approved products";
+    setValidating(true);
+    try {
+      const res = await fetch("/api/v1/integrations/amazon/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ids ? { productIds: ids } : {}),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        toast.error("Validation failed", { description: text || `HTTP ${res.status}` });
+        return;
+      }
+      const data = (await res.json()) as {
+        summary: {
+          ready: number; warning: number; blocked: number;
+          missingListing: number; missingImages: number;
+        };
+      };
+      const s = data.summary;
+      const description = [
+        `${s.ready} ready`,
+        `${s.warning} warning`,
+        `${s.blocked} blocked`,
+        s.missingListing ? `${s.missingListing} need AI` : "",
+        s.missingImages ? `${s.missingImages} no images` : "",
+      ].filter(Boolean).join(" · ");
+      if (s.blocked === 0) {
+        toast.success(`Validation passed for ${label}`, { description, duration: 12000 });
+      } else {
+        toast.warning(`${s.blocked} of ${label} blocked`, { description, duration: 14000 });
+      }
+    } catch (e) {
+      toast.error("Validation failed", { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setValidating(false);
+    }
+  }
+
+  async function onDownload() {
+    const ids = selected.size > 0 ? [...selected] : null;
+    const label = ids ? `${ids.length} selected` : `all approved`;
+    setDownloading(true);
+    try {
+      const qs = ids ? `?productIds=${encodeURIComponent(ids.join(","))}` : "";
+      const res = await fetch(`/api/v1/integrations/amazon/download${qs}`);
+      if (res.status === 422) {
+        const data = await res.json().catch(() => null) as { blockedProducts?: number; error?: string } | null;
+        toast.error("Download blocked by validation", {
+          description: data?.blockedProducts != null
+            ? `${data.blockedProducts} of ${label} blocked. Click Validate to see details, then fix or regenerate.`
+            : data?.error || "Validation failed",
+          duration: 14000,
+        });
+        return;
+      }
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        toast.error("Download failed", { description: text || `HTTP ${res.status}` });
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const scope = ids ? `-${ids.length}prods` : "";
+      a.download = `jaxy_amazon_${stamp}${scope}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`Downloaded spreadsheet for ${label}`);
+    } catch (e) {
+      toast.error("Download failed", { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  // Disable Download when the user has selected only products that have
+  // no listing yet (validation will reject them anyway — better to nudge
+  // toward Generate first).
+  const selectedAllPending = selected.size > 0 && [...selected].every(
+    (id) => !rows.find((r) => r.id === id)?.hasListing,
+  );
+
   return (
     <>
-      {/* Action bar: bulk actions when selection exists; otherwise the
-          batch + "next pending" controls. */}
+      {/* Action bar: always rendered. Generation / validation / download
+          all scope to the current selection — when nothing is checked,
+          the buttons fall back to "all approved products" with labels
+          that make the scope obvious. */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {selected.size > 0 ? (
-          <>
-            <Badge variant="secondary" className="text-sm">{selected.size} selected</Badge>
-            <Button size="sm" onClick={() => onGenerateSelected(false)} disabled={batchState.running}>
-              <Sparkles className="h-3 w-3 mr-1" />
-              Generate selected
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => onGenerateSelected(true)} disabled={batchState.running}>
-              <RefreshCw className="h-3 w-3 mr-1" />
-              Regenerate selected
-            </Button>
-            <Button size="sm" variant="ghost" onClick={clearSelection}>
-              <X className="h-3 w-3 mr-1" />
-              Clear
-            </Button>
-          </>
+          <Badge variant="secondary" className="text-sm">
+            {selected.size} selected
+          </Badge>
         ) : (
-          <>
-            <Button size="sm" onClick={onGenerateAllPending} disabled={batchState.running || pendingCount === 0}>
-              <Sparkles className="h-3 w-3 mr-1" />
-              Generate all pending ({pendingCount})
-            </Button>
-            <span className="text-xs text-muted-foreground">
-              Or check rows to bulk-generate / regenerate specific products.
-            </span>
-          </>
+          <span className="text-xs text-muted-foreground mr-1">
+            No selection — actions run over all approved products. Check rows to scope.
+          </span>
+        )}
+
+        {/* Generate — selection-aware, falls back to "all pending" */}
+        {selected.size > 0 ? (
+          <Button size="sm" onClick={() => onGenerateSelected(false)} disabled={batchState.running}>
+            <Sparkles className="h-3 w-3 mr-1" />
+            Generate {selected.size}
+          </Button>
+        ) : (
+          <Button size="sm" onClick={onGenerateAllPending} disabled={batchState.running || pendingCount === 0}>
+            <Sparkles className="h-3 w-3 mr-1" />
+            Generate all pending ({pendingCount})
+          </Button>
+        )}
+
+        {/* Regenerate — only meaningful when products with listings are selected */}
+        {selected.size > 0 && (
+          <Button size="sm" variant="outline" onClick={() => onGenerateSelected(true)} disabled={batchState.running}>
+            <RefreshCw className="h-3 w-3 mr-1" />
+            Regenerate {selected.size}
+          </Button>
+        )}
+
+        <Button size="sm" variant="outline" onClick={onValidate} disabled={validating || batchState.running}>
+          <ShieldCheck className={`h-3 w-3 mr-1 ${validating ? "animate-pulse" : ""}`} />
+          Validate {selected.size > 0 ? selected.size : "all"}
+        </Button>
+
+        <Button
+          size="sm"
+          onClick={onDownload}
+          disabled={downloading || batchState.running || selectedAllPending}
+          title={selectedAllPending
+            ? "Every selected product is still pending — run Generate first."
+            : undefined}
+        >
+          <Download className={`h-3 w-3 mr-1 ${downloading ? "animate-pulse" : ""}`} />
+          Download {selected.size > 0 ? `${selected.size} as XLSX` : "all"}
+        </Button>
+
+        {selected.size > 0 && (
+          <Button size="sm" variant="ghost" onClick={clearSelection}>
+            <X className="h-3 w-3 mr-1" />
+            Clear
+          </Button>
         )}
       </div>
 
@@ -336,7 +462,10 @@ export function ListingsTable({ initialRows }: Props) {
           }
         }}
       >
-        <SheetContent side="right" className="w-full sm:max-w-2xl flex flex-col gap-0">
+        <SheetContent
+          side="right"
+          className="w-full sm:max-w-3xl lg:max-w-4xl xl:max-w-5xl flex flex-col gap-0"
+        >
           <SheetHeader className="border-b">
             <SheetTitle className="font-mono">
               {openRow?.skuPrefix ?? "…"} — {openRow?.name ?? ""}

@@ -28,8 +28,6 @@ import {
 import {
   CheckCircle, AlertTriangle, Warehouse,
 } from "lucide-react";
-import { ValidateButton } from "./validate-button";
-import { DownloadButton } from "./download-button";
 import { ListingsTable, type ListingRow } from "./listings-table";
 import { UpcImportCard } from "./upc-import-card";
 
@@ -142,11 +140,6 @@ export default function AmazonIntegrationPage() {
     /* ignore */
   }
 
-  const downloadDisabled =
-    !retailOk ||
-    totalEligible === 0 ||
-    (lastSummary != null && lastSummary.blocked > 0);
-
   return (
     <div className="container mx-auto p-6 max-w-7xl space-y-6">
       <div>
@@ -208,30 +201,8 @@ export default function AmazonIntegrationPage() {
       {/* UPC import — surface here so missing UPCs don't block validation */}
       <UpcImportCard />
 
-      {/* Validate / Download */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Validate &amp; download</CardTitle>
-          <CardDescription>
-            After listings are generated, validate the batch and download the Seller-Central-ready spreadsheet. Download is gated until validation reports zero blocked.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap items-center gap-2">
-            <ValidateButton />
-            <DownloadButton disabled={downloadDisabled} />
-          </div>
-          {downloadDisabled && (
-            <p className="text-xs text-muted-foreground mt-3">
-              {!retailOk && "Connect Shopify retail first. "}
-              {totalEligible === 0 && "No approved products to export. "}
-              {lastSummary && lastSummary.blocked > 0 && `${lastSummary.blocked} product${lastSummary.blocked === 1 ? "" : "s"} blocked — re-validate or fix.`}
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Products table (client island — owns selection + sheet) */}
+      {/* Products table (client island — owns selection + sheet +
+          Generate/Validate/Download actions scoped to the selection) */}
       <Card>
         <CardHeader>
           <CardTitle>Products ({totalEligible})</CardTitle>
