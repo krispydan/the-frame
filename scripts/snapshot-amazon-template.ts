@@ -16,7 +16,7 @@
  * Defaults to ~/Downloads/SUNGLASSES.xlsm (where Daniel saved it).
  * Outputs:
  *   src/modules/catalog/lib/amazon/template-snapshot.json
- *   src/modules/catalog/lib/amazon/template.xlsx   (macros stripped, sheets preserved)
+ *   public/amazon-template.xlsx                   (macros stripped, sheets preserved)
  */
 import * as XLSX from "xlsx";
 import * as fs from "fs";
@@ -239,10 +239,17 @@ function main() {
     console.error(`Template not found: ${inputPath}`);
     process.exit(1);
   }
+  // template-snapshot.json lives next to its TypeScript consumers (so
+  // Next bundles it via the JSON import). template.xlsx lives in
+  // public/ so it's reliably on disk at runtime — Next.js only ships
+  // static assets that are inside .next or public/ when standalone
+  // output is disabled.
   const outDir = path.join(process.cwd(), "src/modules/catalog/lib/amazon");
   fs.mkdirSync(outDir, { recursive: true });
   const snapshotPath = path.join(outDir, "template-snapshot.json");
-  const xlsxOutPath = path.join(outDir, "template.xlsx");
+  const publicDir = path.join(process.cwd(), "public");
+  fs.mkdirSync(publicDir, { recursive: true });
+  const xlsxOutPath = path.join(publicDir, "amazon-template.xlsx");
 
   console.log(`Reading ${inputPath} ...`);
   const wb = XLSX.readFile(inputPath, { bookVBA: false });

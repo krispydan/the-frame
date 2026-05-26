@@ -1,12 +1,20 @@
 /**
  * Compose the final Amazon-ready XLSX. Clones the stripped template
- * shipped by Phase 1A (src/modules/catalog/lib/amazon/template.xlsx),
- * writes data rows onto the "Template" sheet starting at the snapshot's
- * dataRowIndex (row 4, 0-indexed = 3), and leaves all other sheets
- * (Instructions / Data Definitions / Valid Values / Dropdown Lists /
- * Example / Images / AttributePTDMAP / Browse Data / Conditions List)
- * untouched so Amazon's dropdown validations and ops-facing references
- * survive into Seller Central.
+ * shipped at public/amazon-template.xlsx, writes data rows onto the
+ * "Template" sheet starting at the snapshot's dataRowIndex (row 4,
+ * 0-indexed = 3), and leaves all other sheets (Instructions / Data
+ * Definitions / Valid Values / Dropdown Lists / Example / Images /
+ * AttributePTDMAP / Browse Data / Conditions List) untouched so Amazon's
+ * dropdown validations and ops-facing references survive into Seller
+ * Central.
+ *
+ * Why public/ and not src/? Next.js doesn't bundle arbitrary binary
+ * assets that aren't .js/.ts imports, and `output: "standalone"` is
+ * disabled in this app so outputFileTracingIncludes is a no-op. The
+ * public/ directory is the one location guaranteed to land on disk at
+ * runtime via `next start`. The file is the public Amazon template,
+ * so there's no concern about it being addressable at
+ * /amazon-template.xlsx.
  *
  * Returns a Node Buffer the route handler can stream as
  * application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.
@@ -16,10 +24,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getAmazonColumns, getDataRowIndex } from "./template-snapshot";
 
-const TEMPLATE_PATH = path.join(
-  process.cwd(),
-  "src/modules/catalog/lib/amazon/template.xlsx",
-);
+const TEMPLATE_PATH = path.join(process.cwd(), "public", "amazon-template.xlsx");
 
 /**
  * Build the workbook in memory. Each input row is a sparse
