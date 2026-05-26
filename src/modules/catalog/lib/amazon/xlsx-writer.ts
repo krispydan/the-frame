@@ -91,3 +91,72 @@ export function serializeWorkbook(wb: XLSX.WorkBook): Buffer {
 export function buildAmazonXlsxBuffer(rows: Record<string, string>[]): Buffer {
   return serializeWorkbook(buildAmazonWorkbook(rows));
 }
+
+/**
+ * Emit the listing in the tab-delimited TXT format Amazon Seller Central
+ * accepts. The .xlsx path was rejected with FATAL error 90503 ("uploaded
+ * file was saved in a format that could not be read") because their
+ * processor expects either the unmodified .xlsm template (with macros
+ * intact, which xlsx-js can't round-trip) or a tab-delimited .txt.
+ * TSV removes every format/macro/compression edge case from the loop —
+ * Amazon's docs even spell this out in the 90503 error message
+ * ("...in a tab-delimited format or an Excel format").
+ *
+ * Output structure mirrors the Template sheet's first 3 header rows
+ * exactly (metadata, display labels, internal attribute names) so
+ * Amazon's parser can identify the template version and the column
+ * order, followed by the data rows in snapshot column order.
+ *
+ * Cells with embedded tabs/newlines/quotes are passed through with the
+ * problem characters stripped — Amazon's TSV parser is line/tab-based
+ * and doesn't support escaping. In practice the only field at risk is
+ * product_description (free-form text); we replace newlines with " "
+ * and tabs with " " up front. Same defensive handling Amazon's own
+ * inventory file documentation suggests.
+ */
+export function buildAmazonTsvBuffer(rows: Record<string, string>[]): Buffer {
+  if (!fs.existsSync(TEMPLATE_PATH)) {
+    throw new Error(
+      `Template file missing: ${TEMPLATE_PATH}. Run \`npx tsx scripts/snapshot-amazon-template.ts\` first.`,
+    );
+  }
+  const buf = fs.readFileSync(TEMPLATE_PATH);
+  const wb = XLSX.read(buf, { type: "buffer", cellStyles: false });
+  const ws = wb.Sheets["Template"];
+  if (!ws) throw new Error("Template sheet missing from amazon-template.xlsx");
+
+  // Read the first 3 header rows verbatim out of the template so we keep
+  // Amazon's TemplateType / TemplateSignature / display labels / internal
+  // attribute names exactly as they expect them.
+  const cols = getAmazonColumns();
+  const headerMatrix = XLSX.utils.sheet_to_json<unknown[]>(ws, {
+    header: 1,
+    range: 0,
+    blankrows: false,
+    defval: "",
+  }) as unknown[][];
+
+  const headerRows = headerMatrix.slice(0, 3).map((row) =>
+    cols.map((_, i) => sanitiseCell(row[i])),
+  );
+
+  // Build data rows in snapshot column order — same shape as the xlsx
+  // path, just emitted as strings.
+  const dataMatrix = rows.map((row) =>
+    cols.map((c) => sanitiseCell(row[c.name] ?? "")),
+  );
+
+  // Amazon uses \r\n on inventory files. Use \r\n to match their spec
+  // and avoid line-ending guessing on their side.
+  const lines = [...headerRows, ...dataMatrix].map((cells) => cells.join("\t"));
+  const body = lines.join("\r\n") + "\r\n";
+  return Buffer.from(body, "utf-8");
+}
+
+/** TSV cells can't carry tab / newline / CR — replace them with a single
+ *  space rather than escape, since Amazon's parser doesn't support
+ *  RFC-4180 quoting on inventory files. */
+function sanitiseCell(value: unknown): string {
+  if (value == null) return "";
+  return String(value).replace(/[\t\r\n]+/g, " ").trim();
+}

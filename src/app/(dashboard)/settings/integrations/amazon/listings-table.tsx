@@ -259,7 +259,10 @@ export function ListingsTable({ initialRows }: Props) {
       a.href = url;
       const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
       const scope = ids ? `-${ids.length}prods` : "";
-      a.download = `jaxy_amazon_${stamp}${scope}.xlsx`;
+      // Server emits tab-delimited .txt (Amazon's documented format
+      // for inventory uploads — see buildAmazonTsvBuffer). The .xlsx
+      // round-trip strips macros the validator needs.
+      a.download = `jaxy_amazon_${stamp}${scope}.txt`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -344,7 +347,7 @@ export function ListingsTable({ initialRows }: Props) {
             : undefined}
         >
           <Download className={`h-3 w-3 mr-1 ${downloading ? "animate-pulse" : ""}`} />
-          Download {selected.size > 0 ? `${selected.size} as XLSX` : "all"}
+          Download {selected.size > 0 ? `${selected.size} as TXT` : "all"}
         </Button>
 
         {selected.size > 0 && (

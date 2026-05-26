@@ -8,7 +8,7 @@ import {
   isBatchReleasable,
   type ValidateInput,
 } from "@/modules/catalog/lib/amazon/validator";
-import { buildAmazonXlsxBuffer } from "@/modules/catalog/lib/amazon/xlsx-writer";
+import { buildAmazonTsvBuffer } from "@/modules/catalog/lib/amazon/xlsx-writer";
 
 /**
  * GET /api/v1/integrations/amazon/download
@@ -67,16 +67,19 @@ export async function GET(req: NextRequest) {
   // parent + children of product 2, etc. (Each composed.rows is already
   // [parent, ...children].)
   const allRows = composed.flatMap((c) => c.rows);
-  const buf = buildAmazonXlsxBuffer(allRows);
+  // Tab-delimited (.txt) is what Amazon's processor reliably accepts —
+  // the .xlsx round-trip strips macros that the validator needs, which
+  // is why Seller Central rejected our earlier upload with FATAL 90503.
+  // See buildAmazonTsvBuffer in xlsx-writer.ts for the format details.
+  const buf = buildAmazonTsvBuffer(allRows);
 
   const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   return new NextResponse(new Uint8Array(buf), {
     status: 200,
     headers: {
-      "Content-Type":
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Type": "text/tab-separated-values; charset=utf-8",
       "Content-Length": String(buf.length),
-      "Content-Disposition": `attachment; filename="jaxy_amazon_${stamp}.xlsx"`,
+      "Content-Disposition": `attachment; filename="jaxy_amazon_${stamp}.txt"`,
       "Cache-Control": "private, no-store",
     },
   });
