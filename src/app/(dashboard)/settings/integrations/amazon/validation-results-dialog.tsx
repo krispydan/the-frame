@@ -18,6 +18,7 @@
 import { useMemo, useState } from "react";
 import {
   AlertTriangle, CheckCircle, AlertCircle, X, ExternalLink, Sparkles,
+  ChevronRight, ChevronDown,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
@@ -93,6 +94,20 @@ export function ValidationResultsDialog({
 }: Props) {
   const [repairing, setRepairing] = useState(false);
   const [repairingProductId, setRepairingProductId] = useState<string | null>(null);
+  // Tracks which product rows are expanded to show issue detail.
+  // Click the chevron (or anywhere in the status/product cell) to
+  // toggle. Warning-only rows tend to share the same kind of issue,
+  // but expanding shows the exact field + message for each.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  function toggleExpanded(productId: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(productId)) next.delete(productId);
+      else next.add(productId);
+      return next;
+    });
+  }
 
   async function runRepair(products: ProductValidationResult[]) {
     if (products.length === 0) return;
@@ -273,7 +288,7 @@ export function ValidationResultsDialog({
           {/* Per-product drilldown — blocked first, then warning */}
           {(blockedProducts.length > 0 || warningProducts.length > 0) && (
             <section>
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-1">
                 <h3 className="text-sm font-semibold">Per-product</h3>
                 {blockedProducts.length > 0 && (
                   <Button
@@ -305,7 +320,7 @@ export function ValidationResultsDialog({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {[...blockedProducts, ...warningProducts].map((p) => {
+                  {[...blockedProducts, ...warningProducts].flatMap((p) => {
                     const totalIssues =
                       p.issues.length + p.skuResults.reduce((s, sr) => s + sr.issues.length, 0);
                     const blockedCount =
@@ -314,22 +329,47 @@ export function ValidationResultsDialog({
                         (s, sr) => s + sr.issues.filter((i) => i.severity === "blocked").length,
                         0,
                       );
-                    return (
-                      <TableRow key={p.productId}>
+                    const isExpanded = expanded.has(p.productId);
+                    // Build the flat issue list once so the expansion row
+                    // can render without recomputing on every keystroke.
+                    const allIssues: Array<{
+                      scope: string;
+                      field: string;
+                      message: string;
+                      severity: "blocked" | "warning";
+                    }> = [
+                      ...p.issues.map((i) => ({ scope: "parent", ...i })),
+                      ...p.skuResults.flatMap((sr) =>
+                        sr.issues.map((i) => ({ scope: sr.sku, ...i })),
+                      ),
+                    ];
+                    return [
+                      <TableRow
+                        key={p.productId}
+                        className="cursor-pointer hover:bg-muted/40"
+                        onClick={() => toggleExpanded(p.productId)}
+                      >
                         <TableCell>
-                          {p.status === "blocked" ? (
-                            <Badge variant="destructive" className="text-[10px]">
-                              <AlertTriangle className="h-2.5 w-2.5 mr-1" /> Blocked
-                            </Badge>
-                          ) : p.status === "warning" ? (
-                            <Badge variant="outline" className="text-[10px] border-yellow-300 text-yellow-700">
-                              <AlertCircle className="h-2.5 w-2.5 mr-1" /> Warning
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-[10px] text-green-700 border-green-300">
-                              <CheckCircle className="h-2.5 w-2.5 mr-1" /> Ready
-                            </Badge>
-                          )}
+                          <div className="flex items-center gap-1">
+                            {isExpanded ? (
+                              <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                            )}
+                            {p.status === "blocked" ? (
+                              <Badge variant="destructive" className="text-[10px]">
+                                <AlertTriangle className="h-2.5 w-2.5 mr-1" /> Blocked
+                              </Badge>
+                            ) : p.status === "warning" ? (
+                              <Badge variant="outline" className="text-[10px] border-yellow-300 text-yellow-700">
+                                <AlertCircle className="h-2.5 w-2.5 mr-1" /> Warning
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] text-green-700 border-green-300">
+                                <CheckCircle className="h-2.5 w-2.5 mr-1" /> Ready
+                              </Badge>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <div className="font-medium text-sm">{p.productName}</div>
@@ -348,14 +388,15 @@ export function ValidationResultsDialog({
                             )}
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1">
                             {p.status === "blocked" && (
                               <Button
                                 size="sm"
                                 variant="outline"
                                 disabled={repairing}
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   if (!window.confirm(
                                     `Auto-fix ${p.productName} (${p.skuPrefix}) with AI?\n\n` +
                                     `Claude will regenerate the listing with these validation issues as constraints. Takes 30-90 seconds.`,
@@ -375,7 +416,8 @@ export function ValidationResultsDialog({
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 onSelectProduct(p.productId);
                                 onOpenChange(false);
                               }}
@@ -385,8 +427,49 @@ export function ValidationResultsDialog({
                             </Button>
                           </div>
                         </TableCell>
-                      </TableRow>
-                    );
+                      </TableRow>,
+                      // Expanded detail row — only renders when this product
+                      // is open. colSpan 4 fills the full width with a
+                      // compact issue list. Each issue shows scope (parent
+                      // or SKU), the field, a severity dot, and the
+                      // message; clicking opens the product editor at the
+                      // exact field where possible.
+                      isExpanded ? (
+                        <TableRow key={`${p.productId}-expanded`} className="bg-muted/30">
+                          <TableCell colSpan={4} className="py-3">
+                            {allIssues.length === 0 ? (
+                              <p className="text-xs text-muted-foreground">No issues — this product is release-ready.</p>
+                            ) : (
+                              <div className="space-y-1">
+                                {allIssues.map((issue, i) => (
+                                  <div
+                                    key={i}
+                                    className="grid grid-cols-[80px_120px_1fr] gap-3 text-xs items-start"
+                                  >
+                                    <span className={`font-mono ${issue.scope === "parent" ? "text-muted-foreground" : "text-blue-600"}`}>
+                                      {issue.scope}
+                                    </span>
+                                    <span className="font-mono text-muted-foreground truncate" title={issue.field}>
+                                      {issue.field}
+                                    </span>
+                                    <span className="flex items-start gap-1.5">
+                                      {issue.severity === "blocked" ? (
+                                        <AlertTriangle className="h-3 w-3 text-red-500 mt-0.5 shrink-0" />
+                                      ) : (
+                                        <AlertCircle className="h-3 w-3 text-yellow-600 mt-0.5 shrink-0" />
+                                      )}
+                                      <span className={issue.severity === "blocked" ? "text-red-700" : "text-yellow-800"}>
+                                        {issue.message}
+                                      </span>
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ) : null,
+                    ].filter(Boolean);
                   })}
                 </TableBody>
               </Table>
