@@ -224,7 +224,16 @@ export function ValidationResultsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+      <DialogContent
+        // Wide + tall so the per-product table and the issues-by-reason
+        // section both fit without horizontal scrolling. `!max-w-*` to
+        // override the default `sm:max-w-lg` that the Dialog component
+        // sets via its base class — without `!important` the smaller
+        // default wins on >=640px viewports. The +none cap on the right
+        // is for ultra-wide monitors so the dialog doesn't sprawl to
+        // 2000px.
+        className="!max-w-[min(1280px,95vw)] !w-[min(1280px,95vw)] max-h-[92vh] h-[92vh] overflow-hidden flex flex-col p-6 sm:p-8"
+      >
         <DialogHeader>
           <DialogTitle>Validation results</DialogTitle>
           <DialogDescription>
@@ -255,8 +264,8 @@ export function ValidationResultsDialog({
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-20">Severity</TableHead>
-                    <TableHead className="w-44">Field</TableHead>
+                    <TableHead className="w-24">Severity</TableHead>
+                    <TableHead className="w-56">Field</TableHead>
                     <TableHead>Message</TableHead>
                     <TableHead className="w-24 text-right">Affects</TableHead>
                   </TableRow>
@@ -313,10 +322,10 @@ export function ValidationResultsDialog({
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-20">Status</TableHead>
+                    <TableHead className="w-32">Status</TableHead>
                     <TableHead>Product</TableHead>
-                    <TableHead className="w-28">Issues</TableHead>
-                    <TableHead className="w-44 text-right">Actions</TableHead>
+                    <TableHead className="w-32">Issues</TableHead>
+                    <TableHead className="w-48 text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
