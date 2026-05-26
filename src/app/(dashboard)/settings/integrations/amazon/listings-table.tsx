@@ -32,6 +32,11 @@ import {
 } from "@/components/ui/sheet";
 import { toast } from "sonner";
 import { AmazonListingTab } from "@/app/(dashboard)/catalog/[sku]/amazon-tab";
+import {
+  ValidationResultsDialog,
+  type ProductValidationResult,
+  type ValidationSummary,
+} from "./validation-results-dialog";
 
 export interface ListingRow {
   id: string;
@@ -173,6 +178,9 @@ export function ListingsTable({ initialRows }: Props) {
 
   const [validating, setValidating] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [validationResults, setValidationResults] = useState<ProductValidationResult[]>([]);
+  const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
+  const [validationDialogOpen, setValidationDialogOpen] = useState(false);
 
   async function onValidate() {
     const ids = selected.size > 0 ? [...selected] : undefined;
@@ -190,12 +198,17 @@ export function ListingsTable({ initialRows }: Props) {
         return;
       }
       const data = (await res.json()) as {
-        summary: {
-          ready: number; warning: number; blocked: number;
-          missingListing: number; missingImages: number;
-        };
+        results: ProductValidationResult[];
+        summary: ValidationSummary;
       };
       const s = data.summary;
+
+      // Stash full results + open the drilldown dialog so the operator
+      // sees aggregated reasons + per-product issues, not just counts.
+      setValidationResults(data.results ?? []);
+      setValidationSummary(s);
+      setValidationDialogOpen(true);
+
       const description = [
         `${s.ready} ready`,
         `${s.warning} warning`,
@@ -204,9 +217,12 @@ export function ListingsTable({ initialRows }: Props) {
         s.missingImages ? `${s.missingImages} no images` : "",
       ].filter(Boolean).join(" · ");
       if (s.blocked === 0) {
-        toast.success(`Validation passed for ${label}`, { description, duration: 12000 });
+        toast.success(`Validation passed for ${label}`, { description, duration: 8000 });
       } else {
-        toast.warning(`${s.blocked} of ${label} blocked`, { description, duration: 14000 });
+        toast.warning(`${s.blocked} of ${label} blocked — see details`, {
+          description,
+          duration: 10000,
+        });
       }
     } catch (e) {
       toast.error("Validation failed", { description: e instanceof Error ? e.message : String(e) });
@@ -305,6 +321,19 @@ export function ListingsTable({ initialRows }: Props) {
           <ShieldCheck className={`h-3 w-3 mr-1 ${validating ? "animate-pulse" : ""}`} />
           Validate {selected.size > 0 ? selected.size : "all"}
         </Button>
+
+        {/* Re-open the last results without re-running. Useful when the
+            operator dismissed the dialog and wants to revisit. */}
+        {validationResults.length > 0 && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setValidationDialogOpen(true)}
+            title="Re-open last validation results"
+          >
+            See last results
+          </Button>
+        )}
 
         <Button
           size="sm"
@@ -449,6 +478,16 @@ export function ListingsTable({ initialRows }: Props) {
           )}
         </div>
       )}
+
+      {/* Validation drilldown dialog — opens after Validate completes
+          when there are blocked or warning issues to surface. */}
+      <ValidationResultsDialog
+        open={validationDialogOpen}
+        onOpenChange={setValidationDialogOpen}
+        summary={validationSummary}
+        results={validationResults}
+        onSelectProduct={(productId) => setOpenProductId(productId)}
+      />
 
       {/* Right-side detail sheet hosting the existing inline editor. */}
       <Sheet
