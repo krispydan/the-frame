@@ -38,7 +38,15 @@ export function buildAmazonWorkbook(rows: Record<string, string>[]): XLSX.WorkBo
       `Template file missing: ${TEMPLATE_PATH}. Run \`npx tsx scripts/snapshot-amazon-template.ts\` first.`,
     );
   }
-  const wb = XLSX.readFile(TEMPLATE_PATH, { cellStyles: false });
+  // Don't use XLSX.readFile() — the xlsx library lazily resolves `fs`
+  // via a dynamic require, which Next.js's bundler strips, leading to
+  // a confusing "Cannot access file <path>" error in production even
+  // when the file is right there on disk. Reading the bytes with Node
+  // fs and passing them to XLSX.read() sidesteps the bundler issue
+  // entirely — no dynamic require, just a Buffer the library can parse
+  // straight away.
+  const buf = fs.readFileSync(TEMPLATE_PATH);
+  const wb = XLSX.read(buf, { type: "buffer", cellStyles: false });
   const ws = wb.Sheets["Template"];
   if (!ws) throw new Error("Template sheet missing from template.xlsx");
 
