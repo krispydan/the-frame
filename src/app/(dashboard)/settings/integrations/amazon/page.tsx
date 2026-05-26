@@ -29,7 +29,6 @@ import {
   CheckCircle, AlertTriangle, Warehouse,
 } from "lucide-react";
 import { ListingsTable, type ListingRow } from "./listings-table";
-import { UpcImportCard } from "./upc-import-card";
 
 function tryAll<T>(sql: string, params: unknown[] = []): T[] {
   try {
@@ -197,9 +196,6 @@ export default function AmazonIntegrationPage() {
           )}
         </CardContent>
       </Card>
-
-      {/* UPC import — surface here so missing UPCs don't block validation */}
-      <UpcImportCard />
 
       {/* Products table (client island — owns selection + sheet +
           Generate/Validate/Download actions scoped to the selection) */}
