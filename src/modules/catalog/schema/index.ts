@@ -58,6 +58,17 @@ export const products = sqliteTable("catalog_products", {
   purchaseOrderId: text("purchase_order_id").references(() => purchaseOrders.id),
   factoryName: text("factory_name"),
   factorySku: text("factory_sku"),
+  // Physical frame dimensions in millimetres — supplied by the factory as a
+  // string like "51口22 145" (lens-width 口 bridge-width temple-length). We
+  // store each value in its own integer column for downstream use (copy
+  // generation, Amazon listings, Shopify metafields) plus the raw factory
+  // string verbatim for audit and round-trip display. See
+  // src/modules/catalog/lib/frame-size.ts for the parser.
+  lensWidth: integer("lens_width"),
+  bridgeWidth: integer("bridge_width"),
+  templeLength: integer("temple_length"),
+  lensHeight: integer("lens_height"),
+  frameSize: text("frame_size"),
   seoTitle: text("seo_title"),
   metaDescription: text("meta_description"),
   status: text("status", { enum: ["intake", "processing", "review", "approved", "published"] }).default("intake"),

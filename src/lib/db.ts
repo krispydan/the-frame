@@ -361,6 +361,14 @@ try {
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN ai_categorization TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN ai_categorized_at TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN ai_categorization_model TEXT"); } catch { /* exists */ }
+// Physical frame dimensions in millimetres — see
+// src/modules/catalog/lib/frame-size.ts for the parser used to populate
+// these from the factory's "51口22 145" strings.
+try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN lens_width INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN bridge_width INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN temple_length INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN lens_height INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN frame_size TEXT"); } catch { /* exists */ }
 
 // Warehouse/ShipHero exports: PO line items, freight info on POs, shiphero sync timestamps
 try { sqlite.exec("ALTER TABLE catalog_skus ADD COLUMN shiphero_synced_at TEXT"); } catch { /* exists */ }
