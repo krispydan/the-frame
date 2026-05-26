@@ -255,7 +255,12 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
     parent_child: "Parent",
     parent_sku: "",
     relationship_type: "Variation",
-    variation_theme: "LensColor",
+    // "color/lenscolor" = Amazon's two-axis theme covering frame color
+    // (Amazon's "color_name") AND lens color (Amazon's "lens_color").
+    // Matches Jaxy's actual SKU pattern: "Brown/Purple", "Green",
+    // "Tortoise/Rose" — frame and lens vary together. "LensColor" alone
+    // implied only the lens tint changed across SKUs, which isn't right.
+    variation_theme: "color/lenscolor",
     // Content
     product_description: description,
     bullet_point1: bullets[0] ?? "",
@@ -326,7 +331,12 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
       parent_child: "Child",
       parent_sku: p.skuPrefix,
       relationship_type: "Variation",
-      variation_theme: "LensColor",
+      // "color/lenscolor" = Amazon's two-axis theme covering frame color
+    // (Amazon's "color_name") AND lens color (Amazon's "lens_color").
+    // Matches Jaxy's actual SKU pattern: "Brown/Purple", "Green",
+    // "Tortoise/Rose" — frame and lens vary together. "LensColor" alone
+    // implied only the lens tint changed across SKUs, which isn't right.
+    variation_theme: "color/lenscolor",
       // Variation axis — color
       color_name: colorName,
       color_map: colorMap,
