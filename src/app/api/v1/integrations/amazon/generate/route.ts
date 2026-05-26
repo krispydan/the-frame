@@ -45,6 +45,10 @@ export async function POST(req: NextRequest) {
     dryRun?: boolean;
     regenerate?: boolean;
     modelOverride?: string;
+    /** Optional per-product validation issues to feed back to Claude as
+     *  repair constraints. Keyed by productId; values are short strings
+     *  like "title 130 > max 50" or "color_map 'Brown' not in enum". */
+    repairIssues?: Record<string, string[]>;
   } = {};
   try {
     body = (await req.json()) as typeof body;
@@ -111,6 +115,7 @@ export async function POST(req: NextRequest) {
     const r = await generateAmazonListing(c.id, {
       dryRun,
       modelOverride: body.modelOverride,
+      repairIssues: body.repairIssues?.[c.id],
     });
     results.push({
       productId: r.productId,

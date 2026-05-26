@@ -213,7 +213,14 @@ function persist(productId: string, output: AmazonListingOutput, model: string) 
  */
 export async function generateAmazonListing(
   productId: string,
-  opts?: { dryRun?: boolean; modelOverride?: string },
+  opts?: {
+    dryRun?: boolean;
+    modelOverride?: string;
+    /** Validation issues from a prior run; when provided, the prompt
+     *  builder prepends a "FIX THESE" section so the model treats them
+     *  as hard constraints. Used by the dialog's AI auto-fix flow. */
+    repairIssues?: string[];
+  },
 ): Promise<GenerateAmazonResult> {
   const model = opts?.modelOverride || process.env.AMAZON_AI_MODEL || DEFAULT_MODEL;
 
@@ -244,7 +251,9 @@ export async function generateAmazonListing(
     };
   }
 
-  const { system, messages } = buildAmazonListingPrompt(built.input);
+  const { system, messages } = buildAmazonListingPrompt(built.input, {
+    repairIssues: opts?.repairIssues,
+  });
 
   let rawText = "";
   try {

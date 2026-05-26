@@ -15,9 +15,9 @@
  * the existing detail sheet.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
-  AlertTriangle, CheckCircle, AlertCircle, X, ExternalLink,
+  AlertTriangle, CheckCircle, AlertCircle, X, ExternalLink, Sparkles,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { toast } from "sonner";
 
 export interface ValidationIssue {
   field: string;
@@ -62,11 +63,104 @@ interface Props {
   summary: ValidationSummary | null;
   results: ProductValidationResult[];
   onSelectProduct: (productId: string) => void;
+  /** Called after the user confirms an auto-fix batch. The parent table
+   *  refreshes its row data + reopens validation when fixing completes. */
+  onAfterRepair?: () => void;
+}
+
+/** Flatten a product's parent + child issues into short, AI-friendly
+ *  constraint strings. Dedups by (field, message). Skips issues the AI
+ *  can't fix on its own (UPC missing, etc.) — those need data action. */
+function repairableIssueStrings(p: ProductValidationResult): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const collect = (issue: ValidationIssue, scope: string) => {
+    // Anything tied to required_external_product_id etc. needs UPC data,
+    // not creativity. Skip those — they won't change on re-generation.
+    if (issue.field.includes("external_product_id")) return;
+    const key = `${scope}|${issue.field}|${issue.message}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(`${scope === "parent" ? "" : `(SKU ${scope}) `}${issue.field}: ${issue.message}`);
+  };
+  for (const i of p.issues) collect(i, "parent");
+  for (const sr of p.skuResults) for (const i of sr.issues) collect(i, sr.sku);
+  return out;
 }
 
 export function ValidationResultsDialog({
-  open, onOpenChange, summary, results, onSelectProduct,
+  open, onOpenChange, summary, results, onSelectProduct, onAfterRepair,
 }: Props) {
+  const [repairing, setRepairing] = useState(false);
+  const [repairingProductId, setRepairingProductId] = useState<string | null>(null);
+
+  async function runRepair(products: ProductValidationResult[]) {
+    if (products.length === 0) return;
+    // Build the per-product issues map. If everything in a product was
+    // unfixable (missing UPCs only), drop it.
+    const repairIssues: Record<string, string[]> = {};
+    const candidates: ProductValidationResult[] = [];
+    for (const p of products) {
+      const issues = repairableIssueStrings(p);
+      if (issues.length > 0) {
+        repairIssues[p.productId] = issues;
+        candidates.push(p);
+      }
+    }
+    if (candidates.length === 0) {
+      toast.info("Nothing AI-fixable", {
+        description: "All issues require data action (e.g. add a UPC, fix a tag). Edit each product directly.",
+      });
+      return;
+    }
+
+    setRepairing(true);
+    let processed = 0;
+    let errors = 0;
+    try {
+      // Drive sequentially per-product (each Claude vision call is
+      // 30-90s; we want progress visibility and to stay under
+      // Cloudflare's edge timeout per request).
+      for (const c of candidates) {
+        setRepairingProductId(c.productId);
+        try {
+          const res = await fetch("/api/v1/integrations/amazon/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              productIds: [c.productId],
+              regenerate: true,
+              repairIssues: { [c.productId]: repairIssues[c.productId] },
+            }),
+          });
+          if (!res.ok) {
+            errors++;
+            console.error(`[repair] ${c.skuPrefix} HTTP ${res.status}`);
+          } else {
+            const data = (await res.json()) as { results: Array<{ status: "ok" | "error"; errors?: string[] }> };
+            if (data.results[0]?.status === "ok") processed++;
+            else errors++;
+          }
+        } catch (e) {
+          errors++;
+          console.error(`[repair] ${c.skuPrefix} threw:`, e);
+        }
+      }
+      const msg = `${processed} fixed, ${errors} errored. Re-validate to confirm.`;
+      if (errors === 0) {
+        toast.success("AI repair complete", { description: msg, duration: 10000 });
+      } else {
+        toast.warning("AI repair partial", { description: msg, duration: 12000 });
+      }
+      // Close the dialog so the operator can click Validate again to
+      // see the new state, and let the parent know to refresh rows.
+      onOpenChange(false);
+      if (onAfterRepair) onAfterRepair();
+    } finally {
+      setRepairing(false);
+      setRepairingProductId(null);
+    }
+  }
   // Aggregate blocked issues by (field, message) so "37 missing
   // item_name" surfaces once instead of 37 row-level repeats.
   const aggregated = useMemo(() => {
@@ -179,14 +273,35 @@ export function ValidationResultsDialog({
           {/* Per-product drilldown — blocked first, then warning */}
           {(blockedProducts.length > 0 || warningProducts.length > 0) && (
             <section>
-              <h3 className="text-sm font-semibold mb-2">Per-product</h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold">Per-product</h3>
+                {blockedProducts.length > 0 && (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      if (!window.confirm(
+                        `Auto-fix ${blockedProducts.length} blocked product${blockedProducts.length === 1 ? "" : "s"} with AI?\n\n` +
+                        `Claude will regenerate each listing with the validation issues injected as constraints. ` +
+                        `Each takes 30-90 seconds (~${Math.ceil(blockedProducts.length * 60 / 60)} min total). ` +
+                        `Re-validate when complete to confirm. ` +
+                        `Products whose only issue is missing data (UPC, etc.) won't be touched — those need a manual fix.`,
+                      )) return;
+                      void runRepair(blockedProducts);
+                    }}
+                    disabled={repairing}
+                  >
+                    <Sparkles className={`h-3 w-3 mr-1 ${repairing ? "animate-pulse" : ""}`} />
+                    Auto-fix all blocked ({blockedProducts.length})
+                  </Button>
+                )}
+              </div>
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-20">Status</TableHead>
                     <TableHead>Product</TableHead>
                     <TableHead className="w-28">Issues</TableHead>
-                    <TableHead className="w-16"></TableHead>
+                    <TableHead className="w-44 text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -234,17 +349,41 @@ export function ValidationResultsDialog({
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              onSelectProduct(p.productId);
-                              onOpenChange(false);
-                            }}
-                            title="Open product to fix"
-                          >
-                            <ExternalLink className="h-3 w-3" />
-                          </Button>
+                          <div className="flex items-center justify-end gap-1">
+                            {p.status === "blocked" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={repairing}
+                                onClick={() => {
+                                  if (!window.confirm(
+                                    `Auto-fix ${p.productName} (${p.skuPrefix}) with AI?\n\n` +
+                                    `Claude will regenerate the listing with these validation issues as constraints. Takes 30-90 seconds.`,
+                                  )) return;
+                                  void runRepair([p]);
+                                }}
+                                title="Re-generate with validation issues injected"
+                              >
+                                <Sparkles
+                                  className={`h-3 w-3 mr-1 ${
+                                    repairing && repairingProductId === p.productId ? "animate-pulse" : ""
+                                  }`}
+                                />
+                                Fix
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                onSelectProduct(p.productId);
+                                onOpenChange(false);
+                              }}
+                              title="Open product to fix manually"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );

@@ -197,8 +197,16 @@ type AnthropicContentBlock = AnthropicImageBlock | AnthropicTextBlock;
  * Build the structured content blocks for the user message. Returns the
  * Anthropic Messages API shape directly so the orchestrator can hand it
  * straight into fetch().
+ *
+ * Optional `repairIssues` adds a "FIX THESE FROM PREVIOUS ATTEMPT"
+ * section near the top so the model treats them as hard constraints,
+ * not gentle nudges. Passed by the auto-fix path from the validation
+ * dialog.
  */
-export function buildAmazonListingPrompt(input: AmazonListingInput): {
+export function buildAmazonListingPrompt(
+  input: AmazonListingInput,
+  opts?: { repairIssues?: string[] },
+): {
   system: string;
   messages: Array<{ role: "user"; content: AnthropicContentBlock[] }>;
 } {
@@ -213,6 +221,18 @@ export function buildAmazonListingPrompt(input: AmazonListingInput): {
   // Concise context block — Claude does better with structured cues than
   // prose paragraphs at vision-task scale.
   const lines: string[] = [];
+
+  // Repair section first so the model treats these as overrides rather
+  // than discovering the constraints mid-task.
+  if (opts?.repairIssues && opts.repairIssues.length > 0) {
+    lines.push("⚠️ FIX THESE FROM PREVIOUS ATTEMPT — these took the listing");
+    lines.push("from blocked → must produce a release-ready row this time:");
+    for (const issue of opts.repairIssues) {
+      lines.push(`  • ${issue}`);
+    }
+    lines.push("");
+  }
+
   lines.push(`Product: ${input.productName}`);
   lines.push(`SKU prefix: ${input.skuPrefix}`);
   lines.push(`Category: ${input.category ?? "(unspecified)"}`);

@@ -487,6 +487,7 @@ export function ListingsTable({ initialRows }: Props) {
         summary={validationSummary}
         results={validationResults}
         onSelectProduct={(productId) => setOpenProductId(productId)}
+        onAfterRepair={() => void reload()}
       />
 
       {/* Right-side detail sheet hosting the existing inline editor. */}
