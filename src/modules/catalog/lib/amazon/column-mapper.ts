@@ -78,9 +78,10 @@ const STATIC = {
   fulfillment_channel_code: "Fulfillment by Merchant (Default)",
   // US marketplace ID.
   us_marketplace_id: "ATVPDKIKX0DER",
-  // We assume mm for lens dimensions. Item weight unit must match the
-  // template enum exactly (LB/OZ/KG/MG/GR). We weigh in ounces.
-  lens_unit: "millimeters",
+  // Item weight unit must match the template enum exactly
+  // (LB/OZ/KG/MG/GR). We weigh in ounces. Frame-dimension units live
+  // per-field — see frameDimensionsBlock — because the template has
+  // four separate *_unit_of_measure columns and no single "lens_unit".
   item_weight_unit: "OZ",
   // 1 piece per box — defensible default; can override per product later.
   unit_count_type: "Count",
@@ -110,6 +111,54 @@ function stripHtml(html: string | null | undefined): string {
 function ozAsString(oz: number | null | undefined): string {
   if (!oz || oz <= 0) return "";
   return oz.toFixed(2);
+}
+
+/** Default frame dimensions (mm) when the catalog row has none.
+ *  Industry-standard medium-frame sizes for adult sunglasses — keeps
+ *  Amazon's required-empty check happy without misrepresenting the
+ *  product. Override in the catalog product editor when a specific
+ *  frame has different specs. */
+const FRAME_DIM_DEFAULTS = {
+  lensWidth: 61,
+  bridgeWidth: 18,
+  templeLength: 146,
+  lensHeight: 57,
+} as const;
+
+/** Map our catalog dimension fields → Amazon's dimension columns +
+ *  per-field unit_of_measure cells. Three things this fixes vs the
+ *  prior inline mapping:
+ *
+ *  1. Amazon's temple column is `arm_length`, not `temple_length`.
+ *     Writing the wrong key meant the data was silently dropped at
+ *     write time and the cell shipped blank.
+ *  2. lens_width is REQUIRED per the snapshot, and the
+ *     *_unit_of_measure enums want "MM" not "millimeters". The old
+ *     `lens_unit` static was a free-text label that didn't match any
+ *     Amazon column either.
+ *  3. Defaults fill in industry-standard adult sunglasses dimensions
+ *     when the catalog row has nulls, so validation doesn't block on
+ *     "lens_width required" for products we haven't measured yet. */
+function frameDimensionsBlock(p: {
+  lensWidth: number | null;
+  bridgeWidth: number | null;
+  templeLength: number | null;
+  lensHeight: number | null;
+}): Record<string, string> {
+  const lw = p.lensWidth ?? FRAME_DIM_DEFAULTS.lensWidth;
+  const bw = p.bridgeWidth ?? FRAME_DIM_DEFAULTS.bridgeWidth;
+  const tl = p.templeLength ?? FRAME_DIM_DEFAULTS.templeLength;
+  const lh = p.lensHeight ?? FRAME_DIM_DEFAULTS.lensHeight;
+  return {
+    lens_width: String(lw),
+    lens_width_unit_of_measure: "MM",
+    bridge_width: String(bw),
+    bridge_width_unit_of_measure: "MM",
+    arm_length: String(tl),
+    arm_length_unit_of_measure: "MM",
+    lens_height: String(lh),
+    lens_height_unit_of_measure: "MM",
+  };
 }
 
 /** Trim s to maxChars, breaking on the last whitespace before the cap so
@@ -233,14 +282,9 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
     other_image_url6: otherImages[5],
     other_image_url7: otherImages[6],
     other_image_url8: otherImages[7],
-    // Frame dimensions in mm — STATIC.lens_unit is already "millimeters".
-    // Skip writing when null (Amazon happily leaves the cell blank rather
-    // than choking on "0").
-    ...(p.lensWidth ? { lens_width: String(p.lensWidth) } : {}),
-    ...(p.bridgeWidth ? { bridge_width: String(p.bridgeWidth) } : {}),
-    ...(p.templeLength ? { temple_length: String(p.templeLength) } : {}),
-    ...(p.lensHeight ? { lens_height: String(p.lensHeight) } : {}),
-    ...((p.lensWidth || p.bridgeWidth || p.templeLength || p.lensHeight) ? { lens_unit: STATIC.lens_unit } : {}),
+    // Frame dimensions (mm) — see frameDimensionsBlock for the mapping
+    // rationale + default fallbacks for unmeasured products.
+    ...frameDimensionsBlock(p),
     // Compliance defaults
     country_of_origin: STATIC.country_of_origin,
     batteries_required: STATIC.batteries_required,
@@ -316,13 +360,9 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
       other_image_url2: otherImages[1],
       other_image_url3: otherImages[2],
       other_image_url4: otherImages[3],
-      // Frame dimensions — duplicated from parent for the same
-      // defensive reason as the classification fields above.
-      ...(p.lensWidth ? { lens_width: String(p.lensWidth) } : {}),
-      ...(p.bridgeWidth ? { bridge_width: String(p.bridgeWidth) } : {}),
-      ...(p.templeLength ? { temple_length: String(p.templeLength) } : {}),
-      ...(p.lensHeight ? { lens_height: String(p.lensHeight) } : {}),
-      ...((p.lensWidth || p.bridgeWidth || p.templeLength || p.lensHeight) ? { lens_unit: STATIC.lens_unit } : {}),
+      // Frame dimensions — duplicated from parent so child SKU rows
+      // inherit correctly even when Amazon de-couples them.
+      ...frameDimensionsBlock(p),
       // Compliance
       country_of_origin: STATIC.country_of_origin,
       batteries_required: STATIC.batteries_required,
