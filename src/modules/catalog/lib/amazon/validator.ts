@@ -52,11 +52,35 @@ function worst(issues: ValidationIssue[]): ProductValidationResult["status"] {
  *   - main_image_url / other_image_url*      → blocked if not https://… or has whitespace
  *   - any text                               → blocked if contains ®©™ (Amazon rejects)
  */
-function checkCell(col: AmazonColumnDef, value: string): ValidationIssue[] {
+/** Fields whose snapshot-required flag applies only to child rows in a
+ *  Variation listing. Amazon's parent variant is non-purchasable and
+ *  doesn't carry a UPC, EAN, or price — those live on each child. The
+ *  snapshot marks them as required (true for non-variation single-SKU
+ *  listings) but for parent/child the validator must skip them on the
+ *  parent or we generate phantom 39-product-wide blocks for what is
+ *  actually correct mapper output. */
+const CHILD_ONLY_REQUIRED = new Set([
+  "external_product_id",
+  "external_product_id_type",
+]);
+
+function checkCell(
+  col: AmazonColumnDef,
+  value: string,
+  /** "parent" or the SKU string. Drives which required-empty checks
+   *  fire. */
+  scope: string = "parent",
+): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const trimmed = value.trim();
 
   if (col.required && !trimmed) {
+    // Skip required-empty on parent rows for fields that live only on
+    // children in a Variation listing.
+    const isParent = scope === "parent";
+    if (isParent && CHILD_ONLY_REQUIRED.has(col.name)) {
+      return issues;
+    }
     issues.push({
       field: col.name,
       message: `Required (${col.group ?? "general"})`,
@@ -118,10 +142,13 @@ function checkSoftRules(parent: AmazonRow): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
   const title = parent.item_name ?? "";
-  if (title && title.length < 80) {
+  // Amazon's sunglasses template caps item_name at 50 chars — verified
+  // in the snapshot's Data Definitions. Target the upper half of that
+  // window so we're keyword-rich without truncation risk.
+  if (title && title.length < 35) {
     issues.push({
       field: "item_name",
-      message: `Title is only ${title.length} chars — Amazon allows ~200; longer titles rank better`,
+      message: `Title is only ${title.length} chars — target 40-50 for max keyword density (hard cap is 50)`,
       severity: "warning",
     });
   }
@@ -178,7 +205,10 @@ export function validateProductRows(input: ValidateInput): ProductValidationResu
     for (const col of columns) {
       const value = row[col.name];
       if (value == null) continue;
-      for (const issue of checkCell(col, value)) {
+      // `who` is "parent" for the parent row, or the SKU string for
+      // children. checkCell uses it to decide which required-empty
+      // checks fire (e.g. external_product_id is skipped on parent).
+      for (const issue of checkCell(col, value, who)) {
         out.push({ ...issue, field: `${who}.${issue.field}` });
       }
     }
