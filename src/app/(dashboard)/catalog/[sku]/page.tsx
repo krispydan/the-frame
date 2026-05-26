@@ -28,6 +28,7 @@ import { CopyManagementTab } from "@/modules/catalog/components/copy-management-
 import { TagManagementTab } from "@/modules/catalog/components/tag-management-tab";
 import { KeywordsTab } from "@/modules/catalog/components/keywords-tab";
 import { MetafieldsTab } from "@/modules/catalog/components/metafields-tab";
+import { parseFrameSize, formatFrameSize } from "@/modules/catalog/lib/frame-size";
 
 type Product = {
   id: string;
@@ -52,6 +53,13 @@ type Product = {
   aiCategorization: string | null;
   aiCategorizedAt: string | null;
   aiCategorizationModel: string | null;
+  // Frame dimensions in millimetres — see
+  // src/modules/catalog/lib/frame-size.ts.
+  lensWidth: number | null;
+  bridgeWidth: number | null;
+  templeLength: number | null;
+  lensHeight: number | null;
+  frameSize: string | null;
 };
 
 type Sku = {
@@ -306,6 +314,12 @@ export default function ProductDetailPage() {
                 )}
               </CardContent>
             </Card>
+            <DimensionsCard
+              editing={editing}
+              product={product}
+              editData={editData}
+              setEditData={setEditData}
+            />
           </div>
 
           {editing ? (
@@ -475,6 +489,107 @@ export default function ProductDetailPage() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+/**
+ * Frame-dimensions card. View mode shows the four mm values + the raw
+ * factory string; edit mode lets the user paste a single factory string
+ * ("51口22 145") into the Frame size field — on blur, parseFrameSize
+ * normalises it and populates the four numeric inputs. If parsing fails
+ * the four fields are left untouched and a hint appears.
+ */
+function DimensionsCard({
+  editing,
+  product,
+  editData,
+  setEditData,
+}: {
+  editing: boolean;
+  product: Product;
+  editData: Partial<Product>;
+  setEditData: (next: Partial<Product>) => void;
+}) {
+  const [rawDraft, setRawDraft] = useState(editData.frameSize ?? product.frameSize ?? "");
+  const [parseError, setParseError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Re-seed local raw input when entering/leaving edit mode or loading a
+    // new product, so we always show the persisted value not stale state.
+    setRawDraft(editData.frameSize ?? product.frameSize ?? "");
+    setParseError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, product.id]);
+
+  function commitRaw(value: string) {
+    const trimmed = value.trim();
+    setEditData({ ...editData, frameSize: trimmed || null });
+    if (!trimmed) {
+      setParseError(null);
+      return;
+    }
+    const parsed = parseFrameSize(trimmed);
+    if (!parsed) {
+      setParseError("Couldn't parse — enter the four fields manually below.");
+      return;
+    }
+    setParseError(null);
+    setEditData({
+      ...editData,
+      frameSize: trimmed,
+      lensWidth: parsed.lensWidth,
+      bridgeWidth: parsed.bridgeWidth,
+      templeLength: parsed.templeLength,
+      lensHeight: parsed.lensHeight ?? null,
+    });
+  }
+
+  const displayString = product.frameSize
+    || formatFrameSize({
+      lensWidth: product.lensWidth ?? 0,
+      bridgeWidth: product.bridgeWidth ?? 0,
+      templeLength: product.templeLength ?? 0,
+      lensHeight: product.lensHeight ?? undefined,
+    }).replace(/^0口0 0/, "");
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">Dimensions (mm)</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {editing ? (
+          <>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Frame size (paste factory string)</Label>
+              <Input
+                value={rawDraft}
+                onChange={(e) => setRawDraft(e.target.value)}
+                onBlur={(e) => commitRaw(e.target.value)}
+                placeholder="51口22 145"
+                className="h-8"
+              />
+              {parseError && <p className="text-[11px] text-yellow-600">⚠️ {parseError}</p>}
+              {!parseError && <p className="text-[10px] text-muted-foreground">Accepts 51口22 145 · 51-22-145 · 51x22x145 · 51 22 145 [38]</p>}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Lens" value={String(editData.lensWidth ?? "")} onChange={(v) => setEditData({ ...editData, lensWidth: Number(v) || null })} type="number" />
+              <Field label="Bridge" value={String(editData.bridgeWidth ?? "")} onChange={(v) => setEditData({ ...editData, bridgeWidth: Number(v) || null })} type="number" />
+              <Field label="Temple" value={String(editData.templeLength ?? "")} onChange={(v) => setEditData({ ...editData, templeLength: Number(v) || null })} type="number" />
+              <Field label="Lens height" value={String(editData.lensHeight ?? "")} onChange={(v) => setEditData({ ...editData, lensHeight: Number(v) || null })} type="number" />
+            </div>
+          </>
+        ) : (
+          <>
+            <Row label="Frame size" value={displayString || null} />
+            <Row label="Lens" value={product.lensWidth ? `${product.lensWidth} mm` : null} />
+            <Row label="Bridge" value={product.bridgeWidth ? `${product.bridgeWidth} mm` : null} />
+            <Row label="Temple" value={product.templeLength ? `${product.templeLength} mm` : null} />
+            <Row label="Lens height" value={product.lensHeight ? `${product.lensHeight} mm` : null} />
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
