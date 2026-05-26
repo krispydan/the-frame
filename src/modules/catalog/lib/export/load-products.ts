@@ -68,6 +68,11 @@ export async function loadExportProducts(productIds?: string[]): Promise<ExportP
         category: curated.category, frameShape: curated.frameShape,
         frameMaterial: curated.frameMaterial, gender: curated.gender,
         lensType: curated.lensType,
+        lensWidth: p.lensWidth ?? null,
+        bridgeWidth: p.bridgeWidth ?? null,
+        templeLength: p.templeLength ?? null,
+        lensHeight: p.lensHeight ?? null,
+        frameSize: p.frameSize ?? null,
       },
       skus: productSkus.map((s) => ({
         id: s.id, sku: s.sku, colorName: s.colorName, colorHex: s.colorHex,

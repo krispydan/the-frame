@@ -50,6 +50,16 @@ export interface AmazonListingInput {
   /** Existing description text as inspiration — model may reuse but must
    *  not copy verbatim because it's not Amazon-optimised. */
   existingDescription: string | null;
+  /** Physical frame dimensions in millimetres, from the factory's
+   *  "51口22 145" string. When present, we pass them through so Claude
+   *  doesn't have to infer from photos AND so they can be written into
+   *  the listing body. The Amazon template already declares matching
+   *  numeric columns (lens_width/bridge_width/temple_length/lens_height
+   *  with lens_unit="millimeters"); column-mapper.ts writes the cells. */
+  lensWidth: number | null;
+  bridgeWidth: number | null;
+  templeLength: number | null;
+  lensHeight: number | null;
 }
 
 export interface AmazonListingOutput {
@@ -241,6 +251,16 @@ export function buildAmazonListingPrompt(
   lines.push(`Lens type: ${input.lensType ?? "(unknown — infer from images)"}`);
   lines.push(`Gender: ${input.gender ?? "unisex"}`);
   lines.push(`Available colours across SKUs: ${input.availableColors.length ? input.availableColors.join(", ") : "(none)"}`);
+
+  // Frame dimensions — verbatim from the factory's measurement string,
+  // when present. Useful for the listing body (sizing copy) and saves
+  // Claude having to infer from photos.
+  if (input.lensWidth && input.bridgeWidth && input.templeLength) {
+    const heightSuffix = input.lensHeight ? `, lens height ${input.lensHeight} mm` : "";
+    lines.push(
+      `Dimensions: ${input.lensWidth}-${input.bridgeWidth}-${input.templeLength} mm (lens width − bridge width − temple length${heightSuffix}). Reference these as a "size" callout in the bullets or description when natural.`,
+    );
+  }
 
   if (input.keywords.length > 0) {
     lines.push("");

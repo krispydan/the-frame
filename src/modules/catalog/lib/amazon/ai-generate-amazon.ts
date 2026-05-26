@@ -133,6 +133,13 @@ async function buildInput(productId: string): Promise<BuildInputResult | null> {
       availableColors,
       imageUrls,
       existingDescription: product.description,
+      // Frame dimensions captured by the catalog edit UI / MCP; passed
+      // straight through to the prompt + downstream cells via the
+      // column-mapper.
+      lensWidth: product.lensWidth ?? null,
+      bridgeWidth: product.bridgeWidth ?? null,
+      templeLength: product.templeLength ?? null,
+      lensHeight: product.lensHeight ?? null,
     },
   };
 }

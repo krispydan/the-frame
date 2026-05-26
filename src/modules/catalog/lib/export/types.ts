@@ -35,6 +35,13 @@ export interface ExportProduct {
     frameMaterial: string | null;
     gender: string | null;
     lensType: string | null;
+    // Physical frame dimensions in millimetres — see
+    // src/modules/catalog/lib/frame-size.ts.
+    lensWidth: number | null;
+    bridgeWidth: number | null;
+    templeLength: number | null;
+    lensHeight: number | null;
+    frameSize: string | null;
   };
   skus: {
     id: string;

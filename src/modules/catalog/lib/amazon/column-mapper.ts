@@ -233,6 +233,14 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
     other_image_url6: otherImages[5],
     other_image_url7: otherImages[6],
     other_image_url8: otherImages[7],
+    // Frame dimensions in mm — STATIC.lens_unit is already "millimeters".
+    // Skip writing when null (Amazon happily leaves the cell blank rather
+    // than choking on "0").
+    ...(p.lensWidth ? { lens_width: String(p.lensWidth) } : {}),
+    ...(p.bridgeWidth ? { bridge_width: String(p.bridgeWidth) } : {}),
+    ...(p.templeLength ? { temple_length: String(p.templeLength) } : {}),
+    ...(p.lensHeight ? { lens_height: String(p.lensHeight) } : {}),
+    ...((p.lensWidth || p.bridgeWidth || p.templeLength || p.lensHeight) ? { lens_unit: STATIC.lens_unit } : {}),
     // Compliance defaults
     country_of_origin: STATIC.country_of_origin,
     batteries_required: STATIC.batteries_required,
@@ -308,6 +316,13 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
       other_image_url2: otherImages[1],
       other_image_url3: otherImages[2],
       other_image_url4: otherImages[3],
+      // Frame dimensions — duplicated from parent for the same
+      // defensive reason as the classification fields above.
+      ...(p.lensWidth ? { lens_width: String(p.lensWidth) } : {}),
+      ...(p.bridgeWidth ? { bridge_width: String(p.bridgeWidth) } : {}),
+      ...(p.templeLength ? { temple_length: String(p.templeLength) } : {}),
+      ...(p.lensHeight ? { lens_height: String(p.lensHeight) } : {}),
+      ...((p.lensWidth || p.bridgeWidth || p.templeLength || p.lensHeight) ? { lens_unit: STATIC.lens_unit } : {}),
       // Compliance
       country_of_origin: STATIC.country_of_origin,
       batteries_required: STATIC.batteries_required,

@@ -17,6 +17,12 @@ export interface ProductContext {
   colors: string[];
   styleCategory: StyleCategory;
   tags: Record<string, string[]>;
+  // Physical frame dimensions (mm). Captured from the factory's
+  // "51口22 145" string. Optional — older products may not have them yet.
+  lensWidth?: number | null;
+  bridgeWidth?: number | null;
+  templeLength?: number | null;
+  lensHeight?: number | null;
 }
 
 const STYLE_KEYWORDS: Record<StyleCategory, string[]> = {
@@ -78,7 +84,26 @@ export function getModelDescription(productId: string, sceneIndex: number): stri
 }
 
 export function buildProductDescription(context: ProductContext): string {
-  return [context.name, context.frameShape, context.frameMaterial, context.category].filter(Boolean).join(" ");
+  const dimensions = formatDimensionsLine(context);
+  return [context.name, context.frameShape, context.frameMaterial, context.category, dimensions]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/**
+ * Compose a human-readable dimensions sentence for inclusion in prompt
+ * templates. Returns "" when no dimensions are set so callers can simply
+ * concatenate without branching.
+ *
+ *   formatDimensionsLine({ lensWidth: 51, bridgeWidth: 22, templeLength: 145 })
+ *     === "Dimensions: 51-22-145 mm (lens-bridge-temple)."
+ */
+export function formatDimensionsLine(context: Pick<ProductContext, "lensWidth" | "bridgeWidth" | "templeLength" | "lensHeight">): string {
+  const { lensWidth, bridgeWidth, templeLength, lensHeight } = context;
+  if (!lensWidth || !bridgeWidth || !templeLength) return "";
+  const base = `${lensWidth}-${bridgeWidth}-${templeLength}`;
+  const height = lensHeight ? ` (lens height ${lensHeight} mm)` : "";
+  return `Dimensions: ${base} mm (lens-bridge-temple)${height}.`;
 }
 
 /** Copy generation prompt templates */
