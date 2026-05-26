@@ -14,6 +14,7 @@ import {
 } from "@/modules/orders/lib/shopify-api";
 import { categorizeProduct } from "@/modules/catalog/lib/shopify-metafields/ai-categorize";
 import { syncProductMetafields } from "@/modules/catalog/lib/shopify-metafields/sync";
+import { syncProductDimensions } from "@/modules/catalog/lib/shopify-metafields/dimensions";
 import type { AiCategorizationOutput } from "@/modules/catalog/lib/shopify-metafields/handles";
 
 /**
@@ -66,6 +67,8 @@ export async function POST(request: NextRequest) {
     error?: string;
     metafieldsSynced?: number;
     metafieldsErrors?: string[];
+    dimensionsSynced?: number;
+    dimensionsErrors?: string[];
   }> = [];
 
   // Pre-fetch cached AI categorization for each product if metafield sync
@@ -193,6 +196,26 @@ export async function POST(request: NextRequest) {
         // Optional: sync taxonomy category + metafields after create/update
         let metafieldsSynced: number | undefined;
         let metafieldsErrors: string[] | undefined;
+        let dimensionsSynced: number | undefined;
+        let dimensionsErrors: string[] | undefined;
+        // Frame dimensions are a separate concern from category metafields —
+        // they're plain number_integer customs (custom.lens_width etc.) so
+        // we push them whenever they're present, regardless of whether the
+        // operator opted into the (more expensive) category sync.
+        try {
+          const dimRes = await syncProductDimensions({
+            store,
+            shopifyProductId: String(shopifyId),
+            lensWidth: ep.product.lensWidth,
+            bridgeWidth: ep.product.bridgeWidth,
+            templeLength: ep.product.templeLength,
+            lensHeight: ep.product.lensHeight,
+          });
+          dimensionsSynced = dimRes.written;
+          if (!dimRes.ok && dimRes.errors.length) dimensionsErrors = dimRes.errors;
+        } catch (e) {
+          dimensionsErrors = [e instanceof Error ? e.message : String(e)];
+        }
         if (syncMetafields) {
           const categorization = categorizationByProductId.get(ep.product.id);
           if (!categorization) {
@@ -226,6 +249,8 @@ export async function POST(request: NextRequest) {
           shopifyId,
           metafieldsSynced,
           metafieldsErrors,
+          dimensionsSynced,
+          dimensionsErrors,
         });
       } catch (e) {
         results.push({

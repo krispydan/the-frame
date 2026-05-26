@@ -504,6 +504,10 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
         lensType: string;
         hsCode: string;
         countryOfOrigin: string;
+        lensWidth: string;
+        bridgeWidth: string;
+        templeLength: string;
+        lensHeight: string;
       }>,
     ): Record<string, string> => ({
       Title: opts.title ?? "",
@@ -577,6 +581,14 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       "Variant HS Code": opts.hsCode ?? "",
       "Variant Country of Origin": opts.countryOfOrigin ?? "",
       "Metafield: custom.lens_type [single_line_text_field]": opts.lensType ?? "",
+      // Frame dimensions in millimetres. Shopify ignores unknown columns
+      // on import, so this is safe to emit even on stores that haven't
+      // defined these metafield definitions yet. Once defined as
+      // number_integer, the values flow into the storefront.
+      "Metafield: custom.lens_width [number_integer]": opts.lensWidth ?? "",
+      "Metafield: custom.bridge_width [number_integer]": opts.bridgeWidth ?? "",
+      "Metafield: custom.temple_length [number_integer]": opts.templeLength ?? "",
+      "Metafield: custom.lens_height [number_integer]": opts.lensHeight ?? "",
     });
 
     // 1. First variant row — also carries all product-level fields
@@ -604,6 +616,14 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       lensType: lensTag,
       hsCode: JAXY_CONSTANTS.hsCode,
       countryOfOrigin: JAXY_CONSTANTS.countryOfOrigin,
+      // Frame dimensions live at the product level in Shopify, so we
+      // only emit them on the first variant row that carries product
+      // metadata. Subsequent variant rows would just be ignored on
+      // import. Empty string when null so the column stays present.
+      lensWidth: ep.product.lensWidth ? String(ep.product.lensWidth) : "",
+      bridgeWidth: ep.product.bridgeWidth ? String(ep.product.bridgeWidth) : "",
+      templeLength: ep.product.templeLength ? String(ep.product.templeLength) : "",
+      lensHeight: ep.product.lensHeight ? String(ep.product.lensHeight) : "",
     }));
 
     // 2. Additional variant rows (one per SKU after the first) —
