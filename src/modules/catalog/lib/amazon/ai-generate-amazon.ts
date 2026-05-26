@@ -140,6 +140,7 @@ async function buildInput(productId: string): Promise<BuildInputResult | null> {
       bridgeWidth: product.bridgeWidth ?? null,
       templeLength: product.templeLength ?? null,
       lensHeight: product.lensHeight ?? null,
+      frameWidth: product.frameWidth ?? null,
     },
   };
 }

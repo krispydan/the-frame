@@ -68,6 +68,11 @@ export const products = sqliteTable("catalog_products", {
   bridgeWidth: integer("bridge_width"),
   templeLength: integer("temple_length"),
   lensHeight: integer("lens_height"),
+  /** Total frame width edge-to-edge (mm) — supplied by some factories on
+   *  the 5-column tabular sheets (lens width, lens height, bridge width,
+   *  frame width, temple length). Not part of the canonical "51口22 145"
+   *  positional format. */
+  frameWidth: integer("frame_width"),
   frameSize: text("frame_size"),
   seoTitle: text("seo_title"),
   metaDescription: text("meta_description"),

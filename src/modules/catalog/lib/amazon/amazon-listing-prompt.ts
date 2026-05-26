@@ -60,6 +60,8 @@ export interface AmazonListingInput {
   bridgeWidth: number | null;
   templeLength: number | null;
   lensHeight: number | null;
+  /** Total frame width edge-to-edge (mm); 5-field factories supply it. */
+  frameWidth: number | null;
 }
 
 export interface AmazonListingOutput {
@@ -256,9 +258,12 @@ export function buildAmazonListingPrompt(
   // when present. Useful for the listing body (sizing copy) and saves
   // Claude having to infer from photos.
   if (input.lensWidth && input.bridgeWidth && input.templeLength) {
-    const heightSuffix = input.lensHeight ? `, lens height ${input.lensHeight} mm` : "";
+    const extras: string[] = [];
+    if (input.lensHeight) extras.push(`lens height ${input.lensHeight} mm`);
+    if (input.frameWidth) extras.push(`total frame width ${input.frameWidth} mm`);
+    const extraSuffix = extras.length ? `, ${extras.join(", ")}` : "";
     lines.push(
-      `Dimensions: ${input.lensWidth}-${input.bridgeWidth}-${input.templeLength} mm (lens width − bridge width − temple length${heightSuffix}). Reference these as a "size" callout in the bullets or description when natural.`,
+      `Dimensions: ${input.lensWidth}-${input.bridgeWidth}-${input.templeLength} mm (lens width − bridge width − temple length${extraSuffix}). Reference these as a "size" callout in the bullets or description when natural.`,
     );
   }
 

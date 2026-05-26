@@ -72,6 +72,7 @@ export async function loadExportProducts(productIds?: string[]): Promise<ExportP
         bridgeWidth: p.bridgeWidth ?? null,
         templeLength: p.templeLength ?? null,
         lensHeight: p.lensHeight ?? null,
+        frameWidth: p.frameWidth ?? null,
         frameSize: p.frameSize ?? null,
       },
       skus: productSkus.map((s) => ({

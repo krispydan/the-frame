@@ -18,6 +18,9 @@ export interface FrameSize {
   templeLength: number;
   /** Some factories include a 4th value for lens height; optional. */
   lensHeight?: number;
+  /** Total frame width edge-to-edge (mm). Only supplied on the
+   *  5-column tabular factory format (L, H, B, F, T); optional. */
+  frameWidth?: number;
 }
 
 /**
@@ -31,6 +34,8 @@ const RANGES = {
   bridgeWidth: [10, 30] as const,
   templeLength: [100, 170] as const,
   lensHeight: [20, 70] as const,
+  // Total frame edge-to-edge — usually ≈ 2·lensWidth + bridgeWidth.
+  frameWidth: [100, 180] as const,
 };
 
 function inRange(value: number, [min, max]: readonly [number, number]): boolean {
@@ -39,13 +44,21 @@ function inRange(value: number, [min, max]: readonly [number, number]): boolean 
 
 /**
  * Parse a factory dimension string into structured fields. Returns null
- * when the string can't be confidently resolved to 3–4 valid integers in
+ * when the string can't be confidently resolved into valid integers in
  * the expected ranges — callers should surface that as a "couldn't parse,
  * enter manually" prompt rather than persisting bad data.
  *
- * Accepts: "51口22 145", "51-22-145", "51x22x145", "51X22X145",
- * "51×22×145", "51 22 145", "51 22 145 38" (with lens height), and
- * combinations thereof. Surrounding whitespace + "mm" suffix tolerated.
+ * Two formats are supported, chosen by count:
+ *
+ *   3 ints — canonical eyewear "lens-bridge-temple"   (e.g. "51口22 145")
+ *   4 ints — same plus lens height                    (e.g. "51 22 145 38")
+ *   5 ints — tabular "lens-height-bridge-frame-temple" labelled order
+ *            that some factories supply, e.g. "51 37 20 145 147"
+ *            (lens width 51, lens height 37, bridge 20, frame width 145,
+ *             temple length 147)
+ *
+ * Surrounding whitespace + per-cell "mm" suffix tolerated; separators
+ * may be 口, □, x, X, ×, -, –, —, ,, /, |, or whitespace.
  */
 export function parseFrameSize(raw: string | null | undefined): FrameSize | null {
   if (!raw) return null;
@@ -64,7 +77,19 @@ export function parseFrameSize(raw: string | null | undefined): FrameSize | null
     .split(" ")
     .map((p) => Number.parseInt(p, 10))
     .filter((n) => Number.isFinite(n));
-  if (parts.length < 3 || parts.length > 4) return null;
+  if (parts.length < 3 || parts.length > 5) return null;
+
+  if (parts.length === 5) {
+    // Labelled tabular order: lens width, lens height, bridge, frame
+    // width, temple length. Distinct from the positional 3/4 case.
+    const [lensWidth, lensHeight, bridgeWidth, frameWidth, templeLength] = parts;
+    if (!inRange(lensWidth, RANGES.lensWidth)) return null;
+    if (!inRange(lensHeight, RANGES.lensHeight)) return null;
+    if (!inRange(bridgeWidth, RANGES.bridgeWidth)) return null;
+    if (!inRange(frameWidth, RANGES.frameWidth)) return null;
+    if (!inRange(templeLength, RANGES.templeLength)) return null;
+    return { lensWidth, bridgeWidth, templeLength, lensHeight, frameWidth };
+  }
 
   const [lensWidth, bridgeWidth, templeLength, lensHeight] = parts;
   if (!inRange(lensWidth, RANGES.lensWidth)) return null;

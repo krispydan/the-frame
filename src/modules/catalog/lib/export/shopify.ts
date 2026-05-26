@@ -508,6 +508,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
         bridgeWidth: string;
         templeLength: string;
         lensHeight: string;
+        frameWidth: string;
       }>,
     ): Record<string, string> => ({
       Title: opts.title ?? "",
@@ -589,6 +590,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       "Metafield: custom.bridge_width [number_integer]": opts.bridgeWidth ?? "",
       "Metafield: custom.temple_length [number_integer]": opts.templeLength ?? "",
       "Metafield: custom.lens_height [number_integer]": opts.lensHeight ?? "",
+      "Metafield: custom.frame_width [number_integer]": opts.frameWidth ?? "",
     });
 
     // 1. First variant row — also carries all product-level fields
@@ -624,6 +626,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       bridgeWidth: ep.product.bridgeWidth ? String(ep.product.bridgeWidth) : "",
       templeLength: ep.product.templeLength ? String(ep.product.templeLength) : "",
       lensHeight: ep.product.lensHeight ? String(ep.product.lensHeight) : "",
+      frameWidth: ep.product.frameWidth ? String(ep.product.frameWidth) : "",
     }));
 
     // 2. Additional variant rows (one per SKU after the first) —

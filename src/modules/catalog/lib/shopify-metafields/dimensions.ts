@@ -24,6 +24,8 @@ export interface SyncDimensionsParams {
   bridgeWidth: number | null;
   templeLength: number | null;
   lensHeight: number | null;
+  /** Total frame width edge-to-edge (mm), when supplied. */
+  frameWidth: number | null;
 }
 
 export interface SyncDimensionsResult {
@@ -48,6 +50,7 @@ export async function syncProductDimensions(
     ["bridge_width", params.bridgeWidth],
     ["temple_length", params.templeLength],
     ["lens_height", params.lensHeight],
+    ["frame_width", params.frameWidth],
   ];
 
   const inputs: MetafieldsSetInput[] = fields

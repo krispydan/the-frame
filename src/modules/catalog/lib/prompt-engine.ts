@@ -23,6 +23,8 @@ export interface ProductContext {
   bridgeWidth?: number | null;
   templeLength?: number | null;
   lensHeight?: number | null;
+  /** Total frame width edge-to-edge (mm), when supplied. */
+  frameWidth?: number | null;
 }
 
 const STYLE_KEYWORDS: Record<StyleCategory, string[]> = {
@@ -98,12 +100,15 @@ export function buildProductDescription(context: ProductContext): string {
  *   formatDimensionsLine({ lensWidth: 51, bridgeWidth: 22, templeLength: 145 })
  *     === "Dimensions: 51-22-145 mm (lens-bridge-temple)."
  */
-export function formatDimensionsLine(context: Pick<ProductContext, "lensWidth" | "bridgeWidth" | "templeLength" | "lensHeight">): string {
-  const { lensWidth, bridgeWidth, templeLength, lensHeight } = context;
+export function formatDimensionsLine(context: Pick<ProductContext, "lensWidth" | "bridgeWidth" | "templeLength" | "lensHeight" | "frameWidth">): string {
+  const { lensWidth, bridgeWidth, templeLength, lensHeight, frameWidth } = context;
   if (!lensWidth || !bridgeWidth || !templeLength) return "";
   const base = `${lensWidth}-${bridgeWidth}-${templeLength}`;
-  const height = lensHeight ? ` (lens height ${lensHeight} mm)` : "";
-  return `Dimensions: ${base} mm (lens-bridge-temple)${height}.`;
+  const extras: string[] = [];
+  if (lensHeight) extras.push(`lens height ${lensHeight} mm`);
+  if (frameWidth) extras.push(`frame width ${frameWidth} mm`);
+  const suffix = extras.length ? ` (${extras.join(", ")})` : "";
+  return `Dimensions: ${base} mm (lens-bridge-temple)${suffix}.`;
 }
 
 /** Copy generation prompt templates */

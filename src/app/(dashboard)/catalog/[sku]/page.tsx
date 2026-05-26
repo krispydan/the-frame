@@ -59,6 +59,7 @@ type Product = {
   bridgeWidth: number | null;
   templeLength: number | null;
   lensHeight: number | null;
+  frameWidth: number | null;
   frameSize: string | null;
 };
 
@@ -541,6 +542,10 @@ function DimensionsCard({
       bridgeWidth: parsed.bridgeWidth,
       templeLength: parsed.templeLength,
       lensHeight: parsed.lensHeight ?? null,
+      // frameWidth is only populated by the 5-field labelled format.
+      // Leave existing value when parser returns undefined so a 3/4-field
+      // paste doesn't clobber a previously-set frame width.
+      ...(parsed.frameWidth != null ? { frameWidth: parsed.frameWidth } : {}),
     });
   }
 
@@ -570,13 +575,14 @@ function DimensionsCard({
                 className="h-8"
               />
               {parseError && <p className="text-[11px] text-yellow-600">⚠️ {parseError}</p>}
-              {!parseError && <p className="text-[10px] text-muted-foreground">Accepts 51口22 145 · 51-22-145 · 51x22x145 · 51 22 145 [38]</p>}
+              {!parseError && <p className="text-[10px] text-muted-foreground">Accepts 51口22 145 · 51-22-145 · 51x22x145 · 51 22 145 [38] · 51 37 20 145 147 (5-field: L H B F T)</p>}
             </div>
             <div className="grid grid-cols-2 gap-2">
               <Field label="Lens" value={String(editData.lensWidth ?? "")} onChange={(v) => setEditData({ ...editData, lensWidth: Number(v) || null })} type="number" />
               <Field label="Bridge" value={String(editData.bridgeWidth ?? "")} onChange={(v) => setEditData({ ...editData, bridgeWidth: Number(v) || null })} type="number" />
               <Field label="Temple" value={String(editData.templeLength ?? "")} onChange={(v) => setEditData({ ...editData, templeLength: Number(v) || null })} type="number" />
               <Field label="Lens height" value={String(editData.lensHeight ?? "")} onChange={(v) => setEditData({ ...editData, lensHeight: Number(v) || null })} type="number" />
+              <Field label="Frame width" value={String(editData.frameWidth ?? "")} onChange={(v) => setEditData({ ...editData, frameWidth: Number(v) || null })} type="number" />
             </div>
           </>
         ) : (
@@ -586,6 +592,7 @@ function DimensionsCard({
             <Row label="Bridge" value={product.bridgeWidth ? `${product.bridgeWidth} mm` : null} />
             <Row label="Temple" value={product.templeLength ? `${product.templeLength} mm` : null} />
             <Row label="Lens height" value={product.lensHeight ? `${product.lensHeight} mm` : null} />
+            <Row label="Frame width" value={product.frameWidth ? `${product.frameWidth} mm` : null} />
           </>
         )}
       </CardContent>

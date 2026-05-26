@@ -368,6 +368,7 @@ try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN lens_width INTEGER");
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN bridge_width INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN temple_length INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN lens_height INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN frame_width INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN frame_size TEXT"); } catch { /* exists */ }
 
 // Warehouse/ShipHero exports: PO line items, freight info on POs, shiphero sync timestamps

@@ -41,6 +41,7 @@ export interface ExportProduct {
     bridgeWidth: number | null;
     templeLength: number | null;
     lensHeight: number | null;
+    frameWidth: number | null;
     frameSize: string | null;
   };
   skus: {

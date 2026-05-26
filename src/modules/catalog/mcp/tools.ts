@@ -104,6 +104,7 @@ mcpRegistry.register(
     bridgeWidth: z.number().int().positive().optional().describe("Bridge width (mm)"),
     templeLength: z.number().int().positive().optional().describe("Temple length (mm)"),
     lensHeight: z.number().int().positive().optional().describe("Lens height (mm) — optional"),
+    frameWidth: z.number().int().positive().optional().describe("Total frame width edge-to-edge (mm) — supplied on 5-field tabular factory sheets"),
     frameSize: z.string().optional().describe("Raw factory size string, e.g. \"51口22 145\""),
   }),
   async (args) => {
@@ -161,13 +162,14 @@ mcpRegistry.register(
 
     sqlite.prepare(
       `UPDATE catalog_products
-       SET lens_width = ?, bridge_width = ?, temple_length = ?, lens_height = ?, frame_size = ?, updated_at = datetime('now')
+       SET lens_width = ?, bridge_width = ?, temple_length = ?, lens_height = ?, frame_width = ?, frame_size = ?, updated_at = datetime('now')
        WHERE id = ?`,
     ).run(
       parsed.lensWidth,
       parsed.bridgeWidth,
       parsed.templeLength,
       parsed.lensHeight ?? null,
+      parsed.frameWidth ?? null,
       raw,
       productId,
     );

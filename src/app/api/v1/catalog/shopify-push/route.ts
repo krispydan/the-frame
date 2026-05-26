@@ -210,6 +210,7 @@ export async function POST(request: NextRequest) {
             bridgeWidth: ep.product.bridgeWidth,
             templeLength: ep.product.templeLength,
             lensHeight: ep.product.lensHeight,
+            frameWidth: ep.product.frameWidth,
           });
           dimensionsSynced = dimRes.written;
           if (!dimRes.ok && dimRes.errors.length) dimensionsErrors = dimRes.errors;

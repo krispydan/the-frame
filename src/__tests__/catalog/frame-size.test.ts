@@ -65,13 +65,33 @@ describe("parseFrameSize", () => {
     });
   });
 
+  it("parses the 5-value labelled tabular format (L, H, B, F, T)", () => {
+    // Lens width 51, lens height 37, bridge 20, frame width 145,
+    // temple length 147 — from a typical factory spreadsheet row.
+    expect(parseFrameSize("51 37 20 145 147")).toEqual({
+      lensWidth: 51,
+      lensHeight: 37,
+      bridgeWidth: 20,
+      frameWidth: 145,
+      templeLength: 147,
+    });
+    // With mm suffixes per cell.
+    expect(parseFrameSize("57mm 33mm 17mm 144mm 142mm")).toEqual({
+      lensWidth: 57,
+      lensHeight: 33,
+      bridgeWidth: 17,
+      frameWidth: 144,
+      templeLength: 142,
+    });
+  });
+
   it("returns null on garbage input", () => {
     expect(parseFrameSize("")).toBeNull();
     expect(parseFrameSize(null)).toBeNull();
     expect(parseFrameSize(undefined)).toBeNull();
     expect(parseFrameSize("foo bar")).toBeNull();
     expect(parseFrameSize("51")).toBeNull(); // not enough values
-    expect(parseFrameSize("51 22 145 38 12")).toBeNull(); // too many values
+    expect(parseFrameSize("51 22 145 38 12 99")).toBeNull(); // too many values
   });
 
   it("returns null on out-of-range numbers (likely mis-parse)", () => {
@@ -79,6 +99,8 @@ describe("parseFrameSize", () => {
     expect(parseFrameSize("51口5 145")).toBeNull(); // bridge too narrow
     expect(parseFrameSize("51口22 50")).toBeNull(); // temple too short
     expect(parseFrameSize("51口22 145 200")).toBeNull(); // lens height too big
+    // 5-value form, frame width out of range
+    expect(parseFrameSize("51 37 20 999 147")).toBeNull();
   });
 });
 
