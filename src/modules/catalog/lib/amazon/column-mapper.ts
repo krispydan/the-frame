@@ -228,8 +228,21 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
     || mapLensMaterial(curated.lensType)
     || (tagSet.has("polarized") ? "Polarized" : "Plastic");
   const polarization = listing?.suggestedPolarization || mapPolarizationFromTags(tagSet);
-  const targetGender = mapTargetGender(curated.gender) || "Unisex";
-  const departmentName = mapDepartmentName(curated.gender);
+  // Per ops: Jaxy products are marketed for both men and women, so
+  // target_gender always ships as Unisex regardless of any
+  // gender-leaning tag the AI might have picked up. The "men and women"
+  // intent maps to Amazon's "Unisex" enum value (target_gender enum is
+  // single-select: Unisex / Female / Male).
+  const targetGender = "Unisex";
+  const departmentName = "Unisex Adult";
+  // Per ops: parent's `model` field is the SKU prefix (JX4008), and
+  // `model_name` is the marketing product name. Both fields are
+  // optional on Amazon's snapshot but help dedup variation rollups in
+  // Seller Central + appear on the listing's tech-specs panel.
+  // model_name is capped at 50 chars per the snapshot, so apply the
+  // same word-boundary truncate we use for item_name.
+  const modelNumber = p.skuPrefix;
+  const modelName = truncateAtWord(p.name?.trim() || p.skuPrefix, 50);
 
   // ── Images: first 9 fill main + other_image_url1..8 ─────────────────
   const mainImage = imageUrls[0] ?? "";
@@ -243,6 +256,8 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
     item_sku: p.skuPrefix,
     brand_name: STATIC.brand_name,
     manufacturer: STATIC.manufacturer,
+    model: modelNumber,
+    model_name: modelName,
     item_name: title,
     item_type: STATIC.item_type,
     item_type_name: STATIC.item_type_name,
@@ -321,6 +336,11 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
       item_sku: sku.sku ?? "",
       brand_name: STATIC.brand_name,
       manufacturer: STATIC.manufacturer,
+      // Same model + model_name across all children — they're parent-
+      // identity attributes, but Amazon's processor wants them on each
+      // row to dedup the variation rollup.
+      model: modelNumber,
+      model_name: modelName,
       // Children inherit title/desc/bullets from parent; leave blank to avoid drift.
       // But Amazon's validator is sometimes happier with the title repeated, so we do.
       item_name: title,
