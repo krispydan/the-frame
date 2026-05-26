@@ -96,12 +96,17 @@ export function mapTargetGender(gender: string | null): "Unisex" | "Female" | "M
   return null;
 }
 
-/** Map curated category → Amazon department_name. */
+/** Map curated category → Amazon department_name.
+ *  The output MUST match the template snapshot's enum verbatim:
+ *  ["Baby Boys", "Baby Girls", "Boys", "Girls", "Men", "Unisex Baby",
+ *   "Unisex Child", "Women", "Unisex Adult"]. Lowercased values used to
+ *  be emitted ("womens" / "mens" / "unisex-adult") which the validator
+ *  rejected for every product. */
 export function mapDepartmentName(gender: string | null): string {
   const tg = mapTargetGender(gender);
-  if (tg === "Female") return "womens";
-  if (tg === "Male") return "mens";
-  return "unisex-adult";
+  if (tg === "Female") return "Women";
+  if (tg === "Male") return "Men";
+  return "Unisex Adult";
 }
 
 /**

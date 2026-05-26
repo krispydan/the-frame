@@ -64,20 +64,24 @@ const STATIC = {
   item_type: "sunglasses",
   item_type_name: "Sunglasses",
   age_range_description: "Adult",
-  country_of_origin: "CN",
+  // Must match the country_of_origin enum from the template snapshot
+  // verbatim — "CN" was a 2-letter code that the snapshot doesn't accept;
+  // the snapshot's enum has full country names ("China", "United States").
+  country_of_origin: "China",
   // Sunglasses have no batteries; Amazon still requires the declaration row.
   batteries_required: "No",
   are_batteries_included: "No",
   // Dangerous goods — sunglasses are not regulated; "Not Applicable" is
   // Amazon's accepted answer for these.
   supplier_declared_dg_hz_regulation1: "Not Applicable",
-  // Fulfillment via merchant. Update if we ever go FBA.
-  fulfillment_channel_code: "DEFAULT",
+  // Fulfillment via merchant. Must match the template enum verbatim.
+  fulfillment_channel_code: "Fulfillment by Merchant (Default)",
   // US marketplace ID.
   us_marketplace_id: "ATVPDKIKX0DER",
-  // We assume mm for lens dimensions and inches/grams for the item itself.
+  // We assume mm for lens dimensions. Item weight unit must match the
+  // template enum exactly (LB/OZ/KG/MG/GR). We weigh in ounces.
   lens_unit: "millimeters",
-  item_weight_unit: "pounds",
+  item_weight_unit: "OZ",
   // 1 piece per box — defensible default; can override per product later.
   unit_count_type: "Count",
 } as const;
@@ -100,10 +104,26 @@ function stripHtml(html: string | null | undefined): string {
   return html.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
 }
 
-/** Convert ounces → pounds (Amazon wants pounds for item_weight). */
-function ozToLb(oz: number | null | undefined): string {
+/** Format a numeric ounce value for Amazon's item_weight field. We
+ *  declare item_weight_unit_of_measure = "OZ" up top so the value
+ *  passes through as-is rather than being converted to pounds. */
+function ozAsString(oz: number | null | undefined): string {
   if (!oz || oz <= 0) return "";
-  return (oz / 16).toFixed(2);
+  return oz.toFixed(2);
+}
+
+/** Trim s to maxChars, breaking on the last whitespace before the cap so
+ *  we don't lop mid-word. No ellipsis — Amazon's title field looks more
+ *  natural with a clean cut than "…". */
+function truncateAtWord(s: string, maxChars: number): string {
+  if (s.length <= maxChars) return s;
+  const slice = s.slice(0, maxChars);
+  const lastSpace = slice.lastIndexOf(" ");
+  // Don't truncate too aggressively — if the last space is in the first
+  // ~70% of the slice, the result loses too many keywords. Take the
+  // hard cut instead.
+  if (lastSpace > maxChars * 0.6) return slice.slice(0, lastSpace).trim();
+  return slice.trim();
 }
 
 // ── Public entrypoint ───────────────────────────────────────────────────
@@ -124,7 +144,14 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
 
   // ── Shared content (lives on parent row only — Amazon inherits to
   //    children) ────────────────────────────────────────────────────────
-  const title = listing?.amazonTitle?.trim() || p.name?.trim() || p.skuPrefix;
+  // Amazon's sunglasses template caps item_name at 50 chars (verified
+  // against the snapshot's Data Definitions). The current AI prompt
+  // doesn't enforce that limit, so most generated titles are 100-150
+  // chars and fail validation. Truncate defensively at 50 chars on a
+  // word boundary as a safety net — the prompt + regeneration is the
+  // long-term fix.
+  const rawTitle = listing?.amazonTitle?.trim() || p.name?.trim() || p.skuPrefix;
+  const title = truncateAtWord(rawTitle, 50);
   const description = listing?.productDescription?.trim() || stripHtml(p.description);
 
   const bulletsFromListing = [
@@ -173,11 +200,13 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
     // Parent does NOT carry a UPC — only children do.
     external_product_id: "",
     external_product_id_type: "",
-    // Variation chain
-    parent_child: "parent",
+    // Variation chain — enum values must match the template snapshot
+    // exactly (Parent/Child capitalized; variation_theme uses Amazon's
+    // exact format, not a free-text label).
+    parent_child: "Parent",
     parent_sku: "",
     relationship_type: "Variation",
-    variation_theme: "Color",
+    variation_theme: "LensColor",
     // Content
     product_description: description,
     bullet_point1: bullets[0] ?? "",
@@ -223,11 +252,11 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
     const listPrice = (product.msrp && product.msrp > 0)
       ? product.msrp.toFixed(2)
       : price;
-    const itemWeight = ozToLb(sku.id ? (
+    const itemWeight = ozAsString(sku.id ? (
       // Per-SKU weight from catalog_skus.weightOz — passed through via ExportProduct? It's not
       // currently in the ExportProduct.skus shape, so fall back to a reasonable sunglasses default.
       null
-    ) : null) || "0.10";
+    ) : null) || "1.60";
 
     const child: Record<string, string> = {
       // Identity
@@ -239,11 +268,13 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
       // But Amazon's validator is sometimes happier with the title repeated, so we do.
       item_name: title,
       item_type: STATIC.item_type,
-      // Variation chain
-      parent_child: "child",
+      // Variation chain — enum values match the snapshot exactly.
+      // parent_child = "Child" (capitalized); variation_theme must
+      // match the parent and be one of Amazon's accepted values.
+      parent_child: "Child",
       parent_sku: p.skuPrefix,
       relationship_type: "Variation",
-      variation_theme: "Color",
+      variation_theme: "LensColor",
       // Variation axis — color
       color_name: colorName,
       color_map: colorMap,

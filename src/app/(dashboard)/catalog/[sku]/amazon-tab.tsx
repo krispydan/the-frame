@@ -63,7 +63,7 @@ type EditableKey = (typeof EDITABLE_KEYS)[number];
 
 /** Length budgets — soft, surfaced inline so the operator sees them. */
 const SOFT_LIMITS: Partial<Record<EditableKey, number>> = {
-  amazonTitle: 200,
+  amazonTitle: 50,
   bulletPoint1: 500,
   bulletPoint2: 500,
   bulletPoint3: 500,

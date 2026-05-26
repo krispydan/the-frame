@@ -118,9 +118,15 @@ OUTPUT FORMAT — strict JSON only, no prose, no code fences:
 }
 
 TITLE RULES — never break:
-- ≤200 chars. Target 150–195.
-- Front-load high-intent keywords: shape, lens type, category, target
-  audience. Brand "Jaxy" appears once, near the end.
+- ≤50 chars HARD CAP. Amazon's sunglasses template item_name field is
+  strictly 50 chars. Titles above 50 are rejected at upload time, so
+  keep this tight. Target 40–50 chars.
+- Front-load the 1–2 highest-intent keywords: shape + category + a
+  qualifier. Examples (all under 50):
+    "Polarized Cat-Eye Sunglasses for Women UV400"  (44)
+    "Round Acetate Sunglasses Men Vintage UV400"     (42)
+    "Aviator Sunglasses Polarized UV400 Unisex"      (41)
+- Brand "Jaxy" only if it fits — never sacrifice keywords for the brand.
 - Natural phrasing ("for Women" not "Womens"; "Cat-Eye" not "cateye").
 - No promotional language ("Best", "Premium", "Top-rated", "Sale",
   "Discount", "Free Shipping"), no ALL CAPS words, no emoji, no
@@ -299,8 +305,8 @@ export function validateAmazonListingOutput(raw: unknown): {
   if (errors.length > 0) return { output: null, errors, warnings };
 
   // Length checks (soft — surface as warnings)
-  if (title.length > 200) warnings.push(`title ${title.length} > 200 chars`);
-  if (title.length < 80) warnings.push(`title is short (${title.length} chars; target ≥150)`);
+  if (title.length > 50) warnings.push(`title ${title.length} > 50 chars (will be hard-truncated for Amazon)`);
+  if (title.length < 30) warnings.push(`title is short (${title.length} chars; target 40-50)`);
   for (let i = 0; i < bullets.length; i++) {
     if (bullets[i].length > 500) warnings.push(`bullet ${i + 1} ${bullets[i].length} > 500 chars`);
   }
