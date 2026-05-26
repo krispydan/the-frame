@@ -364,6 +364,10 @@ try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN ai_categorization_mod
 
 // Warehouse/ShipHero exports: PO line items, freight info on POs, shiphero sync timestamps
 try { sqlite.exec("ALTER TABLE catalog_skus ADD COLUMN shiphero_synced_at TEXT"); } catch { /* exists */ }
+// Touch-stamp the row when anything edits it (UPC bulk-import,
+// per-row UI edit, etc.) — symmetric with most other tables that have
+// an updated_at. Idempotent: skipped after the first run.
+try { sqlite.exec("ALTER TABLE catalog_skus ADD COLUMN updated_at TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_purchase_orders ADD COLUMN factory_code TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_purchase_orders ADD COLUMN freight_type TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_purchase_orders ADD COLUMN shipping_method TEXT"); } catch { /* exists */ }

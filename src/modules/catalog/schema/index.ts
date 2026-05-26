@@ -91,6 +91,7 @@ export const skus = sqliteTable("catalog_skus", {
   shipheroSyncedAt: text("shiphero_synced_at"),
   status: text("status", { enum: ["intake", "review", "approved"] }).default("intake"),
   createdAt: timestamp("created_at"),
+  updatedAt: text("updated_at"),
 });
 
 // ── Image Types ──
