@@ -68,6 +68,11 @@ const STATIC = {
   // verbatim — "CN" was a 2-letter code that the snapshot doesn't accept;
   // the snapshot's enum has full country names ("China", "United States").
   country_of_origin: "China",
+  // Origin disclosure for the listing's Tech Specs panel. Snapshot enum:
+  // ['Made in the USA or Imported', 'Imported', 'Made in the USA and
+  // Imported', 'Made in the USA']. Jaxy frames are manufactured in
+  // China so "Imported" is the truthful pick.
+  import_designation: "Imported",
   // Sunglasses have no batteries; Amazon still requires the declaration row.
   batteries_required: "No",
   are_batteries_included: "No",
@@ -307,6 +312,7 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
     ...frameDimensionsBlock(p),
     // Compliance defaults
     country_of_origin: STATIC.country_of_origin,
+    import_designation: STATIC.import_designation,
     batteries_required: STATIC.batteries_required,
     are_batteries_included: STATIC.are_batteries_included,
     supplier_declared_dg_hz_regulation1: STATIC.supplier_declared_dg_hz_regulation1,
@@ -395,6 +401,7 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
       ...frameDimensionsBlock(p),
       // Compliance
       country_of_origin: STATIC.country_of_origin,
+      import_designation: STATIC.import_designation,
       batteries_required: STATIC.batteries_required,
       are_batteries_included: STATIC.are_batteries_included,
       supplier_declared_dg_hz_regulation1: STATIC.supplier_declared_dg_hz_regulation1,
