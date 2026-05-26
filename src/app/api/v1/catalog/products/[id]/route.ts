@@ -59,6 +59,8 @@ export async function PATCH(
     "wholesalePrice", "retailPrice", "msrp", "factoryName", "factorySku",
     "seoTitle", "metaDescription", "status",
     "aiCategorization", "aiCategorizedAt", "aiCategorizationModel",
+    // Frame dimensions — see src/modules/catalog/lib/frame-size.ts.
+    "lensWidth", "bridgeWidth", "templeLength", "lensHeight", "frameSize",
   ];
 
   const updates: Record<string, unknown> = { updatedAt: sql`(datetime('now'))` };

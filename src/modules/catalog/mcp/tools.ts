@@ -4,6 +4,7 @@
 import { mcpRegistry } from "@/modules/core/mcp/server";
 import { sqlite } from "@/lib/db";
 import { z } from "zod";
+import { parseFrameSize } from "@/modules/catalog/lib/frame-size";
 
 // ── catalog.list_products ──
 mcpRegistry.register(
@@ -95,6 +96,15 @@ mcpRegistry.register(
     retailPrice: z.number().optional(),
     msrp: z.number().optional(),
     status: z.string().optional().describe("intake, processing, review, approved, published"),
+    // Frame dimensions in millimetres. Pass any subset. To set all at
+    // once from a factory string (e.g. "51口22 145"), prefer the
+    // dedicated catalog.set_frame_size tool which parses + writes
+    // everything atomically.
+    lensWidth: z.number().int().positive().optional().describe("Lens width (mm)"),
+    bridgeWidth: z.number().int().positive().optional().describe("Bridge width (mm)"),
+    templeLength: z.number().int().positive().optional().describe("Temple length (mm)"),
+    lensHeight: z.number().int().positive().optional().describe("Lens height (mm) — optional"),
+    frameSize: z.string().optional().describe("Raw factory size string, e.g. \"51口22 145\""),
   }),
   async (args) => {
     const { id, ...updates } = args;
@@ -119,6 +129,57 @@ mcpRegistry.register(
     const updated = sqlite.prepare("SELECT * FROM catalog_products WHERE id = ?").get(id);
     return { content: [{ type: "text" as const, text: JSON.stringify({ product: updated }) }] };
   }
+);
+
+// ── catalog.set_frame_size ──
+// Convenience tool for the common case where a factory hands us a single
+// dimension string like "51口22 145". Parses + persists all five
+// dimension fields (lens_width, bridge_width, temple_length, lens_height,
+// frame_size) in one call. On parse failure returns isError so the caller
+// can fall back to setting individual fields via catalog.update_product.
+mcpRegistry.register(
+  "catalog.set_frame_size",
+  "Parse a factory frame-size string (e.g. \"51口22 145\") and write all four dimensions + the raw string to the product. Accepts separators 口, x, X, ×, -, /, and whitespace.",
+  z.object({
+    productId: z.string().describe("Product ID"),
+    raw: z.string().describe("Factory dimension string, e.g. \"51口22 145\" or \"52-20-148\""),
+  }),
+  async ({ productId, raw }) => {
+    const parsed = parseFrameSize(raw);
+    if (!parsed) {
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            error: "Couldn't parse frame size — set the four fields individually via catalog.update_product",
+            raw,
+          }),
+        }],
+        isError: true,
+      };
+    }
+
+    sqlite.prepare(
+      `UPDATE catalog_products
+       SET lens_width = ?, bridge_width = ?, temple_length = ?, lens_height = ?, frame_size = ?, updated_at = datetime('now')
+       WHERE id = ?`,
+    ).run(
+      parsed.lensWidth,
+      parsed.bridgeWidth,
+      parsed.templeLength,
+      parsed.lensHeight ?? null,
+      raw,
+      productId,
+    );
+
+    const product = sqlite.prepare("SELECT * FROM catalog_products WHERE id = ?").get(productId);
+    return {
+      content: [{
+        type: "text" as const,
+        text: JSON.stringify({ ok: true, parsed, product }),
+      }],
+    };
+  },
 );
 
 // ── catalog.generate_copy ──
