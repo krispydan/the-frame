@@ -167,8 +167,10 @@ export const PLATFORM_CATEGORY_SUGGESTIONS: Record<string, CategorySuggestion[]>
     { category: "clearing",       label: "Afterpay clearing",        hint: "Afterpay settles separately from Shopify Payments", defaultAccountCode: "1050", defaultAccountName: "Afterpay Clearing", side: "debit" },
   ],
   shopify_wholesale: [
-    { category: "sales",          label: "Sales (gross)",           hint: "Order total — wholesale typically tax-exempt and non-returnable", defaultAccountCode: "4030", defaultAccountName: "Sales - Shopify Wholesale (B2B)", side: "credit" },
+    { category: "sales",          label: "Sales (gross)",           hint: "Order total — wholesale typically tax-exempt", defaultAccountCode: "4030", defaultAccountName: "Sales - Shopify Wholesale (B2B)", side: "credit" },
     { category: "shipping",       label: "Shipping income",          hint: "Shipping charged to retailer", defaultAccountCode: "4060", defaultAccountName: "Shipping Income", side: "credit" },
+    { category: "refunds",        label: "Refunds & returns",        hint: "Refunds issued to wholesale customers — rare but does happen", defaultAccountCode: "4300", defaultAccountName: "Sales Returns & Allowances", side: "debit" },
+    { category: "discounts",      label: "Discounts & promotions",   hint: "Volume / promo discounts on wholesale orders", defaultAccountCode: "4310", defaultAccountName: "Sales Discounts & Promotions", side: "debit" },
     { category: "fees",           label: "Merchant fees",            hint: "Shopify Payments processing fee", defaultAccountCode: "5400", defaultAccountName: "Merchant Fees - Shopify Payments", side: "debit" },
     { category: "clearing",       label: "Wholesale clearing",       hint: "Net payout debits here; transfer to BofA on deposit", defaultAccountCode: "1015", defaultAccountName: "Shopify Wholesale Clearing", side: "debit" },
   ],
