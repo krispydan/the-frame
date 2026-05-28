@@ -318,7 +318,14 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
     supplier_declared_dg_hz_regulation1: STATIC.supplier_declared_dg_hz_regulation1,
   };
 
-  // ── Child rows (one per SKU) ────────────────────────────────────────
+  // ── Child rows (TWO per catalog SKU — one FBM, one FBA) ─────────────
+  // Per ops: ship dual listings under the same parent so each colorway
+  // has both an FBM offer (we ship via ShipHero) and an FBA offer
+  // (Amazon ships from their warehouse for Prime eligibility). Same
+  // physical product, same UPC on both — the only differences are
+  // item_sku (FBA gets a "-FBA" suffix), the fulfillment_channel_code,
+  // and we leave FBA's quantity blank so Amazon's inbound shipments
+  // own the count rather than our number stomping theirs.
   const children: Record<string, string>[] = [];
   for (const sku of product.skus) {
     const colorName = sku.colorName?.trim() || "";
@@ -336,10 +343,14 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
       null
     ) : null) || "1.60";
 
-    const child: Record<string, string> = {
+    const baseSku = sku.sku ?? "";
+    // FBM child — operator-fulfilled (the default Jaxy flow via
+    // ShipHero). Quantity carries over from the catalog row so Amazon
+    // knows how many we have to sell.
+    const fbmChild: Record<string, string> = {
       // Identity
       feed_product_type: STATIC.feed_product_type,
-      item_sku: sku.sku ?? "",
+      item_sku: baseSku,
       brand_name: STATIC.brand_name,
       manufacturer: STATIC.manufacturer,
       // Same model + model_name across all children — they're parent-
@@ -376,9 +387,11 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
       // Pricing — US marketplace only for v1
       list_price: listPrice,
       [`purchasable_offer[marketplace_id=${STATIC.us_marketplace_id}]#1.our_price#1.schedule#1.value_with_tax`]: price,
-      // Inventory / fulfillment
+      // Inventory / fulfillment — FBM defaults; the FBA twin built
+      // below overrides channel + quantity.
       "fulfillment_availability#1.fulfillment_channel_code": STATIC.fulfillment_channel_code,
       "fulfillment_availability#1.quantity": String(sku.inventoryQuantity ?? 0),
+      "fulfillment_availability#1.is_inventory_available": "Enabled",
       // Weights — Amazon wants a number; fall back to 0.10 lb for sunglasses
       item_weight: itemWeight,
       item_weight_unit_of_measure: STATIC.item_weight_unit,
@@ -406,7 +419,23 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
       are_batteries_included: STATIC.are_batteries_included,
       supplier_declared_dg_hz_regulation1: STATIC.supplier_declared_dg_hz_regulation1,
     };
-    children.push(child);
+    // FBA twin — Fulfilled by Amazon. Same physical product → same UPC,
+    // same parent_sku, same color / lens_color / price / images. Three
+    // overrides:
+    //   1. item_sku gets "-FBA" suffix so the two offers don't collide.
+    //   2. fulfillment_channel_code = Fulfillment by Amazon (NA).
+    //   3. quantity is blank — Amazon's inbound shipments own the count
+    //      on the FBA side; setting our own number would conflict with
+    //      their warehouse receipts.
+    const fbaChild: Record<string, string> = {
+      ...fbmChild,
+      item_sku: baseSku ? `${baseSku}-FBA` : "",
+      "fulfillment_availability#1.fulfillment_channel_code": "Fulfillment by Amazon (NA)",
+      "fulfillment_availability#1.quantity": "",
+      "fulfillment_availability#1.is_inventory_available": "Enabled",
+    };
+
+    children.push(fbmChild, fbaChild);
   }
 
   return [parent, ...children];

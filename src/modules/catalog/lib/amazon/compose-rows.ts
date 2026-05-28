@@ -64,7 +64,16 @@ export async function composeAmazonRows(productIds?: string[]): Promise<Composed
       productName: ep.product.name ?? ep.product.skuPrefix,
       skuPrefix: ep.product.skuPrefix,
       rows,
-      skuIdentifiers: ep.skus.map((s) => ({ skuId: s.id, sku: s.sku ?? "" })),
+      // Two child rows per catalog SKU (FBM + FBA — see column-mapper.ts);
+      // the validator attributes child-row issues by index into this
+      // array, so we flatMap to keep it 1:1 with the rows.
+      skuIdentifiers: ep.skus.flatMap((s) => {
+        const base = s.sku ?? "";
+        return [
+          { skuId: s.id, sku: base },
+          { skuId: s.id, sku: base ? `${base}-FBA` : "" },
+        ];
+      }),
       hasListing: !!listingRow,
       hasImages: imageUrls.length > 0,
     });
