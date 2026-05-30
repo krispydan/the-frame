@@ -368,26 +368,21 @@ export async function handleOrderUpdated(order: ShopifyOrder, shopDomain?: strin
     }
   }
 
-  // Slack alerts on financial-status transitions: voided/refunded → payment_failed
-  // The "chargeback" topic is fired by the disputes/create webhook (handled separately
-  // when we wire it). Voided/refunded counts as a payment fail for our team's purposes.
-  const oldFinancial = (existing as { financialStatus?: string }).financialStatus;
-  const newFinancial = order.financial_status;
-  if (newFinancial !== oldFinancial && (newFinancial === "voided" || newFinancial === "refunded")) {
-    try {
-      const { notifyPaymentFailed } = await import("@/modules/integrations/lib/slack/notifications");
-      await notifyPaymentFailed({
-        orderNumber: order.name,
-        channel: existing.channel,
-        total: parseFloat(order.total_price),
-        currency: order.currency,
-        customerEmail: order.email || order.customer?.email || null,
-        reason: newFinancial === "voided" ? "voided" : "refunded",
-      });
-    } catch (e) {
-      console.error("[Shopify Webhook] Slack payment_failed alert failed:", e);
-    }
-  }
+  // No more "💳 Payment didn't go through" Slack alerts on refunded/voided
+  // orders. Two reasons the old logic was wrong:
+  //   1. The "old" financial status was read from a column we never
+  //      persisted (existing.financialStatus is always undefined), so the
+  //      transition check could never compare two real values — the alert
+  //      fired every time Shopify re-sent orders/updated for the same
+  //      refunded order. That made it a daily nag, not a one-shot.
+  //   2. The naming "Payment didn't go through" is misleading for refunds.
+  //      Refunds are deliberate actions by us; we already know we issued
+  //      them. They're visible in Shopify admin and in the order's local
+  //      status flow. A Slack ping adds noise, not signal.
+  // True payment failures (auth declines, disputes/chargebacks) come
+  // through different Shopify webhooks — we can wire those when we want
+  // an alert that actually represents a problem. notifyPaymentFailed()
+  // is left in place in slack/notifications.ts for that future use.
 }
 
 async function handleOrderCancelled(order: ShopifyOrder, _shopDomain?: string) {
