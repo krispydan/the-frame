@@ -150,6 +150,30 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN icp_manual_override INTEGER 
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN icp_updated_by TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN icp_updated_at TEXT"); } catch { /* exists */ }
 
+// ── StoreLeads integration ───────────────────────────────────────────────
+// Fields captured from StoreLeads.app — Daniel bought a Pro subscription
+// for ecommerce-store enrichment. Columns are added even if the StoreLeads
+// API/CSV doesn't always populate them; the import + enrichment paths
+// merge-fill rather than overwrite so a hand-edited value is preserved.
+// Schema mirror in src/modules/sales/schema/index.ts.
+// source_type widening to include "storeleads" is a Drizzle-only change
+// (SQLite stores enums as plain TEXT, no migration needed).
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN storeleads_id TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN storeleads_last_synced_at TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN employee_count INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN estimated_monthly_visits INTEGER"); } catch { /* exists */ }
+// Stored in USD cents to avoid float drift; UI converts back to dollars.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN estimated_yearly_sales_cents INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN average_product_price_cents INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN tiktok_url TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN tiktok_followers INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN youtube_url TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN youtube_followers INTEGER"); } catch { /* exists */ }
+// e.g. "shopify" / "woocommerce" / "magento" / "bigcommerce" / "custom".
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN ecom_platform TEXT"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_companies_storeleads_id ON companies (storeleads_id)"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_companies_ecom_platform ON companies (ecom_platform)"); } catch { /* exists */ }
+
 // Image upload system: new columns on catalog_images
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN url TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN file_size INTEGER"); } catch { /* exists */ }

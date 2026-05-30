@@ -53,7 +53,7 @@ export const companies = sqliteTable("companies", {
   // contact-us page, stash the URL for later outreach.
   contactFormUrl: text("contact_form_url"),
   leadSourceDetail: text("lead_source_detail"),
-  sourceType: text("source_type", { enum: ["storemapper", "outscraper", "manual", "csv", "chrome-ext"] }),
+  sourceType: text("source_type", { enum: ["storemapper", "outscraper", "manual", "csv", "chrome-ext", "storeleads"] }),
   sourceId: text("source_id"),
   sourceQuery: text("source_query"),
   ownerName: text("owner_name"),
@@ -65,6 +65,22 @@ export const companies = sqliteTable("companies", {
   yelpUrl: text("yelp_url"),
   enrichedAt: text("enriched_at"),
   socials: text("socials"),  // JSON: {"instagram": "...", "facebook": "..."}
+  // ── StoreLeads integration fields ──
+  // StoreLeads.app provides ecommerce-store firmographics (sales, traffic,
+  // platform, contact info). Populated by the CSV importer and the live
+  // enrichment job. Always merge-fill (never clobber hand-edited values).
+  storeleadsId: text("storeleads_id"),
+  storeleadsLastSyncedAt: text("storeleads_last_synced_at"),
+  employeeCount: integer("employee_count"),
+  estimatedMonthlyVisits: integer("estimated_monthly_visits"),
+  estimatedYearlySalesCents: integer("estimated_yearly_sales_cents"),
+  averageProductPriceCents: integer("average_product_price_cents"),
+  tiktokUrl: text("tiktok_url"),
+  tiktokFollowers: integer("tiktok_followers"),
+  youtubeUrl: text("youtube_url"),
+  youtubeFollowers: integer("youtube_followers"),
+  // "shopify" / "woocommerce" / "magento" / "bigcommerce" / "custom" / …
+  ecomPlatform: text("ecom_platform"),
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 }, (table) => [
@@ -75,6 +91,8 @@ export const companies = sqliteTable("companies", {
   index("idx_companies_domain").on(table.domain),
   index("idx_companies_source_type").on(table.sourceType),
   index("idx_companies_source_id").on(table.sourceId),
+  index("idx_companies_storeleads_id").on(table.storeleadsId),
+  index("idx_companies_ecom_platform").on(table.ecomPlatform),
 ]);
 
 // ── Stores ──
