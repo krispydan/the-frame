@@ -43,7 +43,7 @@ export interface ProspectRow {
   status: string;
 }
 
-function extractDomain(website: string | null): string | null {
+export function extractDomain(website: string | null): string | null {
   if (!website) return null;
   try {
     let url = website.trim();
