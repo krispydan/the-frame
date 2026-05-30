@@ -88,6 +88,17 @@ const STATIC = {
   // per-field — see frameDimensionsBlock — because the template has
   // four separate *_unit_of_measure columns and no single "lens_unit".
   item_weight_unit: "OZ",
+  // Per-unit PACKAGE dimensions + weight (the item in its retail
+  // packaging). Amazon needs these to compute FBA fees, and the
+  // Send-to-Amazon inbound flow blocks if they're missing from the
+  // catalog. Every Jaxy frame ships in the same pouch/box: 8 x 3.5 x
+  // 0.5 in, 2.5 oz. Units must match the enum exactly: IN / OZ.
+  package_length: "8",
+  package_width: "3.5",
+  package_height: "0.5",
+  package_dim_unit: "IN",
+  package_weight: "2.5",
+  package_weight_unit: "OZ",
   // 1 piece per box — defensible default; can override per product later.
   unit_count_type: "Count",
 } as const;
@@ -163,6 +174,24 @@ function frameDimensionsBlock(p: {
     arm_length_unit_of_measure: "MM",
     lens_height: String(lh),
     lens_height_unit_of_measure: "MM",
+  };
+}
+
+/** Per-unit package dimensions + weight, identical for every Jaxy
+ *  frame (8 x 3.5 x 0.5 in, 2.5 oz). Required by the FBA inbound flow;
+ *  emitted on both parent + child rows so the catalog has them
+ *  regardless of which row Amazon reads. Eight cells: 3 dims + dim unit
+ *  + weight + weight unit (package_*_unit_of_measure are per-field). */
+function packageDimensionsBlock(): Record<string, string> {
+  return {
+    package_length: STATIC.package_length,
+    package_length_unit_of_measure: STATIC.package_dim_unit,
+    package_width: STATIC.package_width,
+    package_width_unit_of_measure: STATIC.package_dim_unit,
+    package_height: STATIC.package_height,
+    package_height_unit_of_measure: STATIC.package_dim_unit,
+    package_weight: STATIC.package_weight,
+    package_weight_unit_of_measure: STATIC.package_weight_unit,
   };
 }
 
@@ -310,6 +339,7 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
     // Frame dimensions (mm) — see frameDimensionsBlock for the mapping
     // rationale + default fallbacks for unmeasured products.
     ...frameDimensionsBlock(p),
+    ...packageDimensionsBlock(),
     // Compliance defaults
     country_of_origin: STATIC.country_of_origin,
     import_designation: STATIC.import_designation,
@@ -412,6 +442,7 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
       // Frame dimensions — duplicated from parent so child SKU rows
       // inherit correctly even when Amazon de-couples them.
       ...frameDimensionsBlock(p),
+      ...packageDimensionsBlock(),
       // Compliance
       country_of_origin: STATIC.country_of_origin,
       import_designation: STATIC.import_designation,
