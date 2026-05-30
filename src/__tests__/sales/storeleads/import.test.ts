@@ -54,8 +54,19 @@ function ensureStoreLeadsColumns() {
   }
 }
 
+// Older export header (no merchant_name column).
 const HEADER =
   "domain,about_us_url,average_product_price_usd,categories,city,cluster_domains,company_ids,company_location,contact_page_url,country_code,created,description,domain_url,emails,employee_count,estimated_monthly_pageviews,estimated_monthly_visits,estimated_yearly_sales,facebook,instagram,phones,platform,region,state,status,street_address,tiktok,tiktok_followers,youtube,youtube_followers\n";
+
+// Newer export header (merchant_name between instagram + phones).
+const HEADER_WITH_NAME =
+  "domain,about_us_url,average_product_price_usd,categories,city,cluster_domains,company_ids,company_location,contact_page_url,country_code,created,description,domain_url,emails,employee_count,estimated_monthly_pageviews,estimated_monthly_visits,estimated_yearly_sales,facebook,instagram,merchant_name,phones,platform,region,state,status,street_address,tiktok,tiktok_followers,youtube,youtube_followers\n";
+
+function writeCsvWithName(rows: string[]): string {
+  const p = path.join(os.tmpdir(), `sl-import-name-${process.pid}-${Math.random()}.csv`);
+  fs.writeFileSync(p, HEADER_WITH_NAME + rows.join("\n") + "\n");
+  return p;
+}
 
 function writeCsv(rows: string[]): string {
   const p = path.join(os.tmpdir(), `sl-import-${process.pid}-${Math.random()}.csv`);
@@ -125,6 +136,63 @@ describe("storeleads CSV importer", () => {
     const stats = await importStoreLeadsCsv(csv);
     expect(stats.skippedNoDomain).toBe(1);
     expect(stats.created).toBe(0);
+  });
+
+  it("uses merchant_name from the newer CSV format as the company name", async () => {
+    // Row matches the actual modcloth.com row from the newer export.
+    const csv = writeCsvWithName([
+      `modcloth.com,,USD $68.38,/Apparel/Women's Clothing,Los Angeles,modcloth.com,,"Los Angeles, CA, USA",,US,2016/12/30,Boutique,https://modcloth.com,support@modcloth.com,192,4572282,1235751,USD $63264503,facebook.com/modcloth,instagram.com/modcloth,ModCloth,,Shopify,Americas,California,active,123 Main St,,,,`,
+    ]);
+    const { importStoreLeadsCsv } = await import("@/modules/sales/lib/storeleads/import");
+    await importStoreLeadsCsv(csv);
+    const row = getTestDb()
+      .prepare("SELECT name FROM companies WHERE domain = ?")
+      .get("modcloth.com") as { name: string };
+    expect(row.name).toBe("ModCloth");
+  });
+
+  it("overwrites a domain-named row with merchant_name on re-import (newer CSV)", async () => {
+    // Step 1 — older CSV (no merchant_name) → row's name defaults to domain.
+    const oldCsv = writeCsv([
+      `modcloth.com,,USD $68.38,/Apparel/Women's Clothing,Los Angeles,,,,,US,,,https://modcloth.com,support@modcloth.com,192,,1235751,USD $63264503,,,,Shopify,,California,,,,,,`,
+    ]);
+    const { importStoreLeadsCsv } = await import("@/modules/sales/lib/storeleads/import");
+    await importStoreLeadsCsv(oldCsv);
+    const before = getTestDb()
+      .prepare("SELECT name FROM companies WHERE domain = ?")
+      .get("modcloth.com") as { name: string };
+    expect(before.name).toBe("modcloth.com");
+
+    // Step 2 — newer CSV (with merchant_name) → name should now be "ModCloth".
+    const newCsv = writeCsvWithName([
+      `modcloth.com,,USD $68.38,/Apparel/Women's Clothing,Los Angeles,modcloth.com,,"Los Angeles, CA, USA",,US,2016/12/30,Boutique,https://modcloth.com,support@modcloth.com,192,4572282,1235751,USD $63264503,facebook.com/modcloth,instagram.com/modcloth,ModCloth,,Shopify,Americas,California,active,,,,,`,
+    ]);
+    await importStoreLeadsCsv(newCsv);
+    const after = getTestDb()
+      .prepare("SELECT name FROM companies WHERE domain = ?")
+      .get("modcloth.com") as { name: string };
+    expect(after.name).toBe("ModCloth");
+  });
+
+  it("does NOT overwrite a hand-edited name on re-import", async () => {
+    // Pre-seed with a hand-edited name that's NOT the domain.
+    getTestDb()
+      .prepare(
+        `INSERT INTO companies (id, name, domain, status, created_at, updated_at)
+         VALUES ('c-edited', 'Hand Edited Name', 'modcloth.com', 'qualified',
+                 datetime('now'), datetime('now'))`,
+      )
+      .run();
+
+    const csv = writeCsvWithName([
+      `modcloth.com,,USD $68.38,/Apparel/,LA,,,,,US,,,https://modcloth.com,support@modcloth.com,192,,1000,USD $5000000,,,ModCloth,,Shopify,,CA,,,,,,`,
+    ]);
+    const { importStoreLeadsCsv } = await import("@/modules/sales/lib/storeleads/import");
+    await importStoreLeadsCsv(csv);
+    const row = getTestDb()
+      .prepare("SELECT name FROM companies WHERE domain = ?")
+      .get("modcloth.com") as { name: string };
+    expect(row.name).toBe("Hand Edited Name");
   });
 
   it("never clobbers a hand-edited non-null field on merge", async () => {

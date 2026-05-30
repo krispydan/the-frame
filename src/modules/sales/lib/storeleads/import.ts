@@ -50,6 +50,8 @@ export interface StoreLeadsCsvRow {
   estimated_yearly_sales?: string;
   facebook?: string;
   instagram?: string;
+  /** Present on newer StoreLeads CSV exports; absent on earlier ones. */
+  merchant_name?: string;
   phones?: string;
   platform?: string;
   region?: string;
@@ -327,9 +329,11 @@ function deriveFields(row: StoreLeadsCsvRow, domain: string): DerivedFields {
   })();
 
   return {
-    // StoreLeads doesn't ship a merchant_name field on the CSV (only on
-    // the API). Fall back to the domain as the display name.
-    merchantName: domain,
+    // merchant_name is on the newer CSV exports (the one with the
+    // column header literally `merchant_name`). Older exports omit it,
+    // so fall back to the domain. The merge step below knows to
+    // overwrite a domain-named row if a real merchant_name lands later.
+    merchantName: row.merchant_name?.trim() || domain,
     website: row.domain_url?.trim() || `https://${domain}`,
     phone: firstOf(row.phones),
     email: (firstOf(row.emails) || "").toLowerCase() || null,
@@ -403,6 +407,25 @@ function mergeRow(opts: {
     sets.push(`${col} = ?`);
     vals.push(val);
   }
+
+  // Special-case the `name` column: an earlier import of the same row
+  // (when the CSV didn't carry merchant_name) defaulted the name to
+  // the bare domain. If the CSV now ships a real merchant_name AND the
+  // current name in the DB is just the domain, replace it. We never
+  // clobber a hand-edited name (anything other than the domain literal).
+  const existingName = (existing.name as string | null | undefined) ?? "";
+  const existingDomain = (existing.domain as string | null | undefined) ?? "";
+  const namesEqual = (a: string, b: string) =>
+    a.trim().toLowerCase() === b.trim().toLowerCase();
+  if (
+    fields.merchantName &&
+    !namesEqual(fields.merchantName, existingDomain) &&
+    (existingName === "" || namesEqual(existingName, existingDomain))
+  ) {
+    sets.push("name = ?");
+    vals.push(fields.merchantName);
+  }
+
   // Always-write fields: timestamp + updated_at.
   sets.push("storeleads_last_synced_at = ?");
   vals.push(now);

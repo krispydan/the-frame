@@ -120,20 +120,23 @@ function median(arr: number[]): number | null {
 
 export interface LookalikeGenOptions {
   /** Max categories to seed searches from (1 = just the top match,
-   *  5 = top 5 categories combined). Defaults to 3. */
+   *  5 = top 5 categories combined). Defaults to 5 — categories are the
+   *  load-bearing signal per Daniel's spec, so cast a wider category net. */
   topCategoriesToTarget?: number;
   /** Cap on total new prospects fetched. Prevents runaway searches.
    *  Defaults to 500 — sane for an initial pass. */
   maxResults?: number;
-  /** Restrict to a country code (e.g. "US"). Falls back to the operator's
-   *  customer-base most-common country when omitted. */
+  /** Country code. Defaults to "US" (Daniel: "all stores should be in the US"). */
   countryFilter?: string;
-  /** Restrict to a single ecommerce platform. Falls back to most-common. */
+  /** Ecommerce platform. Defaults to "shopify" (Daniel: "all stores should be on shopify"). */
   platformFilter?: string;
-  /** Minimum estimated yearly sales (USD cents) — filters out tiny
-   *  shops. When omitted, uses the median customer's avg product
-   *  price × 12 as a floor (rough heuristic). */
+  /** Optional minimum estimated yearly sales (USD cents). Defaults to UNSET —
+   *  Daniel wants categories to drive, not sales floors. */
   minYearlySalesCents?: number;
+  /** When true (default), drop search results that don't expose at least
+   *  one email address in contact_info. StoreLeads has no documented
+   *  filter for "has email", so we post-filter. */
+  requireEmail?: boolean;
   signal?: AbortSignal;
 }
 
@@ -162,20 +165,24 @@ export async function generateLookalikes(
   const start = Date.now();
   const profile = aggregateCustomerProfile();
 
-  const topN = Math.max(1, Math.min(10, opts.topCategoriesToTarget ?? 3));
+  const topN = Math.max(1, Math.min(10, opts.topCategoriesToTarget ?? 5));
   const targetCategories = profile.categories.slice(0, topN).map((c) => c.category);
-  const country = opts.countryFilter ?? profile.countries[0]?.country ?? "US";
-  const platform = opts.platformFilter ?? profile.platforms[0]?.platform ?? "shopify";
-  const minSales =
-    opts.minYearlySalesCents ??
-    (profile.medianAvgProductPriceCents != null ? profile.medianAvgProductPriceCents * 12 : 100_00 * 1000);
+  const country = (opts.countryFilter ?? "US").toUpperCase();
+  // StoreLeads docs name the platform filter `f:p` (NOT `f:platform`,
+  // which is silently ignored). Confirmed at line 10771 of the API ref.
+  const platform = (opts.platformFilter ?? "shopify").toLowerCase();
   const maxResults = Math.max(10, Math.min(5000, opts.maxResults ?? 500));
+  const requireEmail = opts.requireEmail !== false;
 
   const effectiveFilters: Record<string, string | number> = {
     "f:cc": country,
-    "f:platform": platform,
-    "f:salesusdmin": minSales,
+    "f:p": platform,
   };
+  // Sales floor is opt-in only — Daniel's spec is "categories drive,
+  // not sales bands." When the caller explicitly passes a min, honour it.
+  if (opts.minYearlySalesCents != null && opts.minYearlySalesCents > 0) {
+    effectiveFilters["f:salesusdmin"] = opts.minYearlySalesCents;
+  }
 
   const results: StoreLeadsDomain[] = [];
   const seen = new Set<string>();
@@ -215,10 +222,23 @@ export async function generateLookalikes(
           signal: opts.signal,
         });
         for (const d of page.domains) {
-          const key = d.domain?.toLowerCase();
+          // StoreLeads' bulk + search responses key on cluster_best_ranked
+          // for the canonical public domain, not `domain` directly. Walk
+          // both so we don't silently miss every result.
+          const key =
+            (d.domain ?? (d as { cluster_best_ranked?: string }).cluster_best_ranked)?.toLowerCase();
           if (!key) continue;
           if (excludedDomains.has(key)) continue;
           if (seen.has(key)) continue;
+          // Email gate: skip rows without at least one email in
+          // contact_info. StoreLeads has no documented "has email"
+          // filter, so we post-filter.
+          if (requireEmail) {
+            const hasEmail = (d.contact_info ?? []).some(
+              (c) => c.type?.toLowerCase() === "email" && c.value,
+            );
+            if (!hasEmail) continue;
+          }
           seen.add(key);
           results.push(d);
           categoryCount++;
@@ -310,7 +330,8 @@ export function mergeLookalikesIntoCompanies(opts: {
     for (const d of opts.results) {
       stats.inspected++;
       try {
-        const domain = d.domain?.toLowerCase();
+        const domain =
+          (d.domain ?? (d as { cluster_best_ranked?: string }).cluster_best_ranked)?.toLowerCase();
         if (!domain) {
           stats.errors++;
           continue;
