@@ -7,8 +7,9 @@ import Link from "next/link";
 import {
   ArrowLeft, ArrowRight, Building2, Globe, Phone, Mail, MapPin, Tag, Star,
   Edit, UserPlus, MessageSquare, Clock, ExternalLink, Plus, Save, X,
-  Briefcase, Sparkles, Loader2, CheckCircle2, AlertCircle, Search,
+  Briefcase, Sparkles, Loader2, CheckCircle2, AlertCircle, Search, Store,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -145,9 +146,55 @@ export default function CompanyDetailPage() {
   const [dealNotes, setDealNotes] = useState("");
   const [dealSaving, setDealSaving] = useState(false);
   const [enriching, setEnriching] = useState(false);
+  const [enrichingSL, setEnrichingSL] = useState(false);
   const [newlyEnrichedFields, setNewlyEnrichedFields] = useState<string[]>([]);
   const [showDisqualifyDialog, setShowDisqualifyDialog] = useState(false);
   const [disqualifyReason, setDisqualifyReason] = useState("");
+
+  const enrichViaStoreLeads = async () => {
+    if (!company) return;
+    setEnrichingSL(true);
+    setNewlyEnrichedFields([]);
+    try {
+      const res = await fetch(`/api/v1/sales/prospects/${company.id}/enrich-storeleads`, {
+        method: "POST",
+      });
+      const result = (await res.json()) as
+        | { ok: true; enrichedFields: string[]; notFound?: boolean }
+        | { ok: false; error: string };
+      if (!result.ok) {
+        toast.error("StoreLeads enrichment failed", { description: result.error });
+        return;
+      }
+      if (result.notFound) {
+        toast.message("Not in StoreLeads", {
+          description: `StoreLeads doesn't have a record for ${company.domain ?? "this domain"}. Synced timestamp updated so we don't keep retrying.`,
+        });
+        return;
+      }
+      if (result.enrichedFields.length === 0) {
+        toast.success("Already up to date", {
+          description: "All StoreLeads fields were already populated — nothing to merge.",
+        });
+      } else {
+        toast.success(`Enriched ${result.enrichedFields.length} field${result.enrichedFields.length === 1 ? "" : "s"}`, {
+          description: result.enrichedFields.join(", "),
+        });
+        setNewlyEnrichedFields(result.enrichedFields);
+        setTimeout(() => setNewlyEnrichedFields([]), 30000);
+      }
+      // Refresh company data so the merged fields show up.
+      const data = await (await fetch(`/api/v1/sales/prospects/${id}`)).json();
+      setCompany(data.company);
+      setActivities(data.activities || []);
+    } catch (e) {
+      toast.error("Request failed", {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setEnrichingSL(false);
+    }
+  };
 
   const enrichCompany = async () => {
     if (!company) return;
@@ -658,7 +705,7 @@ export default function CompanyDetailPage() {
             </DialogContent>
           </Dialog>
 
-          {/* Enrichment status + button */}
+          {/* Enrichment status + buttons */}
           {company.enrichment_status === "enriched" ? (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-green-100 text-green-700">
               <CheckCircle2 className="w-4 h-4" /> Enriched
@@ -674,6 +721,23 @@ export default function CompanyDetailPage() {
               )}
             </Button>
           )}
+
+          {/* StoreLeads enrichment — separate channel; merges by COALESCE so
+              hand-edited values are preserved. Disabled when the prospect
+              has no domain (StoreLeads keys on domain). */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={enrichViaStoreLeads}
+            disabled={enrichingSL || !company.domain}
+            title={!company.domain ? "Add a domain first" : "Pull profile from StoreLeads"}
+          >
+            {enrichingSL ? (
+              <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> StoreLeads…</>
+            ) : (
+              <><Store className="w-4 h-4 mr-1" /> StoreLeads</>
+            )}
+          </Button>
 
           <Button variant="outline" size="sm" onClick={() => { setEditing(!editing); setEditFields({}); }}>
             <Edit className="w-4 h-4 mr-1" /> Edit
