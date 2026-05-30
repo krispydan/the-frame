@@ -174,6 +174,12 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN ecom_platform TEXT"); } catc
 try { sqlite.exec("CREATE INDEX idx_companies_storeleads_id ON companies (storeleads_id)"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_ecom_platform ON companies (ecom_platform)"); } catch { /* exists */ }
 
+// SL Phase 7: enforce one push per (campaign, company) pair so re-running
+// the StoreLeads → Instantly push UI doesn't add the same lead twice. The
+// existing pushCampaigns flow gates on instantly_lead_id IS NULL but
+// doesn't prevent a fresh row from being inserted by the new endpoint.
+try { sqlite.exec("CREATE UNIQUE INDEX uq_campaign_leads_campaign_company ON campaign_leads (campaign_id, company_id)"); } catch { /* exists */ }
+
 // Image upload system: new columns on catalog_images
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN url TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN file_size INTEGER"); } catch { /* exists */ }

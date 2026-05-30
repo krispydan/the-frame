@@ -19,6 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { isConfigured } from "@/modules/sales/lib/storeleads/client";
 import { StoreLeadsActions } from "./actions";
 import { LookalikeCard } from "./lookalike-card";
+import { InstantlyPushCard } from "./instantly-push-card";
 
 export const dynamic = "force-dynamic";
 
@@ -145,6 +146,9 @@ export default function StoreLeadsSettingsPage() {
 
       {/* Customer lookalike pipeline */}
       <LookalikeCard />
+
+      {/* Score + push to Instantly */}
+      <InstantlyPushCard />
 
       {/* Recent rows */}
       <Card>
