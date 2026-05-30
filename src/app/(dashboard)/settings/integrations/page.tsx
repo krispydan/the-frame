@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plug, ChevronRight, ShoppingBag, DollarSign, Warehouse, MessageSquare, Store, Package, CheckCircle, AlertCircle, Circle } from "lucide-react";
+import { Plug, ChevronRight, ShoppingBag, DollarSign, Warehouse, MessageSquare, Store, Package, Sparkles, CheckCircle, AlertCircle, Circle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ApiKeyCard } from "./api-key-card";
@@ -31,6 +31,12 @@ type ShipHeroStatus = {
   configured: boolean;
 };
 
+type StoreLeadsStatus = {
+  configured: boolean;
+  sourcedCount: number;
+  enrichedCount: number;
+};
+
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
@@ -53,6 +59,7 @@ export default function IntegrationsIndexPage() {
   const [xero, setXero] = useState<XeroStatus | null>(null);
   const [shiphero, setShiphero] = useState<ShipHeroStatus | null>(null);
   const [slack, setSlack] = useState<SlackStatus | null>(null);
+  const [storeleads, setStoreleads] = useState<StoreLeadsStatus | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/integrations/shopify")
@@ -77,6 +84,17 @@ export default function IntegrationsIndexPage() {
       .then((r) => r.json())
       .then((d) => setSlack(d))
       .catch(() => setSlack({ configured: false, auth: { ok: false }, routing: [] }));
+    fetch("/api/v1/integrations/storeleads")
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = (await r.json()) as { configured?: boolean; sourcedCount?: number; enrichedCount?: number };
+        setStoreleads({
+          configured: !!d.configured,
+          sourcedCount: d.sourcedCount ?? 0,
+          enrichedCount: d.enrichedCount ?? 0,
+        });
+      })
+      .catch(() => setStoreleads({ configured: false, sourcedCount: 0, enrichedCount: 0 }));
   }, []);
 
   const shopifyActive = shopifyShops?.filter((s) => s.isActive) ?? [];
@@ -229,6 +247,37 @@ export default function IntegrationsIndexPage() {
             </CardHeader>
             <CardContent>
               <StatusBadge kind={slackStatusKind} label={slackLabel} />
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link href="/settings/integrations/storeleads" className="block group cursor-pointer">
+          <Card className="transition-all group-hover:shadow-md group-hover:border-primary/40">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center justify-between text-base">
+                <span className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5" />
+                  StoreLeads
+                </span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </CardTitle>
+              <CardDescription>
+                Ecommerce-store firmographic data. Lead imports, CRM enrichment, lookalike audiences.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <StatusBadge
+                kind={storeleads === null ? "off" : storeleads.configured ? "ok" : "off"}
+                label={
+                  storeleads === null
+                    ? "Loading"
+                    : storeleads.configured
+                    ? storeleads.sourcedCount > 0
+                      ? `${storeleads.sourcedCount.toLocaleString()} sourced`
+                      : "Configured"
+                    : "Not configured"
+                }
+              />
             </CardContent>
           </Card>
         </Link>
