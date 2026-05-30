@@ -18,6 +18,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { isConfigured } from "@/modules/sales/lib/storeleads/client";
 import { StoreLeadsActions } from "./actions";
+import { LookalikeCard } from "./lookalike-card";
 
 export const dynamic = "force-dynamic";
 
@@ -141,6 +142,9 @@ export default function StoreLeadsSettingsPage() {
 
       {/* Actions */}
       <StoreLeadsActions />
+
+      {/* Customer lookalike pipeline */}
+      <LookalikeCard />
 
       {/* Recent rows */}
       <Card>
