@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Award, Send, Loader2, Eye, Sparkles } from "lucide-react";
+import { Award, Send, Loader2, Eye, Sparkles, MailCheck } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -35,7 +35,14 @@ interface Campaign {
 interface Pushable {
   campaignId: string;
   tiers: string[];
+  /** Total candidates by score (before NeverBounce filter). */
   total: number;
+  /** Verified valid+catchall — what Push actually moves. */
+  pushable: number;
+  /** Still need NeverBounce verification. */
+  pendingVerification: number;
+  /** NeverBounce ruled out (invalid/disposable/unknown/error). */
+  ruledOut: number;
   perTier: Array<{ tier: string; c: number }>;
   sample: Array<{
     id: string;
@@ -44,7 +51,22 @@ interface Pushable {
     email: string | null;
     icp_tier: string | null;
     icp_score: number | null;
+    email_verification_status: string | null;
   }>;
+}
+
+interface VerifyResp {
+  ok: boolean;
+  verified: number;
+  remaining: number;
+  stats: {
+    apiCallsMade: number;
+    results: Record<string, number>;
+    skippedFresh: number;
+    skippedNoEmail: number;
+    errors: Array<{ email: string; message: string }>;
+  } | null;
+  error?: string;
 }
 
 interface ScoreResult {
@@ -73,6 +95,8 @@ export function InstantlyPushCard() {
   const [loadingPushable, setLoadingPushable] = useState(false);
   const [scoring, setScoring] = useState(false);
   const [pushing, setPushing] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyProgress, setVerifyProgress] = useState<{ verified: number; remaining: number } | null>(null);
   const [unscoredCount, setUnscoredCount] = useState<number | null>(null);
 
   useEffect(() => {
@@ -145,20 +169,63 @@ export function InstantlyPushCard() {
     }
   }
 
+  /** Verify all pending emails for this campaign+tiers. Loops the
+   *  endpoint until `remaining` hits 0 (each call is capped at 50 to
+   *  fit under Cloudflare edge timeout). Refreshes the pushable
+   *  preview between batches so the operator sees live progress. */
+  async function onVerify() {
+    if (!campaignId) {
+      toast.error("Pick a campaign first");
+      return;
+    }
+    setVerifying(true);
+    setVerifyProgress(null);
+    let totalVerified = 0;
+    try {
+      let loops = 0;
+      // Hard ceiling on loops — defensive against an endpoint that always
+      // returns remaining>0 (shouldn't happen but better than infinite).
+      while (loops < 200) {
+        const res = await fetch("/api/v1/integrations/storeleads/verify-pending", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ campaignId, tiers, limit: 50 }),
+        });
+        const data = (await res.json()) as VerifyResp;
+        if (!data.ok) {
+          toast.error("Verification failed", { description: data.error });
+          break;
+        }
+        totalVerified += data.verified;
+        setVerifyProgress({ verified: totalVerified, remaining: data.remaining });
+        if (data.verified === 0 || data.remaining === 0) break;
+        loops++;
+      }
+      toast.success(`Verified ${totalVerified} email${totalVerified === 1 ? "" : "s"}`, {
+        description: "Refresh preview to see what's now push-eligible.",
+        duration: 10000,
+      });
+      void refreshPushable();
+    } finally {
+      setVerifying(false);
+    }
+  }
+
   async function onPush() {
     if (!campaignId) {
       toast.error("Pick a campaign first");
       return;
     }
-    if (!pushable || pushable.total === 0) {
-      toast.message("Nothing to push", {
-        description: "No qualifying leads. Try widening the tier filter or scoring more rows.",
-      });
+    if (!pushable || pushable.pushable === 0) {
+      const hint = pushable && pushable.pendingVerification > 0
+        ? `${pushable.pendingVerification} need NeverBounce verification — click Verify first.`
+        : "No qualifying leads. Try widening the tier filter or scoring more rows.";
+      toast.message("Nothing to push", { description: hint });
       return;
     }
     if (
       !window.confirm(
-        `Push ${pushable.total.toLocaleString()} ${tiers.join("/")} StoreLeads lead${pushable.total === 1 ? "" : "s"} to "${campaigns.find((c) => c.id === campaignId)?.name}"? Already-pushed leads are skipped by the unique index, so re-runs are safe.`,
+        `Push ${pushable.pushable.toLocaleString()} verified ${tiers.join("/")} StoreLeads lead${pushable.pushable === 1 ? "" : "s"} to "${campaigns.find((c) => c.id === campaignId)?.name}"? Already-pushed leads are skipped by the unique index, so re-runs are safe.`,
       )
     ) {
       return;
@@ -275,19 +342,61 @@ export function InstantlyPushCard() {
               {loadingPushable ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Eye className="h-4 w-4 mr-1" />}
               Preview
             </Button>
-            <Button onClick={onPush} disabled={!pushable || pushable.total === 0 || pushing}>
+            <Button
+              variant="outline"
+              onClick={onVerify}
+              disabled={!campaignId || verifying || pushing || !pushable || pushable.pendingVerification === 0}
+              title={
+                !pushable
+                  ? "Preview first to see what needs verification"
+                  : pushable.pendingVerification === 0
+                    ? "All eligible emails already verified"
+                    : `Verify ${pushable.pendingVerification} unverified emails via NeverBounce`
+              }
+            >
+              {verifying ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <MailCheck className="h-4 w-4 mr-1" />}
+              Verify {pushable ? `${pushable.pendingVerification}` : ""}
+            </Button>
+            <Button onClick={onPush} disabled={!pushable || pushable.pushable === 0 || pushing}>
               {pushing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />}
-              Push {pushable ? `${pushable.total}` : ""}
+              Push {pushable ? `${pushable.pushable}` : ""}
             </Button>
           </div>
 
+          {verifying && verifyProgress && (
+            <div className="text-xs text-muted-foreground flex items-center gap-2">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Verifying… {verifyProgress.verified.toLocaleString()} done, {verifyProgress.remaining.toLocaleString()} remaining.
+            </div>
+          )}
+
           {pushable && (
             <div className="rounded-md border bg-muted/30 p-3 text-xs space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <Award className="h-3 w-3" />
-                <span className="font-medium">
-                  {pushable.total.toLocaleString()} lead{pushable.total === 1 ? "" : "s"} ready
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="flex items-center gap-1.5">
+                  <Award className="h-3 w-3" />
+                  <span className="font-medium">{pushable.total.toLocaleString()}</span>
+                  <span className="text-muted-foreground">candidates by score</span>
                 </span>
+                <span className="flex items-center gap-1.5 text-green-700">
+                  <span className="font-medium">{pushable.pushable.toLocaleString()}</span>
+                  <span>verified — push-eligible</span>
+                </span>
+                {pushable.pendingVerification > 0 && (
+                  <span className="flex items-center gap-1.5 text-yellow-700">
+                    <span className="font-medium">{pushable.pendingVerification.toLocaleString()}</span>
+                    <span>need verification</span>
+                  </span>
+                )}
+                {pushable.ruledOut > 0 && (
+                  <span className="flex items-center gap-1.5 text-muted-foreground">
+                    <span className="font-medium">{pushable.ruledOut.toLocaleString()}</span>
+                    <span>ruled out by NeverBounce</span>
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-1">
+                <span className="text-muted-foreground">By tier:</span>
                 {pushable.perTier.map((pt) => (
                   <Badge key={pt.tier} variant="outline" className="text-xs">
                     {pt.tier}: {pt.c}
@@ -301,6 +410,13 @@ export function InstantlyPushCard() {
                     {pushable.sample.map((s) => (
                       <li key={s.id} className="flex items-center gap-2">
                         <Badge variant="outline" className="text-xs">{s.icp_tier ?? "—"}</Badge>
+                        {s.email_verification_status === "valid" || s.email_verification_status === "catchall" ? (
+                          <Badge className="text-[10px] bg-green-600 hover:bg-green-700">{s.email_verification_status}</Badge>
+                        ) : s.email_verification_status ? (
+                          <Badge variant="outline" className="text-[10px] text-red-600 border-red-300">{s.email_verification_status}</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-[10px] text-yellow-700">unverified</Badge>
+                        )}
                         <span className="font-mono">{s.domain || s.name}</span>
                         <span className="text-muted-foreground">{s.email}</span>
                       </li>

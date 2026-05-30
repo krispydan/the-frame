@@ -47,28 +47,59 @@ export async function GET(req: NextRequest) {
       )
   `;
 
+  // Bind args repeat per query — sqlite prepared statements re-bind per call.
+  const bind = [...tiers, campaignId];
+
+  // Total candidates (before NeverBounce filter). Surfaces "how many
+  // are eligible by score but blocked by verification" vs the push count.
   const totalRow = sqlite
     .prepare(`SELECT COUNT(*) AS c ${sqlBase}`)
-    .get(...tiers, campaignId) as { c: number };
+    .get(...bind) as { c: number };
+
+  // Push-eligible = NeverBounce-verified 'valid' or 'catchall'. This is
+  // what the Push button actually moves.
+  const pushable = (sqlite
+    .prepare(
+      `SELECT COUNT(*) AS c ${sqlBase} AND c.email_verification_status IN ('valid','catchall')`,
+    )
+    .get(...bind) as { c: number }).c;
+
+  // Still need verification.
+  const pendingVerification = (sqlite
+    .prepare(
+      `SELECT COUNT(*) AS c ${sqlBase} AND c.email_verification_status IS NULL`,
+    )
+    .get(...bind) as { c: number }).c;
+
+  // Verified as bad — surfaces what NeverBounce ruled out.
+  const ruledOut = (sqlite
+    .prepare(
+      `SELECT COUNT(*) AS c ${sqlBase} AND c.email_verification_status IN ('invalid','disposable','unknown','error')`,
+    )
+    .get(...bind) as { c: number }).c;
 
   const perTier = sqlite
     .prepare(`SELECT c.icp_tier AS tier, COUNT(*) AS c ${sqlBase} GROUP BY c.icp_tier`)
-    .all(...tiers, campaignId) as Array<{ tier: string; c: number }>;
+    .all(...bind) as Array<{ tier: string; c: number }>;
 
   const sample = sqlite
     .prepare(
       `SELECT c.id, c.name, c.domain, c.email, c.city, c.state, c.country,
-              c.icp_tier, c.icp_score, c.estimated_yearly_sales_cents
+              c.icp_tier, c.icp_score, c.estimated_yearly_sales_cents,
+              c.email_verification_status
        ${sqlBase}
        ORDER BY COALESCE(c.icp_score, -1) DESC, COALESCE(c.estimated_yearly_sales_cents, -1) DESC
        LIMIT 20`,
     )
-    .all(...tiers, campaignId) as Array<Record<string, unknown>>;
+    .all(...bind) as Array<Record<string, unknown>>;
 
   return NextResponse.json({
     campaignId,
     tiers,
     total: totalRow.c,
+    pushable,
+    pendingVerification,
+    ruledOut,
     perTier,
     sample,
   });
