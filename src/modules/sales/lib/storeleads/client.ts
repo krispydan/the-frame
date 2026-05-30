@@ -215,8 +215,28 @@ export async function bulkGetStoresByDomain(
     { ...opts, label: `bulkGetStoresByDomain(${domains.length})` },
   );
   const map: Record<string, StoreLeadsDomain> = {};
+  // The bulk response has no top-level `domain` field on each record —
+  // identifying fields are `cluster_best_ranked` (the canonical public
+  // domain) and `platform_domain` (e.g. *.myshopify.com). We key by the
+  // ORIGINAL requested domain so callers can match input→output, then
+  // also index by cluster_best_ranked + platform_domain as fallbacks
+  // for cases where StoreLeads redirected and the input/output strings
+  // differ.
+  const requested = new Set(domains.map((d) => d.toLowerCase()));
   for (const d of res.domains ?? []) {
-    if (d.domain) map[d.domain.toLowerCase()] = d;
+    const candidates = [
+      (d as { domain?: string }).domain,
+      (d as { cluster_best_ranked?: string }).cluster_best_ranked,
+      (d as { platform_domain?: string }).platform_domain,
+    ];
+    for (const c of candidates) {
+      if (!c) continue;
+      const k = c.toLowerCase();
+      if (requested.has(k)) map[k] = d;
+      // Always also store under cluster_best_ranked so subsequent callers
+      // can look up by canonical domain without the original request set.
+      if (!map[k]) map[k] = d;
+    }
   }
   return map;
 }

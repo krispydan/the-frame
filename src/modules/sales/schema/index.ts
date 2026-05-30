@@ -81,6 +81,13 @@ export const companies = sqliteTable("companies", {
   youtubeFollowers: integer("youtube_followers"),
   // "shopify" / "woocommerce" / "magento" / "bigcommerce" / "custom" / …
   ecomPlatform: text("ecom_platform"),
+  // ── MillionVerifier ──
+  // Raw `result` from MillionVerifier's API; one of:
+  //   'ok' | 'catch_all' | 'unknown' | 'invalid' | 'disposable' | 'error'
+  // Null = never verified. Push-to-Instantly filter only accepts 'ok'
+  // and 'catch_all'.
+  emailVerificationStatus: text("email_verification_status"),
+  emailVerifiedAt: text("email_verified_at"),
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 }, (table) => [
@@ -93,6 +100,7 @@ export const companies = sqliteTable("companies", {
   index("idx_companies_source_id").on(table.sourceId),
   index("idx_companies_storeleads_id").on(table.storeleadsId),
   index("idx_companies_ecom_platform").on(table.ecomPlatform),
+  index("idx_companies_email_verification").on(table.emailVerificationStatus),
 ]);
 
 // ── Stores ──

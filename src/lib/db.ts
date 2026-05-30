@@ -180,6 +180,16 @@ try { sqlite.exec("CREATE INDEX idx_companies_ecom_platform ON companies (ecom_p
 // doesn't prevent a fresh row from being inserted by the new endpoint.
 try { sqlite.exec("CREATE UNIQUE INDEX uq_campaign_leads_campaign_company ON campaign_leads (campaign_id, company_id)"); } catch { /* exists */ }
 
+// SL Phase 7.5: NeverBounce email-verification cache. Stamped per row so
+// just-in-time verification before Instantly push can skip rows we
+// already checked. Status values mirror NeverBounce's raw `result`
+// field so the column tells the operator the literal API outcome:
+// 'valid' | 'catchall' | 'unknown' | 'invalid' | 'disposable'.
+// Push filter accepts 'valid' + 'catchall' (Daniel's pick).
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN email_verification_status TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN email_verified_at TEXT"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_companies_email_verification ON companies (email_verification_status)"); } catch { /* exists */ }
+
 // Image upload system: new columns on catalog_images
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN url TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN file_size INTEGER"); } catch { /* exists */ }

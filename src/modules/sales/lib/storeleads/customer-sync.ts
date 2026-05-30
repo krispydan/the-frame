@@ -25,6 +25,7 @@ import { sqlite } from "@/lib/db";
 import {
   addDomainsToList,
   bulkGetStoresByDomain,
+  StoreLeadsError,
   type StoreLeadsDomain,
 } from "./client";
 
@@ -93,6 +94,12 @@ export interface CustomerSyncStats {
   storeleadsAccepted: number;
   /** Domains StoreLeads didn't recognise (returned in unrecognized_domains). */
   storeleadsUnrecognized: string[];
+  /** True when the list-upload step failed because the named list doesn't
+   *  exist in StoreLeads. The bulk-enrichment step continues regardless —
+   *  the list is a nice-to-have, the enrichment is the load-bearing
+   *  step. UI surfaces this so the operator can create the list
+   *  manually in StoreLeads' UI. */
+  listMissing?: boolean;
   /** Companies whose row got enriched with StoreLeads data on this run. */
   enriched: number;
   /** Domains where the bulk lookup returned no record. */
@@ -136,7 +143,11 @@ export async function uploadCustomerListToStoreLeads(opts: {
   }
 
   // Step 1 — push to the StoreLeads List. 10,000 per request; we're nowhere
-  // near that yet. Single call.
+  // near that yet. Single call. Soft-fails: the bulk-enrichment step in
+  // Step 2 is the load-bearing one (it actually populates our companies
+  // rows). The list is convenience-only — Daniel can see his customers
+  // in StoreLeads' UI from it — so a missing-list error here just gets
+  // flagged for human action without blocking the rest of the sync.
   try {
     const allDomains = slice.map((c) => c.domain);
     const res = await addDomainsToList({
@@ -148,12 +159,21 @@ export async function uploadCustomerListToStoreLeads(opts: {
     stats.storeleadsUnrecognized = res.unrecognized;
     opts.onProgress?.(allDomains.length, allDomains.length, "list");
   } catch (e) {
-    stats.errors.push({
-      domain: "(list-upload)",
-      message: e instanceof Error ? e.message : String(e),
-    });
-    // The enrichment step doesn't depend on the list upload succeeding —
-    // we can still fetch each customer's profile. Continue.
+    const msg = e instanceof Error ? e.message : String(e);
+    // StoreLeads has no documented "create list" endpoint — the list
+    // must already exist in their UI before add-domains works. Detect
+    // the specific "ErrNotFound" body and surface it as a structured
+    // flag so the UI can show actionable guidance.
+    const looksLikeMissingList =
+      e instanceof StoreLeadsError &&
+      e.status === 404 &&
+      e.bodyPreview.includes("ErrNotFound") &&
+      e.bodyPreview.includes("List");
+    if (looksLikeMissingList) {
+      stats.listMissing = true;
+    } else {
+      stats.errors.push({ domain: "(list-upload)", message: msg });
+    }
   }
 
   // Step 2 — bulk lookup. 100 domains per request; 5 req/sec on Pro/Elite.

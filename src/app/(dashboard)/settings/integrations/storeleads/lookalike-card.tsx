@@ -26,6 +26,7 @@ interface SyncStats {
   totalCustomers: number;
   storeleadsAccepted: number;
   storeleadsUnrecognized: string[];
+  listMissing?: boolean;
   enriched: number;
   notFoundInStoreLeads: string[];
   errors: Array<{ domain: string; message: string }>;
@@ -71,8 +72,10 @@ export function LookalikeCard() {
         return;
       }
       setLastSync(data.stats);
+      const notFound = data.stats.storeleadsUnrecognized.length + data.stats.notFoundInStoreLeads.length;
       toast.success("Customer list synced", {
-        description: `${data.stats.totalCustomers} customers · ${data.stats.enriched} enriched · ${data.stats.storeleadsUnrecognized.length} not in StoreLeads`,
+        description: `${data.stats.totalCustomers} customers · ${data.stats.enriched} enriched · ${notFound} not in StoreLeads${data.stats.listMissing ? " · list not yet created in StoreLeads UI" : ""}`,
+        duration: 10000,
       });
     } catch (e) {
       toast.error("Sync request failed", { description: e instanceof Error ? e.message : String(e) });
@@ -180,6 +183,14 @@ export function LookalikeCard() {
                 value={lastSync.storeleadsUnrecognized.length + lastSync.notFoundInStoreLeads.length}
               />
             </div>
+            {lastSync.listMissing && (
+              <p className="text-xs text-yellow-700 mt-1">
+                ⚠️ StoreLeads list <strong>Jaxy Customers</strong> doesn&apos;t
+                exist. Create it manually in the StoreLeads UI (Lists → New
+                List → name it &quot;Jaxy Customers&quot;) and re-run, or
+                ignore — bulk enrichment already populated the CRM rows.
+              </p>
+            )}
             {lastSync.errors.length > 0 && (
               <p className="text-xs text-red-600 mt-1">
                 {lastSync.errors.length} errors (check browser console for details)
