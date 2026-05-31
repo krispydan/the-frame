@@ -14,6 +14,9 @@ interface CampaignRow {
   instantly_campaign_id: string | null;
   sent: number;
   delivered: number;
+  /** Kept on the row so /campaigns/[id] can show opens if it ever wants
+   *  to, but NOT surfaced on the dashboard — Daniel doesn't track open
+   *  rate because of deliverability concerns with open tracking. */
   opened: number;
   replied: number;
   bounced: number;
@@ -29,7 +32,6 @@ interface CampaignRow {
 interface Summary {
   active_campaigns: number;
   total_sent: number;
-  avg_open_rate: number;
   avg_reply_rate: number;
 }
 
@@ -61,7 +63,6 @@ async function getCampaigns() {
     SELECT
       count(CASE WHEN status = 'active' THEN 1 END) as active_campaigns,
       coalesce(sum(sent), 0) as total_sent,
-      CASE WHEN sum(sent) > 0 THEN round(cast(sum(opened) as real) / sum(sent) * 100, 1) ELSE 0 END as avg_open_rate,
       CASE WHEN sum(sent) > 0 THEN round(cast(sum(replied) as real) / sum(sent) * 100, 1) ELSE 0 END as avg_reply_rate
     FROM campaigns
   `).get() as Summary;

@@ -231,7 +231,7 @@ export function CampaignDetail({ campaign }: { campaign: Campaign }) {
               {classifyingIcp ? "Classifying..." : "Classify ICP"}
             </Button>
             {campaign.instantly_campaign_id && (
-              <a href={`https://app.instantly.ai/campaigns/${campaign.instantly_campaign_id}`} target="_blank" rel="noopener">
+              <a href={`https://app.instantly.ai/app/campaign/${campaign.instantly_campaign_id}/analytics`} target="_blank" rel="noopener">
                 <Button variant="outline" size="sm">
                   <ExternalLink className="mr-2 h-4 w-4" /> Open in Instantly
                 </Button>

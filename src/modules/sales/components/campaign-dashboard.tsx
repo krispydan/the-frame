@@ -32,7 +32,6 @@ interface Props {
     status: string;
     instantly_campaign_id: string | null;
     sent: number;
-    opened: number;
     replied: number;
     /** Distinct contacts in this campaign that have placed ≥1 order. */
     orders_count: number;
@@ -44,7 +43,6 @@ interface Props {
   summary: {
     active_campaigns: number;
     total_sent: number;
-    avg_open_rate: number;
     avg_reply_rate: number;
   };
 }
@@ -127,15 +125,6 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Avg Open Rate</CardTitle>
-            <Eye className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{summary.avg_open_rate}%</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Avg Reply Rate</CardTitle>
             <MessageSquare className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -207,7 +196,6 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
               <TableHead>Type</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Sent</TableHead>
-              <TableHead className="text-right">Opened</TableHead>
               <TableHead className="text-right">Replied</TableHead>
               <TableHead className="text-right">Orders</TableHead>
               <TableHead className="text-right">Order $</TableHead>
@@ -237,9 +225,6 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{c.sent.toLocaleString()}</TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {c.opened.toLocaleString()} <span className="text-muted-foreground text-xs">({pct(c.opened, c.sent)}%)</span>
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
                     {c.replied.toLocaleString()} <span className="text-muted-foreground text-xs">({pct(c.replied, c.sent)}%)</span>
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{c.orders_count.toLocaleString()}</TableCell>
@@ -253,7 +238,7 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
             })}
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-16">
+                <TableCell colSpan={7} className="text-center py-16">
                   <Mail className="h-10 w-10 mx-auto text-muted-foreground/50 mb-3" />
                   <p className="font-medium text-muted-foreground">No campaigns yet</p>
                   <p className="text-sm text-muted-foreground/70 mt-1">Create your first outreach campaign to start generating leads.</p>
