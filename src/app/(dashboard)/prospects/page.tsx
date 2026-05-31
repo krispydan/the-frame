@@ -3,6 +3,7 @@
 import { Suspense, useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { PushToInstantlyModal } from "./push-to-instantly-modal";
 import { ListFilter, Bookmark, Plus, X, ChevronRight, Download, Search, Merge, AlertTriangle, CheckCircle2, ExternalLink, Globe, Phone, Mail, MapPin, Star, Tag, ChevronsUpDown, Check } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -274,6 +275,7 @@ function ProspectsPage() {
   // Duplicate detection state
   const [showDuplicates, setShowDuplicates] = useState(false);
   const [duplicates, setDuplicates] = useState<DuplicatePair[]>([]);
+  const [showPushToInstantly, setShowPushToInstantly] = useState(false);
   const [dupLoading, setDupLoading] = useState(false);
   const [mergePair, setMergePair] = useState<DuplicatePair | null>(null);
   const [mergeLoading, setMergeLoading] = useState(false);
@@ -875,6 +877,16 @@ function ProspectsPage() {
             🏷️ Classify ICP
           </button>
 
+          {/* Push to Instantly — verify via NeverBounce + ship to chosen campaign */}
+          <button
+            onClick={() => setShowPushToInstantly(true)}
+            disabled={bulkLoading || selected.size === 0}
+            title={selected.size === 0 ? "Select prospects first" : "Push selected to an Instantly campaign"}
+            className="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium flex items-center gap-1.5"
+          >
+            📧 Push to Instantly
+          </button>
+
           {/* Export CSV */}
           <button onClick={exportSelectedCSV} disabled={bulkLoading}
             className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 font-medium flex items-center gap-1.5">
@@ -1453,6 +1465,19 @@ function ProspectsPage() {
           </div>
         </div>
       </div>
+
+      {showPushToInstantly && (
+        <PushToInstantlyModal
+          companyIds={Array.from(selected)}
+          onClose={() => setShowPushToInstantly(false)}
+          onPushed={() => {
+            setSelected(new Set());
+            setSelectAll(false);
+            setSelectAllMatching(false);
+            void refreshProspects();
+          }}
+        />
+      )}
     </div>
   );
 }

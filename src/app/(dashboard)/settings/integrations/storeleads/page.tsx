@@ -19,7 +19,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { isConfigured } from "@/modules/sales/lib/storeleads/client";
 import { StoreLeadsActions } from "./actions";
 import { LookalikeCard } from "./lookalike-card";
-import { InstantlyPushCard } from "./instantly-push-card";
 
 export const dynamic = "force-dynamic";
 
@@ -147,8 +146,20 @@ export default function StoreLeadsSettingsPage() {
       {/* Customer lookalike pipeline */}
       <LookalikeCard />
 
-      {/* Score + push to Instantly */}
-      <InstantlyPushCard />
+      {/* Push to Instantly is no longer here — moved to the Prospects
+          page so it works for ALL sources, not just StoreLeads. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Score + push to Instantly</CardTitle>
+          <CardDescription>
+            The push workflow moved to <Link href="/prospects" className="underline">/prospects</Link>:
+            filter prospects (by ICP tier, source, status, etc.), select the rows you want to push,
+            then click <strong>📧 Push to Instantly</strong> in the floating bulk-action bar. Verification
+            via NeverBounce + the Instantly campaign picker live in the modal that opens. Now works for
+            any source, not just StoreLeads.
+          </CardDescription>
+        </CardHeader>
+      </Card>
 
       {/* Recent rows */}
       <Card>
