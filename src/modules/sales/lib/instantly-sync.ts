@@ -170,6 +170,8 @@ export interface ImportCampaignsStats {
   /** Returned by Instantly but we already had them locally and nothing
    *  changed — counted separately so re-runs are obviously safe. */
   unchanged: number;
+  /** Campaigns we pulled fresh analytics for after the upsert. */
+  analyticsRefreshed: number;
   errors: string[];
 }
 
@@ -190,6 +192,7 @@ export async function importCampaignsFromInstantly(): Promise<ImportCampaignsSta
     created: 0,
     updated: 0,
     unchanged: 0,
+    analyticsRefreshed: 0,
     errors: [],
   };
 
@@ -241,6 +244,33 @@ export async function importCampaignsFromInstantly(): Promise<ImportCampaignsSta
     }
   });
   txn();
+
+  // Pull fresh analytics for every campaign we just upserted. Without
+  // this the table renders 0s on a freshly-synced campaign until the
+  // next full Instantly sync runs. Per-campaign HTTP, so we cap the
+  // pacing — 5 rps fits comfortably under any rate limit.
+  const analyticsUpdate = sqlite.prepare(
+    `UPDATE campaigns
+        SET sent = ?, delivered = ?, opened = ?, replied = ?, bounced = ?,
+            updated_at = datetime('now')
+      WHERE instantly_campaign_id = ?`,
+  );
+  for (const c of remote) {
+    try {
+      const a = await instantlyClient.getCampaignAnalytics(c.id);
+      analyticsUpdate.run(
+        a.emails_sent,
+        Math.max(0, a.emails_sent - a.emails_bounced),
+        a.emails_opened,
+        a.emails_replied,
+        a.emails_bounced,
+        c.id,
+      );
+      stats.analyticsRefreshed++;
+    } catch (err) {
+      stats.errors.push(`analytics ${c.id} (${c.name}): ${(err as Error).message}`);
+    }
+  }
   return stats;
 }
 

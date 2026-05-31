@@ -34,8 +34,10 @@ interface Props {
     sent: number;
     opened: number;
     replied: number;
-    meetings_booked: number;
-    orders_placed: number;
+    /** Distinct contacts in this campaign that have placed ≥1 order. */
+    orders_count: number;
+    /** Sum of order totals across those contacts (USD). */
+    orders_total: number;
     lead_count: number;
     created_at: string;
   }>;
@@ -207,8 +209,8 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
               <TableHead className="text-right">Sent</TableHead>
               <TableHead className="text-right">Opened</TableHead>
               <TableHead className="text-right">Replied</TableHead>
-              <TableHead className="text-right">Meetings</TableHead>
               <TableHead className="text-right">Orders</TableHead>
+              <TableHead className="text-right">Order $</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -240,8 +242,12 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
                   <TableCell className="text-right tabular-nums">
                     {c.replied.toLocaleString()} <span className="text-muted-foreground text-xs">({pct(c.replied, c.sent)}%)</span>
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">{c.meetings_booked}</TableCell>
-                  <TableCell className="text-right tabular-nums">{c.orders_placed}</TableCell>
+                  <TableCell className="text-right tabular-nums">{c.orders_count.toLocaleString()}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {c.orders_total > 0
+                      ? c.orders_total.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 })
+                      : <span className="text-muted-foreground">—</span>}
+                  </TableCell>
                 </TableRow>
               );
             })}

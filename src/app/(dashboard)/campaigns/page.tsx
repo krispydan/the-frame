@@ -17,9 +17,11 @@ interface CampaignRow {
   opened: number;
   replied: number;
   bounced: number;
-  meetings_booked: number;
-  orders_placed: number;
   lead_count: number;
+  /** Distinct companies in this campaign that have placed ≥1 order. */
+  orders_count: number;
+  /** Sum of order totals across those companies (USD). */
+  orders_total: number;
   created_at: string;
   updated_at: string;
 }
@@ -32,9 +34,25 @@ interface Summary {
 }
 
 async function getCampaigns() {
+  // orders_count: distinct companies in this campaign with ≥1 order (any
+  // status). orders_total: sum of order totals across those companies.
+  // Joins through campaign_leads → orders by company_id. NULL-safe via
+  // COALESCE so a campaign with no orders shows 0, not blank.
   const rows = sqlite.prepare(`
     SELECT c.*,
-      (SELECT count(*) FROM campaign_leads cl WHERE cl.campaign_id = c.id) as lead_count
+      (SELECT count(*) FROM campaign_leads cl WHERE cl.campaign_id = c.id) as lead_count,
+      COALESCE((
+        SELECT COUNT(DISTINCT cl.company_id)
+          FROM campaign_leads cl
+          JOIN orders o ON o.company_id = cl.company_id
+         WHERE cl.campaign_id = c.id
+      ), 0) as orders_count,
+      COALESCE((
+        SELECT SUM(o.total)
+          FROM campaign_leads cl
+          JOIN orders o ON o.company_id = cl.company_id
+         WHERE cl.campaign_id = c.id
+      ), 0) as orders_total
     FROM campaigns c
     ORDER BY c.created_at DESC
   `).all() as CampaignRow[];
