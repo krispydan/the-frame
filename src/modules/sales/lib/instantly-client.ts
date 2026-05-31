@@ -50,6 +50,39 @@ export interface CreateCampaignData {
   body?: string;
 }
 
+// ── Normalisation helpers (Instantly v2 → our types) ──
+
+/**
+ * Instantly v2 ships `status` as a small integer (verified against the
+ * live /campaigns response, May 2026):
+ *   0 = draft, 1 = active, 2 = paused, 3 = completed, 4 = error.
+ * Map to our string union — anything unexpected falls back to "paused"
+ * to avoid silently dropping the row through a strict enum check.
+ */
+function statusFromCode(code: unknown): InstantlyCampaign["status"] {
+  switch (typeof code === "number" ? code : Number(code)) {
+    case 0: return "draft";
+    case 1: return "active";
+    case 2: return "paused";
+    case 3: return "completed";
+    case 4: return "error";
+    default: return "paused";
+  }
+}
+
+/** Convert a raw Instantly v2 /campaigns item into the local typed shape. */
+function normalizeCampaign(raw: Record<string, unknown>): InstantlyCampaign {
+  return {
+    id: String(raw.id ?? ""),
+    name: String(raw.name ?? "(unnamed)"),
+    status: typeof raw.status === "string"
+      ? (raw.status as InstantlyCampaign["status"])
+      : statusFromCode(raw.status),
+    created_at: String(raw.timestamp_created ?? raw.created_at ?? ""),
+    updated_at: String(raw.timestamp_updated ?? raw.updated_at ?? ""),
+  };
+}
+
 // ── Rate Limiter ──
 
 class RateLimiter {
@@ -153,7 +186,34 @@ class InstantlyClient {
   // ── API Methods ──
 
   async listCampaigns(): Promise<InstantlyCampaign[]> {
-    return this.request("GET", "/campaigns");
+    // Real Instantly v2 /campaigns returns
+    //   { items: [...], next_starting_after?: "<cursor>" }
+    // with paginated chunks. Status is a NUMBER, not the enum string our
+    // local InstantlyCampaign type claims — map it here so callers can
+    // rely on the union value. Mock mode still returns a plain array
+    // (see mockResponse) — handle both shapes for either path.
+    const items: InstantlyCampaign[] = [];
+    let cursor: string | undefined;
+    const MAX_PAGES = 50; // safety cap; 50 × default page size ≫ any real catalog
+    for (let p = 0; p < MAX_PAGES; p++) {
+      const path = `/campaigns${cursor ? `?starting_after=${encodeURIComponent(cursor)}` : ""}`;
+      const raw = await this.request<
+        | InstantlyCampaign[]
+        | { items?: Array<Record<string, unknown>>; next_starting_after?: string }
+      >("GET", path);
+      // Mock path → plain array of already-shaped InstantlyCampaign.
+      if (Array.isArray(raw)) {
+        items.push(...raw);
+        break;
+      }
+      // Real API → { items, next_starting_after } with raw fields.
+      for (const r of raw.items ?? []) {
+        items.push(normalizeCampaign(r));
+      }
+      cursor = raw.next_starting_after;
+      if (!cursor) break;
+    }
+    return items;
   }
 
   async getCampaign(id: string): Promise<InstantlyCampaign> {
