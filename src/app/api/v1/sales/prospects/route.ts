@@ -27,6 +27,11 @@ export async function GET(request: NextRequest) {
   // — useless as filters). If someone bookmarked URLs with them, just ignore.
 
   const offset = (page - 1) * limit;
+  // `ids_only=1` returns just the matching company IDs (up to 50k) so the
+  // client can resolve "select all matching" → full ID list for a bulk
+  // action without transferring 4k rows of joined data. Skips the count
+  // query, joins, and pagination since the caller wants the full set.
+  const idsOnly = params.get("ids_only") === "1";
 
   // Build WHERE clauses
   const whereClauses: string[] = [];
@@ -129,6 +134,20 @@ export async function GET(request: NextRequest) {
     created_at: "c.created_at",
   };
   const sortCol = sortColumns[sort] || "c.name";
+
+  // ids_only short-circuit — single-column SELECT, no joins, no
+  // pagination, no JSON parsing. Caps at 50k to protect Node memory
+  // from a runaway "select all of 130k companies" request.
+  if (idsOnly) {
+    const idRows = sqlite.prepare(
+      `SELECT c.id FROM companies c ${whereSQL} LIMIT 50000`,
+    ).all(...whereParams) as Array<{ id: string }>;
+    return NextResponse.json({
+      ids: idRows.map((r) => r.id),
+      total: idRows.length,
+      capped: idRows.length === 50000,
+    });
+  }
 
   // Count query
   const countResult = sqlite.prepare(`SELECT count(*) as total FROM companies c ${whereSQL}`).get(...whereParams) as { total: number };

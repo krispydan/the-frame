@@ -3,8 +3,9 @@
 import { Suspense, useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { toast } from "sonner";
 import { PushToInstantlyModal } from "./push-to-instantly-modal";
-import { ListFilter, Bookmark, Plus, X, ChevronRight, Download, Search, Merge, AlertTriangle, CheckCircle2, ExternalLink, Globe, Phone, Mail, MapPin, Star, Tag, ChevronsUpDown, Check } from "lucide-react";
+import { ListFilter, Bookmark, Plus, X, ChevronRight, Download, Search, Merge, AlertTriangle, CheckCircle2, ExternalLink, Globe, Phone, Mail, MapPin, Star, Tag, ChevronsUpDown, Check, Sparkles, Award, Send, Loader2 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Command,
@@ -98,6 +99,44 @@ interface ApiResponse {
   page: number;
   limit: number;
   totalPages: number;
+}
+
+/**
+ * Compact button used by the bottom bulk-action bar. Variants pick a
+ * fixed colour so the bar stays scannable: primary (the headline
+ * outreach action), success (approve), danger (reject), neutral
+ * (everything else — secondary actions in a single muted style so
+ * the eye lands on Push first).
+ */
+function BarButton({
+  onClick, disabled, variant, title, children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  variant: "primary" | "success" | "danger" | "neutral";
+  title?: string;
+  children: React.ReactNode;
+}) {
+  const styles: Record<typeof variant, string> = {
+    primary: "bg-indigo-600 text-white hover:bg-indigo-700",
+    success: "bg-green-600 text-white hover:bg-green-700",
+    danger: "bg-red-600 text-white hover:bg-red-700",
+    neutral: "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700",
+  };
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${styles[variant]}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Divider() {
+  return <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-0.5" />;
 }
 
 function SegmentCell({
@@ -276,6 +315,12 @@ function ProspectsPage() {
   const [showDuplicates, setShowDuplicates] = useState(false);
   const [duplicates, setDuplicates] = useState<DuplicatePair[]>([]);
   const [showPushToInstantly, setShowPushToInstantly] = useState(false);
+  /** Resolved id list passed to the Push to Instantly modal. When the
+   *  operator has "select all matching N" turned on, this is fetched
+   *  via /api/v1/sales/prospects?ids_only=1&<filters> so the modal
+   *  actually sees all N — not just the visible 25-row page. */
+  const [pushIds, setPushIds] = useState<string[]>([]);
+  const [resolvingPushIds, setResolvingPushIds] = useState(false);
   const [dupLoading, setDupLoading] = useState(false);
   const [mergePair, setMergePair] = useState<DuplicatePair | null>(null);
   const [mergeLoading, setMergeLoading] = useState(false);
@@ -386,6 +431,53 @@ function ProspectsPage() {
     apiParams.set("limit", String(limit));
     const data: ApiResponse = await (await fetch(`/api/v1/sales/prospects?${apiParams}`)).json();
     setProspects(data.data); setTotal(data.total); setTotalPages(data.totalPages);
+  };
+
+  /**
+   * Resolve the operator's current selection into a flat ID list. When
+   * `selectAllMatching` is true, this fetches every matching id from
+   * the server (filters preserved) so bulk actions actually cover all
+   * matches — not just the visible page. Hard-capped server-side at
+   * 50k for memory safety.
+   */
+  const resolveSelectedIds = async (): Promise<string[]> => {
+    if (!selectAllMatching) return Array.from(selected);
+    const apiParams = new URLSearchParams(searchParams.toString());
+    apiParams.set("ids_only", "1");
+    apiParams.delete("page");
+    apiParams.delete("limit");
+    try {
+      const data = (await (await fetch(`/api/v1/sales/prospects?${apiParams.toString()}`)).json()) as {
+        ids?: string[];
+        capped?: boolean;
+      };
+      if (data.capped) {
+        toast.message("Capped at 50,000 prospects", {
+          description: "Tighten your filters to reach more than that in one batch.",
+        });
+      }
+      return data.ids ?? [];
+    } catch (e) {
+      toast.error("Couldn't load all matching ids", {
+        description: e instanceof Error ? e.message : String(e),
+      });
+      return Array.from(selected);
+    }
+  };
+
+  const openPushToInstantly = async () => {
+    setResolvingPushIds(true);
+    try {
+      const ids = await resolveSelectedIds();
+      if (ids.length === 0) {
+        toast.error("No prospects to push");
+        return;
+      }
+      setPushIds(ids);
+      setShowPushToInstantly(true);
+    } finally {
+      setResolvingPushIds(false);
+    }
   };
 
   const doBulkAction = async (action: string, params?: Record<string, unknown>) => {
@@ -744,37 +836,50 @@ function ProspectsPage() {
         </div>
       )}
 
-      {/* Bulk action bar — floating at bottom when items selected */}
+      {/* Bulk action bar — floating at bottom when items selected.
+          Layout: [selection chip + 'select all' upgrade] | [status: Approve/Reject]
+                  | [Add Tag] | [Enrich/Classify] | [Push to Instantly + Export] | [×] */}
       {selected.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl px-5 py-3 flex items-center gap-3">
-          <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-            {selectAllMatching ? `All ${total.toLocaleString()} matching` : `${selected.size} selected`}
-          </span>
-          {selectAll && !selectAllMatching && total > limit && (
-            <button onClick={() => setSelectAllMatching(true)} className="text-sm text-blue-600 hover:underline">
-              Select all {total.toLocaleString()}
-            </button>
-          )}
-          <div className="w-px h-6 bg-gray-200 dark:bg-gray-600" />
-          <button onClick={() => doBulkAction("approve")} disabled={bulkLoading}
-            className="px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">
-            ✓ Approve
-          </button>
-          <button onClick={() => doBulkAction("reject")} disabled={bulkLoading}
-            className="px-3 py-1.5 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 disabled:opacity-50 font-medium">
-            ✕ Reject
-          </button>
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40
+                        bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700
+                        rounded-2xl shadow-2xl px-2 py-1.5 flex items-center gap-1
+                        max-w-[calc(100vw-2rem)] overflow-x-auto">
+          {/* Selection chip — separate visual unit, click to upgrade to all-matching */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 text-xs font-semibold mr-1">
+            <span className="text-gray-800 dark:text-gray-200">
+              {selectAllMatching ? `All ${total.toLocaleString()}` : `${selected.size}`}
+            </span>
+            <span className="text-gray-400">selected</span>
+            {selectAll && !selectAllMatching && total > limit && (
+              <button
+                onClick={() => setSelectAllMatching(true)}
+                className="ml-1 px-1.5 py-0.5 rounded text-[11px] bg-blue-600 text-white hover:bg-blue-700"
+                title={`Select all ${total.toLocaleString()} matching the current filters`}
+              >
+                +{(total - limit).toLocaleString()} more
+              </button>
+            )}
+          </div>
 
-          {/* Tag picker dropdown */}
+          {/* Status changes */}
+          <BarButton onClick={() => doBulkAction("approve")} disabled={bulkLoading} variant="success">
+            <CheckCircle2 className="w-3.5 h-3.5" /> Approve
+          </BarButton>
+          <BarButton onClick={() => doBulkAction("reject")} disabled={bulkLoading} variant="danger">
+            <X className="w-3.5 h-3.5" /> Reject
+          </BarButton>
+
+          <Divider />
+
+          {/* Tag picker */}
           <div className="relative" ref={tagPickerRef}>
-            <button onClick={() => { setShowTagPicker(!showTagPicker); setShowCampaignPicker(false); }} disabled={bulkLoading}
-              className="px-3 py-1.5 bg-gray-700 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50 font-medium">
-              🏷 Add Tag
-            </button>
+            <BarButton onClick={() => { setShowTagPicker(!showTagPicker); setShowCampaignPicker(false); }} disabled={bulkLoading} variant="neutral">
+              <Tag className="w-3.5 h-3.5" /> Tag
+            </BarButton>
             {showTagPicker && (
               <div className="absolute bottom-full mb-2 left-0 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl">
                 <div className="p-2 border-b border-gray-100 dark:border-gray-700">
-                  <input type="text" placeholder="New tag..." value={newTag} onChange={e => setNewTag(e.target.value)}
+                  <input type="text" placeholder="New tag…" value={newTag} onChange={e => setNewTag(e.target.value)}
                     onKeyDown={e => { if (e.key === "Enter" && newTag.trim()) { doBulkAction("tag", { tag: newTag.trim() }); setNewTag(""); setShowTagPicker(false); } }}
                     className="w-full px-2 py-1.5 border rounded text-sm dark:bg-gray-700 dark:border-gray-600" autoFocus />
                 </div>
@@ -793,109 +898,91 @@ function ProspectsPage() {
             )}
           </div>
 
-          {/* Campaign picker dropdown */}
-          <div className="relative" ref={campaignPickerRef}>
-            <button onClick={() => { setShowCampaignPicker(!showCampaignPicker); setShowTagPicker(false); }} disabled={bulkLoading}
-              className="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium">
-              📧 Add to Campaign
-            </button>
-            {showCampaignPicker && (
-              <div className="absolute bottom-full mb-2 right-0 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl">
-                <div className="p-2 border-b border-gray-100 dark:border-gray-700">
-                  <p className="text-xs font-semibold text-gray-500 uppercase">Select Campaign</p>
-                </div>
-                <div className="max-h-48 overflow-y-auto p-1">
-                  {campaigns.length === 0 ? (
-                    <p className="px-3 py-2 text-xs text-gray-400">No campaigns found</p>
-                  ) : campaigns.map(c => (
-                    <button key={c.id} onClick={() => { doBulkAction("assign", { owner_id: c.id }); setShowCampaignPicker(false); }}
-                      className="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
-                      <div className="text-sm font-medium text-gray-900 dark:text-white">{c.name}</div>
-                      <div className="text-xs text-gray-400">{c.type} · {c.status}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Bulk Enrich */}
-          <button onClick={async () => {
-            setBulkLoading(true);
-            setBulkEnrichProgress(null);
-            try {
-              const res = await fetch("/api/v1/prospects/enrich-bulk", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ companyIds: Array.from(selected), skipWithEmail: false }),
-              });
-              const reader = res.body?.getReader();
-              const decoder = new TextDecoder();
-              if (reader) {
-                let buffer = "";
-                while (true) {
-                  const { done, value } = await reader.read();
-                  if (done) break;
-                  buffer += decoder.decode(value, { stream: true });
-                  const lines = buffer.split("\n\n");
-                  buffer = lines.pop() || "";
-                  for (const line of lines) {
-                    const match = line.match(/^data: (.+)$/);
-                    if (match) {
-                      try {
-                        const data = JSON.parse(match[1]);
-                        if (data.type === "progress") {
-                          setBulkEnrichProgress({ done: data.done, total: data.total });
-                        } else if (data.type === "complete") {
-                          setBulkEnrichProgress(null);
-                        }
-                      } catch {}
+          {/* Enrich + Classify */}
+          <BarButton
+            disabled={bulkLoading}
+            variant="neutral"
+            onClick={async () => {
+              setBulkLoading(true);
+              setBulkEnrichProgress(null);
+              try {
+                const ids = await resolveSelectedIds();
+                const res = await fetch("/api/v1/prospects/enrich-bulk", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ companyIds: ids, skipWithEmail: false }),
+                });
+                const reader = res.body?.getReader();
+                const decoder = new TextDecoder();
+                if (reader) {
+                  let buffer = "";
+                  while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split("\n\n");
+                    buffer = lines.pop() || "";
+                    for (const line of lines) {
+                      const match = line.match(/^data: (.+)$/);
+                      if (match) {
+                        try {
+                          const data = JSON.parse(match[1]);
+                          if (data.type === "progress") setBulkEnrichProgress({ done: data.done, total: data.total });
+                          else if (data.type === "complete") setBulkEnrichProgress(null);
+                        } catch {}
+                      }
                     }
                   }
                 }
-              }
-              await refreshProspects();
-            } finally { setBulkLoading(false); setBulkEnrichProgress(null); }
-          }} disabled={bulkLoading}
-            className="px-3 py-1.5 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700 disabled:opacity-50 font-medium flex items-center gap-1.5">
-            ✨ {bulkEnrichProgress ? `Enriching ${bulkEnrichProgress.done}/${bulkEnrichProgress.total}` : "Enrich"}
-          </button>
-
-          {/* Bulk ICP Classify */}
-          <button onClick={async () => {
-            setBulkLoading(true);
-            try {
-              await fetch("/api/v1/sales/agents/icp-classify", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ companyIds: Array.from(selected) }),
-              });
-              await refreshProspects();
-            } finally { setBulkLoading(false); }
-          }} disabled={bulkLoading}
-            className="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium flex items-center gap-1.5">
-            🏷️ Classify ICP
-          </button>
-
-          {/* Push to Instantly — verify via NeverBounce + ship to chosen campaign */}
-          <button
-            onClick={() => setShowPushToInstantly(true)}
-            disabled={bulkLoading || selected.size === 0}
-            title={selected.size === 0 ? "Select prospects first" : "Push selected to an Instantly campaign"}
-            className="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium flex items-center gap-1.5"
+                await refreshProspects();
+              } finally { setBulkLoading(false); setBulkEnrichProgress(null); }
+            }}
           >
-            📧 Push to Instantly
-          </button>
+            <Sparkles className="w-3.5 h-3.5" />
+            {bulkEnrichProgress ? `${bulkEnrichProgress.done}/${bulkEnrichProgress.total}` : "Enrich"}
+          </BarButton>
+          <BarButton
+            disabled={bulkLoading}
+            variant="neutral"
+            onClick={async () => {
+              setBulkLoading(true);
+              try {
+                const ids = await resolveSelectedIds();
+                await fetch("/api/v1/sales/agents/icp-classify", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ companyIds: ids }),
+                });
+                await refreshProspects();
+              } finally { setBulkLoading(false); }
+            }}
+          >
+            <Award className="w-3.5 h-3.5" /> Score
+          </BarButton>
 
-          {/* Export CSV */}
-          <button onClick={exportSelectedCSV} disabled={bulkLoading}
-            className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 font-medium flex items-center gap-1.5">
-            <Download className="w-3.5 h-3.5" /> Export CSV
-          </button>
+          <Divider />
 
-          <div className="w-px h-6 bg-gray-200 dark:bg-gray-600" />
-          <button onClick={() => { setSelected(new Set()); setSelectAll(false); setSelectAllMatching(false); }}
-            className="text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+          {/* The headline outreach action — visually distinct, full color */}
+          <BarButton
+            onClick={openPushToInstantly}
+            disabled={bulkLoading || resolvingPushIds}
+            variant="primary"
+            title="Verify via NeverBounce + push to an Instantly campaign"
+          >
+            {resolvingPushIds ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+            Push to Instantly
+          </BarButton>
+
+          <BarButton onClick={exportSelectedCSV} disabled={bulkLoading} variant="neutral">
+            <Download className="w-3.5 h-3.5" /> Export
+          </BarButton>
+
+          <Divider />
+          <button
+            onClick={() => { setSelected(new Set()); setSelectAll(false); setSelectAllMatching(false); }}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+            title="Clear selection"
+          >
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -1468,12 +1555,13 @@ function ProspectsPage() {
 
       {showPushToInstantly && (
         <PushToInstantlyModal
-          companyIds={Array.from(selected)}
+          companyIds={pushIds}
           onClose={() => setShowPushToInstantly(false)}
           onPushed={() => {
             setSelected(new Set());
             setSelectAll(false);
             setSelectAllMatching(false);
+            setPushIds([]);
             void refreshProspects();
           }}
         />
