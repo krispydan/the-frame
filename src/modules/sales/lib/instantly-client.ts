@@ -311,6 +311,41 @@ class InstantlyClient {
   }
 
   /**
+   * Walk every lead in a single campaign. Used by the auto-import
+   * step on /sync-campaigns — leads created directly in Instantly
+   * (not via our push) need to land in our CRM so the campaigns
+   * table dedup + analytics line up. Paginated; v2's /leads/list
+   * accepts `campaign` + `starting_after` cursor.
+   *
+   * The caller decides what to do with each row (upsert into
+   * companies / campaign_leads etc).
+   */
+  async listLeadsInCampaign(
+    campaignId: string,
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<Array<Record<string, unknown>>> {
+    const out: Array<Record<string, unknown>> = [];
+    let cursor: string | undefined;
+    const MAX_PAGES = 200; // 200 × default 25 = 5,000 leads/campaign — generous cap
+    for (let p = 0; p < MAX_PAGES; p++) {
+      if (opts.signal?.aborted) break;
+      const raw = await this.request<{
+        items?: Array<Record<string, unknown>>;
+        next_starting_after?: string;
+      }>("POST", "/leads/list", {
+        campaign: campaignId,
+        limit: 100,
+        ...(cursor ? { starting_after: cursor } : {}),
+      });
+      const items = raw.items ?? [];
+      out.push(...items);
+      cursor = raw.next_starting_after;
+      if (!cursor || items.length === 0) break;
+    }
+    return out;
+  }
+
+  /**
    * Look up a lead by email. v2 has no GET /leads/status — leads are
    * queried via POST /leads/list with a search payload. Returns the
    * matching leads (typically 1 row per (campaign, email) tuple).

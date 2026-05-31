@@ -2,7 +2,10 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 import { NextResponse } from "next/server";
-import { importCampaignsFromInstantly } from "@/modules/sales/lib/instantly-sync";
+import {
+  importCampaignsFromInstantly,
+  importLeadsFromInstantly,
+} from "@/modules/sales/lib/instantly-sync";
 import { instantlyClient } from "@/modules/sales/lib/instantly-client";
 
 /**
@@ -24,8 +27,18 @@ import { instantlyClient } from "@/modules/sales/lib/instantly-client";
 export async function POST() {
   try {
     const isMock = instantlyClient.isMock;
-    const stats = await importCampaignsFromInstantly();
-    return NextResponse.json({ ok: true, isMock, stats });
+    const campaignStats = await importCampaignsFromInstantly();
+    // Pull every campaign's lead list AFTER the campaign upsert lands,
+    // so leads that were added in Instantly directly (not via our push)
+    // get back-filled into companies + campaign_leads. Pre-push dedup
+    // relies on the result.
+    const leadStats = await importLeadsFromInstantly();
+    return NextResponse.json({
+      ok: true,
+      isMock,
+      stats: campaignStats,
+      leadStats,
+    });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : String(e) },

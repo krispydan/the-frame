@@ -24,6 +24,14 @@ interface SyncResp {
     created: number;
     updated: number;
     unchanged: number;
+    analyticsRefreshed: number;
+    errors: string[];
+  };
+  leadStats?: {
+    fetched: number;
+    companiesCreated: number;
+    leadsLinked: number;
+    alreadyKnown: number;
     errors: string[];
   };
   error?: string;
@@ -50,9 +58,16 @@ export function InstantlySyncButton() {
           duration: 12000,
         });
       }
+      const camps = data.stats;
+      const leads = data.leadStats;
+      const errCount = camps.errors.length + (leads?.errors.length ?? 0);
+      const leadLine = leads
+        ? `\nLeads: ${leads.fetched} fetched · ${leads.companiesCreated} companies created · ${leads.leadsLinked} newly linked · ${leads.alreadyKnown} already known`
+        : "";
       toast.success("Synced campaigns from Instantly", {
-        description: `${data.stats.fetched} fetched · ${data.stats.created} created · ${data.stats.updated} updated · ${data.stats.unchanged} unchanged${data.stats.errors.length ? ` · ${data.stats.errors.length} errors` : ""}`,
-        duration: 12000,
+        description:
+          `${camps.fetched} fetched · ${camps.created} created · ${camps.updated} updated · ${camps.unchanged} unchanged · ${camps.analyticsRefreshed} analytics refreshed${errCount ? ` · ${errCount} errors` : ""}${leadLine}`,
+        duration: 15000,
       });
     } catch (e) {
       toast.error("Sync request failed", {

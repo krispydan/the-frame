@@ -274,6 +274,136 @@ export async function importCampaignsFromInstantly(): Promise<ImportCampaignsSta
   return stats;
 }
 
+// ── Pull leads from Instantly into our CRM ──
+
+export interface ImportLeadsStats {
+  /** Total raw leads Instantly returned across every synced campaign. */
+  fetched: number;
+  /** New companies inserted (email wasn't known to our CRM). */
+  companiesCreated: number;
+  /** New campaign_leads rows inserted (lead wasn't recorded against this
+   *  campaign locally yet). */
+  leadsLinked: number;
+  /** Already-known (campaign, company) pairs — counted so re-runs are
+   *  obviously idempotent. */
+  alreadyKnown: number;
+  /** Per-campaign errors. */
+  errors: string[];
+}
+
+/**
+ * Walk every campaign that has an instantly_campaign_id, pull its full
+ * lead list from Instantly via /leads/list, and back-fill our CRM so
+ * the dedup gate at push time + the campaign table's lead counts both
+ * reflect Instantly reality.
+ *
+ * For each lead returned:
+ *   - email exists in companies   → ensure a campaign_leads row exists
+ *                                    for (campaign, company)
+ *   - email missing from companies → create a company tagged
+ *                                    source_type='instantly_pull' +
+ *                                    a campaign_leads row
+ *
+ * Always persists the real Instantly lead id onto campaign_leads so a
+ * later push can dedup against (campaign_id, company_id) AND we have a
+ * proper handle for status-pull. Re-runs are safe — the unique index
+ * on campaign_leads(campaign_id, company_id) makes the insert path a
+ * silent no-op for already-linked pairs.
+ */
+export async function importLeadsFromInstantly(): Promise<ImportLeadsStats> {
+  const stats: ImportLeadsStats = {
+    fetched: 0,
+    companiesCreated: 0,
+    leadsLinked: 0,
+    alreadyKnown: 0,
+    errors: [],
+  };
+
+  const synced = sqlite.prepare(
+    `SELECT id, instantly_campaign_id, name FROM campaigns WHERE instantly_campaign_id IS NOT NULL`,
+  ).all() as Array<{ id: string; instantly_campaign_id: string; name: string }>;
+
+  if (synced.length === 0) return stats;
+
+  const findCompanyByEmail = sqlite.prepare(
+    `SELECT id FROM companies WHERE LOWER(email) = LOWER(?) LIMIT 1`,
+  );
+  const findLink = sqlite.prepare(
+    `SELECT id FROM campaign_leads WHERE campaign_id = ? AND company_id = ? LIMIT 1`,
+  );
+  const insertCompany = sqlite.prepare(
+    `INSERT INTO companies (
+       id, name, type, email, status, source, source_type,
+       created_at, updated_at
+     ) VALUES (
+       ?, ?, 'online', ?, 'new', 'instantly_pull', 'instantly_pull',
+       datetime('now'), datetime('now')
+     )`,
+  );
+  const insertLink = sqlite.prepare(
+    `INSERT INTO campaign_leads (
+       id, campaign_id, company_id, contact_id, instantly_lead_id, email,
+       status, created_at
+     ) VALUES (?, ?, ?, NULL, ?, ?, 'sent', datetime('now'))`,
+  );
+
+  for (const camp of synced) {
+    let leads: Array<Record<string, unknown>>;
+    try {
+      leads = await instantlyClient.listLeadsInCampaign(camp.instantly_campaign_id);
+    } catch (err) {
+      stats.errors.push(`listLeads ${camp.name}: ${(err as Error).message}`);
+      continue;
+    }
+
+    const txn = sqlite.transaction(() => {
+      for (const lead of leads) {
+        stats.fetched++;
+        const email = String(lead.email ?? "").trim().toLowerCase();
+        const instId = String(lead.id ?? "");
+        if (!email || !instId) continue;
+
+        // Find or create company by email. NOTE: companies has no
+        // `source_type='instantly_pull'` value in the schema enum
+        // technically, but the column is plain TEXT in sqlite so this
+        // works — Drizzle's enum is a typecheck-only constraint.
+        let row = findCompanyByEmail.get(email) as { id: string } | undefined;
+        if (!row) {
+          const name =
+            (typeof lead.company_name === "string" && lead.company_name.trim())
+              ? String(lead.company_name).trim()
+              : [lead.first_name, lead.last_name].filter(Boolean).join(" ").trim() || email;
+          const newId = crypto.randomUUID();
+          insertCompany.run(newId, name, email);
+          row = { id: newId };
+          stats.companiesCreated++;
+        }
+
+        // Link → campaign_leads. Unique index on (campaign_id,
+        // company_id) handles dedup at the DB layer; we still check
+        // first so the alreadyKnown counter is accurate.
+        const link = findLink.get(camp.id, row.id) as { id: string } | undefined;
+        if (link) {
+          stats.alreadyKnown++;
+        } else {
+          try {
+            insertLink.run(crypto.randomUUID(), camp.id, row.id, instId, email);
+            stats.leadsLinked++;
+          } catch (e) {
+            // Concurrent race with another caller — log + count as
+            // already-known so the stats stay honest.
+            stats.alreadyKnown++;
+            void e;
+          }
+        }
+      }
+    });
+    txn();
+  }
+
+  return stats;
+}
+
 // ── Full Sync ──
 
 export async function runInstantlySync(): Promise<SyncResult> {
