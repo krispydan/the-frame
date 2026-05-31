@@ -21,7 +21,7 @@
  */
 
 import { sqlite } from "@/lib/db";
-import { verifyMany, type NeverBounceResult } from "./client";
+import { verifyEmail, type NeverBounceResult } from "./client";
 
 export interface VerifyProspectsStats {
   requested: number;
@@ -107,12 +107,16 @@ export async function verifyProspectEmails(opts: {
     return stats;
   }
 
-  const map = await verifyMany(toVerify.map((t) => t.email), {
-    concurrency: opts.concurrency,
-    signal: opts.signal,
-  });
-  stats.apiCallsMade = Object.keys(map).length;
-
+  // Inline the concurrency loop instead of using verifyMany() so we can
+  // persist each verdict to SQLite the instant it returns from
+  // NeverBounce. Previously we batched all results into a single
+  // end-of-call transaction — meaning a mid-batch crash (network
+  // blip, edge timeout, process restart) would spend up to ~50
+  // credits with zero rows updated, and the retry would re-pay for
+  // every one. Per-result writes drop that worst case from N to 0
+  // wasted credits: every credit spent immediately becomes a stored
+  // status that the no-re-verify skip rule will respect on the next
+  // run.
   const update = sqlite.prepare(
     `UPDATE companies
         SET email_verification_status = ?,
@@ -120,24 +124,39 @@ export async function verifyProspectEmails(opts: {
             updated_at                = ?
       WHERE id = ?`,
   );
-  const now = new Date().toISOString();
 
-  const txn = sqlite.transaction(() => {
-    for (const { id, email } of toVerify) {
-      const r = map[email];
-      if (!r) continue;
-      if ("error" in r) {
-        stats.errors.push({ email, message: r.error });
+  const concurrency = Math.max(1, Math.min(10, opts.concurrency ?? 5));
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < toVerify.length) {
+      if (opts.signal?.aborted) return;
+      const i = cursor++;
+      const { id, email } = toVerify[i];
+      try {
+        const r = await verifyEmail(email, { signal: opts.signal });
+        stats.apiCallsMade++;
+        const status = r.result;
+        stats.results[status] = (stats.results[status] ?? 0) + 1;
+        const now = new Date().toISOString();
+        update.run(status, now, now, id);
+      } catch (e) {
+        // Treat anything that throws (network, 5xx, throttle) as a
+        // transient 'error' verdict. Persist it — the
+        // `IS NULL OR = 'error'` filter in verify-by-ids will pick it
+        // up on the next click, and the original credit (if any was
+        // charged) wasn't wasted because we recorded the attempt.
+        const msg = e instanceof Error ? e.message : String(e);
+        stats.errors.push({ email, message: msg });
         stats.results.error++;
+        stats.apiCallsMade++;
+        const now = new Date().toISOString();
         update.run("error", now, now, id);
-        continue;
       }
-      const status = r.result;
-      stats.results[status] = (stats.results[status] ?? 0) + 1;
-      update.run(status, now, now, id);
     }
-  });
-  txn();
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
   stats.durationMs = Date.now() - start;
   return stats;
