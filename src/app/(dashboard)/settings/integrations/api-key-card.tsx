@@ -30,9 +30,13 @@ interface ApiKeyCardProps {
   settingKey: string;
   /** The integration slug for /api/v1/settings/test-connection, e.g. "klaviyo". */
   testSlug: string;
+  /** Optional integration-specific buttons rendered next to Save + Test
+   *  (e.g. Instantly's "Sync campaigns" trigger). Kept generic so we
+   *  don't have to fork the card for every integration. */
+  extraActions?: React.ReactNode;
 }
 
-export function ApiKeyCard({ title, description, settingKey, testSlug }: ApiKeyCardProps) {
+export function ApiKeyCard({ title, description, settingKey, testSlug, extraActions }: ApiKeyCardProps) {
   const [value, setValue] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -130,6 +134,7 @@ export function ApiKeyCard({ title, description, settingKey, testSlug }: ApiKeyC
               {result.message}
             </span>
           )}
+          {extraActions}
         </div>
       </CardContent>
     </Card>

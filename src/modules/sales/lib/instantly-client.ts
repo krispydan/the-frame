@@ -72,20 +72,45 @@ class RateLimiter {
 
 class InstantlyClient {
   private baseUrl = "https://api.instantly.ai/api/v2";
-  private apiKey: string | null;
+  private envKey: string | null;
   private rateLimiter = new RateLimiter();
   private maxRetries = 3;
 
   constructor() {
-    this.apiKey = process.env.INSTANTLY_API_KEY || null;
+    this.envKey = process.env.INSTANTLY_API_KEY || null;
+  }
+
+  /**
+   * Resolve the API key for THIS request. Env var wins (immutable per
+   * deploy), then we fall back to the `instantly_api_key` row in the
+   * settings table so the existing /settings/integrations Instantly
+   * card actually takes effect without requiring a redeploy. Resolved
+   * per-call so a paste-key-then-click-button flow works without an
+   * app restart.
+   */
+  private resolveApiKey(): string | null {
+    if (this.envKey) return this.envKey;
+    try {
+      // Local import to avoid a circular dependency at module load time
+      // (sqlite needs db.ts which transitively imports modules that
+      // import this client).
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { sqlite } = require("@/lib/db") as { sqlite: { prepare: (s: string) => { get: () => { value?: string } | undefined } } };
+      const row = sqlite.prepare(`SELECT value FROM settings WHERE key='instantly_api_key' LIMIT 1`).get();
+      const val = row?.value?.trim();
+      return val && val.length > 0 ? val : null;
+    } catch {
+      return null;
+    }
   }
 
   get isMock(): boolean {
-    return !this.apiKey;
+    return !this.resolveApiKey();
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    if (this.isMock) return this.mockResponse<T>(method, path, body);
+    const apiKey = this.resolveApiKey();
+    if (!apiKey) return this.mockResponse<T>(method, path, body);
 
     await this.rateLimiter.wait();
 
@@ -95,7 +120,7 @@ class InstantlyClient {
         const url = `${this.baseUrl}${path}`;
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
         };
         const res = await fetch(url, {
           method,

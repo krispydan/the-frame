@@ -6,6 +6,7 @@ import { Plug, ChevronRight, ShoppingBag, DollarSign, Warehouse, MessageSquare, 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ApiKeyCard } from "./api-key-card";
+import { InstantlySyncButton } from "./instantly-sync-button";
 
 type ShopifyShop = {
   id: string;
@@ -317,9 +318,10 @@ export default function IntegrationsIndexPage() {
           />
           <ApiKeyCard
             title="Instantly"
-            description="Cold-email campaign automation for the sales pipeline"
+            description="Cold-email campaign automation for the sales pipeline. Paste your API key, save, then click Sync to pull current campaigns into the Frame."
             settingKey="instantly_api_key"
             testSlug="instantly"
+            extraActions={<InstantlySyncButton />}
           />
           <ApiKeyCard
             title="Outscraper"

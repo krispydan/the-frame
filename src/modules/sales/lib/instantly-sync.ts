@@ -145,6 +145,92 @@ async function pullCampaigns(): Promise<{ campaigns: number; leads: number; stag
   return { campaigns: campaignCount, leads: leadCount, stageUpdates, errors };
 }
 
+// ── Import campaigns from Instantly into Frame ──
+
+export interface ImportCampaignsStats {
+  /** Campaigns Instantly returned. */
+  fetched: number;
+  /** New rows created in our `campaigns` table. */
+  created: number;
+  /** Existing rows whose status/name we refreshed. */
+  updated: number;
+  /** Returned by Instantly but we already had them locally and nothing
+   *  changed — counted separately so re-runs are obviously safe. */
+  unchanged: number;
+  errors: string[];
+}
+
+/**
+ * Pull every campaign from Instantly and upsert it into our local
+ * `campaigns` table, keyed by `instantly_campaign_id`. New rows land
+ * with status mapped from Instantly's status enum, type='email_sequence'
+ * (the only kind Instantly exposes), and `name` from Instantly.
+ *
+ * Existing rows keep their local id + lead_count + analytics — we only
+ * refresh `name`, `status`, and `updated_at`. This means re-running
+ * after renaming a campaign in Instantly picks up the new name without
+ * recreating anything.
+ */
+export async function importCampaignsFromInstantly(): Promise<ImportCampaignsStats> {
+  const stats: ImportCampaignsStats = {
+    fetched: 0,
+    created: 0,
+    updated: 0,
+    unchanged: 0,
+    errors: [],
+  };
+
+  let remote;
+  try {
+    remote = await instantlyClient.listCampaigns();
+  } catch (err) {
+    stats.errors.push(`listCampaigns: ${(err as Error).message}`);
+    return stats;
+  }
+  stats.fetched = remote.length;
+  if (remote.length === 0) return stats;
+
+  const findByInstantlyId = sqlite.prepare(
+    `SELECT id, name, status FROM campaigns WHERE instantly_campaign_id = ? LIMIT 1`,
+  );
+  const update = sqlite.prepare(
+    `UPDATE campaigns SET name = ?, status = ?, updated_at = datetime('now') WHERE id = ?`,
+  );
+  const insert = sqlite.prepare(
+    `INSERT INTO campaigns (id, name, type, status, instantly_campaign_id, created_at, updated_at)
+     VALUES (?, ?, 'email_sequence', ?, ?, datetime('now'), datetime('now'))`,
+  );
+
+  // Instantly's status enum: active | paused | completed | draft | error.
+  // Our schema accepts the first 4 — coerce 'error' to 'paused' so it
+  // doesn't drop the row.
+  const mapStatus = (s: string): string => (s === "error" ? "paused" : s);
+
+  const txn = sqlite.transaction(() => {
+    for (const c of remote) {
+      try {
+        const local = findByInstantlyId.get(c.id) as { id: string; name: string; status: string } | undefined;
+        const newStatus = mapStatus(c.status);
+        if (local) {
+          if (local.name !== c.name || local.status !== newStatus) {
+            update.run(c.name, newStatus, local.id);
+            stats.updated++;
+          } else {
+            stats.unchanged++;
+          }
+        } else {
+          insert.run(crypto.randomUUID(), c.name, newStatus, c.id);
+          stats.created++;
+        }
+      } catch (err) {
+        stats.errors.push(`upsert ${c.id} (${c.name}): ${(err as Error).message}`);
+      }
+    }
+  });
+  txn();
+  return stats;
+}
+
 // ── Full Sync ──
 
 export async function runInstantlySync(): Promise<SyncResult> {
