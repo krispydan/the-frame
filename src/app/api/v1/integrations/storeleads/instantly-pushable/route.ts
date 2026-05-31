@@ -36,6 +36,10 @@ export async function GET(req: NextRequest) {
   }
 
   const tierPh = tiers.map(() => "?").join(",");
+  // Same filter as /push-to-instantly so the preview count matches what
+  // would actually move. The campaign-anywhere dedup (Phase 7.7) joins
+  // through campaign_leads.email so leads already on Instantly in ANY
+  // campaign are excluded — prevents the same email landing twice.
   const sqlBase = `
     FROM companies c
     WHERE c.source_type = 'storeleads'
@@ -44,6 +48,11 @@ export async function GET(req: NextRequest) {
       AND NOT EXISTS (
         SELECT 1 FROM campaign_leads cl
         WHERE cl.campaign_id = ? AND cl.company_id = c.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM campaign_leads cl2
+        WHERE LOWER(cl2.email) = LOWER(c.email)
+          AND cl2.instantly_lead_id IS NOT NULL
       )
   `;
 

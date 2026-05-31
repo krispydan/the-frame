@@ -72,12 +72,13 @@ export async function POST(req: NextRequest) {
   }
 
   const tierPh = tiers.map(() => "?").join(",");
-  // SL Phase 7.5: hard filter — only NeverBounce-verified 'valid' or
-  // 'catchall' rows are eligible to push. Unverified or
-  // invalid/disposable/unknown/error rows stay in the CRM but don't
-  // ship to Instantly. The UI runs /verify-pending first (an explicit
-  // step in the Push card) so unverified rows get checked before the
-  // push button enables.
+  // Hard filters before push:
+  //   Phase 7.5 — NeverBounce-verified 'valid' or 'catchall' only
+  //   Phase 7.7 — email is not already on Instantly in ANY campaign
+  //               (locally tracked via campaign_leads.instantly_lead_id —
+  //               populated by importLeadsFromInstantly so it reflects
+  //               leads created in Instantly directly too)
+  // Unverified or already-pushed rows stay in the CRM but don't ship.
   const candidates = sqlite
     .prepare(
       `SELECT c.id, c.name, c.email, c.icp_tier
@@ -89,6 +90,11 @@ export async function POST(req: NextRequest) {
           AND NOT EXISTS (
             SELECT 1 FROM campaign_leads cl
              WHERE cl.campaign_id = ? AND cl.company_id = c.id
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM campaign_leads cl2
+             WHERE LOWER(cl2.email) = LOWER(c.email)
+               AND cl2.instantly_lead_id IS NOT NULL
           )
         ORDER BY COALESCE(c.icp_score, -1) DESC
         LIMIT ?`,

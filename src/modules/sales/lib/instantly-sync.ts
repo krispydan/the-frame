@@ -49,12 +49,23 @@ async function pushCampaigns(): Promise<{ campaigns: number; leads: number; erro
   ).all() as Array<{ id: string; instantly_campaign_id: string }>;
 
   for (const camp of campaignsWithId) {
+    // Phase 7.7 cross-campaign dedup: skip rows where this email already
+    // has an instantly_lead_id in some OTHER campaign_leads row. The
+    // existing instantly_lead_id IS NULL check already prevents the
+    // SAME row from re-pushing; this extends it to "same email,
+    // anywhere."
     const unsentLeads = sqlite.prepare(`
       SELECT cl.*, co.name as company_name, ct.first_name, ct.last_name, ct.email as contact_email, ct.phone as contact_phone, co.website
       FROM campaign_leads cl
       LEFT JOIN companies co ON co.id = cl.company_id
       LEFT JOIN contacts ct ON ct.id = cl.contact_id
       WHERE cl.campaign_id = ? AND cl.instantly_lead_id IS NULL AND cl.email IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM campaign_leads cl2
+          WHERE cl2.id != cl.id
+            AND LOWER(cl2.email) = LOWER(cl.email)
+            AND cl2.instantly_lead_id IS NOT NULL
+        )
     `).all(camp.id) as Array<Record<string, unknown>>;
 
     if (unsentLeads.length === 0) continue;
