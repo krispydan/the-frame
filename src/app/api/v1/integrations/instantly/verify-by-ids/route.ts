@@ -44,11 +44,15 @@ export async function POST(req: NextRequest) {
 
   // Order by score so the "verify the hottest leads first" intuition wins
   // when the caller didn't pre-sort.
+  // "Pending" = never verified, OR last attempt errored (transient NeverBounce
+  // failure worth retrying). Real verdicts (valid/catchall/unknown/invalid/
+  // disposable) are paid for once and trusted forever — see
+  // verify-prospects.ts for the policy.
   const pending = sqlite.prepare(
     `SELECT c.id FROM companies c
       WHERE c.id IN (${idPh})
         AND c.email IS NOT NULL AND TRIM(c.email) != ''
-        AND c.email_verification_status IS NULL
+        AND (c.email_verification_status IS NULL OR c.email_verification_status = 'error')
         ${campaignGuard}
       ORDER BY COALESCE(c.icp_score, -1) DESC
       LIMIT ?`,
@@ -58,7 +62,7 @@ export async function POST(req: NextRequest) {
     `SELECT COUNT(*) AS c FROM companies c
       WHERE c.id IN (${idPh})
         AND c.email IS NOT NULL AND TRIM(c.email) != ''
-        AND c.email_verification_status IS NULL
+        AND (c.email_verification_status IS NULL OR c.email_verification_status = 'error')
         ${campaignGuard}`,
   ).get(...args) as { c: number }).c;
 

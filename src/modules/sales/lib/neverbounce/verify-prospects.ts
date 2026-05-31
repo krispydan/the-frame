@@ -10,20 +10,24 @@
  *                                'disposable' / 'error')
  *   email_verified_at         — ISO timestamp of this verification
  *
- * Skips rows verified within the staleness window (90 days by default)
- * — NeverBounce charges per call and re-verifying a fresh address is
- * wasteful.
+ * Skip rule (Daniel: "we shouldn't have to verify twice — we store the
+ * status"): once email_verification_status is set, we never re-verify.
+ * The single exception is rows currently marked 'error' — that's a
+ * transient NeverBounce failure (network / SMTP timeout) and worth one
+ * retry next time the operator hits Verify.
+ *
+ * If you ever need to force re-verification (email changed, you suspect
+ * stale data), null out companies.email_verification_status first.
  */
 
 import { sqlite } from "@/lib/db";
 import { verifyMany, type NeverBounceResult } from "./client";
 
-const VERIFICATION_TTL_DAYS = 90;
-
 export interface VerifyProspectsStats {
   requested: number;
-  /** Skipped because verified within the TTL window. */
-  skippedFresh: number;
+  /** Skipped because already verified (status set, not in retryable
+   *  'error' state). Doesn't cost a NeverBounce credit. */
+  skippedAlreadyVerified: number;
   /** Skipped because email field was null/empty. */
   skippedNoEmail: number;
   /** Count of API calls made (= chargeable credits). */
@@ -46,8 +50,6 @@ const ZERO_RESULTS = (): VerifyProspectsStats["results"] => ({
 
 export async function verifyProspectEmails(opts: {
   companyIds: string[];
-  /** Override the staleness TTL (default 90 days). */
-  ttlDays?: number;
   /** Concurrency for the NeverBounce calls (default 5). */
   concurrency?: number;
   signal?: AbortSignal;
@@ -55,7 +57,7 @@ export async function verifyProspectEmails(opts: {
   const start = Date.now();
   const stats: VerifyProspectsStats = {
     requested: opts.companyIds.length,
-    skippedFresh: 0,
+    skippedAlreadyVerified: 0,
     skippedNoEmail: 0,
     apiCallsMade: 0,
     results: ZERO_RESULTS(),
@@ -67,13 +69,10 @@ export async function verifyProspectEmails(opts: {
     return stats;
   }
 
-  const ttlMs = (opts.ttlDays ?? VERIFICATION_TTL_DAYS) * 24 * 60 * 60 * 1000;
-  const freshThreshold = new Date(Date.now() - ttlMs).toISOString();
-
   const placeholders = opts.companyIds.map(() => "?").join(",");
   const rows = sqlite
     .prepare(
-      `SELECT id, email, email_verification_status, email_verified_at
+      `SELECT id, email, email_verification_status
          FROM companies
         WHERE id IN (${placeholders})`,
     )
@@ -81,7 +80,6 @@ export async function verifyProspectEmails(opts: {
       id: string;
       email: string | null;
       email_verification_status: string | null;
-      email_verified_at: string | null;
     }>;
 
   const toVerify: Array<{ id: string; email: string }> = [];
@@ -90,12 +88,15 @@ export async function verifyProspectEmails(opts: {
       stats.skippedNoEmail++;
       continue;
     }
+    // Skip if already verified to anything besides 'error'. 'error' is
+    // a transient NeverBounce failure (network / SMTP timeout) and
+    // worth one retry; anything else (valid/catchall/unknown/invalid/
+    // disposable) is a real verdict we trust + paid for once.
     if (
       r.email_verification_status &&
-      r.email_verified_at &&
-      r.email_verified_at > freshThreshold
+      r.email_verification_status !== "error"
     ) {
-      stats.skippedFresh++;
+      stats.skippedAlreadyVerified++;
       continue;
     }
     toVerify.push({ id: r.id, email: r.email.trim().toLowerCase() });

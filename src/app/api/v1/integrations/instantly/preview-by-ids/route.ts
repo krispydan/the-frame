@@ -70,11 +70,14 @@ export async function POST(req: NextRequest) {
                          AND cl2.instantly_lead_id IS NOT NULL)`,
   ).get(...ids, body.campaignId) as { c: number }).c;
 
+  // "Pending" includes prior 'error' rows so they get one more shot —
+  // matches verify-by-ids' candidate filter so the count + the actual
+  // verify pass stay aligned.
   const pendingVerification = (sqlite.prepare(
     `SELECT COUNT(*) AS c FROM companies c
      ${baseWhere}
        AND c.email IS NOT NULL AND TRIM(c.email) != ''
-       AND c.email_verification_status IS NULL
+       AND (c.email_verification_status IS NULL OR c.email_verification_status = 'error')
        AND NOT EXISTS (SELECT 1 FROM campaign_leads cl
                        WHERE cl.campaign_id = ? AND cl.company_id = c.id)
        AND NOT EXISTS (SELECT 1 FROM campaign_leads cl2
