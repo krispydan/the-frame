@@ -15,6 +15,82 @@ export interface SyncResult {
 
 // ── Push Sync: Frame → Instantly ──
 
+/**
+ * Build the per-lead custom-variable bag we ship to Instantly. Every
+ * key becomes a `{{key}}` template token in the sequence body, so the
+ * goal is "give Daniel the most useful columns for personalization
+ * without flooding the Instantly UI with nulls."
+ *
+ * Conventions:
+ * - snake_case keys (matches Instantly's own first_name / company_name
+ *   convention so templates look uniform).
+ * - Strings only. Numbers (icp_score, yearly_sales) get formatted
+ *   here — Instantly merges the literal string into the email body.
+ * - Sales formatted as "$1.2M" / "$450K" — friendlier in copy than
+ *   raw cents.
+ * - Empty/null values are dropped in addLeadsToCampaign's cleanVars
+ *   step, so we don't have to be defensive here; just pass through.
+ */
+function buildCustomVariables(row: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  const put = (k: string, v: unknown) => {
+    if (v === null || v === undefined) return;
+    const s = String(v).trim();
+    if (!s) return;
+    out[k] = s;
+  };
+
+  // Location — `{{city}}` is the headline request: "we want to push
+  // the store city to instantly for the personalization."
+  put("city", row.city);
+  put("state", row.state);
+  put("country", row.country);
+
+  // Firmographics / segmentation
+  put("industry", row.industry);
+  put("category", row.category);
+  put("segment", row.segment);
+  put("domain", row.domain);
+  put("ecom_platform", row.ecom_platform);
+  put("contact_title", row.contact_title);
+
+  // ICP signals — useful for "we noticed you're a Tier A Shopify
+  // store doing $X/yr" style intros.
+  put("icp_tier", row.icp_tier);
+  if (typeof row.icp_score === "number") put("icp_score", String(row.icp_score));
+  if (typeof row.employee_count === "number" && row.employee_count > 0) {
+    put("employee_count", String(row.employee_count));
+  }
+
+  // StoreLeads sales/traffic estimates — format for human eyes.
+  if (typeof row.estimated_yearly_sales_cents === "number" && row.estimated_yearly_sales_cents > 0) {
+    put("estimated_yearly_sales", formatMoneyShort(row.estimated_yearly_sales_cents / 100));
+  }
+  if (typeof row.estimated_monthly_visits === "number" && row.estimated_monthly_visits > 0) {
+    put("estimated_monthly_visits", formatNumberShort(row.estimated_monthly_visits));
+  }
+
+  // Socials — handy for "saw your reel about X" openers.
+  put("instagram_url", row.instagram_url);
+  put("facebook_url", row.facebook_url);
+  put("tiktok_url", row.tiktok_url);
+
+  return out;
+}
+
+function formatMoneyShort(usd: number): string {
+  if (usd >= 1_000_000) return `$${(usd / 1_000_000).toFixed(usd >= 10_000_000 ? 0 : 1)}M`;
+  if (usd >= 1_000) return `$${Math.round(usd / 1_000)}K`;
+  return `$${Math.round(usd)}`;
+}
+
+function formatNumberShort(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
+  return String(Math.round(n));
+}
+
+
 async function pushCampaigns(): Promise<{ campaigns: number; leads: number; errors: string[] }> {
   let campaignCount = 0;
   let leadCount = 0;
@@ -54,8 +130,37 @@ async function pushCampaigns(): Promise<{ campaigns: number; leads: number; erro
     // existing instantly_lead_id IS NULL check already prevents the
     // SAME row from re-pushing; this extends it to "same email,
     // anywhere."
+    // Pull the full company + contact context so we can ship rich
+    // custom variables to Instantly for personalization. Anything we
+    // pass here becomes a `{{variable_name}}` token available inside
+    // the sequence body in Instantly. Keep names snake_case so Daniel
+    // can drop {{city}}, {{industry}}, {{icp_tier}}, etc. into copy
+    // directly.
     const unsentLeads = sqlite.prepare(`
-      SELECT cl.*, co.name as company_name, ct.first_name, ct.last_name, ct.email as contact_email, ct.phone as contact_phone, co.website
+      SELECT cl.*,
+             co.name      as company_name,
+             co.website   as website,
+             co.domain    as domain,
+             co.city      as city,
+             co.state     as state,
+             co.country   as country,
+             co.industry  as industry,
+             co.category  as category,
+             co.segment   as segment,
+             co.icp_tier  as icp_tier,
+             co.icp_score as icp_score,
+             co.ecom_platform                as ecom_platform,
+             co.employee_count               as employee_count,
+             co.estimated_yearly_sales_cents as estimated_yearly_sales_cents,
+             co.estimated_monthly_visits     as estimated_monthly_visits,
+             co.instagram_url                as instagram_url,
+             co.facebook_url                 as facebook_url,
+             co.tiktok_url                   as tiktok_url,
+             ct.first_name,
+             ct.last_name,
+             ct.email      as contact_email,
+             ct.phone      as contact_phone,
+             ct.title      as contact_title
       FROM campaign_leads cl
       LEFT JOIN companies co ON co.id = cl.company_id
       LEFT JOIN contacts ct ON ct.id = cl.contact_id
@@ -77,6 +182,7 @@ async function pushCampaigns(): Promise<{ campaigns: number; leads: number; erro
       company_name: l.company_name as string | undefined,
       phone: l.contact_phone as string | undefined,
       website: l.website as string | undefined,
+      custom_variables: buildCustomVariables(l),
     }));
 
     try {

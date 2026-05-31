@@ -259,6 +259,20 @@ class InstantlyClient {
     let added = 0;
     for (const l of leads) {
       try {
+        // Instantly v2 custom variables: any extra top-level key on the
+        // lead body becomes a `{{key}}` template variable in the campaign
+        // sequence. They are stored on the lead row and rendered per-
+        // send. (The older `personalization` field is for AI-generated
+        // first-line text — NOT a generic JSON bag — so we don't reuse
+        // it.) We strip empty / undefined values so we don't pollute
+        // the lead with blanks that render as literal `""` in templates.
+        const cleanVars = l.custom_variables
+          ? Object.fromEntries(
+              Object.entries(l.custom_variables).filter(
+                ([, v]) => v !== undefined && v !== null && String(v).trim() !== "",
+              ),
+            )
+          : {};
         const res = await this.request<{ id: string }>("POST", "/leads", {
           campaign: campaignId,
           email: l.email,
@@ -267,7 +281,7 @@ class InstantlyClient {
           company_name: l.company_name,
           phone: l.phone,
           website: l.website,
-          ...(l.custom_variables ? { personalization: JSON.stringify(l.custom_variables) } : {}),
+          ...cleanVars,
         });
         results.push({ email: l.email, id: res.id });
         added++;
