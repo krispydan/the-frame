@@ -70,6 +70,25 @@ function statusFromCode(code: unknown): InstantlyCampaign["status"] {
   }
 }
 
+/**
+ * Lead status codes per Instantly v2 (observed from /leads response):
+ *   1 = active (in sequence, not yet contacted)
+ *   2 = contacted
+ *   3 = paused / out-of-office
+ *   4 = bounced / failed
+ *   -1 / -2 = error states
+ * We coerce anything unrecognised to "active" rather than dropping the row.
+ */
+function mapLeadStatus(code: unknown): InstantlyLeadStatus["status"] {
+  switch (typeof code === "number" ? code : Number(code)) {
+    case 1: return "active";
+    case 2: return "contacted";
+    case 3: return "opened";
+    case 4: return "bounced";
+    default: return "active";
+  }
+}
+
 /** Convert a raw Instantly v2 /campaigns item into the local typed shape. */
 function normalizeCampaign(raw: Record<string, unknown>): InstantlyCampaign {
   return {
@@ -224,24 +243,105 @@ class InstantlyClient {
     return this.request("POST", "/campaigns", data);
   }
 
-  async addLeadsToCampaign(campaignId: string, leads: InstantlyLead[]): Promise<{ added: number }> {
-    return this.request("POST", `/campaigns/${campaignId}/leads`, { leads });
+  /**
+   * Add leads to an Instantly campaign. v2 has no "POST /campaigns/{id}/leads"
+   * batch endpoint — verified 404 against the real API. Instead each lead
+   * is its own POST /leads with `{ campaign, email, first_name, ... }`.
+   * We loop here so callers stay batch-shaped; per-lead errors are
+   * returned in the result so a single bad address doesn't fail the
+   * whole push.
+   */
+  async addLeadsToCampaign(
+    campaignId: string,
+    leads: InstantlyLead[],
+  ): Promise<{ added: number; results: Array<{ email: string; id?: string; error?: string }> }> {
+    const results: Array<{ email: string; id?: string; error?: string }> = [];
+    let added = 0;
+    for (const l of leads) {
+      try {
+        const res = await this.request<{ id: string }>("POST", "/leads", {
+          campaign: campaignId,
+          email: l.email,
+          first_name: l.first_name,
+          last_name: l.last_name,
+          company_name: l.company_name,
+          phone: l.phone,
+          website: l.website,
+          ...(l.custom_variables ? { personalization: JSON.stringify(l.custom_variables) } : {}),
+        });
+        results.push({ email: l.email, id: res.id });
+        added++;
+      } catch (e) {
+        results.push({ email: l.email, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    return { added, results };
   }
 
+  /**
+   * Fetch the analytics overview for a single campaign. The v2 path is
+   * /campaigns/analytics/overview?id=X (NOT /campaigns/{id}/analytics —
+   * verified 404 against the real API). Field names in the response are
+   * different too — normalised here into our local InstantlyCampaignAnalytics
+   * shape so callers don't have to change.
+   */
   async getCampaignAnalytics(campaignId: string): Promise<InstantlyCampaignAnalytics> {
-    return this.request("GET", `/campaigns/${campaignId}/analytics`);
+    const raw = await this.request<Record<string, unknown>>(
+      "GET",
+      `/campaigns/analytics/overview?id=${encodeURIComponent(campaignId)}`,
+    );
+    const n = (v: unknown): number => (typeof v === "number" ? v : Number(v ?? 0)) || 0;
+    const sent = n(raw.emails_sent_count);
+    const opened = n(raw.open_count_unique);
+    const replied = n(raw.reply_count_unique);
+    const bounced = n(raw.bounced_count);
+    return {
+      campaign_id: campaignId,
+      total_leads: n(raw.contacted_count) + 0, // overview doesn't ship a total — best proxy
+      contacted: n(raw.contacted_count),
+      emails_sent: sent,
+      emails_opened: opened,
+      emails_replied: replied,
+      emails_bounced: bounced,
+      unsubscribed: n(raw.unsubscribed_count),
+      open_rate: sent > 0 ? Math.round((opened / sent) * 1000) / 10 : 0,
+      reply_rate: sent > 0 ? Math.round((replied / sent) * 1000) / 10 : 0,
+      bounce_rate: sent > 0 ? Math.round((bounced / sent) * 1000) / 10 : 0,
+    };
   }
 
+  /**
+   * Look up a lead by email. v2 has no GET /leads/status — leads are
+   * queried via POST /leads/list with a search payload. Returns the
+   * matching leads (typically 1 row per (campaign, email) tuple).
+   */
   async getLeadStatus(email: string): Promise<InstantlyLeadStatus[]> {
-    return this.request("GET", `/leads/status?email=${encodeURIComponent(email)}`);
+    const raw = await this.request<{ items?: Array<Record<string, unknown>> }>(
+      "POST",
+      "/leads/list",
+      { search: email, limit: 25 },
+    );
+    return (raw.items ?? []).map((r) => ({
+      email: String(r.email ?? ""),
+      campaign_id: String(r.campaign ?? ""),
+      status: mapLeadStatus(r.status),
+      lead_data: r,
+    }));
   }
 
+  /**
+   * Pause an active campaign. v2 path uses an action-suffix collection:
+   * POST /campaigns/{id}/pause (no body). Verified.
+   */
   async pauseCampaign(id: string): Promise<InstantlyCampaign> {
-    return this.request("POST", `/campaigns/${id}/pause`);
+    return this.request("POST", `/campaigns/${encodeURIComponent(id)}/pause`);
   }
 
+  /**
+   * Resume a paused campaign. Instantly v2 uses /activate, not /resume.
+   */
   async resumeCampaign(id: string): Promise<InstantlyCampaign> {
-    return this.request("POST", `/campaigns/${id}/resume`);
+    return this.request("POST", `/campaigns/${encodeURIComponent(id)}/activate`);
   }
 
   // ── Mock Data ──

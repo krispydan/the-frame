@@ -70,10 +70,23 @@ async function pushCampaigns(): Promise<{ campaigns: number; leads: number; erro
 
     try {
       const result = await instantlyClient.addLeadsToCampaign(camp.instantly_campaign_id, leads);
-      // Mark leads as pushed
-      const update = sqlite.prepare("UPDATE campaign_leads SET instantly_lead_id = ?, status = 'sent' WHERE id = ?");
+      // Map each Instantly response row back to its local campaign_leads
+      // row by email and persist the REAL Instantly lead id (not the
+      // synthetic `instantly-<localId>` placeholder the old code used).
+      // Per-lead errors get surfaced so partial-success is observable.
+      const updateOk = sqlite.prepare(
+        "UPDATE campaign_leads SET instantly_lead_id = ?, status = 'sent' WHERE id = ?",
+      );
+      const byEmail = new Map<string, { id?: string; error?: string }>();
+      for (const r of result.results) byEmail.set(r.email.toLowerCase(), r);
       for (const lead of unsentLeads) {
-        update.run(`instantly-${lead.id}`, lead.id);
+        const emailRaw = (lead.email || lead.contact_email) as string | undefined;
+        const r = emailRaw ? byEmail.get(emailRaw.toLowerCase()) : undefined;
+        if (r?.id) {
+          updateOk.run(r.id, lead.id);
+        } else if (r?.error) {
+          errors.push(`Lead ${emailRaw}: ${r.error}`);
+        }
       }
       leadCount += result.added;
     } catch (err) {
