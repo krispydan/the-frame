@@ -329,9 +329,18 @@ function mapStoreLeadsToCompanyFields(sl: StoreLeadsDomain): MappedFields {
     storeleadsId: slId,
     category: categoryRaw,
     industry,
-    estimatedYearlySalesCents: typeof sl.estimated_sales_yearly === "number" ? sl.estimated_sales_yearly : null,
+    // StoreLeads' API returns these as raw USD dollars (e.g.
+    // estimated_sales_yearly: 25700 means $25,700/yr). Multiply by 100
+    // to match the unit convention of the *_cents columns, which the
+    // CSV importer already populates via parseCurrencyToCents.
+    //
+    // Bug history: pre-2026-06-01 this stored the dollar value
+    // straight into a "_cents" column, so API-enriched rows show up
+    // as 100x smaller than reality. Existing bad rows are NOT
+    // back-migrated — Daniel's call. Future enrichments are correct.
+    estimatedYearlySalesCents: typeof sl.estimated_sales_yearly === "number" ? Math.round(sl.estimated_sales_yearly * 100) : null,
     estimatedMonthlyVisits: typeof sl.estimated_visits === "number" ? sl.estimated_visits : null,
-    averageProductPriceCents: typeof sl.avg_price_usd === "number" ? sl.avg_price_usd : null,
+    averageProductPriceCents: typeof sl.avg_price_usd === "number" ? Math.round(sl.avg_price_usd * 100) : null,
     employeeCount: typeof sl.employee_count === "number" ? sl.employee_count : null,
     ecomPlatform: sl.platform?.toLowerCase() ?? null,
     facebookUrl: firstByType("facebook"),
