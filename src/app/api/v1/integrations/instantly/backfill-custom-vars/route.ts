@@ -198,7 +198,15 @@ export async function POST(req: NextRequest) {
 
   await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 
-  const remaining = Math.max(0, remainingBefore - updated - skippedEmpty);
+  // Re-query "remaining" instead of subtracting from remainingBefore.
+  // Under force=true the simple subtraction undercounts — every row
+  // is force-eligible, so remainingBefore is the FULL set (2825), and
+  // (2825 - 1000) = 1825 even after we've processed 1000 of the
+  // never-touched ones. The real "still needs work this loop" count
+  // is "rows whose backfilled_at is NULL OR older than this run
+  // started" — which the processed rows are no longer in.
+  const remaining = (sqlite.prepare(remainingCountSql)
+    .get(...remainingCountParams) as { c: number }).c;
 
   return NextResponse.json({
     ok: true,
