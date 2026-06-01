@@ -75,9 +75,21 @@ export async function POST(req: NextRequest) {
     where.push("cl.instantly_custom_vars_backfilled_at IS NULL");
   }
 
-  const remainingBefore = (sqlite.prepare(
-    `SELECT COUNT(*) AS c FROM campaign_leads cl WHERE ${where.join(" AND ")}`,
-  ).get(...params) as { c: number }).c;
+  // For non-force mode this is "rows still needing a backfill." For
+  // force=true we instead count "rows last backfilled before this
+  // request started" — otherwise the counter never decrements
+  // (every row is always force-eligible) and the client can't tell
+  // when to stop the loop.
+  const runStartedAt = new Date().toISOString();
+  const remainingCountSql = body.force
+    ? `SELECT COUNT(*) AS c FROM campaign_leads cl
+        WHERE ${where.join(" AND ")}
+          AND (cl.instantly_custom_vars_backfilled_at IS NULL
+               OR cl.instantly_custom_vars_backfilled_at < ?)`
+    : `SELECT COUNT(*) AS c FROM campaign_leads cl WHERE ${where.join(" AND ")}`;
+  const remainingCountParams = body.force ? [...params, runStartedAt] : params;
+  const remainingBefore = (sqlite.prepare(remainingCountSql)
+    .get(...remainingCountParams) as { c: number }).c;
 
   // Pull the same company + contact context the push path joins on,
   // so buildCustomVariables() produces the identical bag we would
@@ -108,7 +120,14 @@ export async function POST(req: NextRequest) {
        LEFT JOIN companies co ON co.id = cl.company_id
        LEFT JOIN contacts  ct ON ct.id = cl.contact_id
       WHERE ${where.join(" AND ")}
-      ORDER BY cl.created_at ASC
+      -- Order by the backfill timestamp so each call moves forward
+      -- through the list — even with force=true, which doesn't filter
+      -- on backfilled_at. NULLs (never touched) come first, then the
+      -- oldest backfills. When we markDone(NOW) a row, it moves to
+      -- the end of the queue for the next call.
+      ORDER BY (cl.instantly_custom_vars_backfilled_at IS NULL) DESC,
+               cl.instantly_custom_vars_backfilled_at ASC,
+               cl.created_at ASC
       LIMIT ?`,
   ).all(...params, limit) as Array<Record<string, unknown>>;
 
