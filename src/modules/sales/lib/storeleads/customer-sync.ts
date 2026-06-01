@@ -291,7 +291,7 @@ export async function uploadCustomerListToStoreLeads(opts: {
 
 // ─── StoreLeads domain → companies fields mapping ────────────────────────
 
-interface MappedFields {
+export interface MappedFields {
   storeleadsId: string | null;
   category: string | null;
   industry: string | null;
@@ -312,7 +312,7 @@ interface MappedFields {
   metaDescription: string | null;
 }
 
-function mapStoreLeadsToCompanyFields(sl: StoreLeadsDomain): MappedFields {
+export function mapStoreLeadsToCompanyFields(sl: StoreLeadsDomain): MappedFields {
   // StoreLeads ships several IDs at once; the canonical one we can use to
   // re-lookup the store later is the platform_domain. Otherwise the
   // public domain is itself stable.
