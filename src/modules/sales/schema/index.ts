@@ -81,6 +81,11 @@ export const companies = sqliteTable("companies", {
   youtubeFollowers: integer("youtube_followers"),
   // "shopify" / "woocommerce" / "magento" / "bigcommerce" / "custom" / …
   ecomPlatform: text("ecom_platform"),
+  // Merchant's "about us" / homepage copy.
+  description: text("description"),
+  // <meta name="description"> — what shows up in Google results.
+  // Often identical to `description` on Shopify but can diverge.
+  metaDescription: text("meta_description"),
   // ── MillionVerifier ──
   // Raw `result` from MillionVerifier's API; one of:
   //   'ok' | 'catch_all' | 'unknown' | 'invalid' | 'disposable' | 'error'

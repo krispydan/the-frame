@@ -145,6 +145,8 @@ export async function POST(req: NextRequest) {
             co.instagram_url                as instagram_url,
             co.facebook_url                 as facebook_url,
             co.tiktok_url                   as tiktok_url,
+            co.description                  as description,
+            co.meta_description             as meta_description,
             ct.title     as contact_title
        FROM campaign_leads cl
        LEFT JOIN companies co ON co.id = cl.company_id

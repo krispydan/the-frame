@@ -54,6 +54,15 @@ export function buildCustomVariables(row: Record<string, unknown>): Record<strin
   put("ecom_platform", row.ecom_platform);
   put("contact_title", row.contact_title);
 
+  // Merchant's own copy — useful for openers like "loved your line of
+  // {{meta_description-derived-keyword}}" or for an LLM-assembled
+  // first line. Prefer meta_description (Google-facing, usually
+  // tighter) over the longer "about us" description, but fall back
+  // when one is missing. Instantly's UI truncates long values
+  // gracefully, so we don't need to cap length here.
+  put("meta_description", row.meta_description ?? row.description);
+  put("description", row.description);
+
   // ICP signals — useful for "we noticed you're a Tier A Shopify
   // store doing $X/yr" style intros.
   put("icp_tier", row.icp_tier);
@@ -156,6 +165,8 @@ async function pushCampaigns(): Promise<{ campaigns: number; leads: number; erro
              co.instagram_url                as instagram_url,
              co.facebook_url                 as facebook_url,
              co.tiktok_url                   as tiktok_url,
+             co.description                  as description,
+             co.meta_description             as meta_description,
              ct.first_name,
              ct.last_name,
              ct.email      as contact_email,

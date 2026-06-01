@@ -52,6 +52,10 @@ export interface StoreLeadsCsvRow {
   instagram?: string;
   /** Present on newer StoreLeads CSV exports; absent on earlier ones. */
   merchant_name?: string;
+  /** The <meta name="description"> tag — what appears in Google
+   *  results. Often identical to `description` on Shopify stores
+   *  but can diverge. Newer StoreLeads exports include it. */
+  meta_description?: string;
   phones?: string;
   platform?: string;
   region?: string;
@@ -177,7 +181,7 @@ export async function importStoreLeadsCsv(
        average_product_price_cents,
        facebook_url, instagram_url, tiktok_url, tiktok_followers,
        youtube_url, youtube_followers, contact_form_url,
-       ecom_platform,
+       ecom_platform, description, meta_description,
        enriched_at, enrichment_source, enrichment_fetched_at,
        created_at, updated_at
      ) VALUES (
@@ -189,7 +193,7 @@ export async function importStoreLeadsCsv(
        ?,
        ?, ?, ?, ?,
        ?, ?, ?,
-       ?,
+       ?, ?, ?,
        ?, 'storeleads', ?,
        ?, ?
      )`,
@@ -260,6 +264,8 @@ export async function importStoreLeadsCsv(
             fields.youtubeFollowers,
             fields.contactFormUrl,
             fields.ecomPlatform,
+            fields.description,
+            fields.metaDescription,
             now, // enriched_at
             now, // enrichment_fetched_at
             now, // created_at
@@ -311,6 +317,8 @@ interface DerivedFields {
   youtubeFollowers: number | null;
   contactFormUrl: string | null;
   ecomPlatform: string | null;
+  description: string | null;
+  metaDescription: string | null;
 }
 
 function deriveFields(row: StoreLeadsCsvRow, domain: string): DerivedFields {
@@ -356,6 +364,8 @@ function deriveFields(row: StoreLeadsCsvRow, domain: string): DerivedFields {
     youtubeFollowers: parseInt0(row.youtube_followers),
     contactFormUrl: row.contact_page_url?.trim() || null,
     ecomPlatform: row.platform?.trim().toLowerCase() || null,
+    description: row.description?.trim() || null,
+    metaDescription: row.meta_description?.trim() || null,
   };
 }
 
@@ -395,6 +405,8 @@ function mergeRow(opts: {
     ["youtube_followers", fields.youtubeFollowers],
     ["contact_form_url", fields.contactFormUrl],
     ["ecom_platform", fields.ecomPlatform],
+    ["description", fields.description],
+    ["meta_description", fields.metaDescription],
   ];
 
   const sets: string[] = [];

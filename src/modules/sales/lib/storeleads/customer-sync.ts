@@ -205,6 +205,8 @@ export async function uploadCustomerListToStoreLeads(opts: {
             youtube_followers              = COALESCE(youtube_followers, ?),
             phone                          = COALESCE(phone, ?),
             email                          = COALESCE(email, ?),
+            description                    = COALESCE(description, ?),
+            meta_description               = COALESCE(meta_description, ?),
             updated_at                     = ?
       WHERE id = ?`,
   );
@@ -253,6 +255,8 @@ export async function uploadCustomerListToStoreLeads(opts: {
               fields.youtubeFollowers,
               fields.phone,
               fields.email,
+              fields.description,
+              fields.metaDescription,
               now, // updated_at
               c.companyId,
             );
@@ -304,6 +308,8 @@ interface MappedFields {
   youtubeFollowers: number | null;
   phone: string | null;
   email: string | null;
+  description: string | null;
+  metaDescription: string | null;
 }
 
 function mapStoreLeadsToCompanyFields(sl: StoreLeadsDomain): MappedFields {
@@ -351,5 +357,15 @@ function mapStoreLeadsToCompanyFields(sl: StoreLeadsDomain): MappedFields {
     youtubeFollowers: followersByType("youtube"),
     phone: firstByType("phone"),
     email: firstByType("email"),
+    // The merchant's own copy. `description` is what they publish on
+    // their site / "about us." `meta_description` is the <meta> tag
+    // that surfaces in Google results. Often identical on Shopify
+    // stores but worth storing both since either may be missing.
+    // StoreLeads' API doesn't always document meta_description, but
+    // when present it's at sl.meta_description; access defensively.
+    description: typeof sl.description === "string" ? sl.description.trim() || null : null,
+    metaDescription: typeof (sl as Record<string, unknown>).meta_description === "string"
+      ? String((sl as Record<string, unknown>).meta_description).trim() || null
+      : null,
   };
 }

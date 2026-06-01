@@ -173,6 +173,13 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN youtube_followers INTEGER");
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN ecom_platform TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_storeleads_id ON companies (storeleads_id)"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_ecom_platform ON companies (ecom_platform)"); } catch { /* exists */ }
+// Store the merchant's own description (the "about us" copy they show on
+// site) and meta_description (the <meta name="description"> tag — what
+// shows up in Google results). StoreLeads exports both as separate
+// columns; they're often identical on Shopify stores but can diverge.
+// Useful for outreach personalization and future LLM enrichment.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN description TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN meta_description TEXT"); } catch { /* exists */ }
 
 // SL Phase 7: enforce one push per (campaign, company) pair so re-running
 // the StoreLeads → Instantly push UI doesn't add the same lead twice. The
