@@ -48,6 +48,12 @@ export async function POST(req: NextRequest) {
     limit?: number;
     dryRun?: boolean;
     force?: boolean;
+    /** NULL out all backfilled_at marks before processing, so the simple
+     *  IS NULL filter runs from scratch. Use after a known-bad earlier
+     *  run marked rows "done" that didn't actually land. */
+    resetMarks?: boolean;
+    /** Only run the reset, don't continue with a backfill pass. */
+    resetOnly?: boolean;
   } = {};
   try { body = await req.json(); } catch { /* ok */ }
 
@@ -60,6 +66,30 @@ export async function POST(req: NextRequest) {
       "ALTER TABLE campaign_leads ADD COLUMN instantly_custom_vars_backfilled_at TEXT",
     );
   } catch { /* already exists */ }
+
+  // resetMarks: NULL out all backfilled_at timestamps so the simple
+  // IS NULL filter (non-force mode) processes everything from
+  // scratch. Use this when prior backfill runs marked rows "done"
+  // that didn't actually land in Instantly — e.g. the pre-fix runs
+  // that PATCHed with the wrong body shape.
+  //
+  // Done ONCE at the top of the request; subsequent calls skip the
+  // reset and just process normally.
+  if (body.resetMarks) {
+    const reset = sqlite.prepare(
+      `UPDATE campaign_leads
+          SET instantly_custom_vars_backfilled_at = NULL
+        WHERE instantly_lead_id IS NOT NULL
+          AND instantly_custom_vars_backfilled_at IS NOT NULL`,
+    ).run();
+    // Caller asked for a reset-only with no follow-up work — return
+    // immediately so they can confirm before kicking off the loop.
+    if (body.resetOnly) {
+      return NextResponse.json({
+        ok: true, reset: true, cleared: reset.changes,
+      });
+    }
+  }
 
   const where: string[] = ["cl.instantly_lead_id IS NOT NULL"];
   const params: unknown[] = [];
