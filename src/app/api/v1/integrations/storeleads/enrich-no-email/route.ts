@@ -16,6 +16,71 @@ const MAX_PER_CALL = 500;
 const DEFAULT_LIMIT = 50;
 
 /**
+ * Apex domains for sites that host LISTINGS, not ecom merchants —
+ * StoreLeads doesn't index any of these so sending them is pure
+ * API-credit waste. Match is case-insensitive and applied with a
+ * `www.` strip; any company.domain whose apex equals one of these
+ * is excluded from the enrichment candidates AND marked attempted
+ * (so it can't sneak back in next run).
+ *
+ * Maintained inline rather than in a config table because the list
+ * is small, slow-moving, and Daniel will want to grep it when a
+ * domain shows up unexpectedly. Add freely as new junk surfaces.
+ */
+const JUNK_DOMAINS = new Set([
+  // Social
+  "facebook.com", "fb.com", "m.facebook.com",
+  "instagram.com",
+  "twitter.com", "x.com",
+  "linkedin.com",
+  "pinterest.com",
+  "tiktok.com",
+  "youtube.com", "youtu.be",
+  "reddit.com",
+  "threads.net",
+  // Review / directory
+  "yelp.com", "m.yelp.com", "biz.yelp.com",
+  "yellowpages.com", "yp.com",
+  "foursquare.com",
+  "mapquest.com",
+  "tripadvisor.com",
+  "google.com", "maps.google.com",
+  "bing.com",
+  "bizapedia.com",
+  "dnb.com",
+  "manta.com",
+  "bbb.org",
+  "nextdoor.com",
+  // Sitebuilder root domains (legit customer sites live on subdomains,
+  // but a raw e.g. "wixsite.com" usually means we scraped the builder
+  // homepage by mistake)
+  "wixsite.com", "wix.com",
+  "weebly.com",
+  "godaddysites.com",
+  "squarespace.com",
+  "webador.com",
+  "jimdosite.com",
+  "site123.me",
+  // Misc generic
+  "yahoo.com",
+  "gmail.com",
+  "hotmail.com",
+  "wordpress.com",
+  "blogspot.com",
+]);
+
+/** Strip www., lowercase, trim. Returns the apex match key we test
+ *  against JUNK_DOMAINS. */
+function junkKey(d: string | null | undefined): string {
+  if (!d) return "";
+  return String(d).trim().toLowerCase().replace(/^www\./, "");
+}
+
+function isJunkDomain(d: string | null | undefined): boolean {
+  return JUNK_DOMAINS.has(junkKey(d));
+}
+
+/**
  * POST /api/v1/integrations/storeleads/enrich-no-email
  *
  * Walk every company in the CRM that has a domain but no email, send
@@ -69,6 +134,22 @@ export async function POST(req: NextRequest) {
     );
   } catch { /* exists */ }
 
+  // One-time pre-pass per request: mark every no-email row whose
+  // domain is a known junk site (Facebook, Yelp, etc.) as already
+  // attempted so it falls out of the candidate set and won't waste
+  // a StoreLeads bulk slot on a guaranteed miss. Idempotent — re-
+  // running just no-ops on rows already stamped.
+  const junkPh = Array.from(JUNK_DOMAINS).map(() => "?").join(",");
+  const junkMarked = sqlite.prepare(
+    `UPDATE companies
+        SET storeleads_no_email_attempted_at = COALESCE(storeleads_no_email_attempted_at, ?),
+            updated_at = ?
+      WHERE (email IS NULL OR TRIM(email) = '')
+        AND domain IS NOT NULL AND TRIM(domain) != ''
+        AND LOWER(REPLACE(domain, 'www.', '')) IN (${junkPh})`,
+  ).run(new Date().toISOString(), new Date().toISOString(),
+        ...Array.from(JUNK_DOMAINS));
+
   const where: string[] = [
     "(c.email IS NULL OR TRIM(c.email) = '')",
     "c.domain IS NOT NULL AND TRIM(c.domain) != ''",
@@ -88,27 +169,52 @@ export async function POST(req: NextRequest) {
   ).get(...params) as { c: number }).c;
 
   // Prefer hottest leads first if ICP is set, so a small pilot tests
-  // the rows we actually care about.
-  const candidates = sqlite.prepare(
+  // the rows we actually care about. Over-fetch slightly + filter
+  // any junk-domain stragglers the SQL `LOWER(REPLACE(...))` missed
+  // (subdomains like `m.yelp.com/biz/...` won't match a literal
+  // 'yelp.com' apex check). Stamp those stragglers attempted in the
+  // same pass so they don't reappear.
+  const rawCandidates = sqlite.prepare(
     `SELECT c.id, c.name, c.domain
        FROM companies c
        ${whereSql}
       ORDER BY COALESCE(c.icp_score, -1) DESC, c.created_at ASC
       LIMIT ?`,
-  ).all(...params, limit) as Array<{ id: string; name: string; domain: string }>;
+  ).all(...params, Math.min(MAX_PER_CALL, limit * 2)) as Array<{
+    id: string; name: string; domain: string;
+  }>;
+
+  const stampJunk = sqlite.prepare(
+    `UPDATE companies SET storeleads_no_email_attempted_at = ?, updated_at = ?
+       WHERE id = ?`,
+  );
+  let junkStragglers = 0;
+  const candidates: Array<{ id: string; name: string; domain: string }> = [];
+  const now0 = new Date().toISOString();
+  for (const c of rawCandidates) {
+    if (isJunkDomain(c.domain)) {
+      stampJunk.run(now0, now0, c.id);
+      junkStragglers++;
+      continue;
+    }
+    candidates.push(c);
+    if (candidates.length >= limit) break;
+  }
 
   if (candidates.length === 0) {
     return NextResponse.json({
       ok: true, scanned: 0, gotEmail: 0, gotPhone: 0, gotDescription: 0,
       gotMeta: 0, notFoundInStoreLeads: 0, errors: [],
-      sample: [], remaining: 0,
+      sample: [], remaining: Math.max(0, remainingBefore - junkStragglers),
+      junkExcluded: junkMarked.changes + junkStragglers,
     });
   }
 
   if (body.dryRun) {
     return NextResponse.json({
       ok: true, dryRun: true, scanned: candidates.length,
-      remaining: remainingBefore,
+      remaining: Math.max(0, remainingBefore - junkStragglers),
+      junkExcluded: junkMarked.changes + junkStragglers,
       sample: candidates.slice(0, 10),
     });
   }
@@ -241,6 +347,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     ...stats,
-    remaining: Math.max(0, remainingBefore - candidates.length),
+    junkExcluded: junkMarked.changes + junkStragglers,
+    remaining: Math.max(0, remainingBefore - candidates.length - junkStragglers),
   });
 }
