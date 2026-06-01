@@ -259,13 +259,12 @@ class InstantlyClient {
     let added = 0;
     for (const l of leads) {
       try {
-        // Instantly v2 custom variables: any extra top-level key on the
-        // lead body becomes a `{{key}}` template variable in the campaign
-        // sequence. They are stored on the lead row and rendered per-
-        // send. (The older `personalization` field is for AI-generated
-        // first-line text — NOT a generic JSON bag — so we don't reuse
-        // it.) We strip empty / undefined values so we don't pollute
-        // the lead with blanks that render as literal `""` in templates.
+        // Instantly v2 custom variables MUST be sent inside a
+        // `custom_variables` object — the API silently drops any
+        // extra top-level keys (verified by PATCHing a real lead +
+        // re-GETting). The server merges custom_variables into the
+        // lead's `payload` field, which is what renders as {{key}}
+        // template tokens in the sequence body.
         const cleanVars = l.custom_variables
           ? Object.fromEntries(
               Object.entries(l.custom_variables).filter(
@@ -281,7 +280,7 @@ class InstantlyClient {
           company_name: l.company_name,
           phone: l.phone,
           website: l.website,
-          ...cleanVars,
+          ...(Object.keys(cleanVars).length ? { custom_variables: cleanVars } : {}),
         });
         results.push({ email: l.email, id: res.id });
         added++;
@@ -293,28 +292,46 @@ class InstantlyClient {
   }
 
   /**
-   * Update an existing Instantly lead in place. Same body shape as
-   * POST /leads — any top-level key that isn't a reserved field
-   * (email/first_name/last_name/company_name/phone/website) becomes a
-   * {{key}} template variable on the lead. Used by the backfill
-   * endpoint to attach custom variables to leads we pushed BEFORE
-   * the variable mapping landed.
+   * Update an existing Instantly lead in place. Used by the
+   * backfill endpoint to attach custom variables to leads we
+   * pushed BEFORE the variable mapping landed.
    *
-   * Returns the updated lead id on success; throws on 4xx/5xx so the
-   * caller can decide whether to skip + continue or abort the batch.
+   * IMPORTANT: Instantly v2 only persists custom variables when
+   * they're wrapped in a `custom_variables` object. Top-level keys
+   * on the PATCH body get silently dropped (no error, no effect) —
+   * verified by PATCHing then re-GETting a real lead in their UI.
+   * The server merges custom_variables into the lead's `payload`
+   * field, which is what renders as {{key}} template tokens.
+   *
+   * So `customVars` is mandatory and the function name promises
+   * exactly that: variables. If we ever need to update reserved
+   * fields (first_name, phone, etc.) too, add another method.
+   *
+   * Returns the updated lead id on success; throws on 4xx/5xx so
+   * the caller can decide whether to skip + continue or abort the
+   * batch.
    */
   async updateLead(
     leadId: string,
-    payload: Record<string, unknown>,
+    customVars: Record<string, unknown>,
   ): Promise<{ id: string }> {
-    // Strip empty/null so we don't blow away existing fields by
-    // sending blank strings — same hygiene the create path uses.
+    // Strip empty/null so we don't blow away existing variables by
+    // sending blank strings — Instantly will overwrite the prior
+    // value with "" if we let it through.
     const clean = Object.fromEntries(
-      Object.entries(payload).filter(
+      Object.entries(customVars).filter(
         ([, v]) => v !== undefined && v !== null && String(v).trim() !== "",
       ),
     );
-    return await this.request<{ id: string }>("PATCH", `/leads/${leadId}`, clean);
+    if (Object.keys(clean).length === 0) {
+      // Nothing to write — return synthetically rather than
+      // wasting an API call (Instantly accepts an empty PATCH but
+      // it's pointless).
+      return { id: leadId };
+    }
+    return await this.request<{ id: string }>("PATCH", `/leads/${leadId}`, {
+      custom_variables: clean,
+    });
   }
 
   /**
