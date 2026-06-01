@@ -31,7 +31,7 @@ export interface SyncResult {
  * - Empty/null values are dropped in addLeadsToCampaign's cleanVars
  *   step, so we don't have to be defensive here; just pass through.
  */
-function buildCustomVariables(row: Record<string, unknown>): Record<string, string> {
+export function buildCustomVariables(row: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
   const put = (k: string, v: unknown) => {
     if (v === null || v === undefined) return;

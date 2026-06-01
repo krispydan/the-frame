@@ -293,6 +293,31 @@ class InstantlyClient {
   }
 
   /**
+   * Update an existing Instantly lead in place. Same body shape as
+   * POST /leads — any top-level key that isn't a reserved field
+   * (email/first_name/last_name/company_name/phone/website) becomes a
+   * {{key}} template variable on the lead. Used by the backfill
+   * endpoint to attach custom variables to leads we pushed BEFORE
+   * the variable mapping landed.
+   *
+   * Returns the updated lead id on success; throws on 4xx/5xx so the
+   * caller can decide whether to skip + continue or abort the batch.
+   */
+  async updateLead(
+    leadId: string,
+    payload: Record<string, unknown>,
+  ): Promise<{ id: string }> {
+    // Strip empty/null so we don't blow away existing fields by
+    // sending blank strings — same hygiene the create path uses.
+    const clean = Object.fromEntries(
+      Object.entries(payload).filter(
+        ([, v]) => v !== undefined && v !== null && String(v).trim() !== "",
+      ),
+    );
+    return await this.request<{ id: string }>("PATCH", `/leads/${leadId}`, clean);
+  }
+
+  /**
    * Fetch the analytics overview for a single campaign. The v2 path is
    * /campaigns/analytics/overview?id=X (NOT /campaigns/{id}/analytics —
    * verified 404 against the real API). Field names in the response are
