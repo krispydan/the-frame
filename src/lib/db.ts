@@ -865,6 +865,27 @@ try {
   )`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cbl_company ON company_brand_links (company_id)`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cbl_brand ON company_brand_links (brand_account_id)`);
+
+  // Multiple phone numbers per company. The legacy companies.phone
+  // column holds a single primary phone (the one populated at import
+  // from contact_info[0]); this table holds every number we know of
+  // — storefront, mobile, customer service — so cold-call lists can
+  // try multiple numbers per lead.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS company_phones (
+    id TEXT PRIMARY KEY NOT NULL,
+    company_id TEXT NOT NULL REFERENCES companies(id),
+    phone TEXT NOT NULL,
+    source TEXT,          -- 'storeleads' / 'manual' / 'csv' / 'outscraper'
+    phone_type TEXT,      -- future: 'storefront' / 'mobile' / 'support'
+    is_primary INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_company_phones_company ON company_phones (company_id)`);
+  // De-dupe key: same company + same phone string is one row.
+  // Comparing on TRIM/LOWER would be more robust but keeps the SQL
+  // index simple; callers normalize before insert.
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_company_phones ON company_phones (company_id, phone)`);
   sqlite.exec(`CREATE TABLE IF NOT EXISTS magic_link_tokens (
     id TEXT PRIMARY KEY NOT NULL,
     email TEXT NOT NULL,

@@ -188,6 +188,23 @@ export const companyBrandLinks = sqliteTable("company_brand_links", {
   index("idx_cbl_brand").on(table.brandAccountId),
 ]);
 
+// ── company_phones — one row per known phone per company ──
+// The legacy `companies.phone` holds a single primary; this table
+// holds the FULL set so cold-call workflows can try every number
+// StoreLeads (or any other source) returned.
+export const companyPhones = sqliteTable("company_phones", {
+  id: id(),
+  companyId: text("company_id").notNull().references(() => companies.id),
+  phone: text("phone").notNull(),
+  source: text("source"),
+  phoneType: text("phone_type"),
+  isPrimary: integer("is_primary", { mode: "boolean" }).notNull().default(false),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  index("idx_company_phones_company").on(table.companyId),
+]);
+
 // ── Smart Lists (Saved Filters) ──
 // Re-export pipeline schema
 export { deals, dealActivities, DEAL_STAGES, DEAL_STAGE_LABELS, DEAL_STAGE_COLORS, DEAL_CHANNELS, ACTIVITY_TYPES } from "./pipeline";

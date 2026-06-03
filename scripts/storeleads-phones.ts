@@ -34,8 +34,13 @@ import {
 } from "../src/modules/sales/lib/storeleads/client";
 
 const PROSPECTS_URL = "https://theframe.getjaxy.com/api/v1/sales/prospects";
+const UPSERT_URL = "https://theframe.getjaxy.com/api/v1/integrations/storeleads/upsert-phones";
 const PAGE_SIZE = 100;
 const SL_BATCH = 100;
+// Upsert in chunks of 1000 items so a single POST doesn't time out on
+// the edge. ~10K per chunk × 5 chunks fits comfortably under the
+// route's MAX_ITEMS = 10000 cap with margin.
+const UPSERT_CHUNK = 1000;
 
 interface ProspectRow {
   id: string;
@@ -199,6 +204,67 @@ async function main() {
   for (const k of Object.keys(phoneCountDist).map(Number).sort((a, b) => a - b)) {
     console.log(`  ${k} phones: ${phoneCountDist[k]} domains`);
   }
+
+  // Push every (company_id, phones[]) tuple back to The Frame so the
+  // numbers live in our DB long-term and a future re-run is a no-op.
+  // The endpoint dedupes via INSERT OR IGNORE on (company_id, phone)
+  // so re-running this script is safe.
+  console.log(`\nPushing phones to The Frame...`);
+  const items: Array<{ company_id: string; phones: string[]; source: string }> = [];
+  for (const [domain, prospectsForDomain] of Array.from(byDomain.entries())) {
+    const sl = enrichments.get(domain) ?? null;
+    const phones = extractPhones(sl);
+    if (phones.length === 0) continue;
+    for (const p of prospectsForDomain) {
+      items.push({ company_id: p.id, phones, source: "storeleads" });
+    }
+  }
+
+  let totals = {
+    itemsProcessed: 0,
+    phoneRowsInserted: 0,
+    duplicatesSkipped: 0,
+    primariesAssigned: 0,
+    companiesPhoneFilled: 0,
+  };
+
+  for (let i = 0; i < items.length; i += UPSERT_CHUNK) {
+    const chunk = items.slice(i, i + UPSERT_CHUNK);
+    const res = await fetch(UPSERT_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `session-token=${token}`,
+      },
+      body: JSON.stringify({ items: chunk }),
+    });
+    if (!res.ok) {
+      console.warn(`  chunk ${i + 1}-${i + chunk.length}: HTTP ${res.status} — ${await res.text().then((t) => t.slice(0, 200))}`);
+      continue;
+    }
+    const json = await res.json() as typeof totals & { ok: boolean };
+    if (!json.ok) {
+      console.warn(`  chunk ${i + 1}-${i + chunk.length}: server error`);
+      continue;
+    }
+    totals.itemsProcessed += json.itemsProcessed;
+    totals.phoneRowsInserted += json.phoneRowsInserted;
+    totals.duplicatesSkipped += json.duplicatesSkipped;
+    totals.primariesAssigned += json.primariesAssigned;
+    totals.companiesPhoneFilled += json.companiesPhoneFilled;
+    console.log(
+      `  chunk ${i + 1}-${i + chunk.length}: ` +
+      `+${json.phoneRowsInserted} phones inserted, ` +
+      `${json.duplicatesSkipped} duplicates skipped`,
+    );
+  }
+
+  console.log(`\nFrame upsert totals:`);
+  console.log(`  Items processed:              ${totals.itemsProcessed}`);
+  console.log(`  New phone rows inserted:      ${totals.phoneRowsInserted}`);
+  console.log(`  Duplicates skipped (re-run):  ${totals.duplicatesSkipped}`);
+  console.log(`  Companies given a primary:    ${totals.primariesAssigned}`);
+  console.log(`  companies.phone fills:        ${totals.companiesPhoneFilled}`);
 }
 
 main().catch((e) => {
