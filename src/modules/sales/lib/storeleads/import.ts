@@ -108,11 +108,32 @@ function parseInt0(raw: string | undefined | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Pick the first non-empty value from a comma- or semicolon-separated cell. */
+/** Pick the first non-empty value from a multi-value cell.
+ *
+ *  StoreLeads CSV exports use a mix of separators across columns:
+ *    - emails:  comma OR semicolon
+ *    - phones:  COLON ":"  ← discovered the hard way: company
+ *                 edccbde1-0b8d-42b0-8ebc-dbbb248b1cd6 had its
+ *                 phone stored as `+1 916-584-4540:+1 916-...`
+ *                 because we weren't splitting on colon.
+ *    - emails / urls also occasionally pipe-separated.
+ *  Split on all common separators so the first-of-list logic
+ *  actually picks one value instead of stuffing the whole
+ *  concatenated string into a single column. */
 function firstOf(raw: string | undefined | null): string | null {
   if (!raw) return null;
-  const parts = String(raw).split(/[,;\n]/).map((s) => s.trim()).filter(Boolean);
+  const parts = splitMulti(raw);
   return parts[0] ?? null;
+}
+
+/** Same split logic as firstOf, exported as a list — used by the
+ *  cleanup pass to recover the additional values that got lost. */
+export function splitMulti(raw: string | undefined | null): string[] {
+  if (!raw) return [];
+  return String(raw)
+    .split(/[,;:|\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 /** Lowercase + trim domains for dedup keys. */
