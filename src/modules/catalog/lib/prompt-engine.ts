@@ -128,6 +128,104 @@ export const COPY_PROMPTS = {
   metaDescription: (name: string, details: string) =>
     `Write an SEO meta description for "${name}" by Jaxy. Details: ${details}. Max 160 characters. Include a call to action.`,
 
-  productName: (details: string) =>
-    `Suggest 5 creative product names for sunglasses with these details: ${details}. Names should be: short (1-2 words), evocative, memorable, and work for a modern eyewear brand called Jaxy. Return as a JSON array of strings.`,
+  /**
+   * Generate product-name candidates. v2: Quay-inspired emotional
+   * register + explicit legal-avoidance clause.
+   *
+   * Daniel's brief (June 2026): "I feel like ours need more feelings
+   * attached to them, I think Quay do a good job with their product
+   * naming." Names should evoke moments and moods, not describe the
+   * frame. Plus: "we need to make sure the name isn't copyrighted
+   * or the same as other eyewear brands for legal reasons."
+   *
+   * @param productCategory  Drives tonal register. Reading glasses
+   *   should read approachable/grown-up; sunglasses should read
+   *   confident/lifestyle-forward; blue light sits between.
+   * @param details          Frame attributes blob (category, shape,
+   *   material, gender, tags) — passed verbatim into the prompt.
+   */
+  productName: (
+    productCategory: "sunglasses" | "reading glasses" | "blue light",
+    details: string,
+  ) =>
+    `You're naming a new ${productCategory} style for Jaxy — a modern, lifestyle-driven eyewear brand.
+
+Frame details: ${details}.
+
+Generate 8 candidate names following these rules:
+
+STYLE
+- 1–2 words, max 14 characters total. Easy to say out loud.
+- Evoke a MOMENT, MOOD, or ATTITUDE — not the frame itself.
+  Strong references: late nights, music, motion, weather, light,
+  small intimate scenes, after-hours energy, golden-hour calm.
+  Weak references: literal colors, frame shapes, technical specs.
+- The name should make you feel something the second you read it.
+- Mix registers across your 8: some single evocative nouns
+  (Encore, Vesper, Static), some short verb/state phrases
+  (All In, Closing Time, Off Duty), one wildcard.
+- Avoid clichés saturated in eyewear: Aviator, Rebel, Maverick,
+  Icon, Classic, Vintage, Modern.
+- Names must read as ${productCategory === "reading glasses"
+      ? "approachable + grown-up + un-fussy"
+      : productCategory === "blue light"
+      ? "calm + focused + everyday-friendly"
+      : "confident + lifestyle-forward"}.
+
+LEGAL — IMPORTANT
+- Do NOT propose any name you know belongs to another eyewear,
+  fashion, or sunglass brand — not as a brand name, model name,
+  or collection name. Examples to avoid (non-exhaustive):
+  Ray-Ban / Wayfarer / Aviator / Clubmaster / Erika; Oakley /
+  Holbrook / Frogskins / Sutro / Radar; Quay names (After Hours,
+  Hardwire, All In, Sweet Dreams, Encore, On Repeat, Vesper,
+  Empire, Soundcheck, Closing Time, Off Duty); Warby Parker /
+  Felix / Percey / Haskell / Burke; Persol / Steve McQueen;
+  Maui Jim / Banyans; Smith / Lowdown; Le Specs / Halfmoon
+  Magic; Krewe / Conti / Clio; DIFF / Carson / Becky; Bonlook;
+  Privé Revaux; Pair Eyewear; Zenni; EyeBuyDirect; Liingo;
+  YESGLASSES; Felix Gray.
+- Avoid trademark-style names of large consumer brands in adjacent
+  categories (Apple, Tesla, Nike, Lululemon, etc.) — even when the
+  literal meaning is generic.
+- If a name is even SLIGHTLY at risk of overlap, do not include
+  it. Pick a different angle.
+
+OUTPUT
+For each name return:
+  { "name": "...",
+    "vibe": "<one-line scene/mood it conjures>",
+    "legal_confidence": "high" | "medium" | "low",
+    "legal_notes": "<reasoning — e.g. 'common dictionary word, not a known eyewear brand' or 'low confidence — should TM search before use'>" }
+
+Return a JSON array of 8 such objects, sorted by legal_confidence descending.
+NOTE TO READER: legal_confidence: high means "the model doesn't
+recall this being used in eyewear." It is NOT a trademark
+guarantee. Final names must be checked against USPTO TESS
+(tmsearch.uspto.gov) in class 9 + class 16 before launch.`,
 };
+
+/**
+ * Infer the product-name category from whatever signals are
+ * available on the product row. Reading glasses are flagged by
+ * the SKU pattern Jaxy uses (`-R-` segment, e.g. `JX5001-R-BLK`)
+ * or by a category string containing "reading". Blue light similar.
+ * Default falls back to sunglasses — the bulk of the catalog.
+ */
+export function inferProductNameCategory(input: {
+  sku?: string | null;
+  category?: string | null;
+  tags?: string | null;
+}): "sunglasses" | "reading glasses" | "blue light" {
+  const sku = (input.sku ?? "").toUpperCase();
+  const cat = (input.category ?? "").toLowerCase();
+  const tags = (input.tags ?? "").toLowerCase();
+
+  if (sku.includes("-R-") || cat.includes("reading") || tags.includes("reading")) {
+    return "reading glasses";
+  }
+  if (sku.includes("-B-") || cat.includes("blue light") || tags.includes("blue light")) {
+    return "blue light";
+  }
+  return "sunglasses";
+}

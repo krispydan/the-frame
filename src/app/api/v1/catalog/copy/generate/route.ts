@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { products, tags, copyVersions } from "@/modules/catalog/schema";
 import { eq } from "drizzle-orm";
-import { COPY_PROMPTS, detectStyleCategory } from "@/modules/catalog/lib/prompt-engine";
+import { COPY_PROMPTS, detectStyleCategory, inferProductNameCategory } from "@/modules/catalog/lib/prompt-engine";
 import { curatedAttrsFromTags } from "@/modules/catalog/lib/curated-attributes";
 
 /**
@@ -53,7 +53,18 @@ export async function POST(request: NextRequest) {
       case "description": prompt = COPY_PROMPTS.description(name, details); break;
       case "short_description": prompt = COPY_PROMPTS.shortDescription(name, details); break;
       case "bullet_points": prompt = COPY_PROMPTS.bulletPoints(name, details); break;
-      case "name": prompt = COPY_PROMPTS.productName(details); break;
+      case "name": {
+        // Reading glasses / blue light / sunglasses each get a
+        // different tonal register in the prompt. Inferred from
+        // SKU prefix (-R-, -B-) or category string.
+        const productCategory = inferProductNameCategory({
+          sku: p.skuPrefix,
+          category: p.category,
+          tags: tagNames,
+        });
+        prompt = COPY_PROMPTS.productName(productCategory, details);
+        break;
+      }
       default: return NextResponse.json({ error: "Invalid field" }, { status: 400 });
     }
 
