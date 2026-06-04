@@ -4,10 +4,7 @@
  * stores them in reporting_logs for history.
  */
 
-import { db } from "@/lib/db";
-import { reportingLogs } from "@/modules/core/schema";
-import { sql } from "drizzle-orm";
-import { detectTrends } from "./trend-detector";
+import { sqlite } from "@/lib/db";
 import { calculateBusinessHealth } from "../lib/business-health";
 
 export interface ReportData {
@@ -44,16 +41,18 @@ export function generateReport(period: "weekly" | "monthly" = "weekly"): ReportD
   const priorStartStr = priorStart.toISOString().slice(0, 10);
 
   // ── Revenue & order counts ──
-  const revData = db.all<{ period_label: string; total_revenue: number; order_count: number }>(sql`
+  const revData = sqlite.prepare(`
     SELECT
-      CASE WHEN placed_at >= ${currentStartStr} THEN 'current' ELSE 'prior' END AS period_label,
+      CASE WHEN placed_at >= ? THEN 'current' ELSE 'prior' END AS period_label,
       COALESCE(SUM(total), 0) AS total_revenue,
       COUNT(*) AS order_count
     FROM orders
-    WHERE placed_at >= ${priorStartStr}
+    WHERE placed_at >= ?
       AND status NOT IN ('cancelled', 'returned')
     GROUP BY period_label
-  `);
+  `).all(currentStartStr, priorStartStr) as Array<{
+    period_label: string; total_revenue: number; order_count: number;
+  }>;
 
   const current = revData.find((r) => r.period_label === "current") || { total_revenue: 0, order_count: 0 };
   const prior = revData.find((r) => r.period_label === "prior") || { total_revenue: 0, order_count: 0 };
@@ -63,7 +62,7 @@ export function generateReport(period: "weekly" | "monthly" = "weekly"): ReportD
     : current.total_revenue > 0 ? 100 : 0;
 
   // ── Top products ──
-  const topProducts = db.all<{ sku: string; product_name: string; units: number; revenue: number }>(sql`
+  const topProducts = sqlite.prepare(`
     SELECT
       oi.sku,
       oi.product_name,
@@ -71,25 +70,27 @@ export function generateReport(period: "weekly" | "monthly" = "weekly"): ReportD
       SUM(oi.total_price) AS revenue
     FROM order_items oi
     JOIN orders o ON o.id = oi.order_id
-    WHERE o.placed_at >= ${currentStartStr}
+    WHERE o.placed_at >= ?
       AND o.status NOT IN ('cancelled', 'returned')
     GROUP BY oi.sku
     ORDER BY revenue DESC
     LIMIT 10
-  `);
+  `).all(currentStartStr) as Array<{
+    sku: string; product_name: string; units: number; revenue: number;
+  }>;
 
   // ── Channel breakdown ──
-  const channelData = db.all<{ channel: string; orders: number; revenue: number }>(sql`
+  const channelData = sqlite.prepare(`
     SELECT
       channel,
       COUNT(*) AS orders,
       COALESCE(SUM(total), 0) AS revenue
     FROM orders
-    WHERE placed_at >= ${currentStartStr}
+    WHERE placed_at >= ?
       AND status NOT IN ('cancelled', 'returned')
     GROUP BY channel
     ORDER BY revenue DESC
-  `);
+  `).all(currentStartStr) as Array<{ channel: string; orders: number; revenue: number }>;
 
   const totalRevenue = current.total_revenue || 1;
   const channelBreakdown = channelData.map((c) => ({
@@ -163,12 +164,12 @@ ${channelBreakdown.map((c) => `- **${channelLabel(c.channel)}:** ${c.orders} ord
     markdown,
   };
 
-  db.insert(reportingLogs).values({
-    id: reportId,
-    eventType: `${period}_report`,
-    module: "intelligence",
-    metadata: reportData as any,
-  }).run();
+  // reporting_logs column is `timestamp`, not `created_at` — see
+  // src/modules/core/schema/index.ts:reportingLogs.
+  sqlite.prepare(`
+    INSERT INTO reporting_logs (id, timestamp, event_type, module, metadata)
+    VALUES (?, datetime('now'), ?, 'intelligence', ?)
+  `).run(reportId, `${period}_report`, JSON.stringify(reportData));
 
   return reportData;
 }
@@ -177,13 +178,13 @@ ${channelBreakdown.map((c) => `- **${channelLabel(c.channel)}:** ${c.orders} ord
  * Get previously generated reports from history.
  */
 export function getReportHistory(limit = 10): ReportData[] {
-  const rows = db.all<{ metadata: string }>(sql`
+  const rows = sqlite.prepare(`
     SELECT metadata FROM reporting_logs
     WHERE event_type IN ('weekly_report', 'monthly_report')
       AND module = 'intelligence'
-    ORDER BY created_at DESC
-    LIMIT ${limit}
-  `);
+    ORDER BY timestamp DESC
+    LIMIT ?
+  `).all(limit) as Array<{ metadata: string }>;
 
   return rows.map((r) => {
     try {

@@ -214,7 +214,10 @@ export default function IntelligencePage() {
     setLoading((l) => ({ ...l, health: true }));
     try {
       const res = await fetch("/api/v1/intelligence/health");
-      setHealth(await res.json());
+      const json = await res.json();
+      // API returns { error: "..." } on 500 — only accept a well-shaped
+      // health payload so a broken endpoint can't crash the gauge.
+      if (json && json.components && json.color) setHealth(json);
     } catch {} finally {
       setLoading((l) => ({ ...l, health: false }));
     }
@@ -224,7 +227,8 @@ export default function IntelligencePage() {
     setLoading((l) => ({ ...l, trends: true }));
     try {
       const res = await fetch(`/api/v1/intelligence/trends?period=${periodDays}`);
-      setTrends(await res.json());
+      const json = await res.json();
+      if (json && Array.isArray(json.trending_up)) setTrends(json);
     } catch {} finally {
       setLoading((l) => ({ ...l, trends: false }));
     }
@@ -234,7 +238,8 @@ export default function IntelligencePage() {
     setLoading((l) => ({ ...l, sellThrough: true }));
     try {
       const res = await fetch(`/api/v1/inventory/sell-through?window=${periodDays}`);
-      setSellThrough(await res.json());
+      const json = await res.json();
+      if (json && Array.isArray(json.items)) setSellThrough(json);
     } catch {} finally {
       setLoading((l) => ({ ...l, sellThrough: false }));
     }
@@ -244,7 +249,8 @@ export default function IntelligencePage() {
     setLoading((l) => ({ ...l, pipeline: true }));
     try {
       const res = await fetch("/api/v1/intelligence/pipeline");
-      setPipelineData(await res.json());
+      const json = await res.json();
+      if (json && Array.isArray(json.byStage) && json.summary) setPipelineData(json);
     } catch {} finally {
       setLoading((l) => ({ ...l, pipeline: false }));
     }

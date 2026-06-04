@@ -4,9 +4,7 @@
  * seasonal patterns, and momentum scores.
  */
 
-import { db } from "@/lib/db";
-import { orders, orderItems } from "@/modules/orders/schema";
-import { sql, gte, and, ne } from "drizzle-orm";
+import { sqlite } from "@/lib/db";
 
 export interface ProductTrend {
   sku: string;
@@ -60,10 +58,31 @@ export function detectTrends(periodDays = 30): TrendData {
 
   const currentStartStr = currentStart.toISOString().slice(0, 10);
   const priorStartStr = priorStart.toISOString().slice(0, 10);
-  const nowStr = now.toISOString().slice(0, 10);
 
   // ── Product trends: compare current vs prior period per SKU ──
-  const productData = db.all<{
+  const productData = sqlite.prepare(`
+    SELECT
+      oi.sku,
+      oi.sku_id,
+      oi.product_name,
+      oi.color_name,
+      COALESCE(SUM(CASE WHEN o.placed_at >= ? THEN oi.quantity ELSE 0 END), 0) AS current_units,
+      COALESCE(SUM(CASE WHEN o.placed_at >= ? AND o.placed_at < ? THEN oi.quantity ELSE 0 END), 0) AS prior_units,
+      COALESCE(SUM(CASE WHEN o.placed_at >= ? THEN oi.total_price ELSE 0 END), 0) AS current_revenue,
+      COALESCE(SUM(CASE WHEN o.placed_at >= ? AND o.placed_at < ? THEN oi.total_price ELSE 0 END), 0) AS prior_revenue
+    FROM order_items oi
+    JOIN orders o ON o.id = oi.order_id
+    WHERE o.placed_at >= ?
+      AND o.status NOT IN ('cancelled', 'returned')
+    GROUP BY oi.sku
+    ORDER BY current_units DESC
+  `).all(
+    currentStartStr,
+    priorStartStr, currentStartStr,
+    currentStartStr,
+    priorStartStr, currentStartStr,
+    priorStartStr,
+  ) as Array<{
     sku: string;
     sku_id: string | null;
     product_name: string;
@@ -72,23 +91,7 @@ export function detectTrends(periodDays = 30): TrendData {
     prior_units: number;
     current_revenue: number;
     prior_revenue: number;
-  }>(sql`
-    SELECT
-      oi.sku,
-      oi.sku_id,
-      oi.product_name,
-      oi.color_name,
-      COALESCE(SUM(CASE WHEN o.placed_at >= ${currentStartStr} THEN oi.quantity ELSE 0 END), 0) AS current_units,
-      COALESCE(SUM(CASE WHEN o.placed_at >= ${priorStartStr} AND o.placed_at < ${currentStartStr} THEN oi.quantity ELSE 0 END), 0) AS prior_units,
-      COALESCE(SUM(CASE WHEN o.placed_at >= ${currentStartStr} THEN oi.total_price ELSE 0 END), 0) AS current_revenue,
-      COALESCE(SUM(CASE WHEN o.placed_at >= ${priorStartStr} AND o.placed_at < ${currentStartStr} THEN oi.total_price ELSE 0 END), 0) AS prior_revenue
-    FROM order_items oi
-    JOIN orders o ON o.id = oi.order_id
-    WHERE o.placed_at >= ${priorStartStr}
-      AND o.status NOT IN ('cancelled', 'returned')
-    GROUP BY oi.sku
-    ORDER BY current_units DESC
-  `);
+  }>;
 
   const allTrends: ProductTrend[] = productData.map((row) => {
     const growthRate = row.prior_units > 0
@@ -122,7 +125,7 @@ export function detectTrends(periodDays = 30): TrendData {
   const flat = allTrends.filter((t) => t.direction === "flat");
 
   // ── Dead stock: SKUs with no sales in the period ──
-  const deadStockData = db.all<{ sku: string; product_name: string; days_since: number }>(sql`
+  const deadStockData = sqlite.prepare(`
     SELECT
       oi.sku,
       oi.product_name,
@@ -131,9 +134,9 @@ export function detectTrends(periodDays = 30): TrendData {
     JOIN orders o ON o.id = oi.order_id
     WHERE o.status NOT IN ('cancelled', 'returned')
     GROUP BY oi.sku
-    HAVING days_since > ${periodDays}
+    HAVING days_since > ?
     ORDER BY days_since DESC
-  `);
+  `).all(periodDays) as Array<{ sku: string; product_name: string; days_since: number }>;
 
   const dead_stock = deadStockData.map((r) => ({
     sku: r.sku || "unknown",
@@ -142,24 +145,30 @@ export function detectTrends(periodDays = 30): TrendData {
   }));
 
   // ── Channel trends ──
-  const channelData = db.all<{
+  const channelData = sqlite.prepare(`
+    SELECT
+      channel,
+      COALESCE(SUM(CASE WHEN placed_at >= ? THEN 1 ELSE 0 END), 0) AS current_orders,
+      COALESCE(SUM(CASE WHEN placed_at >= ? AND placed_at < ? THEN 1 ELSE 0 END), 0) AS prior_orders,
+      COALESCE(SUM(CASE WHEN placed_at >= ? THEN total ELSE 0 END), 0) AS current_revenue,
+      COALESCE(SUM(CASE WHEN placed_at >= ? AND placed_at < ? THEN total ELSE 0 END), 0) AS prior_revenue
+    FROM orders
+    WHERE placed_at >= ?
+      AND status NOT IN ('cancelled', 'returned')
+    GROUP BY channel
+  `).all(
+    currentStartStr,
+    priorStartStr, currentStartStr,
+    currentStartStr,
+    priorStartStr, currentStartStr,
+    priorStartStr,
+  ) as Array<{
     channel: string;
     current_orders: number;
     prior_orders: number;
     current_revenue: number;
     prior_revenue: number;
-  }>(sql`
-    SELECT
-      channel,
-      COALESCE(SUM(CASE WHEN placed_at >= ${currentStartStr} THEN 1 ELSE 0 END), 0) AS current_orders,
-      COALESCE(SUM(CASE WHEN placed_at >= ${priorStartStr} AND placed_at < ${currentStartStr} THEN 1 ELSE 0 END), 0) AS prior_orders,
-      COALESCE(SUM(CASE WHEN placed_at >= ${currentStartStr} THEN total ELSE 0 END), 0) AS current_revenue,
-      COALESCE(SUM(CASE WHEN placed_at >= ${priorStartStr} AND placed_at < ${currentStartStr} THEN total ELSE 0 END), 0) AS prior_revenue
-    FROM orders
-    WHERE placed_at >= ${priorStartStr}
-      AND status NOT IN ('cancelled', 'returned')
-    GROUP BY channel
-  `);
+  }>;
 
   const channel_trends: ChannelTrend[] = channelData.map((r) => ({
     channel: r.channel,
@@ -174,7 +183,7 @@ export function detectTrends(periodDays = 30): TrendData {
 
   // ── Seasonal patterns (monthly averages from all history) ──
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const seasonalData = db.all<{ month: number; avg_orders: number; avg_revenue: number }>(sql`
+  const seasonalData = sqlite.prepare(`
     SELECT
       CAST(strftime('%m', placed_at) AS INTEGER) AS month,
       CAST(COUNT(*) AS REAL) / MAX(1, COUNT(DISTINCT strftime('%Y', placed_at))) AS avg_orders,
@@ -184,7 +193,7 @@ export function detectTrends(periodDays = 30): TrendData {
       AND placed_at IS NOT NULL
     GROUP BY month
     ORDER BY month
-  `);
+  `).all() as Array<{ month: number; avg_orders: number; avg_revenue: number }>;
 
   const seasonal_patterns: SeasonalPattern[] = seasonalData.map((r) => ({
     month: r.month,

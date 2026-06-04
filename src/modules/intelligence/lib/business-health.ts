@@ -4,8 +4,7 @@
  * Uses real data from orders, inventory, customers, and finance modules.
  */
 
-import { db } from "@/lib/db";
-import { sql } from "drizzle-orm";
+import { sqlite } from "@/lib/db";
 
 export interface HealthComponent {
   score: number;
@@ -38,15 +37,15 @@ function scorePipeline(): HealthComponent {
   const d14 = new Date(now.getTime() - 14 * 86400000).toISOString().slice(0, 10);
   const d28 = new Date(now.getTime() - 28 * 86400000).toISOString().slice(0, 10);
 
-  const data = db.all<{ period_label: string; cnt: number; rev: number }>(sql`
+  const data = sqlite.prepare(`
     SELECT
-      CASE WHEN placed_at >= ${d14} THEN 'current' ELSE 'prior' END AS period_label,
+      CASE WHEN placed_at >= ? THEN 'current' ELSE 'prior' END AS period_label,
       COUNT(*) AS cnt,
       COALESCE(SUM(total), 0) AS rev
     FROM orders
-    WHERE placed_at >= ${d28} AND status NOT IN ('cancelled', 'returned')
+    WHERE placed_at >= ? AND status NOT IN ('cancelled', 'returned')
     GROUP BY period_label
-  `);
+  `).all(d14, d28) as Array<{ period_label: string; cnt: number; rev: number }>;
 
   const cur = data.find((r) => r.period_label === "current") || { cnt: 0, rev: 0 };
   const pri = data.find((r) => r.period_label === "prior") || { cnt: 0, rev: 0 };
@@ -68,14 +67,14 @@ function scorePipeline(): HealthComponent {
  * Inventory health: % of SKUs adequately stocked vs needing reorder.
  */
 function scoreInventory(): HealthComponent {
-  const data = db.get<{ total: number; needs_reorder: number; out_of_stock: number }>(sql`
+  const data = sqlite.prepare(`
     SELECT
       COUNT(*) AS total,
       SUM(CASE WHEN needs_reorder = 1 THEN 1 ELSE 0 END) AS needs_reorder,
       SUM(CASE WHEN quantity <= 0 THEN 1 ELSE 0 END) AS out_of_stock
     FROM inventory
     WHERE location = 'warehouse'
-  `);
+  `).get() as { total: number; needs_reorder: number; out_of_stock: number } | undefined;
 
   if (!data || data.total === 0) {
     return { score: 70, label: "No inventory data", trend: "flat" };
@@ -97,19 +96,19 @@ function scoreInventory(): HealthComponent {
 function scoreCustomers(): HealthComponent {
   const d60 = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
 
-  const data = db.get<{ total_customers: number; repeat_customers: number }>(sql`
+  const data = sqlite.prepare(`
     SELECT
       COUNT(DISTINCT company_id) AS total_customers,
       SUM(CASE WHEN order_count > 1 THEN 1 ELSE 0 END) AS repeat_customers
     FROM (
       SELECT company_id, COUNT(*) AS order_count
       FROM orders
-      WHERE placed_at >= ${d60}
+      WHERE placed_at >= ?
         AND status NOT IN ('cancelled', 'returned')
         AND company_id IS NOT NULL
       GROUP BY company_id
     )
-  `);
+  `).get(d60) as { total_customers: number; repeat_customers: number } | undefined;
 
   if (!data || data.total_customers === 0) {
     return { score: 70, label: "No customer data", trend: "flat" };
@@ -131,14 +130,14 @@ function scoreFinance(): HealthComponent {
   const d30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
   const d60 = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
 
-  const data = db.all<{ period_label: string; rev: number }>(sql`
+  const data = sqlite.prepare(`
     SELECT
-      CASE WHEN placed_at >= ${d30} THEN 'current' ELSE 'prior' END AS period_label,
+      CASE WHEN placed_at >= ? THEN 'current' ELSE 'prior' END AS period_label,
       COALESCE(SUM(total), 0) AS rev
     FROM orders
-    WHERE placed_at >= ${d60} AND status NOT IN ('cancelled', 'returned')
+    WHERE placed_at >= ? AND status NOT IN ('cancelled', 'returned')
     GROUP BY period_label
-  `);
+  `).all(d30, d60) as Array<{ period_label: string; rev: number }>;
 
   const cur = data.find((r) => r.period_label === "current")?.rev || 0;
   const pri = data.find((r) => r.period_label === "prior")?.rev || 0;
