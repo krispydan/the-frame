@@ -126,12 +126,17 @@ export function buildPayoutJournal(opts: {
     // Xero LineAmount: positive = debit, negative = credit
     let lineAmount = side === "debit" ? bucket.amount : -bucket.amount;
 
-    // Adjustments can be positive or negative in the source data — preserve sign
-    // and let it land on the configured side. If the bucket amount is negative
-    // and side is debit, that's effectively a credit; LineAmount handles it.
+    // Adjustments: aggregator preserves the Shopify sign convention where
+    // POSITIVE amount = money INTO our balance (Shopify credited us — e.g.
+    // dispute won, anomaly credit), NEGATIVE = money OUT (Shopify debited
+    // us — e.g. chargeback). For Xero we need the OPPOSITE sign convention:
+    //   positive Shopify (income)  → CR account  (Xero LineAmount < 0)
+    //   negative Shopify (expense) → DR account  (Xero LineAmount > 0)
+    // So invert. (Earlier code did `lineAmount = bucket.amount` which made
+    // positive adjustments land on the wrong side and produced unbalanced
+    // journals when both `credit` and `debit` txs were present in a payout.)
     if (bucket.category === "adjustments") {
-      // bucket.amount preserves sign from aggregator; map directly.
-      lineAmount = bucket.amount;  // positive bucket -> debit side, negative -> credit
+      lineAmount = -bucket.amount;
     }
 
     lines.push({

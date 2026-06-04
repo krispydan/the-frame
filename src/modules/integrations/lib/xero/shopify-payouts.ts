@@ -38,7 +38,14 @@ export type ShopifyPayout = {
 
 export type ShopifyPayoutTransactionType =
   | "charge" | "refund" | "dispute" | "adjustment" | "advance" | "advance_funding"
-  | "payout" | "fee" | "reserve_hold" | "reserve_release";
+  | "payout" | "fee" | "reserve_hold" | "reserve_release"
+  // Generic Shopify Payments balance adjustments — observed live in payouts
+  // but absent from older Shopify Payments docs. Treated as "adjustments"
+  // by the aggregator (signed sum into the adjustments bucket).
+  | "credit" | "debit"
+  | "chargeback_fee"
+  | "anomaly_credit" | "anomaly_credit_reversal"
+  | "anomaly_debit" | "anomaly_debit_reversal";
 
 export type ShopifyPayoutTransaction = {
   id: number;

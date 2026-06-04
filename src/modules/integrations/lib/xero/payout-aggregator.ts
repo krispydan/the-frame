@@ -126,13 +126,26 @@ export function aggregatePayoutTransactions(
         feeCount += 1;
         break;
       case "adjustment":
+      case "credit":            // generic balance credit (dispute win, anomaly credit, retail credit)
+      case "debit":             // generic balance debit (chargeback, anomaly debit)
       case "dispute":
+      case "chargeback_fee":
       case "reserve_hold":
       case "reserve_release":
       case "advance":
       case "advance_funding":
-        adjustments += amount;  // can be positive or negative
+      case "anomaly_credit":
+      case "anomaly_credit_reversal":
+      case "anomaly_debit":
+      case "anomaly_debit_reversal":
+        adjustments += amount;  // signed: positive = INTO our balance, negative = OUT
         adjustmentCount += 1;
+        // Per-tx fees on adjustment-like txs go to the standard fees bucket
+        // (e.g. the $0.13 fee on a "credit" balance adjustment).
+        if (fee !== 0) {
+          fees += fee;
+          feeCount += 1;
+        }
         break;
       case "payout":
         // The payout transaction itself — skip, we already have the net amount
