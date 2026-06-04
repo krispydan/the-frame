@@ -725,6 +725,19 @@ try {
        AND category = 'deferred_revenue'
        AND xero_account_code = '2200'
   `);
+
+  // One-shot corrective: Faire-origin settlements were tagged channel=
+  // 'shopify_wholesale' (because the Faire integration synced them into
+  // our wholesale Shopify store), but that broke the Finance > Settlements
+  // and Reconciliation views — they double-counted Faire payouts against
+  // wholesale period expected revenue. Faire-payout settlements are
+  // identifiable by external_id LIKE 'faire_payout_%'. UPDATE is idempotent.
+  sqlite.exec(`
+    UPDATE settlements
+       SET channel = 'faire'
+     WHERE channel = 'shopify_wholesale'
+       AND external_id LIKE 'faire_payout_%'
+  `);
 } catch (e) { console.error("[db] Xero ops tables error:", e); }
 
 // ── Slack notifications ──

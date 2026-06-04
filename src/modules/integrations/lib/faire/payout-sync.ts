@@ -45,7 +45,12 @@ import {
 } from "./payouts";
 
 const PLATFORM = "faire";
-const SETTLEMENT_CHANNEL = "shopify_wholesale" as const; // Faire orders live on the wholesale store
+// Faire orders physically live on the Shopify wholesale store, but the
+// payout / money flow is Faire's. Labeling these settlements as "faire"
+// keeps the Finance > Settlements + Reconciliation views accurate (vs
+// the old "shopify_wholesale" label which double-counted them in the
+// wholesale recon period and made discrepancies wildly wrong).
+const SETTLEMENT_CHANNEL = "faire" as const;
 const HUMAN = "Faire";
 
 export interface FairePayoutSyncResult {

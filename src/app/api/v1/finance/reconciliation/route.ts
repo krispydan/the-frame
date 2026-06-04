@@ -24,6 +24,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   shopify_wholesale: "Shopify Wholesale",
   faire: "Faire",
   amazon: "Amazon",
+  tiktok_shop: "TikTok Shop",
   direct: "Direct",
 };
 
@@ -51,22 +52,49 @@ export async function GET(req: NextRequest) {
       gross_amount: number; fees: number; net_amount: number; status: string;
     }>;
 
+    // Expected revenue per settlement comes from the ORDERS THAT ACTUALLY
+    // FLOWED INTO THIS SETTLEMENT (via settlement_line_items.order_id), NOT
+    // from a date-range scan of orders.placed_at IN settlement.period.
+    //
+    // The old approach worked for one bulk weekly payout per channel
+    // (Shopify Payments wholesale model). It catastrophically double-counted
+    // under the Faire per-order payout model: 17 Faire settlements in a
+    // single week would each match against the WHOLE week of orders,
+    // inflating total expected revenue ~17×. That's how we got the
+    // $1.5M expected vs $50K received bug.
+    //
+    // Note on join: settlement_line_items.order_id stores two different
+    // identifiers depending on which sync wrote it:
+    //   - Faire sync writes the LOCAL orders.id (UUID)
+    //   - Shopify Payments sync writes the EXTERNAL Shopify order ID
+    //     (e.g. "6908713533589")
+    // The match below covers both via (o.id = sli.order_id OR
+    // o.external_id = sli.order_id). Long-term we should normalize both
+    // writers to the local UUID, but for now the dual-match keeps the
+    // reconciliation page correct without a destructive backfill.
+    const expectedStmt = sqlite.prepare(`
+      SELECT
+        (SELECT COUNT(DISTINCT o.id) FROM orders o
+          WHERE EXISTS (
+            SELECT 1 FROM settlement_line_items sli
+            WHERE sli.settlement_id = ?
+              AND sli.order_id IS NOT NULL
+              AND (sli.order_id = o.id OR sli.order_id = o.external_id))
+        ) AS order_count,
+        COALESCE(
+          (SELECT SUM(o.total) FROM orders o
+            WHERE EXISTS (
+              SELECT 1 FROM settlement_line_items sli
+              WHERE sli.settlement_id = ?
+                AND sli.order_id IS NOT NULL
+                AND (sli.order_id = o.id OR sli.order_id = o.external_id))
+              AND (o.status IS NULL OR o.status NOT IN ('cancelled', 'returned'))),
+          0
+        ) AS revenue
+    `);
+
     const entries: ReconciliationEntry[] = stlRows.map(s => {
-      // Get expected revenue from orders for this settlement period + channel
-      // Settlement channel may be generic (e.g. 'shopify') while orders use specific channels (e.g. 'shopify_dtc', 'shopify_wholesale')
-      const channelMapping: Record<string, string[]> = {
-        shopify: ["shopify_dtc", "shopify_wholesale"],
-      };
-      const orderChannels = channelMapping[s.channel] || [s.channel];
-      const placeholders = orderChannels.map(() => "?").join(", ");
-      const orderData = sqlite.prepare(`
-        SELECT COUNT(DISTINCT id) as order_count, COALESCE(SUM(total), 0) as revenue
-        FROM orders
-        WHERE channel IN (${placeholders}) AND placed_at >= ? AND placed_at <= ?
-          AND status NOT IN ('cancelled', 'returned')
-      `).get(...orderChannels, s.period_start, s.period_end + "T23:59:59") as {
-        order_count: number; revenue: number;
-      } | undefined;
+      const orderData = expectedStmt.get(s.id, s.id) as { order_count: number; revenue: number } | undefined;
 
       const expectedRevenue = orderData?.revenue || 0;
       const discrepancy = expectedRevenue - s.gross_amount;
