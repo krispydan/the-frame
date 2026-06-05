@@ -14,8 +14,10 @@ import { products, skus as skusTable, tags as tagsTable } from "@/modules/catalo
 import { eq } from "drizzle-orm";
 import { syncMetafieldsFromTags } from "./sync-from-tags";
 import { syncProductDimensions } from "./dimensions";
+import { syncProductMetafields } from "./sync";
 import { curatedAttrsFromTags } from "@/modules/catalog/lib/curated-attributes";
 import type { ProductForExtendedMetafields } from "./extended-metafields";
+import type { AiCategorizationOutput } from "./handles";
 
 const STORES = ["dtc", "wholesale"] as const;
 
@@ -139,6 +141,38 @@ export async function runShopifyMetafieldSync(
             storeSummary[store].failures.push(
               `${product.skuPrefix} (dimensions): ${e instanceof Error ? e.message : "unknown"}`,
             );
+          }
+
+          // AI-categorization-driven metafields: shopify.eyewear-frame-
+          // color, shopify.lens-color, shopify.age-group (+ overlapping
+          // fields like target-gender that sync-from-tags also writes —
+          // metafieldsSet is idempotent so duplicates are harmless).
+          // Only runs when an AI categorization is stored on the product
+          // (populated by /run-ai-categorization).
+          //
+          // Age-group fallback: if AI didn't return adults (rare —
+          // handles.ts validation already coerces unknowns to adults),
+          // patch it here to enforce Daniel's "adults for all" rule.
+          if (product.aiCategorization) {
+            try {
+              const ai = JSON.parse(product.aiCategorization) as AiCategorizationOutput;
+              if (!ai.category_metafields.age_group ||
+                  ai.category_metafields.age_group === ("" as never)) {
+                ai.category_metafields.age_group = "adults";
+              }
+              await syncProductMetafields({
+                store,
+                shopifyProductId: r.shopifyProductId,
+                categorization: ai,
+                extended,
+                skipCategory: true, // already-set on prior run
+                dryRun: false,
+              });
+            } catch (e) {
+              storeSummary[store].failures.push(
+                `${product.skuPrefix} (ai-categorization): ${e instanceof Error ? e.message : "unknown"}`,
+              );
+            }
           }
         }
 
