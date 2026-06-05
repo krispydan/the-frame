@@ -100,6 +100,8 @@ export async function runShopifyMetafieldSync(
       description: product.description,
       collectionBatch: product.collectionBatch,
       retailPrice: product.retailPrice,
+      storedSeoTitle: product.seoTitle,
+      storedSeoDescription: product.metaDescription,
     };
 
     for (const store of STORES) {

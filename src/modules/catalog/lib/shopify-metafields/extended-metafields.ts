@@ -63,6 +63,16 @@ export interface ProductForExtendedMetafields {
   /** Retail price in dollars — drives the global.custom_label_3 price
    *  tier (under_30 / 30_50 / 50_plus). Optional; missing → no tier. */
   retailPrice?: number | null;
+  /** Marketing-curated SEO title from products.seo_title. When
+   *  populated (i.e. via the import-seo-titles endpoint), the sync
+   *  pushes THIS verbatim into global.title_tag rather than the
+   *  formula output. The spreadsheet has 38 hand-curated titles
+   *  with hybrid shapes ("Square Aviator"), mid-position "Polarized",
+   *  reversed orders ("Hexagonal Vintage") etc. that the formula
+   *  can't reproduce. Null → formula wins. */
+  storedSeoTitle?: string | null;
+  /** Same override semantic for the description. */
+  storedSeoDescription?: string | null;
 }
 
 const NAMESPACE_GLOBAL = "global";
@@ -140,8 +150,13 @@ export function buildExtendedMetafields(
 
   const out: MetafieldsSetInput[] = [];
 
-  // ── Deterministic SEO ──
-  const seoTitle = buildSeoTitle(seoCtx);
+  // ── SEO ── stored values win over the formula. The stored value
+  // comes from products.seo_title / meta_description, populated by
+  // the import-seo-titles endpoint from marketing's curated
+  // spreadsheet. Formula is only the fallback for products without
+  // a curated title.
+  const seoTitle =
+    (p.storedSeoTitle && p.storedSeoTitle.trim()) || buildSeoTitle(seoCtx);
   out.push({
     ownerId: productGid,
     namespace: NAMESPACE_GLOBAL,
@@ -150,7 +165,9 @@ export function buildExtendedMetafields(
     value: seoTitle,
   });
 
-  const seoDescription = buildSeoDescription(seoCtx);
+  const seoDescription =
+    (p.storedSeoDescription && p.storedSeoDescription.trim()) ||
+    buildSeoDescription(seoCtx);
   out.push({
     ownerId: productGid,
     namespace: NAMESPACE_GLOBAL,
