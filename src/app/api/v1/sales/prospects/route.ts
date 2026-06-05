@@ -23,6 +23,17 @@ export async function GET(request: NextRequest) {
   const hasEmail = params.get("has_email");
   const hasPhone = params.get("has_phone");
   const sourceTypeFilter = params.getAll("source_type");
+  // source_query filter — exact match. Used by the eyewear smart
+  // lists to slice by crawl cohort ("eyewear_inventory_v1_2026-06"
+  // vs "apparel_no_eyewear_v1_2026-06") without polluting tags.
+  const sourceQueryFilter = params.getAll("source_query");
+  // tag_and: every value must appear in c.tags (AND semantics).
+  // tag_not: none of these values may appear in c.tags.
+  // Distinct from `category` which is legacy OR semantics. Used by
+  // the eyewear "Pitchable" smart list which needs
+  //   eyewear_cohort AND (entry OR mid) AND multi_brand AND NOT too_high
+  const tagAndFilter = params.getAll("tag_and");
+  const tagNotFilter = params.getAll("tag_not");
   // segment + source_id filters dropped (1-value and 32K-values respectively
   // — useless as filters). If someone bookmarked URLs with them, just ignore.
 
@@ -113,6 +124,24 @@ export async function GET(request: NextRequest) {
   if (sourceTypeFilter.length > 0) {
     whereClauses.push(`c.source_type IN (${sourceTypeFilter.map(() => "?").join(",")})`);
     whereParams.push(...sourceTypeFilter);
+  }
+  if (sourceQueryFilter.length > 0) {
+    whereClauses.push(`c.source_query IN (${sourceQueryFilter.map(() => "?").join(",")})`);
+    whereParams.push(...sourceQueryFilter);
+  }
+  if (tagAndFilter.length > 0) {
+    // Every requested tag must be present.
+    for (const t of tagAndFilter) {
+      whereClauses.push(`c.tags LIKE ?`);
+      whereParams.push(`%${t}%`);
+    }
+  }
+  if (tagNotFilter.length > 0) {
+    // None of these tags may be present.
+    for (const t of tagNotFilter) {
+      whereClauses.push(`(c.tags IS NULL OR c.tags NOT LIKE ?)`);
+      whereParams.push(`%${t}%`);
+    }
   }
   // source_id filter dropped — 32K+ near-unique values made it useless.
 

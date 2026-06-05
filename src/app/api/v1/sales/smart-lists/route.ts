@@ -112,6 +112,34 @@ function countForFilters(filters: Record<string, unknown>): number {
   if (filters.has_phone === "true") clauses.push(`phone IS NOT NULL AND phone != ''`);
   else if (filters.has_phone === "false") clauses.push(`(phone IS NULL OR phone = '')`);
 
+  // Eyewear-cohort filters: exact source_query, tag-AND, tag-NOT.
+  // Mirror of the prospects route additions — keeps the saved
+  // result_count accurate for smart lists that use them.
+  const sqArr = filters.source_query as string[] | undefined;
+  if (sqArr?.length) {
+    clauses.push(`source_query IN (${sqArr.map(() => "?").join(",")})`);
+    params.push(...sqArr);
+  }
+  const sourceTypeArr = filters.source_type as string[] | undefined;
+  if (sourceTypeArr?.length) {
+    clauses.push(`source_type IN (${sourceTypeArr.map(() => "?").join(",")})`);
+    params.push(...sourceTypeArr);
+  }
+  const tagAndArr = filters.tag_and as string[] | undefined;
+  if (tagAndArr?.length) {
+    for (const t of tagAndArr) {
+      clauses.push(`tags LIKE ?`);
+      params.push(`%${t}%`);
+    }
+  }
+  const tagNotArr = filters.tag_not as string[] | undefined;
+  if (tagNotArr?.length) {
+    for (const t of tagNotArr) {
+      clauses.push(`(tags IS NULL OR tags NOT LIKE ?)`);
+      params.push(`%${t}%`);
+    }
+  }
+
   const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
   const row = sqlite.prepare(`SELECT count(*) as c FROM companies ${where}`).get(...params) as { c: number };
   return row.c;
