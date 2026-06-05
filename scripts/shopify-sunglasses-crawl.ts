@@ -328,27 +328,46 @@ interface PickedProxy {
   agent: unknown;
 }
 
+// Bookkeeping so we only log the "all cold" event once per
+// genuine saturation rather than once per worker.
+let lastAllColdLogAt = 0;
+
 /** Round-robin starting at the cursor, but skip any entry whose
  *  coldUntil is still in the future. If EVERY entry is cold,
- *  return the soonest-thawing one (callers can await the wait
- *  themselves rather than blowing through them). */
-function nextProxyAgent(): PickedProxy | null {
+ *  AWAIT the soonest-thawing one (not just return it). Without
+ *  this, all workers would keep banging on cold IPs, generating
+ *  fresh 429s with zero recovery — the bug Daniel caught in
+ *  the 0 hot / 10 cold run. */
+async function nextProxyAgent(): Promise<PickedProxy | null> {
   if (proxyPool.length === 0) return null;
-  const now = Date.now();
-  for (let i = 0; i < proxyPool.length; i++) {
-    const idx = (proxyCursor + i) % proxyPool.length;
-    const e = proxyPool[idx];
-    if (e.coldUntil <= now) {
-      proxyCursor = idx + 1;
-      return { index: idx, agent: e.agent };
+  while (true) {
+    const now = Date.now();
+    for (let i = 0; i < proxyPool.length; i++) {
+      const idx = (proxyCursor + i) % proxyPool.length;
+      const e = proxyPool[idx];
+      if (e.coldUntil <= now) {
+        proxyCursor = idx + 1;
+        return { index: idx, agent: e.agent };
+      }
     }
+    // All cold — wait until the soonest one thaws. Cap each
+    // sleep at 30s so the heartbeat / shutdown signal still
+    // ticks if the pool is fully saturated.
+    let soonest = Infinity;
+    for (const e of proxyPool) if (e.coldUntil < soonest) soonest = e.coldUntil;
+    const waitMs = Math.min(30_000, Math.max(250, soonest - now));
+    // Log the saturation once per 30s window so the operator
+    // sees the pool is actually saturated rather than the script
+    // having hung.
+    if (Date.now() - lastAllColdLogAt > 30_000) {
+      lastAllColdLogAt = Date.now();
+      console.log(
+        `\n  ⏸  proxy pool fully saturated (10/10 cold) — waiting ` +
+        `${Math.round(waitMs / 1000)}s for soonest IP to thaw\n`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, waitMs));
   }
-  // All cold — pick the soonest to thaw.
-  let bestIdx = 0;
-  for (let i = 1; i < proxyPool.length; i++) {
-    if (proxyPool[i].coldUntil < proxyPool[bestIdx].coldUntil) bestIdx = i;
-  }
-  return { index: bestIdx, agent: proxyPool[bestIdx].agent };
 }
 
 function markProxyCold(index: number) {
@@ -383,7 +402,7 @@ async function fetchPage(domain: string, page: number, timeoutMs: number): Promi
   const url = `https://${domain}/products.json?limit=${PAGE_LIMIT}&page=${page}`;
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
-  const picked = nextProxyAgent();
+  const picked = await nextProxyAgent();
   try {
     const res = await fetch(url, {
       headers: { "user-agent": USER_AGENT, accept: "application/json" },
