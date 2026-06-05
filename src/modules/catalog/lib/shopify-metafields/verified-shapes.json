@@ -1,0 +1,197 @@
+[
+  {
+    "handle": "havana-haze",
+    "product": "Havana Haze",
+    "shape": "ROUND"
+  },
+  {
+    "handle": "monroe",
+    "product": "Monroe",
+    "shape": "CAT-EYE"
+  },
+  {
+    "handle": "boulevard",
+    "product": "Boulevard",
+    "shape": "SQUARE"
+  },
+  {
+    "handle": "reverie",
+    "product": "Reverie",
+    "shape": "ROUND"
+  },
+  {
+    "handle": "palm-state",
+    "product": "Palm State",
+    "shape": "RECTANGLE"
+  },
+  {
+    "handle": "windsor",
+    "product": "Windsor",
+    "shape": "SQUARE"
+  },
+  {
+    "handle": "solstice",
+    "product": "Solstice",
+    "shape": "ROUND"
+  },
+  {
+    "handle": "mystique",
+    "product": "Mystique",
+    "shape": "CAT-EYE"
+  },
+  {
+    "handle": "bardot",
+    "product": "Bardot",
+    "shape": "OVAL"
+  },
+  {
+    "handle": "the-regent",
+    "product": "The Regent",
+    "shape": "SQUARE"
+  },
+  {
+    "handle": "the-catalyst",
+    "product": "The Catalyst",
+    "shape": "AVIATOR"
+  },
+  {
+    "handle": "velvet-hour",
+    "product": "Velvet Hour",
+    "shape": "RECTANGLE"
+  },
+  {
+    "handle": "sunset-theory",
+    "product": "Sunset Theory",
+    "shape": "ROUND"
+  },
+  {
+    "handle": "eclipse",
+    "product": "Eclipse",
+    "shape": "SQUARE"
+  },
+  {
+    "handle": "drifter",
+    "product": "Drifter",
+    "shape": "AVIATOR"
+  },
+  {
+    "handle": "groove-theory",
+    "product": "Groove Theory",
+    "shape": "AVIATOR"
+  },
+  {
+    "handle": "diner",
+    "product": "Diner",
+    "shape": "SQUARE"
+  },
+  {
+    "handle": "wildflower",
+    "product": "Wildflower",
+    "shape": "SQUARE"
+  },
+  {
+    "handle": "the-hex",
+    "product": "The Hex",
+    "shape": "HEXAGONAL"
+  },
+  {
+    "handle": "burnout",
+    "product": "Burnout",
+    "shape": "AVIATOR"
+  },
+  {
+    "handle": "deco",
+    "product": "Deco",
+    "shape": "OVAL"
+  },
+  {
+    "handle": "canyon",
+    "product": "Canyon",
+    "shape": "SQUARE"
+  },
+  {
+    "handle": "dahlia",
+    "product": "Dahlia",
+    "shape": "SQUARE"
+  },
+  {
+    "handle": "diplomat",
+    "product": "Diplomat",
+    "shape": "AVIATOR"
+  },
+  {
+    "handle": "phoenix",
+    "product": "Phoenix",
+    "shape": "AVIATOR"
+  },
+  {
+    "handle": "vinyl",
+    "product": "Vinyl",
+    "shape": "OVAL"
+  },
+  {
+    "handle": "studio",
+    "product": "Studio",
+    "shape": "SQUARE"
+  },
+  {
+    "handle": "velour",
+    "product": "Velour",
+    "shape": "CAT-EYE"
+  },
+  {
+    "handle": "raven",
+    "product": "Raven",
+    "shape": "ROUND"
+  },
+  {
+    "handle": "foundry",
+    "product": "Foundry",
+    "shape": "SQUARE"
+  },
+  {
+    "handle": "scarlet",
+    "product": "Scarlet",
+    "shape": "OVAL"
+  },
+  {
+    "handle": "cosmic",
+    "product": "Cosmic",
+    "shape": "CAT-EYE"
+  },
+  {
+    "handle": "eastwood",
+    "product": "Eastwood",
+    "shape": "AVIATOR"
+  },
+  {
+    "handle": "westside",
+    "product": "Westside",
+    "shape": "FLAG"
+  },
+  {
+    "handle": "lennon",
+    "product": "Lennon",
+    "shape": "ROUND"
+  },
+  {
+    "handle": "dynasty",
+    "product": "Dynasty",
+    "shape": "CAT-EYE"
+  },
+  {
+    "handle": "captain",
+    "product": "Captain",
+    "shape": "AVIATOR"
+  },
+  {
+    "handle": "theory",
+    "product": "Theory",
+    "shape": "SQUARE"
+  },
+  {
+    "handle": "horizon",
+    "product": "Horizon",
+    "shape": "AVIATOR"
+  }
+]

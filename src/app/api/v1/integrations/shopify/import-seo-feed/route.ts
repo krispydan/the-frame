@@ -3,31 +3,23 @@ export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
-import * as fs from "fs";
-import * as path from "path";
-import * as xlsx from "xlsx";
+import VERIFIED_SHAPES from "@/modules/catalog/lib/shopify-metafields/verified-shapes.json";
 
 /**
  * POST /api/v1/integrations/shopify/import-seo-feed
  *
- * Server-side wrapper around scripts/import-seo-feed-recommendations.ts
- * so Daniel can apply the spreadsheet corrections to PROD's catalog DB
- * via curl, rather than running tsx locally (which only touches his
- * Mac's dev DB).
+ * Apply the visually-verified frame-shape + product_type corrections
+ * from jaxy-seo-feed-recommendations-v2.xlsx to The Frame's catalog
+ * DB. Server-side wrapper around scripts/import-seo-feed-recommendations
+ * .ts so the cutover is curl-able against prod.
  *
- * Reads the .xlsx from the deployed file (uploaded into the repo before
- * the run), applies:
- *   - frame shape tag corrections (39 SKUs, westside hard-coded to
- *     square per brief)
- *   - product_type tag corrections (10 optical → sunglasses)
- *   - Wayfarer scrub on descriptions
+ * Data source: src/modules/catalog/lib/shopify-metafields/verified-
+ * shapes.json — extracted from the spreadsheet at build time so the
+ * runtime doesn't need filesystem access to arbitrary repo paths
+ * (Next.js's standalone build doesn't ship docs/* files).
  *
  * Body:
- *   { dryRun?: boolean }
- *
- * Reads the spreadsheet from one of:
- *   - docs/jaxy-seo-feed-recommendations-v2.xlsx  (preferred — in repo)
- *   - SEO_FEED_XLSX env var (absolute path on the Railway volume)
+ *   { dryRun?: boolean }   default true
  */
 
 const FLAG_OVERRIDES: Record<string, string> = { westside: "SQUARE" };
@@ -39,10 +31,10 @@ const SHAPE_TO_CANONICAL: Record<string, string> = {
   GEOMETRIC: "geometric", BUTTERFLY: "butterfly", OVERSIZED: "oversized",
 };
 
-const OPTICAL_TO_SUNGLASSES_HANDLES = [
+const OPTICAL_TO_SUNGLASSES_HANDLES = new Set([
   "vinyl", "studio", "cosmic", "eastwood", "westside",
   "lennon", "dynasty", "captain", "theory", "horizon",
-];
+]);
 
 function nameToHandle(name: string): string {
   return name
@@ -54,45 +46,31 @@ function nameToHandle(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-function findXlsxPath(): string | null {
-  const candidates = [
-    process.env.SEO_FEED_XLSX,
-    path.join(process.cwd(), "docs", "jaxy-seo-feed-recommendations-v2.xlsx"),
-    path.join(process.cwd(), "data", "jaxy-seo-feed-recommendations-v2.xlsx"),
-  ].filter(Boolean) as string[];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
+export async function POST(req: NextRequest) {
+  try {
+    return await runImport(req);
+  } catch (e) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+        stack: e instanceof Error ? e.stack?.split("\n").slice(0, 8).join("\n") : undefined,
+      },
+      { status: 500 },
+    );
   }
-  return null;
 }
 
-export async function POST(req: NextRequest) {
+async function runImport(req: NextRequest) {
   let body: { dryRun?: boolean } = {};
   try { body = await req.json(); } catch { /* ok */ }
   const apply = body.dryRun === false;
 
-  const xlsxPath = findXlsxPath();
-  if (!xlsxPath) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "Spreadsheet not found. Set SEO_FEED_XLSX env, or place jaxy-seo-feed-recommendations-v2.xlsx in docs/ before deploy.",
-      },
-      { status: 400 },
-    );
-  }
+  const verified = VERIFIED_SHAPES as Array<{
+    handle: string; product: string; shape: string;
+  }>;
 
-  const wb = xlsx.readFile(xlsxPath);
-  const sheet = wb.Sheets["Verified Shapes"];
-  if (!sheet) {
-    return NextResponse.json(
-      { ok: false, error: "Sheet 'Verified Shapes' not found" },
-      { status: 400 },
-    );
-  }
-  const rows = xlsx.utils.sheet_to_json<Record<string, unknown>>(sheet, { range: 3 });
-
-  // Build name→product index once
+  // Build name→product index once.
   const allProducts = sqlite.prepare(
     `SELECT id, name, description FROM catalog_products`,
   ).all() as Array<{ id: string; name: string | null; description: string | null }>;
@@ -103,8 +81,6 @@ export async function POST(req: NextRequest) {
       id: p.id, name: p.name, description: p.description,
     });
   }
-
-  const opticalSet = new Set(OPTICAL_TO_SUNGLASSES_HANDLES);
 
   const getCurrentShapeTag = sqlite.prepare(
     `SELECT tag_name FROM catalog_tags
@@ -122,20 +98,17 @@ export async function POST(req: NextRequest) {
     handle: string; productId: string;
     newFrameShape: string | null;
     newProductType: string | null;
-    descriptionChanged: boolean;
+    descriptionScrubbed: boolean;
   }
   const changes: Change[] = [];
   const missing: string[] = [];
 
-  for (const r of rows) {
-    const handle = String(r["Handle"] ?? "").trim();
-    const shape = String(r["Verified Shape"] ?? "").trim().toUpperCase();
-    if (!handle || !shape) continue;
+  for (const v of verified) {
+    if (!v.handle || !v.shape) continue;
+    const p = byHandle.get(v.handle);
+    if (!p) { missing.push(v.handle); continue; }
 
-    const p = byHandle.get(handle);
-    if (!p) { missing.push(handle); continue; }
-
-    const resolvedShape = FLAG_OVERRIDES[handle] ?? shape;
+    const resolvedShape = FLAG_OVERRIDES[v.handle] ?? v.shape;
     const canonical = SHAPE_TO_CANONICAL[resolvedShape];
     let newFrameShape: string | null = null;
     if (canonical) {
@@ -146,20 +119,20 @@ export async function POST(req: NextRequest) {
     }
 
     let newProductType: string | null = null;
-    if (opticalSet.has(handle)) {
+    if (OPTICAL_TO_SUNGLASSES_HANDLES.has(v.handle)) {
       const cur = getCurrentTypeTag.get(p.id) as { tag_name: string } | undefined;
       if ((cur?.tag_name ?? "").toLowerCase() !== "sunglasses") {
         newProductType = "sunglasses";
       }
     }
 
-    const descriptionChanged =
+    const descriptionScrubbed =
       !!p.description && /wayfarer/i.test(p.description);
 
-    if (newFrameShape || newProductType || descriptionChanged) {
+    if (newFrameShape || newProductType || descriptionScrubbed) {
       changes.push({
-        handle, productId: p.id, newFrameShape, newProductType,
-        descriptionChanged,
+        handle: v.handle, productId: p.id, newFrameShape, newProductType,
+        descriptionScrubbed,
       });
     }
   }
@@ -167,10 +140,11 @@ export async function POST(req: NextRequest) {
   if (!apply) {
     return NextResponse.json({
       ok: true, dryRun: true,
-      xlsxPath,
+      verifiedRows: verified.length,
+      productsInCatalog: allProducts.length,
       plannedChanges: changes.length,
       missingHandles: missing,
-      changes: changes.slice(0, 50), // truncate for response brevity
+      changes: changes.slice(0, 50),
     });
   }
 
@@ -190,7 +164,9 @@ export async function POST(req: NextRequest) {
      VALUES (?, ?, ?, ?, 'manual')`,
   );
   const updateDescription = sqlite.prepare(
-    `UPDATE catalog_products SET description = REPLACE(REPLACE(description, 'wayfarer', 'classic square'), 'Wayfarer', 'Classic Square'), updated_at = datetime('now')
+    `UPDATE catalog_products
+        SET description = REPLACE(REPLACE(description, 'wayfarer', 'classic square'), 'Wayfarer', 'Classic Square'),
+            updated_at = datetime('now')
       WHERE id = ?`,
   );
 
@@ -205,7 +181,7 @@ export async function POST(req: NextRequest) {
         deleteTypeTag.run(c.productId);
         insertTag.run(crypto.randomUUID(), c.productId, c.newProductType, "productType");
       }
-      if (c.descriptionChanged) {
+      if (c.descriptionScrubbed) {
         updateDescription.run(c.productId);
       }
       applied++;
@@ -221,7 +197,7 @@ export async function POST(req: NextRequest) {
       handle: c.handle,
       shape: c.newFrameShape,
       type: c.newProductType,
-      descriptionScrubbed: c.descriptionChanged,
+      descriptionScrubbed: c.descriptionScrubbed,
     })),
   });
 }
