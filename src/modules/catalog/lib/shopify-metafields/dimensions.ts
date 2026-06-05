@@ -26,6 +26,10 @@ export interface SyncDimensionsParams {
   lensHeight: number | null;
   /** Total frame width edge-to-edge (mm), when supplied. */
   frameWidth: number | null;
+  /** Total frame height edge-to-edge (mm). 6th dimension — needed for
+   *  the Google Shopping product_detail[frame_height] feed attribute
+   *  (added in Phase 1 of the SEO sync brief). */
+  frameHeight: number | null;
 }
 
 export interface SyncDimensionsResult {
@@ -51,6 +55,7 @@ export async function syncProductDimensions(
     ["temple_length", params.templeLength],
     ["lens_height", params.lensHeight],
     ["frame_width", params.frameWidth],
+    ["frame_height", params.frameHeight],
   ];
 
   const inputs: MetafieldsSetInput[] = fields

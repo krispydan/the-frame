@@ -55,6 +55,11 @@ export interface SyncFromTagsParams {
   skuColorNames?: Array<string | null | undefined>;
   /** Don't actually post — return the resolved input + dry-run summary. */
   dryRun?: boolean;
+  /** Optional extended-metafields snapshot (Phase 4). When provided,
+   *  the sync ALSO writes deterministic SEO + Custom Labels 0-4 +
+   *  style_era + collection_batch metafields. When omitted, the
+   *  legacy tag-only output is unchanged. */
+  extended?: import("./extended-metafields").ProductForExtendedMetafields;
 }
 
 export interface ResolvedMetafield {
@@ -94,7 +99,7 @@ export interface SyncFromTagsResult {
 export async function syncMetafieldsFromTags(
   params: SyncFromTagsParams,
 ): Promise<SyncFromTagsResult> {
-  const { store, skuPrefix, tags, skuColorNames, dryRun } = params;
+  const { store, skuPrefix, tags, skuColorNames, dryRun, extended } = params;
   const result: SyncFromTagsResult = {
     ok: false,
     store,
@@ -275,26 +280,26 @@ export async function syncMetafieldsFromTags(
     result.skipReasons.push({ field: "custom.lens_type", reason: "no value mapped from the-frame data" });
   }
 
-  // ── custom.frame_shape (list.single_line_text_field, full vocab) ──
-  // Plain-text metafield — no GID resolution needed. Writes the rich label
-  // ("Oversized", "Square", etc.) so the storefront keeps the full vocab even
-  // though shopify.eyewear-frame-design is constrained to 6 enum values.
-  if (mapping.customFrameShape) {
-    inputs.push({
-      ownerId: productGid,
-      namespace: "custom",
-      key: "frame_shape",
-      type: "list.single_line_text_field",
-      value: JSON.stringify([mapping.customFrameShape]),
-    });
-    result.resolved.push({
-      field: "custom.frame_shape",
-      handle: mapping.customFrameShape,
-      gid: null, // not a reference — plain text
-      source: mapping.sources.customFrameShape,
-    });
-  } else {
-    result.skipReasons.push({ field: "custom.frame_shape", reason: "no value mapped from the-frame data" });
+  // ── custom.frame_shape — RETIRED (Phase 4 of SEO sync brief §1) ──
+  // Brief §1 said: "Retire the existing custom.frame_shape metafield —
+  // there are currently two competing shape metafields (custom.frame_shape
+  // and shopify.eyewear-frame-design) with inconsistent values. Keep only
+  // the Shopify standard one." Standard taxonomy is what Simprosys auto-
+  // maps to Google Shopping's `color` / `gender` / etc., so the standard
+  // wins.
+  //
+  // Existing custom.frame_shape values on Shopify products are deleted
+  // by the one-shot scripts/delete-deprecated-shopify-metafields.ts.
+  // After that script runs, this branch is a true no-op.
+
+  // ── Extended metafields (Phase 4) ──
+  // Deterministic SEO title/description + Custom Labels 0-4 + style_era
+  // + collection_batch. The caller passes a snapshot of the product's
+  // curated attrs; we use the same productGid the rest of this function
+  // is targeting.
+  if (extended) {
+    const { buildExtendedMetafields } = await import("./extended-metafields");
+    inputs.push(...buildExtendedMetafields(productGid, extended));
   }
 
   result.metafieldsAttempted = inputs.length;

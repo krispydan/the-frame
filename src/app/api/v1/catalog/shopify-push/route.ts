@@ -211,6 +211,7 @@ export async function POST(request: NextRequest) {
             templeLength: ep.product.templeLength,
             lensHeight: ep.product.lensHeight,
             frameWidth: ep.product.frameWidth,
+            frameHeight: ep.product.frameHeight ?? null,
           });
           dimensionsSynced = dimRes.written;
           if (!dimRes.ok && dimRes.errors.length) dimensionsErrors = dimRes.errors;

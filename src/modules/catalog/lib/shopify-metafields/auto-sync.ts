@@ -18,6 +18,8 @@ import {
   type ShopifyStore,
 } from "@/modules/orders/lib/shopify-api";
 import { syncMetafieldsFromTags } from "./sync-from-tags";
+import { curatedAttrsFromTags } from "@/modules/catalog/lib/curated-attributes";
+import type { ProductForExtendedMetafields } from "./extended-metafields";
 
 /** Pending debounce timers, keyed by productId. */
 const pendingByProduct = new Map<string, NodeJS.Timeout>();
@@ -66,6 +68,31 @@ async function runSync(productId: string): Promise<void> {
     .from(skusTable)
     .where(eq(skusTable.productId, productId));
 
+  // ── Extended snapshot — same shape the nightly cron passes. Re-
+  // computed here so the per-tag debounced sync produces the same
+  // metafield set as the nightly sweep. ──
+  const curated = curatedAttrsFromTags(
+    tagRows.map((t) => ({ dimension: t.dimension ?? "", tagName: t.tagName ?? null })),
+  );
+  const styleTags = tagRows
+    .filter((t) => (t.dimension ?? "").toLowerCase() === "style")
+    .map((t) => (t.tagName ?? "").trim())
+    .filter(Boolean);
+  const firstColor = skuRows.length > 0 ? skuRows[0].colorName ?? null : null;
+  const allSameColor = firstColor && skuRows.every((s) => s.colorName === firstColor);
+  const extended: ProductForExtendedMetafields = {
+    productName: product.name ?? product.skuPrefix,
+    frameShape: curated.frameShape,
+    styleTags,
+    gender: curated.gender,
+    frameMaterial: curated.frameMaterial,
+    frameColor: allSameColor ? firstColor : null,
+    lensType: curated.lensType,
+    description: product.description,
+    collectionBatch: product.collectionBatch,
+    retailPrice: product.retailPrice,
+  };
+
   for (const store of STORES) {
     const ok = await hasShopifyCredentials(store);
     if (!ok) continue;
@@ -75,6 +102,7 @@ async function runSync(productId: string): Promise<void> {
         skuPrefix: product.skuPrefix,
         tags: tagRows.map((t) => ({ dimension: t.dimension ?? "", tagName: t.tagName ?? null })),
         skuColorNames: skuRows.map((s) => s.colorName),
+        extended,
       });
       const summary = r.ok
         ? `wrote ${r.metafieldsWritten}/${r.metafieldsAttempted}`

@@ -23,6 +23,10 @@ import {
   SUNGLASSES_CATEGORY_GID,
   type AiCategorizationOutput,
 } from "./handles";
+import {
+  buildExtendedMetafields,
+  type ProductForExtendedMetafields,
+} from "./extended-metafields";
 
 // ── Handle → GID cache (per store + type, in-process) ──
 
@@ -62,6 +66,14 @@ export interface SyncProductMetafieldsParams {
   /** Numeric Shopify product ID (not a GID — we'll construct the GID here). */
   shopifyProductId: string;
   categorization: AiCategorizationOutput;
+  /** Optional extended metafields snapshot — when provided, the sync
+   *  ALSO writes the deterministic SEO + custom labels + style_era +
+   *  collection_batch metafields, OVERRIDING the AI-categorization
+   *  seo.title/seo.description with the deterministic builders'
+   *  output (no override mechanism in v1 per Daniel's call).
+   *  When omitted, the sync behaves exactly as before (legacy
+   *  callers stay green). */
+  extended?: ProductForExtendedMetafields;
   /** If true, skip the category-set step (assume already set). Default false. */
   skipCategory?: boolean;
   /** If true, don't actually write — return what would be written. */
@@ -86,7 +98,7 @@ export interface SyncProductMetafieldsResult {
 export async function syncProductMetafields(
   params: SyncProductMetafieldsParams,
 ): Promise<SyncProductMetafieldsResult> {
-  const { store, shopifyProductId, categorization, skipCategory, dryRun } = params;
+  const { store, shopifyProductId, categorization, extended, skipCategory, dryRun } = params;
   const productGid = shopifyProductId.startsWith("gid://")
     ? shopifyProductId
     : `gid://shopify/Product/${shopifyProductId}`;
@@ -182,24 +194,30 @@ export async function syncProductMetafields(
 
   const metafields: MetafieldsSetInput[] = [];
 
-  // SEO (global namespace, plain strings — not category-driven)
-  if (categorization.seo.title) {
-    metafields.push({
-      ownerId: productGid,
-      namespace: "global",
-      key: "title_tag",
-      type: "single_line_text_field",
-      value: categorization.seo.title,
-    });
-  }
-  if (categorization.seo.description) {
-    metafields.push({
-      ownerId: productGid,
-      namespace: "global",
-      key: "description_tag",
-      type: "multi_line_text_field",
-      value: categorization.seo.description,
-    });
+  // SEO (global namespace, plain strings — not category-driven).
+  // When the caller provides an `extended` snapshot we DROP the AI-
+  // generated seo.title/seo.description because the deterministic
+  // builders (Phase 2) produce them downstream — no v1 override
+  // mechanism, the formula always wins.
+  if (!extended) {
+    if (categorization.seo.title) {
+      metafields.push({
+        ownerId: productGid,
+        namespace: "global",
+        key: "title_tag",
+        type: "single_line_text_field",
+        value: categorization.seo.title,
+      });
+    }
+    if (categorization.seo.description) {
+      metafields.push({
+        ownerId: productGid,
+        namespace: "global",
+        key: "description_tag",
+        type: "multi_line_text_field",
+        value: categorization.seo.description,
+      });
+    }
   }
 
   // Category metafields (list.metaobject_reference, value is JSON-encoded string of GID array)
@@ -222,6 +240,14 @@ export async function syncProductMetafields(
   if (polarizationGid) addListMetafield("lens_polarization", [polarizationGid]);
   if (genderGid) addListMetafield("target_gender", [genderGid]);
   if (frameDesignGid) addListMetafield("eyewear_frame_design", [frameDesignGid]);
+
+  // ── Extended metafields (Phase 4 of the SEO sync brief) ──
+  // Deterministic SEO title / description, Custom Labels 0-4,
+  // style_era, collection_batch. Pure builder — no IO. Same
+  // metafieldsSet mutation, just more entries in the input array.
+  if (extended) {
+    metafields.push(...buildExtendedMetafields(productGid, extended));
+  }
 
   result.metafieldsAttempted = metafields.length;
 

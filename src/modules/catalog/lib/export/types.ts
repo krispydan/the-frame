@@ -42,6 +42,7 @@ export interface ExportProduct {
     templeLength: number | null;
     lensHeight: number | null;
     frameWidth: number | null;
+    frameHeight: number | null;
     frameSize: string | null;
   };
   skus: {

@@ -13,6 +13,8 @@ import { db } from "@/lib/db";
 import { products, skus as skusTable, tags as tagsTable } from "@/modules/catalog/schema";
 import { eq } from "drizzle-orm";
 import { syncMetafieldsFromTags } from "./sync-from-tags";
+import { curatedAttrsFromTags } from "@/modules/catalog/lib/curated-attributes";
+import type { ProductForExtendedMetafields } from "./extended-metafields";
 
 const STORES = ["dtc", "wholesale"] as const;
 
@@ -43,8 +45,39 @@ export async function runShopifyMetafieldSync(): Promise<BulkSyncResult> {
 
     const [tagRows, skuRows] = await Promise.all([
       db.select().from(tagsTable).where(eq(tagsTable.productId, product.id)),
-      db.select({ colorName: skusTable.colorName }).from(skusTable).where(eq(skusTable.productId, product.id)),
+      db.select().from(skusTable).where(eq(skusTable.productId, product.id)),
     ]);
+
+    // ── Build the Phase 4 extended-metafields snapshot ──
+    // Pure read of curated attrs + style tags + product columns. Same
+    // input the SEO builders consume; sync-from-tags appends the
+    // resulting metafields to the existing tag-driven payload.
+    const curated = curatedAttrsFromTags(
+      tagRows.map((t) => ({ dimension: t.dimension ?? "", tagName: t.tagName ?? null })),
+    );
+    const styleTags = tagRows
+      .filter((t) => (t.dimension ?? "").toLowerCase() === "style")
+      .map((t) => (t.tagName ?? "").trim())
+      .filter(Boolean);
+    // Single-dominant-color rule: if every SKU has the same color name,
+    // use it; otherwise leave null (the description template skips the
+    // color clause for multi-color frames).
+    const firstColor = skuRows.length > 0
+      ? skuRows[0].colorName ?? null
+      : null;
+    const allSameColor = firstColor && skuRows.every((s) => s.colorName === firstColor);
+    const extended: ProductForExtendedMetafields = {
+      productName: product.name ?? product.skuPrefix,
+      frameShape: curated.frameShape,
+      styleTags,
+      gender: curated.gender,
+      frameMaterial: curated.frameMaterial,
+      frameColor: allSameColor ? firstColor : null,
+      lensType: curated.lensType,
+      description: product.description,
+      collectionBatch: product.collectionBatch,
+      retailPrice: product.retailPrice,
+    };
 
     for (const store of STORES) {
       try {
@@ -53,6 +86,7 @@ export async function runShopifyMetafieldSync(): Promise<BulkSyncResult> {
           skuPrefix: product.skuPrefix,
           tags: tagRows.map((t) => ({ dimension: t.dimension ?? "", tagName: t.tagName ?? null })),
           skuColorNames: skuRows.map((s) => s.colorName),
+          extended,
           dryRun: false,
         });
 
