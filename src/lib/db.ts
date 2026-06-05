@@ -416,7 +416,23 @@ try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN bridge_width INTEGER"
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN temple_length INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN lens_height INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN frame_width INTEGER"); } catch { /* exists */ }
+// 6th dimension — Google Shopping product_detail[frame_height] is the only
+// dimension we weren't writing as a metafield. Added here so the Shopify
+// metafield sync can read it from a discrete column rather than parsing
+// it back out of the legacy `frame_size` blob.
+try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN frame_height INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN frame_size TEXT"); } catch { /* exists */ }
+
+// Campaign-segmentation label for Google Shopping Custom Label 4 (e.g.
+// "SS26", "FW26", "vintage_drop_1"). Single value per product; nullable.
+try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN collection_batch TEXT"); } catch { /* exists */ }
+
+// Per-SKU lens color, distinct from the frame color stored on
+// catalog_skus.color_name. Drives the new Shopify variant title format
+// `{Frame Color} Frame / {Lens Color} Lens`. Populated by the SEO-feed
+// importer (splits legacy slash-form names like "Tort/Green") and via
+// future PO imports; falls back gracefully when null.
+try { sqlite.exec("ALTER TABLE catalog_skus ADD COLUMN lens_color_name TEXT"); } catch { /* exists */ }
 
 // Warehouse/ShipHero exports: PO line items, freight info on POs, shiphero sync timestamps
 try { sqlite.exec("ALTER TABLE catalog_skus ADD COLUMN shiphero_synced_at TEXT"); } catch { /* exists */ }

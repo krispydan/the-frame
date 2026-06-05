@@ -73,7 +73,16 @@ export const products = sqliteTable("catalog_products", {
    *  frame width, temple length). Not part of the canonical "51口22 145"
    *  positional format. */
   frameWidth: integer("frame_width"),
+  /** Total frame height edge-to-edge (mm) — 6th dimension needed for the
+   *  Google Shopping product_detail[frame_height] feed attribute. Stored
+   *  separately so the Shopify metafield sync writes it as a discrete
+   *  number_integer metafield. */
+  frameHeight: integer("frame_height"),
   frameSize: text("frame_size"),
+  /** Campaign-segmentation label for Google Shopping Custom Label 4
+   *  (e.g. "SS26", "FW26", "vintage_drop_1"). Single value per
+   *  product; nullable. */
+  collectionBatch: text("collection_batch"),
   seoTitle: text("seo_title"),
   metaDescription: text("meta_description"),
   status: text("status", { enum: ["intake", "processing", "review", "approved", "published"] }).default("intake"),
@@ -91,6 +100,11 @@ export const skus = sqliteTable("catalog_skus", {
   productId: text("product_id").references(() => products.id).notNull(),
   sku: text("sku").unique(),
   colorName: text("color_name"),
+  /** Lens color, distinct from the frame color in `colorName`. Drives the
+   *  Shopify variant title `{frame_color} Frame / {lens_color} Lens`.
+   *  Nullable — when absent, the variant title falls back to the single
+   *  frame-color axis. */
+  lensColorName: text("lens_color_name"),
   colorHex: text("color_hex"),
   size: text("size"),
   upc: text("upc"),
