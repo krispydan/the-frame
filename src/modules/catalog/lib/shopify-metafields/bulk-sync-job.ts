@@ -27,12 +27,34 @@ interface StoreSummary {
 
 export interface BulkSyncResult {
   totalProducts: number;
+  /** Index of the last product processed in this call (exclusive). When
+   *  paging, the next call should pass offset = processedThrough. */
+  processedThrough: number;
+  /** How many products this call actually walked (≤ slice limit). */
+  processed: number;
+  /** Total products remaining after this slice. */
+  remaining: number;
   stores: Record<string, StoreSummary>;
   durationMs: number;
 }
 
-export async function runShopifyMetafieldSync(): Promise<BulkSyncResult> {
+export interface RunShopifyMetafieldSyncOptions {
+  /** Skip this many products from the start of the catalog (sorted by
+   *  the default db.select() order). Used to page through the full set
+   *  in calls that each stay under Cloudflare's 100s edge timeout. */
+  offset?: number;
+  /** Cap the number of products processed in this call. Default 8 —
+   *  with 2 stores × ~3 Shopify calls per product per store at ~1-2s
+   *  each, that puts the worst-case slice around 80s. */
+  limit?: number;
+}
+
+export async function runShopifyMetafieldSync(
+  opts: RunShopifyMetafieldSyncOptions = {},
+): Promise<BulkSyncResult> {
   const start = Date.now();
+  const offset = Math.max(0, opts.offset ?? 0);
+  const limit = Math.max(1, Math.min(100, opts.limit ?? 8));
   const allProducts = await db.select().from(products);
 
   const storeSummary: Record<string, StoreSummary> = {
@@ -40,7 +62,8 @@ export async function runShopifyMetafieldSync(): Promise<BulkSyncResult> {
     wholesale: { ok: 0, partial: 0, failed: 0, failures: [] },
   };
 
-  for (const product of allProducts) {
+  const slice = allProducts.slice(offset, offset + limit);
+  for (const product of slice) {
     if (!product.skuPrefix) continue;
 
     const [tagRows, skuRows] = await Promise.all([
@@ -110,8 +133,12 @@ export async function runShopifyMetafieldSync(): Promise<BulkSyncResult> {
     }
   }
 
+  const processedThrough = offset + slice.length;
   return {
     totalProducts: allProducts.length,
+    processedThrough,
+    processed: slice.length,
+    remaining: Math.max(0, allProducts.length - processedThrough),
     stores: storeSummary,
     durationMs: Date.now() - start,
   };
