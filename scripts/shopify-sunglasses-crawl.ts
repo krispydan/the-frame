@@ -70,7 +70,24 @@ const MAX_PAGES_PER_DOMAIN = 10;       // 2,500 products is plenty for detection
 // "scan the whole catalog").
 const STOP_AFTER_MATCHES = Number(process.env.STOP_AFTER_MATCHES) || 25;
 const HTTP_TIMEOUT_MS = 6_000;
-const USER_AGENT = "Mozilla/5.0 (compatible; JaxyLeadGen/1.0)";
+// Cloudflare profiles by (IP + User-Agent + TLS fingerprint). Same
+// UA on every request from a given IP burns through that IP's
+// budget faster. Rotating across realistic browser UAs effectively
+// gives each IP a few extra "fresh slots" before getting flagged.
+// All of these are real recent (2024-2026) Chrome / Safari /
+// Firefox UAs from desktop + mobile platforms.
+const USER_AGENTS = [
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+  "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.71 Mobile Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+];
+function randomUserAgent(): string {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
 // Per-request randomised delay so we don't issue 8 simultaneous
 // requests to (different) Shopify stores every iteration.
 const JITTER_MIN_MS = 100;
@@ -405,7 +422,13 @@ async function fetchPage(domain: string, page: number, timeoutMs: number): Promi
   const picked = await nextProxyAgent();
   try {
     const res = await fetch(url, {
-      headers: { "user-agent": USER_AGENT, accept: "application/json" },
+      headers: {
+        "user-agent": randomUserAgent(),
+        accept: "application/json",
+        // Also vary accept-language slightly — another cheap
+        // fingerprinting axis that costs us nothing to randomise.
+        "accept-language": Math.random() < 0.5 ? "en-US,en;q=0.9" : "en-GB,en;q=0.9",
+      },
       signal: ctl.signal,
       redirect: "follow",
       // Undici-specific: passes the proxy dispatcher when set.
