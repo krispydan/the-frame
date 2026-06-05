@@ -225,10 +225,17 @@ async function crawlDomain(domain: string, storeName: string): Promise<CrawlResu
 }
 
 // ── Resumable state log ────────────────────────────────────────────────────
+// Both StateLog and ProductsCsv use fs.appendFileSync — NOT a
+// buffered WriteStream — because Daniel asked for crash-safety:
+// every state row and every product row must be on disk before
+// the next domain finishes. Sync append costs ~1ms per row vs
+// the multi-second network fetch, so the overhead is invisible.
+// In exchange, a kill -9 / power loss / laptop hard-crash never
+// loses more than the in-flight requests at the moment of crash —
+// resume picks up cleanly.
 class StateLog {
   private path: string;
   private seen = new Set<string>();
-  private stream: fs.WriteStream;
 
   constructor(p: string) {
     this.path = p;
@@ -238,10 +245,9 @@ class StateLog {
         try {
           const obj = JSON.parse(line) as StateLine;
           if (obj.domain) this.seen.add(obj.domain);
-        } catch { /* skip bad lines */ }
+        } catch { /* skip bad lines from a partial last write */ }
       }
     }
-    this.stream = fs.createWriteStream(p, { flags: "a" });
   }
 
   has(domain: string): boolean { return this.seen.has(domain); }
@@ -249,27 +255,26 @@ class StateLog {
 
   record(line: StateLine): void {
     this.seen.add(line.domain);
-    this.stream.write(JSON.stringify(line) + "\n");
+    // appendFileSync uses O_APPEND + the fsync semantics depend on
+    // the OS, but on macOS APFS / Linux ext4 the row is durable
+    // before this returns.
+    fs.appendFileSync(this.path, JSON.stringify(line) + "\n");
   }
 
-  close(): Promise<void> {
-    return new Promise((res) => this.stream.end(res));
-  }
+  async close(): Promise<void> { /* nothing to flush */ }
 }
 
 // ── Products CSV appender ─────────────────────────────────────────────────
 class ProductsCsv {
   private path: string;
-  private stream: fs.WriteStream;
   private wroteHeader: boolean;
 
   constructor(p: string) {
     this.path = p;
     this.wroteHeader = fs.existsSync(p) && fs.statSync(p).size > 0;
-    this.stream = fs.createWriteStream(p, { flags: "a" });
     if (!this.wroteHeader) {
-      // Match the ProductMatch field order verbatim
-      this.stream.write(
+      fs.appendFileSync(
+        p,
         "domain,store_name,product_id,product_title,product_url," +
         "product_handle,product_vendor,product_type,product_price," +
         "product_image,match_reason\n",
@@ -281,12 +286,10 @@ class ProductsCsv {
   appendMany(matches: ProductMatch[]): void {
     if (matches.length === 0) return;
     const csv = Papa.unparse(matches, { header: false });
-    this.stream.write(csv + "\n");
+    fs.appendFileSync(this.path, csv + "\n");
   }
 
-  close(): Promise<void> {
-    return new Promise((res) => this.stream.end(res));
-  }
+  async close(): Promise<void> { /* nothing to flush */ }
 }
 
 // ── Worker pool ────────────────────────────────────────────────────────────
@@ -363,63 +366,154 @@ async function main() {
   let done = 0;
   let hits = 0;
   let errors = 0;
-  let skippedNotShopify = 0;
+  let noMatch = 0;
+  const errorKinds: Record<string, number> = {};
 
-  // Graceful shutdown — flush streams so partial progress isn't lost.
+  // Graceful shutdown — fs.appendFileSync writes are already
+  // durable, so this is mostly about not abandoning a worker
+  // mid-fetch (which leaves a TCP socket hanging).
   let interrupted = false;
   for (const sig of ["SIGINT", "SIGTERM"] as const) {
     process.on(sig, () => {
       if (interrupted) process.exit(1);
       interrupted = true;
-      console.log("\nShutdown requested — finishing in-flight requests, then flushing state...");
+      console.log("\n[!] Shutdown requested — finishing in-flight requests...");
+      console.log("    (next run picks up where this one stopped — state log is durable)");
     });
   }
+
+  // ── Logging helpers ──
+  // Daniel wants to monitor the run in terminal. Three levels:
+  //
+  //   • HIT — one line per matched store (the interesting events)
+  //   • ERROR — one line per failed store (also interesting; lets
+  //     him spot a pattern, e.g. a bunch of rate-limits in a row)
+  //   • TICK — every 50 silent "no_sunglasses" stores, one
+  //     summary line so the screen always shows activity even
+  //     during a long no-match stretch
+  //   • HEARTBEAT — every 60s, a full status block
+  const fmtPct = (n: number, d: number) => d > 0 ? `${(100 * n / d).toFixed(1)}%` : "—";
+  const fmtETA = (rate: number, remaining: number) => {
+    if (rate <= 0) return "—";
+    const s = remaining / rate;
+    if (s < 90) return `${Math.round(s)}s`;
+    if (s < 5400) return `${Math.round(s / 60)}m`;
+    return `${(s / 3600).toFixed(1)}h`;
+  };
+  function progressTag(): string {
+    const elapsed = (Date.now() - startedAt) / 1000;
+    const rate = done / Math.max(1, elapsed);
+    return `[${done}/${todo.length} · ${rate.toFixed(1)}/s · ETA ${fmtETA(rate, todo.length - done)}]`;
+  }
+
+  let lastHeartbeat = Date.now();
+  function maybeHeartbeat() {
+    if (Date.now() - lastHeartbeat < 60_000) return;
+    lastHeartbeat = Date.now();
+    const topErrs = Object.entries(errorKinds)
+      .sort((a, b) => b[1] - a[1]).slice(0, 3)
+      .map(([k, v]) => `${k}×${v}`).join("  ");
+    console.log(
+      `\n  ──── heartbeat ${new Date().toISOString().slice(11, 19)} ────\n` +
+      `  ${progressTag()}\n` +
+      `  hits=${hits}  no_match=${noMatch}  errors=${errors}  ` +
+      `(hit rate ${fmtPct(hits, done)})\n` +
+      (topErrs ? `  top errors: ${topErrs}\n` : "") +
+      `  ─────────────────────────────────\n`,
+    );
+  }
+
+  let tickAccum = 0;
+  function logNoMatch(domain: string, pages: number) {
+    tickAccum++;
+    // Every 50th no-match, print one summary line so the user
+    // sees the cursor moving even during long silent stretches.
+    if (tickAccum % 50 === 0) {
+      console.log(`${progressTag()}  ··· ${tickAccum} no-match (last: ${domain}, ${pages} pages)`);
+    }
+  }
+  function logHit(m: CrawlResult, domain: string, storeName: string) {
+    const prices = m.matches
+      .map((p) => parseFloat(p.product_price))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    const priceStr = prices.length
+      ? (prices.length === 1 ? `$${prices[0].toFixed(0)}` : `$${Math.min(...prices).toFixed(0)}-$${Math.max(...prices).toFixed(0)}`)
+      : "no price";
+    const sample = m.matches[0]?.product_title?.slice(0, 50) ?? "";
+    console.log(
+      `${progressTag()}  ✓ ${storeName.slice(0, 30).padEnd(30)} ` +
+      `${domain.padEnd(30)} ${m.matches.length}p  ${priceStr.padEnd(14)} ` +
+      `"${sample}"`,
+    );
+  }
+  function logError(domain: string, msg: string) {
+    // Bucket the error type so the heartbeat can summarise.
+    const kind = /rate.?limit/i.test(msg) ? "rate-limit"
+      : /timeout|abort/i.test(msg) ? "timeout"
+      : /ENOTFOUND|DNS/i.test(msg) ? "dns"
+      : /ECONNREFUSED|ECONNRESET/i.test(msg) ? "conn"
+      : msg.slice(0, 30);
+    errorKinds[kind] = (errorKinds[kind] ?? 0) + 1;
+    console.log(`${progressTag()}  ✗ ${domain.padEnd(40)} ${kind}`);
+  }
+
+  console.log(`\nLegend:  ✓ has_sunglasses   ✗ error   ··· batch of no-match`);
+  console.log(`Heartbeat every 60s with rolling totals.\n`);
 
   await runPool(todo, CONCURRENCY, async (row) => {
     if (interrupted) return;
     const storeName = row.merchant_name || row.domain;
+    let r: CrawlResult;
     try {
-      const r = await crawlDomain(row.domain, storeName);
-      state.record({
-        domain: row.domain,
-        status: r.status,
-        match_count: r.matches.length,
-        pages_scanned: r.pagesScanned,
-        error: r.error,
-        processed_at: new Date().toISOString(),
-      });
-      if (r.status === "has_sunglasses") {
-        hits++;
-        products.appendMany(r.matches);
-      } else if (r.status === "error") {
-        errors++;
-      }
+      r = await crawlDomain(row.domain, storeName);
     } catch (e) {
-      errors++;
-      state.record({
-        domain: row.domain,
+      r = {
         status: "error",
+        matches: [],
+        pagesScanned: 0,
         error: e instanceof Error ? e.message : String(e),
-        processed_at: new Date().toISOString(),
-      });
+      };
     }
+
+    // Persist state + products BEFORE incrementing counters so a
+    // crash mid-write doesn't leave the in-memory counters ahead
+    // of disk.
+    state.record({
+      domain: row.domain,
+      status: r.status,
+      match_count: r.matches.length,
+      pages_scanned: r.pagesScanned,
+      error: r.error,
+      processed_at: new Date().toISOString(),
+    });
+    if (r.matches.length > 0) products.appendMany(r.matches);
+
     done++;
-    if (done % 100 === 0 || done === todo.length) {
-      const elapsed = (Date.now() - startedAt) / 1000;
-      const rate = done / elapsed;
-      const eta = (todo.length - done) / rate;
-      process.stdout.write(
-        `\r  ${done}/${todo.length}  hits=${hits}  errors=${errors}  ` +
-        `${rate.toFixed(1)}/s  ETA ${(eta / 60).toFixed(0)}m   `,
-      );
+    if (r.status === "has_sunglasses") {
+      hits++;
+      logHit(r, row.domain, storeName);
+    } else if (r.status === "error") {
+      errors++;
+      logError(row.domain, r.error ?? "unknown");
+    } else {
+      noMatch++;
+      logNoMatch(row.domain, r.pagesScanned);
     }
+    maybeHeartbeat();
   });
 
-  process.stdout.write("\n\n");
-  console.log(`Done. Crawled ${done} domains in ${((Date.now() - startedAt) / 60_000).toFixed(1)} min.`);
-  console.log(`  has_sunglasses: ${hits}`);
-  console.log(`  no_sunglasses:  ${done - hits - errors - skippedNotShopify}`);
-  console.log(`  error:          ${errors}`);
+  const elapsedMin = (Date.now() - startedAt) / 60_000;
+  console.log(`\n=== DONE ===`);
+  console.log(`  Crawled ${done.toLocaleString()} domains in ${elapsedMin.toFixed(1)} min`);
+  console.log(`  has_sunglasses: ${hits.toLocaleString()}  (${fmtPct(hits, done)})`);
+  console.log(`  no_sunglasses:  ${noMatch.toLocaleString()}`);
+  console.log(`  error:          ${errors.toLocaleString()}`);
+  if (Object.keys(errorKinds).length) {
+    console.log(`  error breakdown:`);
+    for (const [k, v] of Object.entries(errorKinds).sort((a, b) => b[1] - a[1])) {
+      console.log(`    ${String(v).padStart(6)}  ${k}`);
+    }
+  }
   console.log(`\nProducts CSV: ${productsPath}`);
   console.log(`State log:    ${statePath}`);
 
