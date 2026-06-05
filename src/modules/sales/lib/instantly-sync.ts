@@ -84,6 +84,25 @@ export function buildCustomVariables(row: Record<string, unknown>): Record<strin
   put("facebook_url", row.facebook_url);
   put("tiktok_url", row.tiktok_url);
 
+  // Eyewear inventory crawl aggregates — what each boutique
+  // currently stocks. Populated only on source_type='shopify_crawl'
+  // rows in the eyewear cohort; null on every other lead, in which
+  // case the `put` helper silently skips them.
+  put("top_brand", row.top_brand);
+  put("eyewear_categories", row.eyewear_categories);
+  put("eyewear_price_range", row.eyewear_price_range);
+  put("eyewear_top_competitors", row.eyewear_top_competitors);
+
+  // The two AI-generated opener lines — the headline personalization
+  // tokens. Christina's email 1 / email 2 sequence references them
+  // as {{ai_opener_email1}} and {{ai_opener_email2}}. When a lead
+  // lacks one (e.g. opener generation hasn't run yet, or the lead
+  // is from a different cohort), the put() helper drops the empty
+  // variable so Instantly falls back to whatever default value
+  // Daniel set in the sequence template.
+  put("ai_opener_email1", row.ai_opener_email1);
+  put("ai_opener_email2", row.ai_opener_email2);
+
   return out;
 }
 
@@ -167,6 +186,12 @@ async function pushCampaigns(): Promise<{ campaigns: number; leads: number; erro
              co.tiktok_url                   as tiktok_url,
              co.description                  as description,
              co.meta_description             as meta_description,
+             co.top_brand                    as top_brand,
+             co.eyewear_categories           as eyewear_categories,
+             co.eyewear_price_range          as eyewear_price_range,
+             co.eyewear_top_competitors      as eyewear_top_competitors,
+             co.ai_opener_email1             as ai_opener_email1,
+             co.ai_opener_email2             as ai_opener_email2,
              ct.first_name,
              ct.last_name,
              ct.email      as contact_email,

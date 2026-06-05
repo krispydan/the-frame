@@ -147,6 +147,12 @@ export async function POST(req: NextRequest) {
             co.tiktok_url                   as tiktok_url,
             co.description                  as description,
             co.meta_description             as meta_description,
+            co.top_brand                    as top_brand,
+            co.eyewear_categories           as eyewear_categories,
+            co.eyewear_price_range          as eyewear_price_range,
+            co.eyewear_top_competitors      as eyewear_top_competitors,
+            co.ai_opener_email1             as ai_opener_email1,
+            co.ai_opener_email2             as ai_opener_email2,
             ct.title     as contact_title
        FROM campaign_leads cl
        LEFT JOIN companies co ON co.id = cl.company_id
