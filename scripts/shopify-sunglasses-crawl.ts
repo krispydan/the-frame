@@ -238,11 +238,13 @@ function getProxyAgentCtor(): ProxyAgentCtor {
 }
 
 // Pool of pre-built agents — one per upstream proxy when using
-// a list. Round-robin via proxyCursor. Each agent is reusable
-// across many fetches (undici keeps a connection pool internally),
-// so building once at startup is the right pattern.
-const proxyPool: unknown[] = [];
+// a list. Round-robin via proxyCursor. Each agent has a coldUntil
+// timestamp so a 429 from one upstream doesn't paralyse the
+// other 9 — we just skip that one until it cools.
+interface PoolEntry { agent: unknown; coldUntil: number; }
+const proxyPool: PoolEntry[] = [];
 let proxyCursor = 0;
+const PER_IP_COOLDOWN_MS = 60_000;
 
 function parseProxyListText(text: string): string[] {
   const urls: string[] = [];
@@ -312,20 +314,53 @@ async function loadProxyList(): Promise<string[]> {
 
 async function initProxies(): Promise<void> {
   if (PROXY_URL) {
-    proxyPool.push(new (getProxyAgentCtor())(PROXY_URL));
+    proxyPool.push({ agent: new (getProxyAgentCtor())(PROXY_URL), coldUntil: 0 });
     return;
   }
   const urls = await loadProxyList();
   if (urls.length === 0) return;
   const Ctor = getProxyAgentCtor();
-  for (const u of urls) proxyPool.push(new Ctor(u));
+  for (const u of urls) proxyPool.push({ agent: new Ctor(u), coldUntil: 0 });
 }
 
-function nextProxyAgent(): unknown {
+interface PickedProxy {
+  index: number;
+  agent: unknown;
+}
+
+/** Round-robin starting at the cursor, but skip any entry whose
+ *  coldUntil is still in the future. If EVERY entry is cold,
+ *  return the soonest-thawing one (callers can await the wait
+ *  themselves rather than blowing through them). */
+function nextProxyAgent(): PickedProxy | null {
   if (proxyPool.length === 0) return null;
-  const a = proxyPool[proxyCursor % proxyPool.length];
-  proxyCursor++;
-  return a;
+  const now = Date.now();
+  for (let i = 0; i < proxyPool.length; i++) {
+    const idx = (proxyCursor + i) % proxyPool.length;
+    const e = proxyPool[idx];
+    if (e.coldUntil <= now) {
+      proxyCursor = idx + 1;
+      return { index: idx, agent: e.agent };
+    }
+  }
+  // All cold — pick the soonest to thaw.
+  let bestIdx = 0;
+  for (let i = 1; i < proxyPool.length; i++) {
+    if (proxyPool[i].coldUntil < proxyPool[bestIdx].coldUntil) bestIdx = i;
+  }
+  return { index: bestIdx, agent: proxyPool[bestIdx].agent };
+}
+
+function markProxyCold(index: number) {
+  if (index < 0 || index >= proxyPool.length) return;
+  proxyPool[index].coldUntil = Date.now() + PER_IP_COOLDOWN_MS;
+}
+
+function poolHealth(): { hot: number; cold: number } {
+  const now = Date.now();
+  let hot = 0, cold = 0;
+  for (const e of proxyPool) (e.coldUntil <= now ? hot++ : cold++);
+  return { hot, cold };
 }
 
 function proxyDescriptor(): string {
@@ -335,21 +370,20 @@ function proxyDescriptor(): string {
 }
 
 async function fetchPage(domain: string, page: number, timeoutMs: number): Promise<Array<Record<string, unknown>> | null> {
-  // Respect any in-progress cooldown before issuing the request.
-  // (Cooldowns still help even with a proxy — a single bad
-  // upstream can still 503 transiently.)
-  await waitForCooldown();
+  // Global cooldown is only used when we DON'T have a proxy pool.
+  // With ≥2 proxies, one hot IP shouldn't halt the other 9 — we
+  // do per-IP cooldown instead (markProxyCold below).
+  if (proxyPool.length < 2) await waitForCooldown();
 
   // Light jitter — staggers concurrent workers so we don't issue
-  // simultaneous bursts. Useful even with a proxy because the
-  // proxy itself may rate-limit per-account.
+  // simultaneous bursts.
   const jitter = JITTER_MIN_MS + Math.random() * (JITTER_MAX_MS - JITTER_MIN_MS);
   await new Promise((r) => setTimeout(r, jitter));
 
   const url = `https://${domain}/products.json?limit=${PAGE_LIMIT}&page=${page}`;
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
-  const agent = nextProxyAgent();
+  const picked = nextProxyAgent();
   try {
     const res = await fetch(url, {
       headers: { "user-agent": USER_AGENT, accept: "application/json" },
@@ -358,16 +392,19 @@ async function fetchPage(domain: string, page: number, timeoutMs: number): Promi
       // Undici-specific: passes the proxy dispatcher when set.
       // Cast to RequestInit-with-dispatcher because the built-in
       // RequestInit type doesn't expose this option.
-      ...(agent ? { dispatcher: agent } : {}),
+      ...(picked ? { dispatcher: picked.agent } : {}),
     } as RequestInit);
     if (!res.ok) {
       // 429 = rate limited. 503 = Cloudflare's "service unavailable"
-      // which it returns when an upstream is overloaded — same
-      // recovery (pause + retry next run). Trigger the global
-      // cooldown then throw so the caller's retry happens AFTER
-      // the pause.
+      // — same recovery semantic. With a proxy pool, mark THIS IP
+      // cold and let the other 9 keep working; without a pool, fall
+      // back to the global cooldown.
       if (res.status === 429 || res.status === 503) {
-        triggerCooldown(`${res.status} on ${domain}`);
+        if (proxyPool.length >= 2 && picked) {
+          markProxyCold(picked.index);
+        } else {
+          triggerCooldown(`${res.status} on ${domain}`);
+        }
         throw new Error("rate-limited");
       }
       return null;        // 404 / 403 / 5xx other — treat as "no more pages"
@@ -671,11 +708,16 @@ async function main() {
     const topErrs = Object.entries(errorKinds)
       .sort((a, b) => b[1] - a[1]).slice(0, 3)
       .map(([k, v]) => `${k}×${v}`).join("  ");
+    const ph = poolHealth();
+    const poolLine = proxyPool.length > 0
+      ? `  proxy pool: ${ph.hot} hot / ${ph.cold} cold (of ${proxyPool.length})\n`
+      : "";
     console.log(
       `\n  ──── heartbeat ${new Date().toISOString().slice(11, 19)} ────\n` +
       `  ${progressTag()}\n` +
       `  hits=${hits}  no_match=${noMatch}  errors=${errors}  ` +
       `(hit rate ${fmtPct(hits, done)})\n` +
+      poolLine +
       (topErrs ? `  top errors: ${topErrs}\n` : "") +
       `  ─────────────────────────────────\n`,
     );
