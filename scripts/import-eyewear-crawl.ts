@@ -410,6 +410,20 @@ const insertNew = sqlite.prepare(
 );
 
 const mergeExisting = sqlite.prepare(
+  // Asymmetric merge — two different rules in one UPDATE:
+  //
+  //   Firmographic fields (name, phone, email, city, description, etc.)
+  //   → COALESCE(existing, new). Preserves any value that's already set,
+  //   including hand-edited values from earlier ops work. Only fills NULLs.
+  //
+  //   Eyewear aggregates (top_brand, eyewear_*).
+  //   → COALESCE(new, existing). PREFERS the fresh crawl data. Daniel's
+  //   note: "a lot of these stores are already in the frame and we should
+  //   just update them with the data we collected so we don't double the
+  //   work." This is the right semantic for computed-from-crawl fields.
+  //   The fallback-to-existing handles the case where this row is being
+  //   touched by the no-eyewear cohort pass — ctx values are NULL, the
+  //   earlier eyewear aggregate survives.
   `UPDATE companies
       SET name              = COALESCE(name, ?),
           phone             = COALESCE(phone, ?),
@@ -424,16 +438,13 @@ const mergeExisting = sqlite.prepare(
           estimated_monthly_visits     = COALESCE(estimated_monthly_visits, ?),
           facebook_url      = COALESCE(facebook_url, ?),
           instagram_url     = COALESCE(instagram_url, ?),
-          -- Eyewear aggregates: COALESCE so a no-eyewear cohort
-          -- re-pass doesn't blow away an earlier eyewear-cohort
-          -- aggregate.
-          top_brand                    = COALESCE(top_brand, ?),
-          eyewear_categories           = COALESCE(eyewear_categories, ?),
-          eyewear_sku_count            = COALESCE(eyewear_sku_count, ?),
-          eyewear_price_range          = COALESCE(eyewear_price_range, ?),
-          eyewear_price_median_cents   = COALESCE(eyewear_price_median_cents, ?),
-          eyewear_top_competitors      = COALESCE(eyewear_top_competitors, ?),
-          eyewear_sample_titles        = COALESCE(eyewear_sample_titles, ?),
+          top_brand                    = COALESCE(?, top_brand),
+          eyewear_categories           = COALESCE(?, eyewear_categories),
+          eyewear_sku_count            = COALESCE(?, eyewear_sku_count),
+          eyewear_price_range          = COALESCE(?, eyewear_price_range),
+          eyewear_price_median_cents   = COALESCE(?, eyewear_price_median_cents),
+          eyewear_top_competitors      = COALESCE(?, eyewear_top_competitors),
+          eyewear_sample_titles        = COALESCE(?, eyewear_sample_titles),
           tags              = ?,
           updated_at        = ?
     WHERE id = ?`,
@@ -715,6 +726,39 @@ async function main() {
     }
   } else if (args.noClassifier) {
     console.log(`\nSkipping classifier (--no-classifier flag).`);
+  }
+
+  // ── Instantly overlap report ──
+  // Daniel: "a lot of these stores are already in the frame and some
+  // may be in instantly, if they are we should just update them with
+  // the data we collected so we don't double the work." This summary
+  // tells him exactly how many of the now-imported eyewear leads are
+  // already sitting in an Instantly campaign — they'll get their new
+  // top_brand / ai_opener_email1/2 / etc. shipped via the existing
+  // backfill-custom-vars endpoint (no re-push needed).
+  if (!args.dryRun && eyewearCompanyIds.length > 0) {
+    const ph = eyewearCompanyIds.map(() => "?").join(",");
+    const overlap = sqlite.prepare(
+      `SELECT COUNT(DISTINCT co.id) AS n
+         FROM companies co
+         INNER JOIN campaign_leads cl ON cl.company_id = co.id
+        WHERE co.id IN (${ph})
+          AND cl.instantly_lead_id IS NOT NULL`,
+    ).get(...eyewearCompanyIds) as { n: number };
+
+    const merged = eyewearStats.mergedExisting;
+    const totalEyewear = eyewearStats.inserted + merged;
+    console.log(`\nEyewear cohort × Instantly overlap:`);
+    console.log(`  Total touched this run:       ${totalEyewear.toLocaleString()}`);
+    console.log(`  Already existed in The Frame: ${merged.toLocaleString()}  (got eyewear aggregates merged)`);
+    console.log(`  Already in Instantly:         ${overlap.n.toLocaleString()}`);
+    if (overlap.n > 0) {
+      console.log(`\n  → To ship the new top_brand / eyewear_price_range / ai_opener_*`);
+      console.log(`    fields to Instantly for these ${overlap.n.toLocaleString()} leads:`);
+      console.log(`      curl -X POST https://theframe.getjaxy.com/api/v1/integrations/instantly/backfill-custom-vars \\`);
+      console.log(`        -H 'cookie: session-token=...' -d '{"resetMarks":true}'`);
+      console.log(`    Run the AI opener generator FIRST so the opener vars are populated before the backfill.`);
+    }
   }
 
   const dur = (Date.now() - t0) / 1000;
