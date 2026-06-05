@@ -47,7 +47,14 @@ import * as os from "os";
 import * as Papa from "papaparse";
 
 // ── Config knobs ───────────────────────────────────────────────────────────
-const CONCURRENCY = 30;
+// Concurrency was 30 originally — Shopify's edge (Cloudflare in
+// front of /products.json) flagged the IP after ~200 sustained
+// requests and started 429-ing everything from any storefront.
+// 8 workers + per-request jitter + a global cooldown when 429s
+// land seems to be the sweet spot: keeps throughput acceptable
+// (~5-8 domains/sec) while staying under whatever sliding-window
+// limit Shopify's edge is using.
+const CONCURRENCY = 8;
 const PAGE_LIMIT = 250;                // max page size Shopify allows
 const MAX_PAGES_PER_DOMAIN = 10;       // 2,500 products is plenty for detection
 const STOP_AFTER_MATCHES = 5;          // stop scanning a domain once we've
@@ -55,6 +62,15 @@ const STOP_AFTER_MATCHES = 5;          // stop scanning a domain once we've
                                        // report — saves time on huge catalogs
 const HTTP_TIMEOUT_MS = 6_000;
 const USER_AGENT = "Mozilla/5.0 (compatible; JaxyLeadGen/1.0)";
+// Per-request randomised delay so we don't issue 8 simultaneous
+// requests to (different) Shopify stores every iteration.
+const JITTER_MIN_MS = 100;
+const JITTER_MAX_MS = 400;
+// When any worker gets a 429, set a global "all workers pause"
+// window. 60s tends to be enough — Shopify's IP throttle clears
+// faster than that, and the next ~50 requests usually go through
+// before another pause is triggered.
+const RATE_LIMIT_PAUSE_MS = 60_000;
 
 const MATCH_KEYWORDS = [
   "sunglasses",   // primary
@@ -142,7 +158,43 @@ function fmtProduct(domain: string, storeName: string, p: Record<string, unknown
   };
 }
 
+// ── Global rate-limit cooldown ────────────────────────────────────────────
+// Shared across all workers. When any worker gets a 429 (or 503),
+// they bump cooldownUntil; every other worker checks before each
+// request and sleeps until the window closes. Prevents the
+// thundering-herd amplification where one rate-limit just causes
+// 7 more in the next second.
+let cooldownUntil = 0;
+let cooldownTrips = 0;
+
+async function waitForCooldown() {
+  while (Date.now() < cooldownUntil) {
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
+function triggerCooldown(reason: string) {
+  cooldownUntil = Math.max(cooldownUntil, Date.now() + RATE_LIMIT_PAUSE_MS);
+  cooldownTrips++;
+  // Log once per trip so the operator sees the script *intentionally*
+  // pausing — not just hanging. Hidden behind a guard so 8 workers
+  // hitting 429 in the same window only log once.
+  console.log(
+    `\n  ⏸  rate-limit detected (${reason}) — all workers pausing ` +
+    `${RATE_LIMIT_PAUSE_MS / 1000}s (trip #${cooldownTrips})\n`,
+  );
+}
+
 async function fetchPage(domain: string, page: number, timeoutMs: number): Promise<Array<Record<string, unknown>> | null> {
+  // Respect any in-progress cooldown before issuing the request.
+  await waitForCooldown();
+
+  // Light jitter — staggers concurrent workers so we don't issue
+  // 8 simultaneous bursts. Reads as ~100-400ms idle per request
+  // but pays back as a much lower rate-limit trip rate.
+  const jitter = JITTER_MIN_MS + Math.random() * (JITTER_MAX_MS - JITTER_MIN_MS);
+  await new Promise((r) => setTimeout(r, jitter));
+
   const url = `https://${domain}/products.json?limit=${PAGE_LIMIT}&page=${page}`;
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
@@ -153,8 +205,16 @@ async function fetchPage(domain: string, page: number, timeoutMs: number): Promi
       redirect: "follow",
     });
     if (!res.ok) {
-      if (res.status === 429) throw new Error("rate-limited");
-      return null;        // 404 / 403 / 5xx — treat as "no more pages"
+      // 429 = rate limited. 503 = Cloudflare's "service unavailable"
+      // which it returns when an upstream is overloaded — same
+      // recovery (pause + retry next run). Trigger the global
+      // cooldown then throw so the caller's retry happens AFTER
+      // the pause.
+      if (res.status === 429 || res.status === 503) {
+        triggerCooldown(`${res.status} on ${domain}`);
+        throw new Error("rate-limited");
+      }
+      return null;        // 404 / 403 / 5xx other — treat as "no more pages"
     }
     const ct = (res.headers.get("content-type") ?? "").toLowerCase();
     if (!ct.includes("application/json")) {
@@ -235,23 +295,47 @@ async function crawlDomain(domain: string, storeName: string): Promise<CrawlResu
 // resume picks up cleanly.
 class StateLog {
   private path: string;
+  // Only "settled" domains get into seen — has_sunglasses or
+  // no_sunglasses or skipped_not_shopify. error-status rows are
+  // deliberately NOT cached as seen, so a re-run automatically
+  // retries them. The state log keeps the historical record (last
+  // line wins when interpreting outcomes) but doesn't block the
+  // next attempt.
   private seen = new Set<string>();
+  private errorCount = 0;
+  private retriableErrors = 0;
 
   constructor(p: string) {
     this.path = p;
     if (fs.existsSync(p)) {
+      // First pass: collect the LATEST status per domain so an
+      // earlier error followed by a later success is treated as
+      // success. Last-write-wins on each domain.
+      const latest = new Map<string, StateLine>();
       for (const line of fs.readFileSync(p, "utf8").split("\n")) {
         if (!line.trim()) continue;
         try {
           const obj = JSON.parse(line) as StateLine;
-          if (obj.domain) this.seen.add(obj.domain);
+          if (obj.domain) latest.set(obj.domain, obj);
         } catch { /* skip bad lines from a partial last write */ }
+      }
+      for (const [d, obj] of Array.from(latest.entries())) {
+        if (obj.status === "error") {
+          this.errorCount++;
+          this.retriableErrors++;
+          // Deliberately not adding to seen — leaves the domain
+          // eligible for re-crawl.
+        } else {
+          this.seen.add(d);
+        }
       }
     }
   }
 
   has(domain: string): boolean { return this.seen.has(domain); }
   size(): number { return this.seen.size; }
+  errors(): number { return this.errorCount; }
+  retriable(): number { return this.retriableErrors; }
 
   record(line: StateLine): void {
     this.seen.add(line.domain);
@@ -352,8 +436,12 @@ async function main() {
 
   const todo = unique.filter((r) => !state.has(r.domain));
   console.log(`Unique domains:  ${unique.length.toLocaleString()}`);
-  console.log(`Already in log:  ${(unique.length - todo.length).toLocaleString()}`);
-  console.log(`To crawl:        ${todo.length.toLocaleString()}\n`);
+  console.log(`Already settled: ${(unique.length - todo.length).toLocaleString()} (has_sunglasses or no_sunglasses)`);
+  if (state.retriable() > 0) {
+    console.log(`Errors to retry: ${state.retriable().toLocaleString()} (will be re-crawled in this run)`);
+  }
+  console.log(`To crawl:        ${todo.length.toLocaleString()}`);
+  console.log(`Concurrency:     ${CONCURRENCY}  ·  jitter ${JITTER_MIN_MS}-${JITTER_MAX_MS}ms  ·  cooldown ${RATE_LIMIT_PAUSE_MS / 1000}s on 429\n`);
 
   if (todo.length === 0) {
     console.log("Nothing to do. Re-running this command after deleting the state log will re-crawl.");
