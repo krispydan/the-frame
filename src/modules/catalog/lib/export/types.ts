@@ -49,6 +49,10 @@ export interface ExportProduct {
     id: string;
     sku: string | null;
     colorName: string | null;
+    /** Lens color, separate from the frame color in colorName. Drives the
+     *  Shopify variant title `{Frame} Frame / {Lens} Lens` (Phase 5).
+     *  Nullable — when absent, variant title falls back to single-axis. */
+    lensColorName: string | null;
     colorHex: string | null;
     size: string | null;
     upc: string | null;

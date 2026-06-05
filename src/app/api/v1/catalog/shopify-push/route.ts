@@ -16,6 +16,7 @@ import { categorizeProduct } from "@/modules/catalog/lib/shopify-metafields/ai-c
 import { syncProductMetafields } from "@/modules/catalog/lib/shopify-metafields/sync";
 import { syncProductDimensions } from "@/modules/catalog/lib/shopify-metafields/dimensions";
 import type { AiCategorizationOutput } from "@/modules/catalog/lib/shopify-metafields/handles";
+import { buildVariantTitle } from "@/modules/catalog/lib/prompt-engine";
 
 /**
  * POST /api/v1/catalog/shopify-push
@@ -151,14 +152,23 @@ export async function POST(request: NextRequest) {
 
         const tagString = ep.tags.map((t) => t.tagName).filter(Boolean).join(", ");
 
-        const colorValues = ep.skus.map((s) => s.colorName || "Default").filter(Boolean);
+        // Variant titles use the new `{Frame Color} Frame / {Lens Color}
+        // Lens` format from brief §5. Falls back to single-axis
+        // ("Tortoise Frame") when no lens column is set, and to legacy
+        // slash-form parsing ("Tort/Green" → "Tort Frame / Green Lens")
+        // when SKUs carry the combined name. The product option list
+        // stays a single "Color" axis for backward compat.
+        const variantTitles = ep.skus.map((s) =>
+          buildVariantTitle(s.colorName, s.lensColorName),
+        );
+        const colorValues = variantTitles.filter(Boolean);
         const hasMultipleVariants = ep.skus.length > 1;
 
-        const variants = ep.skus.map((s) => ({
+        const variants = ep.skus.map((s, i) => ({
           sku: s.sku || "",
           price: variantPrice,
           compare_at_price: compareAtPrice,
-          option1: s.colorName || "Default Title",
+          option1: variantTitles[i],
           inventory_management: "shopify" as const,
           barcode: s.upc || undefined,
         }));

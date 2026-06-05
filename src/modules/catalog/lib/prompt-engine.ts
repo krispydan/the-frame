@@ -511,3 +511,43 @@ function titleCaseFirst(s: string): string {
   if (!s) return s;
   return s[0].toUpperCase() + s.slice(1).toLowerCase();
 }
+
+/**
+ * Build the Shopify variant title using the standardised
+ * `{Frame Color} Frame / {Lens Color} Lens` format from brief §5.
+ *
+ * Falls back gracefully when data is incomplete:
+ *   - Both → "Black Frame / Brown Lens"
+ *   - Frame only → "Black Frame"
+ *   - Legacy slash form ("Tort/Green" with no lensColorName) → split
+ *     left = frame, right = lens
+ *   - Null frame → "Default Title" (Shopify's own fallback)
+ *
+ * The output is used as Shopify variant `option1` so the variant title
+ * is automatically displayed as the same string. We never set
+ * option2/option3 — the product option list stays "Color" for backward
+ * compat with existing storefronts.
+ */
+export function buildVariantTitle(
+  frameColor: string | null | undefined,
+  lensColor: string | null | undefined,
+): string {
+  const fc = (frameColor ?? "").trim();
+  const lc = (lensColor ?? "").trim();
+
+  if (!fc) return "Default Title";
+
+  // Legacy slash-form: "Tort/Green" with no separate lens column.
+  // Split + recurse so the format stays consistent. Only when the
+  // explicit lens column is absent — explicit lens always wins.
+  if (!lc && fc.includes("/")) {
+    const [leftRaw, rightRaw] = fc.split("/", 2).map((s) => s.trim());
+    if (leftRaw && rightRaw) {
+      return `${titleCaseFirst(leftRaw)} Frame / ${titleCaseFirst(rightRaw)} Lens`;
+    }
+  }
+
+  const framePart = `${titleCaseFirst(fc)} Frame`;
+  if (!lc) return framePart;
+  return `${framePart} / ${titleCaseFirst(lc)} Lens`;
+}

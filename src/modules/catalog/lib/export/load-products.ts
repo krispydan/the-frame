@@ -77,7 +77,8 @@ export async function loadExportProducts(productIds?: string[]): Promise<ExportP
         frameSize: p.frameSize ?? null,
       },
       skus: productSkus.map((s) => ({
-        id: s.id, sku: s.sku, colorName: s.colorName, colorHex: s.colorHex,
+        id: s.id, sku: s.sku, colorName: s.colorName, lensColorName: s.lensColorName,
+        colorHex: s.colorHex,
         size: s.size, upc: s.upc, inStock: s.inStock,
         inventoryQuantity: inventoryBySku.get(s.id) ?? 0,
         costPrice: s.costPrice,
