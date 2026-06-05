@@ -98,10 +98,38 @@ const JITTER_MAX_MS = 400;
 // before another pause is triggered.
 const RATE_LIMIT_PAUSE_MS = 60_000;
 
-const MATCH_KEYWORDS = [
-  "sunglasses",   // primary
-  "sunglass",     // singular
-  "sunnies",      // indie copy
+// Category-tagged keyword sets. Each match is labelled with the
+// category that triggered it (sunglasses vs reading_glasses) so
+// Daniel can filter the output CSV by product type for separate
+// outreach campaigns. A store with both lands in the CSV twice —
+// once per category — with separate `product_category` values.
+//
+// Notes on selection:
+//  - "sunnies" is safe sunglasses slang
+//  - "reading glasses" + "reading glass" cover the obvious cases
+//  - "readers" alone is ambiguous (could mean book-readers /
+//    e-readers in body copy) so we ONLY accept it from
+//    title/product_type/tag fields, not body_html
+//  - "cheaters" deliberately omitted — too noisy, hits poker /
+//    relationship copy on too many stores
+const KEYWORD_SETS: Array<{
+  category: "sunglasses" | "reading_glasses";
+  keywords: string[];
+  // If true, the keyword can match anywhere (title, type, tag,
+  // body_html). If false, body_html matches are suppressed —
+  // useful for ambiguous keywords like "readers" that show up in
+  // generic body copy on many stores.
+  allowBodyMatch: boolean;
+}> = [
+  { category: "sunglasses",
+    keywords: ["sunglasses", "sunglass", "sunnies"],
+    allowBodyMatch: true },
+  { category: "reading_glasses",
+    keywords: ["reading glasses", "reading glass"],
+    allowBodyMatch: true },
+  { category: "reading_glasses",
+    keywords: ["readers"],
+    allowBodyMatch: false },
 ];
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -122,6 +150,8 @@ interface ProductMatch {
   product_type: string;
   product_price: string;
   product_image: string;
+  /** "sunglasses" | "reading_glasses" — which keyword set hit. */
+  product_category: string;
   match_reason: string;     // why we considered it a match — which field
                             // hit ("title", "type", "tag:eyewear", etc.)
 }
@@ -142,28 +172,44 @@ function normalizeDomain(raw: string): string {
     .replace(/^www\./, "");
 }
 
-/** Inspect a single product. Return the first match reason found,
- *  or null. Match on multiple fields so we don't miss stores whose
- *  product titles are generic ("Cat-Eye Frames") but whose tags or
- *  product_type say "Sunglasses". */
-function matchProduct(p: Record<string, unknown>): string | null {
+interface MatchInfo {
+  category: "sunglasses" | "reading_glasses";
+  reason: string;
+}
+
+/** Inspect a single product against every keyword set. Return the
+ *  FIRST hit (category + which field matched), or null. Sunglasses
+ *  is tried before reading_glasses, so a product that contains both
+ *  ("Reading glasses & sunglasses combo") lands as sunglasses —
+ *  matches the common case where stores cross-sell. Each product
+ *  generates at most one ProductMatch row regardless. */
+function matchProduct(p: Record<string, unknown>): MatchInfo | null {
   const title = String(p.title ?? "").toLowerCase();
   const ptype = String(p.product_type ?? "").toLowerCase();
   const tags = Array.isArray(p.tags) ? (p.tags as unknown[]).map((t) => String(t).toLowerCase()) : [];
   const body = String(p.body_html ?? "").toLowerCase().slice(0, 500);
 
-  for (const kw of MATCH_KEYWORDS) {
-    if (title.includes(kw)) return `title:${kw}`;
-    if (ptype.includes(kw)) return `product_type:${kw}`;
-    if (body.includes(kw)) return `body_html:${kw}`;
-    for (const t of tags) {
-      if (t.includes(kw)) return `tag:${kw}`;
+  for (const set of KEYWORD_SETS) {
+    for (const kw of set.keywords) {
+      if (title.includes(kw)) return { category: set.category, reason: `title:${kw}` };
+      if (ptype.includes(kw)) return { category: set.category, reason: `product_type:${kw}` };
+      for (const t of tags) {
+        if (t.includes(kw)) return { category: set.category, reason: `tag:${kw}` };
+      }
+      if (set.allowBodyMatch && body.includes(kw)) {
+        return { category: set.category, reason: `body_html:${kw}` };
+      }
     }
   }
   return null;
 }
 
-function fmtProduct(domain: string, storeName: string, p: Record<string, unknown>, reason: string): ProductMatch {
+function fmtProduct(
+  domain: string,
+  storeName: string,
+  p: Record<string, unknown>,
+  m: MatchInfo,
+): ProductMatch {
   const variants = Array.isArray(p.variants) ? (p.variants as Array<Record<string, unknown>>) : [];
   const firstVariant = variants[0] ?? {};
   const images = Array.isArray(p.images) ? (p.images as Array<Record<string, unknown>>) : [];
@@ -180,7 +226,8 @@ function fmtProduct(domain: string, storeName: string, p: Record<string, unknown
     product_type: String(p.product_type ?? ""),
     product_price: String(firstVariant.price ?? ""),
     product_image: String(firstImage.src ?? ""),
-    match_reason: reason,
+    product_category: m.category,
+    match_reason: m.reason,
   };
 }
 
@@ -498,9 +545,9 @@ async function crawlDomain(domain: string, storeName: string): Promise<CrawlResu
     if (!products || products.length === 0) break;
 
     for (const p of products) {
-      const reason = matchProduct(p);
-      if (reason) {
-        matches.push(fmtProduct(domain, storeName, p, reason));
+      const m = matchProduct(p);
+      if (m) {
+        matches.push(fmtProduct(domain, storeName, p, m));
         if (matches.length >= STOP_AFTER_MATCHES) {
           return { status: "has_sunglasses", matches, pagesScanned };
         }
@@ -596,7 +643,7 @@ class ProductsCsv {
         p,
         "domain,store_name,product_id,product_title,product_url," +
         "product_handle,product_vendor,product_type,product_price," +
-        "product_image,match_reason\n",
+        "product_image,product_category,match_reason\n",
       );
       this.wroteHeader = true;
     }
@@ -781,10 +828,17 @@ async function main() {
     const priceStr = prices.length
       ? (prices.length === 1 ? `$${prices[0].toFixed(0)}` : `$${Math.min(...prices).toFixed(0)}-$${Math.max(...prices).toFixed(0)}`)
       : "no price";
+    // Category mix: "5sg" / "3sg+2rg" / "4rg" — so the log lets
+    // Daniel spot reading-glasses-only stores at a glance.
+    const sgCount = m.matches.filter((p) => p.product_category === "sunglasses").length;
+    const rgCount = m.matches.filter((p) => p.product_category === "reading_glasses").length;
+    const mix = sgCount && rgCount ? `${sgCount}sg+${rgCount}rg`
+      : sgCount ? `${sgCount}sg`
+      : `${rgCount}rg`;
     const sample = m.matches[0]?.product_title?.slice(0, 50) ?? "";
     console.log(
       `${progressTag()}  ✓ ${storeName.slice(0, 30).padEnd(30)} ` +
-      `${domain.padEnd(30)} ${m.matches.length}p  ${priceStr.padEnd(14)} ` +
+      `${domain.padEnd(30)} ${mix.padEnd(8)} ${priceStr.padEnd(14)} ` +
       `"${sample}"`,
     );
   }
