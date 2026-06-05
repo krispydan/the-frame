@@ -54,7 +54,11 @@ import * as Papa from "papaparse";
 // land seems to be the sweet spot: keeps throughput acceptable
 // (~5-8 domains/sec) while staying under whatever sliding-window
 // limit Shopify's edge is using.
-const CONCURRENCY = 8;
+// Default to 8 (polite) without a proxy; bump to 30 when PROXY_URL
+// is set so the rotation actually gets used. Daniel can override
+// either with the CONCURRENCY env var.
+const CONCURRENCY = Number(process.env.CONCURRENCY)
+  || (process.env.PROXY_URL ? 30 : 8);
 const PAGE_LIMIT = 250;                // max page size Shopify allows
 const MAX_PAGES_PER_DOMAIN = 10;       // 2,500 products is plenty for detection
 const STOP_AFTER_MATCHES = 5;          // stop scanning a domain once we've
@@ -185,25 +189,59 @@ function triggerCooldown(reason: string) {
   );
 }
 
+// ── Optional proxy support ────────────────────────────────────────────────
+// Set PROXY_URL env to route every fetch through a rotating
+// residential / datacenter proxy. Format:
+//   PROXY_URL='http://user:pass@host:port'
+//
+// When set, Node 22's built-in undici dispatcher rewrites the
+// request URL through the proxy. No code changes needed beyond
+// the URL prefix — works with Webshare, ScrapeOps, Bright Data,
+// Smartproxy, Oxylabs, etc., all of which expose this format.
+//
+// Each request gets a fresh outbound connection (rotation
+// happens at the proxy side), which sidesteps Shopify's per-IP
+// rate limiting entirely. Concurrency can be cranked up safely
+// when this is on.
+const PROXY_URL = process.env.PROXY_URL || null;
+let proxyAgent: unknown = null;
+async function getProxyAgent(): Promise<unknown> {
+  if (!PROXY_URL) return null;
+  if (proxyAgent) return proxyAgent;
+  // Lazy-load undici only when needed — avoids the require cost
+  // for the no-proxy default path.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const undici = require("undici") as { ProxyAgent: new (url: string) => unknown };
+  proxyAgent = new undici.ProxyAgent(PROXY_URL);
+  return proxyAgent;
+}
+
 async function fetchPage(domain: string, page: number, timeoutMs: number): Promise<Array<Record<string, unknown>> | null> {
   // Respect any in-progress cooldown before issuing the request.
+  // (Cooldowns still help even with a proxy — a single bad
+  // upstream can still 503 transiently.)
   await waitForCooldown();
 
   // Light jitter — staggers concurrent workers so we don't issue
-  // 8 simultaneous bursts. Reads as ~100-400ms idle per request
-  // but pays back as a much lower rate-limit trip rate.
+  // simultaneous bursts. Useful even with a proxy because the
+  // proxy itself may rate-limit per-account.
   const jitter = JITTER_MIN_MS + Math.random() * (JITTER_MAX_MS - JITTER_MIN_MS);
   await new Promise((r) => setTimeout(r, jitter));
 
   const url = `https://${domain}/products.json?limit=${PAGE_LIMIT}&page=${page}`;
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
+  const agent = await getProxyAgent();
   try {
     const res = await fetch(url, {
       headers: { "user-agent": USER_AGENT, accept: "application/json" },
       signal: ctl.signal,
       redirect: "follow",
-    });
+      // Undici-specific: passes the proxy dispatcher when set.
+      // Cast to RequestInit-with-dispatcher because the built-in
+      // RequestInit type doesn't expose this option.
+      ...(agent ? { dispatcher: agent } : {}),
+    } as RequestInit);
     if (!res.ok) {
       // 429 = rate limited. 503 = Cloudflare's "service unavailable"
       // which it returns when an upstream is overloaded — same
@@ -441,7 +479,12 @@ async function main() {
     console.log(`Errors to retry: ${state.retriable().toLocaleString()} (will be re-crawled in this run)`);
   }
   console.log(`To crawl:        ${todo.length.toLocaleString()}`);
-  console.log(`Concurrency:     ${CONCURRENCY}  ·  jitter ${JITTER_MIN_MS}-${JITTER_MAX_MS}ms  ·  cooldown ${RATE_LIMIT_PAUSE_MS / 1000}s on 429\n`);
+  console.log(
+    `Concurrency:     ${CONCURRENCY}  ·  ` +
+    `jitter ${JITTER_MIN_MS}-${JITTER_MAX_MS}ms  ·  ` +
+    `cooldown ${RATE_LIMIT_PAUSE_MS / 1000}s on 429  ·  ` +
+    `proxy ${PROXY_URL ? "ON" : "OFF"}\n`,
+  );
 
   if (todo.length === 0) {
     console.log("Nothing to do. Re-running this command after deleting the state log will re-crawl.");
