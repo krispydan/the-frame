@@ -58,7 +58,8 @@ import * as Papa from "papaparse";
 // is set so the rotation actually gets used. Daniel can override
 // either with the CONCURRENCY env var.
 const CONCURRENCY = Number(process.env.CONCURRENCY)
-  || (process.env.PROXY_URL ? 30 : 8);
+  || ((process.env.PROXY_URL || process.env.PROXY_LIST_URL || process.env.PROXY_LIST_FILE)
+    ? 30 : 8);
 const PAGE_LIMIT = 250;                // max page size Shopify allows
 const MAX_PAGES_PER_DOMAIN = 10;       // 2,500 products is plenty for detection
 const STOP_AFTER_MATCHES = 5;          // stop scanning a domain once we've
@@ -190,30 +191,109 @@ function triggerCooldown(reason: string) {
 }
 
 // ── Optional proxy support ────────────────────────────────────────────────
-// Set PROXY_URL env to route every fetch through a rotating
-// residential / datacenter proxy. Format:
+// Two env-var options, pick whichever your provider exposes:
+//
 //   PROXY_URL='http://user:pass@host:port'
+//     Single proxy URL. Use this with Webshare's "rotating
+//     endpoint", Bright Data's backbone, or any provider whose
+//     URL itself does the rotation. Every fetch goes through the
+//     same dispatcher; the provider rotates the upstream IP per
+//     request.
 //
-// When set, Node 22's built-in undici dispatcher rewrites the
-// request URL through the proxy. No code changes needed beyond
-// the URL prefix — works with Webshare, ScrapeOps, Bright Data,
-// Smartproxy, Oxylabs, etc., all of which expose this format.
+//   PROXY_LIST_URL='https://proxy.webshare.io/api/v2/proxy/list/download/<token>/-/...'
+//     OR
+//   PROXY_LIST_FILE='/path/to/proxies.txt'
+//     A list of proxies, one per line. We round-robin across the
+//     list, giving each request a different IP. Use this when
+//     your provider gives you 10 datacenter IPs but no rotating
+//     endpoint (Webshare's free tier).
 //
-// Each request gets a fresh outbound connection (rotation
-// happens at the proxy side), which sidesteps Shopify's per-IP
-// rate limiting entirely. Concurrency can be cranked up safely
-// when this is on.
+//     Expected line format (Webshare's download endpoint format):
+//       ip:port:user:pass
+//     Lines starting with # or blank are ignored.
+//
+// PROXY_URL wins if both are set. Without either, the script
+// runs direct from your machine's IP.
 const PROXY_URL = process.env.PROXY_URL || null;
-let proxyAgent: unknown = null;
-async function getProxyAgent(): Promise<unknown> {
-  if (!PROXY_URL) return null;
-  if (proxyAgent) return proxyAgent;
-  // Lazy-load undici only when needed — avoids the require cost
-  // for the no-proxy default path.
+const PROXY_LIST_URL = process.env.PROXY_LIST_URL || null;
+const PROXY_LIST_FILE = process.env.PROXY_LIST_FILE || null;
+
+// Lazy-imported once; ProxyAgent constructor is what we actually use.
+type ProxyAgentCtor = new (url: string) => unknown;
+let undiciProxyAgent: ProxyAgentCtor | null = null;
+function getProxyAgentCtor(): ProxyAgentCtor {
+  if (undiciProxyAgent) return undiciProxyAgent;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const undici = require("undici") as { ProxyAgent: new (url: string) => unknown };
-  proxyAgent = new undici.ProxyAgent(PROXY_URL);
-  return proxyAgent;
+  const undici = require("undici") as { ProxyAgent: ProxyAgentCtor };
+  undiciProxyAgent = undici.ProxyAgent;
+  return undiciProxyAgent;
+}
+
+// Pool of pre-built agents — one per upstream proxy when using
+// a list. Round-robin via proxyCursor. Each agent is reusable
+// across many fetches (undici keeps a connection pool internally),
+// so building once at startup is the right pattern.
+const proxyPool: unknown[] = [];
+let proxyCursor = 0;
+
+function parseProxyListText(text: string): string[] {
+  const urls: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    // Webshare format: ip:port:user:pass
+    // Also accept already-formed http:// URLs in case the user
+    // pre-built them.
+    if (line.startsWith("http://") || line.startsWith("https://")) {
+      urls.push(line);
+      continue;
+    }
+    const parts = line.split(":");
+    if (parts.length === 4) {
+      const [host, port, user, pass] = parts;
+      urls.push(`http://${user}:${pass}@${host}:${port}`);
+    } else if (parts.length === 2) {
+      // host:port with no auth
+      urls.push(`http://${parts[0]}:${parts[1]}`);
+    }
+  }
+  return urls;
+}
+
+async function loadProxyList(): Promise<string[]> {
+  if (PROXY_LIST_FILE) {
+    return parseProxyListText(fs.readFileSync(PROXY_LIST_FILE, "utf8"));
+  }
+  if (PROXY_LIST_URL) {
+    const res = await fetch(PROXY_LIST_URL);
+    if (!res.ok) throw new Error(`PROXY_LIST_URL fetch ${res.status}`);
+    return parseProxyListText(await res.text());
+  }
+  return [];
+}
+
+async function initProxies(): Promise<void> {
+  if (PROXY_URL) {
+    proxyPool.push(new (getProxyAgentCtor())(PROXY_URL));
+    return;
+  }
+  const urls = await loadProxyList();
+  if (urls.length === 0) return;
+  const Ctor = getProxyAgentCtor();
+  for (const u of urls) proxyPool.push(new Ctor(u));
+}
+
+function nextProxyAgent(): unknown {
+  if (proxyPool.length === 0) return null;
+  const a = proxyPool[proxyCursor % proxyPool.length];
+  proxyCursor++;
+  return a;
+}
+
+function proxyDescriptor(): string {
+  if (PROXY_URL) return "ON (single endpoint)";
+  if (proxyPool.length > 0) return `ON (${proxyPool.length} IPs, round-robin)`;
+  return "OFF";
 }
 
 async function fetchPage(domain: string, page: number, timeoutMs: number): Promise<Array<Record<string, unknown>> | null> {
@@ -231,7 +311,7 @@ async function fetchPage(domain: string, page: number, timeoutMs: number): Promi
   const url = `https://${domain}/products.json?limit=${PAGE_LIMIT}&page=${page}`;
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
-  const agent = await getProxyAgent();
+  const agent = nextProxyAgent();
   try {
     const res = await fetch(url, {
       headers: { "user-agent": USER_AGENT, accept: "application/json" },
@@ -447,6 +527,15 @@ async function main() {
   console.log(`Products: ${productsPath}`);
   console.log(`State:    ${statePath}`);
 
+  // Load proxy pool (single URL, list from URL, or list from file).
+  // Done before the banner so the "proxy ON/OFF" line is accurate.
+  try {
+    await initProxies();
+  } catch (e) {
+    console.error(`Proxy init failed: ${e instanceof Error ? e.message : e}`);
+    process.exit(1);
+  }
+
   const csvText = fs.readFileSync(inputPath, "utf8");
   const parsed = Papa.parse<Record<string, string>>(csvText, {
     header: true, skipEmptyLines: true,
@@ -483,7 +572,7 @@ async function main() {
     `Concurrency:     ${CONCURRENCY}  ·  ` +
     `jitter ${JITTER_MIN_MS}-${JITTER_MAX_MS}ms  ·  ` +
     `cooldown ${RATE_LIMIT_PAUSE_MS / 1000}s on 429  ·  ` +
-    `proxy ${PROXY_URL ? "ON" : "OFF"}\n`,
+    `proxy ${proxyDescriptor()}\n`,
   );
 
   if (todo.length === 0) {
