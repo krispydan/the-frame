@@ -13,6 +13,7 @@ import { db } from "@/lib/db";
 import { products, skus as skusTable, tags as tagsTable } from "@/modules/catalog/schema";
 import { eq } from "drizzle-orm";
 import { syncMetafieldsFromTags } from "./sync-from-tags";
+import { syncProductDimensions } from "./dimensions";
 import { curatedAttrsFromTags } from "@/modules/catalog/lib/curated-attributes";
 import type { ProductForExtendedMetafields } from "./extended-metafields";
 
@@ -114,6 +115,32 @@ export async function runShopifyMetafieldSync(
           extended,
           dryRun: false,
         });
+
+        // Also push the six dimension metafields (custom.lens_width
+        // etc.). Previously only the /shopify-push endpoint did this
+        // — the nightly cron skipped it, so the dimensions never made
+        // it onto products that weren't manually re-pushed. Phase 4
+        // brief §1 lists all six as part of the canonical payload.
+        if (r.shopifyProductId) {
+          try {
+            await syncProductDimensions({
+              store,
+              shopifyProductId: r.shopifyProductId,
+              lensWidth: product.lensWidth,
+              bridgeWidth: product.bridgeWidth,
+              templeLength: product.templeLength,
+              lensHeight: product.lensHeight,
+              frameWidth: product.frameWidth,
+              frameHeight: product.frameHeight ?? null,
+            });
+          } catch (e) {
+            // Non-fatal — log onto the same per-product failure bucket
+            // but don't downgrade the category-metafield outcome.
+            storeSummary[store].failures.push(
+              `${product.skuPrefix} (dimensions): ${e instanceof Error ? e.message : "unknown"}`,
+            );
+          }
+        }
 
         const summary = storeSummary[store];
         if (r.ok && r.skipReasons.length === 0 && r.metafieldErrors.length === 0) {
