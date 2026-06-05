@@ -58,7 +58,8 @@ import * as Papa from "papaparse";
 // is set so the rotation actually gets used. Daniel can override
 // either with the CONCURRENCY env var.
 const CONCURRENCY = Number(process.env.CONCURRENCY)
-  || ((process.env.PROXY_URL || process.env.PROXY_LIST_URL || process.env.PROXY_LIST_FILE)
+  || ((process.env.PROXY_URL || process.env.PROXY_LIST_URL
+       || process.env.PROXY_LIST_FILE || process.env.WEBSHARE_API_KEY)
     ? 30 : 8);
 const PAGE_LIMIT = 250;                // max page size Shopify allows
 const MAX_PAGES_PER_DOMAIN = 10;       // 2,500 products is plenty for detection
@@ -217,6 +218,10 @@ function triggerCooldown(reason: string) {
 const PROXY_URL = process.env.PROXY_URL || null;
 const PROXY_LIST_URL = process.env.PROXY_LIST_URL || null;
 const PROXY_LIST_FILE = process.env.PROXY_LIST_FILE || null;
+// Webshare-specific shortcut: pass the account API key, we'll hit
+// their /api/v2/proxy/list/ endpoint and build the pool ourselves.
+// Easier than dealing with download-token URLs that expire.
+const WEBSHARE_API_KEY = process.env.WEBSHARE_API_KEY || null;
 
 // Lazy-imported once; ProxyAgent constructor is what we actually use.
 type ProxyAgentCtor = new (url: string) => unknown;
@@ -268,6 +273,36 @@ async function loadProxyList(): Promise<string[]> {
     const res = await fetch(PROXY_LIST_URL);
     if (!res.ok) throw new Error(`PROXY_LIST_URL fetch ${res.status}`);
     return parseProxyListText(await res.text());
+  }
+  if (WEBSHARE_API_KEY) {
+    // Paginate /api/v2/proxy/list/ in case the account has >100 IPs.
+    // Returns objects like
+    //   {proxy_address, port, username, password, valid: true, ...}
+    // We only keep valid=true rows so a recently-deactivated proxy
+    // doesn't end up in the pool.
+    const urls: string[] = [];
+    let nextUrl: string | null =
+      "https://proxy.webshare.io/api/v2/proxy/list/?mode=direct&page_size=100";
+    while (nextUrl) {
+      const res = await fetch(nextUrl, {
+        headers: { Authorization: `Token ${WEBSHARE_API_KEY}` },
+      });
+      if (!res.ok) throw new Error(`Webshare API ${res.status}`);
+      const json = await res.json() as {
+        results?: Array<{
+          proxy_address: string; port: number;
+          username: string; password: string;
+          valid?: boolean;
+        }>;
+        next?: string | null;
+      };
+      for (const p of json.results ?? []) {
+        if (p.valid === false) continue;
+        urls.push(`http://${p.username}:${p.password}@${p.proxy_address}:${p.port}`);
+      }
+      nextUrl = json.next ?? null;
+    }
+    return urls;
   }
   return [];
 }
