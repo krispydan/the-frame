@@ -63,9 +63,12 @@ const CONCURRENCY = Number(process.env.CONCURRENCY)
     ? 30 : 8);
 const PAGE_LIMIT = 250;                // max page size Shopify allows
 const MAX_PAGES_PER_DOMAIN = 10;       // 2,500 products is plenty for detection
-const STOP_AFTER_MATCHES = 5;          // stop scanning a domain once we've
-                                       // found enough sunglasses products to
-                                       // report — saves time on huge catalogs
+// Per-store cap on saved matches. 25 captures pricing range,
+// brand variety, and AOV per store without runaway costs from
+// the rare eyewear-heavy catalog. Override with STOP_AFTER_MATCHES
+// env var if you want all of them (set to 9999 effectively =
+// "scan the whole catalog").
+const STOP_AFTER_MATCHES = Number(process.env.STOP_AFTER_MATCHES) || 25;
 const HTTP_TIMEOUT_MS = 6_000;
 const USER_AGENT = "Mozilla/5.0 (compatible; JaxyLeadGen/1.0)";
 // Per-request randomised delay so we don't issue 8 simultaneous
