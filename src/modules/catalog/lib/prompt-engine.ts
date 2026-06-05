@@ -25,6 +25,10 @@ export interface ProductContext {
   lensHeight?: number | null;
   /** Total frame width edge-to-edge (mm), when supplied. */
   frameWidth?: number | null;
+  /** Total frame height edge-to-edge (mm), when supplied. Added for the
+   *  Shopify metafield sync's product_detail[frame_height] feed
+   *  attribute — Phase 1 added the column. */
+  frameHeight?: number | null;
 }
 
 const STYLE_KEYWORDS: Record<StyleCategory, string[]> = {
@@ -228,4 +232,282 @@ export function inferProductNameCategory(input: {
     return "blue light";
   }
   return "sunglasses";
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Deterministic SEO builders for the Shopify metafield sync (Phase 2).
+//
+// Formula straight from the SEO feed brief — produces stable, predictable
+// titles + descriptions + body HTML from curated attrs. No LLM calls.
+//
+// The 39-row golden file at jaxy-seo-feed-recommendations-v2.xlsx
+// matches the OUTPUT of these builders for the dominant case; spreadsheet
+// outliers (Eclipse's mid-position "Polarized", Drifter/Diplomat's hybrid
+// "Square Aviator", Hex's reversed "Hexagonal Vintage") are accepted
+// divergences — vitest asserts per-row INVARIANTS (length, ends with
+// "| Jaxy", contains shape) rather than exact string match. See
+// src/__tests__/catalog/seo-builders.test.ts (Phase 6).
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface SeoBuilderContext {
+  /** Product display name — "Havana Haze". Required. */
+  productName: string;
+  /** Lower-case curated frame shape — "round", "cat-eye", "aviator",
+   *  "hexagonal". Null is tolerated; title falls back to "Sunglasses". */
+  frameShape: string | null;
+  /** All style tag values for the product. Lower-case. Used to pick the
+   *  leading STYLE modifier in priority order: oversized > slim > vintage
+   *  > retro > 70s > 90s > y2k. Empty → "Classic". */
+  styleTags: string[];
+  /** Curated target gender — "womens" / "mens" / "unisex" / null. Only
+   *  "womens" and "mens" emit " for Women" / " for Men"; everything
+   *  else omits the gender clause (Google-feed best practice). */
+  gender: string | null;
+  /** Frame color name for the description template (e.g. "tortoise",
+   *  "black"). Single dominant color only — leave null for
+   *  multi-color frames. */
+  frameColor?: string | null;
+  /** Frame material for the description template (e.g. "acetate",
+   *  "metal"). */
+  frameMaterial?: string | null;
+  /** "polarized" or "uv400" — drives the Features bullet. */
+  lensType?: string | null;
+  /** Existing marketing-prose paragraphs from products.description.
+   *  Split on blank lines into <p> tags in buildBodyHtml. */
+  description?: string | null;
+  /** Frame dimensions in mm — drive the <h3>Frame Measurements</h3>
+   *  list in buildBodyHtml. Missing values are skipped. */
+  lensWidth?: number | null;
+  lensHeight?: number | null;
+  bridgeWidth?: number | null;
+  frameWidth?: number | null;
+  frameHeight?: number | null;
+  templeLength?: number | null;
+}
+
+/** Title-cased frame shape per Google's product taxonomy (used in titles
+ *  and descriptions). Unknown shapes pass through capitalised; the
+ *  "wayfarer" → "Square" mapping is the Ray-Ban-trademark scrub. */
+const FRAME_SHAPE_TITLECASE: Record<string, string> = {
+  round: "Round",
+  square: "Square",
+  rectangle: "Rectangle",
+  oval: "Oval",
+  "cat-eye": "Cat Eye",
+  cateye: "Cat Eye",
+  aviator: "Aviator",
+  hexagonal: "Hexagonal",
+  oversized: "Oversized",
+  geometric: "Geometric",
+  butterfly: "Butterfly",
+  wayfarer: "Square", // TM scrub — never emit "Wayfarer" in copy
+};
+
+function titleCaseShape(shape: string | null | undefined): string {
+  const k = (shape ?? "").toLowerCase().trim();
+  if (!k) return "";
+  return FRAME_SHAPE_TITLECASE[k] ?? (k[0].toUpperCase() + k.slice(1));
+}
+
+/** Style modifier priority — higher in the list wins. Matches the
+ *  spreadsheet's observed pattern: oversized/slim beat era markers,
+ *  era markers beat the default "Classic". */
+const STYLE_MODIFIER_PRIORITY: ReadonlyArray<string> = [
+  "oversized", "slim", "vintage", "retro", "70s", "90s", "y2k",
+];
+
+function pickStyleModifier(styleTags: ReadonlyArray<string>): string {
+  const lower = styleTags.map((s) => s.toLowerCase().trim());
+  for (const mod of STYLE_MODIFIER_PRIORITY) {
+    if (lower.includes(mod)) {
+      // Era markers stay verbatim ("70s", "90s"); "y2k" goes uppercase.
+      if (mod === "y2k") return "Y2K";
+      if (mod === "70s" || mod === "90s") return mod;
+      return mod[0].toUpperCase() + mod.slice(1);
+    }
+  }
+  return "Classic";
+}
+
+function genderClause(gender: string | null | undefined): string {
+  const g = (gender ?? "").toLowerCase().trim();
+  if (g === "womens" || g === "women" || g === "female") return " for Women";
+  if (g === "mens" || g === "men" || g === "male") return " for Men";
+  return ""; // unisex / null → omit
+}
+
+/**
+ * Build the SEO Title (Shopify SEO title field, used by Simprosys as
+ * the Google Shopping product title).
+ *
+ * Formula: `{StyleModifier} {Shape} Sunglasses[ for {Gender}] — {ProductName} | Jaxy`
+ *
+ * Target length 50–65 chars; we don't truncate (Shopify cuts at the
+ * search engine boundary, not ours).
+ */
+export function buildSeoTitle(ctx: SeoBuilderContext): string {
+  const shape = titleCaseShape(ctx.frameShape);
+  const modifier = pickStyleModifier(ctx.styleTags);
+  const shapeAndModifier = shape ? `${modifier} ${shape}` : modifier;
+  return `${shapeAndModifier} Sunglasses${genderClause(ctx.gender)} — ${ctx.productName} | Jaxy`;
+}
+
+/** Brand-voice tagline pool by shape, from brief Appendix A.
+ *  Selection is deterministic per product (hash of product name) so the
+ *  same product always gets the same tagline. */
+const BRAND_VOICE_TAGLINES: Record<string, ReadonlyArray<string>> = {
+  Round: [
+    "a classic silhouette built for every day",
+    "vintage soul, modern wear",
+    "the icon you'll keep coming back to",
+  ],
+  Square: [
+    "confident proportions, quiet ease",
+    "the timeless square, refined",
+    "bold without trying",
+  ],
+  "Cat Eye": [
+    "cinematic glamour, reimagined for today",
+    "vintage drama, sculpted soft",
+    "Old Hollywood, modern attitude",
+  ],
+  Aviator: [
+    "the classic, beautifully balanced",
+    "vintage pilot, modern wear",
+    "timeless presence",
+  ],
+  Oval: [
+    "softly sculpted, endlessly wearable",
+    "a vintage wink, beautifully simple",
+  ],
+  Rectangle: [
+    "vintage character meets everyday comfort",
+    "soft hour, strong shape",
+  ],
+  Hexagonal: ["familiar and fresh, like a perfect vintage find"],
+};
+
+function pickTagline(shape: string, productName: string): string {
+  const pool = BRAND_VOICE_TAGLINES[shape] ?? BRAND_VOICE_TAGLINES.Square;
+  // Stable hash of product name → index into pool. Same product always
+  // gets the same tagline; new products land randomly across the pool.
+  const seed = hashString(productName);
+  return pool[Math.abs(seed) % pool.length];
+}
+
+/**
+ * Build the SEO Description (meta description, search snippet fallback).
+ *
+ * Template: `{StyleModifier} {shape} sunglasses{, with {frame_color}
+ * {material}}. The {product_name} by Jaxy — {brand voice tagline}.`
+ *
+ * Target 140–160 chars. If the rendered string overshoots, drop the
+ * frame-color clause first; if still long, drop the tagline.
+ */
+export function buildSeoDescription(ctx: SeoBuilderContext): string {
+  const shape = titleCaseShape(ctx.frameShape);
+  const modifier = pickStyleModifier(ctx.styleTags);
+  const shapeLc = shape ? shape.toLowerCase() : "";
+
+  const tagline = pickTagline(shape || "Square", ctx.productName);
+
+  // Frame color clause — only when one dominant color is present.
+  const colorPart =
+    ctx.frameColor && ctx.frameMaterial
+      ? `, with ${ctx.frameColor.toLowerCase()} ${ctx.frameMaterial.toLowerCase()}`
+      : ctx.frameColor
+      ? `, with ${ctx.frameColor.toLowerCase()} frames`
+      : "";
+
+  const lead = shapeLc
+    ? `${modifier} ${shapeLc} sunglasses${colorPart}.`
+    : `${modifier} sunglasses${colorPart}.`;
+  const full = `${lead} The ${ctx.productName} by Jaxy — ${tagline}.`;
+
+  // Trim if over 160 — drop color clause first, then tagline.
+  if (full.length <= 160) return full;
+  const withoutColor = shapeLc
+    ? `${modifier} ${shapeLc} sunglasses. The ${ctx.productName} by Jaxy — ${tagline}.`
+    : `${modifier} sunglasses. The ${ctx.productName} by Jaxy — ${tagline}.`;
+  if (withoutColor.length <= 160) return withoutColor;
+  return shapeLc
+    ? `${modifier} ${shapeLc} sunglasses. The ${ctx.productName} by Jaxy.`
+    : `${modifier} sunglasses. The ${ctx.productName} by Jaxy.`;
+}
+
+/** Escape minimal HTML special characters in user-provided text before
+ *  inlining into the body HTML. We don't sanitise full HTML (the
+ *  products.description column is plain text or our own markdown). */
+function escHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/**
+ * Build the long-form Body HTML (Shopify Body (HTML) field).
+ *
+ * Hybrid structure per Daniel's call:
+ *   - <p>…</p> for each marketing-authored paragraph from
+ *     products.description (split on blank lines).
+ *   - <h3>Frame Measurements</h3><ul>…</ul> generated from the dimension
+ *     columns, skipping any null value.
+ *   - <h3>Features</h3><ul>…</ul> with lens-type protection, material,
+ *     and any extras we can derive.
+ *
+ * Returns an empty string if the product has neither prose nor any
+ * structural data — caller can fall back to its existing description.
+ */
+export function buildBodyHtml(ctx: SeoBuilderContext): string {
+  const out: string[] = [];
+
+  // ── Paragraphs from marketing prose ──
+  if (ctx.description && ctx.description.trim()) {
+    const paragraphs = ctx.description
+      .split(/\n{2,}/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    for (const p of paragraphs) {
+      out.push(`<p>${escHtml(p)}</p>`);
+    }
+  }
+
+  // ── Frame Measurements block ──
+  const dimLines: string[] = [];
+  if (ctx.lensWidth) dimLines.push(`<li>Lens width: ${ctx.lensWidth} mm</li>`);
+  if (ctx.lensHeight) dimLines.push(`<li>Lens height: ${ctx.lensHeight} mm</li>`);
+  if (ctx.bridgeWidth) dimLines.push(`<li>Bridge width: ${ctx.bridgeWidth} mm</li>`);
+  if (ctx.frameWidth) dimLines.push(`<li>Frame width: ${ctx.frameWidth} mm</li>`);
+  if (ctx.frameHeight) dimLines.push(`<li>Frame height: ${ctx.frameHeight} mm</li>`);
+  if (ctx.templeLength) dimLines.push(`<li>Temple length: ${ctx.templeLength} mm</li>`);
+
+  if (dimLines.length > 0) {
+    out.push("<h3>Frame Measurements</h3>");
+    out.push(`<ul>${dimLines.join("")}</ul>`);
+  }
+
+  // ── Features block ──
+  const featureLines: string[] = [];
+  const lens = (ctx.lensType ?? "").toLowerCase();
+  if (lens === "polarized") {
+    featureLines.push("<li>Polarized lens with UV400 protection</li>");
+  } else if (lens === "uv400" || lens.includes("uv")) {
+    featureLines.push("<li>UV400 protection</li>");
+  }
+  if (ctx.frameMaterial) {
+    featureLines.push(`<li>${escHtml(titleCaseFirst(ctx.frameMaterial))} frame</li>`);
+  }
+
+  if (featureLines.length > 0) {
+    out.push("<h3>Features</h3>");
+    out.push(`<ul>${featureLines.join("")}</ul>`);
+  }
+
+  return out.join("\n");
+}
+
+function titleCaseFirst(s: string): string {
+  if (!s) return s;
+  return s[0].toUpperCase() + s.slice(1).toLowerCase();
 }
