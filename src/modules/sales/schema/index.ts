@@ -53,7 +53,7 @@ export const companies = sqliteTable("companies", {
   // contact-us page, stash the URL for later outreach.
   contactFormUrl: text("contact_form_url"),
   leadSourceDetail: text("lead_source_detail"),
-  sourceType: text("source_type", { enum: ["storemapper", "outscraper", "manual", "csv", "chrome-ext", "storeleads"] }),
+  sourceType: text("source_type", { enum: ["storemapper", "outscraper", "manual", "csv", "chrome-ext", "storeleads", "shopify_crawl"] }),
   sourceId: text("source_id"),
   sourceQuery: text("source_query"),
   ownerName: text("owner_name"),
@@ -93,6 +93,25 @@ export const companies = sqliteTable("companies", {
   // and 'catch_all'.
   emailVerificationStatus: text("email_verification_status"),
   emailVerifiedAt: text("email_verified_at"),
+  // ── Eyewear inventory crawl aggregates (Jun 2026) ──
+  // Per-store rollups from the Shopify /products.json scan that
+  // found which boutiques already carry sunglasses or reading
+  // glasses. Populated only for source_type='shopify_crawl' rows
+  // in the eyewear cohort; null on every other lead.
+  topBrand: text("top_brand"),
+  eyewearCategories: text("eyewear_categories"),     // "sunglasses" / "reading_glasses" / "sunglasses,reading_glasses"
+  eyewearSkuCount: integer("eyewear_sku_count"),
+  eyewearPriceRange: text("eyewear_price_range"),    // "$25–$95"
+  eyewearPriceMedianCents: integer("eyewear_price_median_cents"),
+  eyewearTopCompetitors: text("eyewear_top_competitors"), // pipe-joined top 3
+  eyewearSampleTitles: text("eyewear_sample_titles"),     // pipe-joined top 3
+  // AI-generated opening lines per email in the Instantly sequence.
+  // Two distinct slots so email 1 and email 2 don't repeat the same
+  // observation about the store.
+  aiOpenerEmail1: text("ai_opener_email1"),
+  aiOpenerEmail2: text("ai_opener_email2"),
+  aiOpenerGeneratedAt: text("ai_opener_generated_at"),
+  aiOpenerModel: text("ai_opener_model"),
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 }, (table) => [
@@ -104,6 +123,7 @@ export const companies = sqliteTable("companies", {
   index("idx_companies_source_type").on(table.sourceType),
   index("idx_companies_source_id").on(table.sourceId),
   index("idx_companies_storeleads_id").on(table.storeleadsId),
+  index("idx_companies_top_brand").on(table.topBrand),
   index("idx_companies_ecom_platform").on(table.ecomPlatform),
   index("idx_companies_email_verification").on(table.emailVerificationStatus),
 ]);

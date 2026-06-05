@@ -197,6 +197,31 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN email_verification_status TE
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN email_verified_at TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_email_verification ON companies (email_verification_status)"); } catch { /* exists */ }
 
+// Eyewear inventory crawl (Shopify /products.json scan, June 2026):
+// per-store aggregates so the cold-email opener generator and the
+// prospecting UI can answer "what does this store already carry?"
+// without having to re-query the source CSV. All optional — only
+// populated for source_type='shopify_crawl' rows in the eyewear
+// cohort. See plan: tender-dazzling-sparkle.md.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN top_brand TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN eyewear_categories TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN eyewear_sku_count INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN eyewear_price_range TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN eyewear_price_median_cents INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN eyewear_top_competitors TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN eyewear_sample_titles TEXT"); } catch { /* exists */ }
+// Two AI opener slots — one per email in the Instantly sequence.
+// Distinct columns (rather than JSON) so they ship cleanly through
+// the existing instantly buildCustomVariables() pipe.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN ai_opener_email1 TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN ai_opener_email2 TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN ai_opener_generated_at TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN ai_opener_model TEXT"); } catch { /* exists */ }
+// Index because the opener generator's SELECT filters on top_brand
+// IS NOT NULL + ai_opener_email1 IS NULL when scanning for the
+// next batch of pitchable leads.
+try { sqlite.exec("CREATE INDEX idx_companies_top_brand ON companies (top_brand)"); } catch { /* exists */ }
+
 // Image upload system: new columns on catalog_images
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN url TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN file_size INTEGER"); } catch { /* exists */ }
