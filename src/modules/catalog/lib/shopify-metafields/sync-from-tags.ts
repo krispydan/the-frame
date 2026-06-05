@@ -257,7 +257,58 @@ export async function syncMetafieldsFromTags(
         type: def.type,
         value: JSON.stringify(colorGids),
       });
+
+      // ── shopify.eyewear-frame-color (Phase 8 fallback) ──
+      // Same metaobject type as color-pattern (handles.ts confirms),
+      // so we reuse the resolved GIDs. Daniel chose deterministic
+      // fallback over AI categorization for this field — the SKU
+      // color names are the source of truth, no Gemini call needed.
+      const eyewearColorDef = CATEGORY_METAFIELDS.eyewear_frame_color;
+      inputs.push({
+        ownerId: productGid,
+        namespace: eyewearColorDef.namespace,
+        key: eyewearColorDef.key,
+        type: eyewearColorDef.type,
+        value: JSON.stringify(colorGids),
+      });
+      result.resolved.push({
+        field: "color-pattern", // reuse the union (same metaobject domain)
+        handle: "(reused from color-pattern)",
+        gid: colorGids[0],
+        source: "sync-from-tags fallback",
+      });
     }
+  }
+
+  // ── shopify.age-group = adults (Phase 8 hardcoded fallback) ──
+  // Jaxy sells adult eyewear exclusively. Daniel's call: hardcode
+  // "adults" for all products. Replaces the AI categorization path
+  // for this field — no Gemini key needed on Railway.
+  try {
+    const ageGroupDef = CATEGORY_METAFIELDS.age_group;
+    const ageGroupGid = await resolveMetaobjectHandle(
+      store,
+      ageGroupDef.metaobjectType,
+      "adults",
+    );
+    if (ageGroupGid) {
+      inputs.push({
+        ownerId: productGid,
+        namespace: ageGroupDef.namespace,
+        key: ageGroupDef.key,
+        type: ageGroupDef.type,
+        value: JSON.stringify([ageGroupGid]),
+      });
+    } else {
+      result.skipReasons.push({
+        field: "age-group",
+        reason: `Shopify metaobject "adults" not found on ${store}`,
+      });
+    }
+  } catch (e) {
+    result.metafieldErrors.push(
+      `age-group: ${e instanceof Error ? e.message : "unknown"}`,
+    );
   }
 
   // ── custom.lens_type (single_line_text_field) ──
