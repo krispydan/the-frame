@@ -37,6 +37,12 @@ interface SmartListDef {
 //   tag_and:      string[]    AND across tags
 //   tag_not:      string[]    NOT across tags
 //   has_email/has_phone:      "true" | "false"
+// Filters use tag_and (NOT source_query) for cohort discrimination.
+// Reason: when the importer merges eyewear data into an existing row
+// (e.g. one already imported as source_type='storeleads'), the row's
+// source_query stays as the original label. Filtering by source_query
+// here would silently miss those merged rows. The `eyewear_cohort` tag
+// IS always appended on merge, so it's the source-agnostic filter.
 const LISTS: SmartListDef[] = [
   {
     name: "🎯 Eyewear — Pitchable (entry+mid, multi-brand)",
@@ -45,8 +51,6 @@ const LISTS: SmartListDef[] = [
       "stores with multi-brand assortments (less than 40% one brand). " +
       "Excludes the Premium/Luxury price ceiling.",
     filters: {
-      source_query: ["eyewear_inventory_v1_2026-06"],
-      // Multi-brand assortment is the pitchability signal.
       tag_and: ["eyewear_cohort", "eyewear_multi_brand_assortment"],
       tag_not: ["eyewear_price_too_high"],
       has_email: "true",
@@ -55,11 +59,10 @@ const LISTS: SmartListDef[] = [
   {
     name: "🎯 Eyewear — All affordable matches",
     description:
-      "Broader cut: every eyewear-carrying store in the entry+mid " +
-      "tier, regardless of brand concentration. Use when the " +
-      "pitchable cohort is exhausted.",
+      "Broader cut: every eyewear-carrying store in the entry+mid tier, " +
+      "regardless of brand concentration. Includes merged storeleads-source " +
+      "rows that picked up eyewear data on import.",
     filters: {
-      source_query: ["eyewear_inventory_v1_2026-06"],
       tag_and: ["eyewear_cohort"],
       tag_not: ["eyewear_price_too_high"],
     },
@@ -71,7 +74,6 @@ const LISTS: SmartListDef[] = [
       "sunglasses). Distinct buyer persona — gift shops, lifestyle " +
       "stores, older demographics.",
     filters: {
-      source_query: ["eyewear_inventory_v1_2026-06"],
       tag_and: ["eyewear_cohort", "carries_reading_glasses"],
     },
   },
@@ -81,7 +83,6 @@ const LISTS: SmartListDef[] = [
       "Stores carrying both sunglasses AND reading glasses. Best " +
       "repeat-purchase profile — established eyewear shelves.",
     filters: {
-      source_query: ["eyewear_inventory_v1_2026-06"],
       tag_and: ["eyewear_cohort", "carries_both"],
     },
   },
@@ -92,29 +93,22 @@ const LISTS: SmartListDef[] = [
       "Jaxy's current $28 MSRP positioning. Kept queryable in case " +
       "a future premium Jaxy line revisits them.",
     filters: {
-      source_query: ["eyewear_inventory_v1_2026-06"],
       tag_and: ["eyewear_cohort", "eyewear_price_too_high"],
     },
   },
   {
     name: "🗂 Apparel no-eyewear — Vintage stores",
     description:
-      "Apparel boutiques with no current eyewear shelf, tagged as " +
-      "Vintage. Future-campaign-relevant for a vintage-styled " +
-      "Jaxy launch or limited-edition retro line.",
+      "Apparel boutiques with no current eyewear shelf, tagged as Vintage.",
     filters: {
-      source_query: ["apparel_no_eyewear_v1_2026-06"],
       tag_and: ["apparel_no_eyewear_v1", "industry_vintage"],
     },
   },
   {
     name: "🗂 Apparel no-eyewear — Gift / lifestyle stores",
     description:
-      "Apparel boutiques with no current eyewear shelf, tagged as " +
-      "Gifts. Sunglasses-as-gift-item angle would be a different " +
-      "outreach copy approach.",
+      "Apparel boutiques with no current eyewear shelf, tagged as Gifts.",
     filters: {
-      source_query: ["apparel_no_eyewear_v1_2026-06"],
       tag_and: ["apparel_no_eyewear_v1", "industry_gifts"],
     },
   },
@@ -124,7 +118,6 @@ const LISTS: SmartListDef[] = [
       "Every other apparel boutique with no current eyewear shelf. " +
       "Catch-all for future broad campaigns.",
     filters: {
-      source_query: ["apparel_no_eyewear_v1_2026-06"],
       tag_and: ["apparel_no_eyewear_v1"],
       tag_not: ["industry_vintage", "industry_gifts"],
     },

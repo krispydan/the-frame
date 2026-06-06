@@ -21,6 +21,16 @@ interface SmartListDef {
   filters: Record<string, unknown>;
 }
 
+// Filters use tag_and (NOT source_query) for cohort discrimination.
+// Reason: the importer's selectByDomain match is source-agnostic, so a
+// store that already exists in companies as source_type='storeleads'
+// (or any other source) gets the eyewear data merged in via COALESCE
+// — but the row's source_query stays as the original "storeleads_csv:..."
+// label. If we filtered by source_query='eyewear_inventory_v1_2026-06'
+// here, those merged rows would silently fall out of every smart list.
+// Tag-based filtering catches them — the importer always appends
+// `eyewear_cohort` to companies.tags, regardless of which source the row
+// originally came from.
 const LISTS: SmartListDef[] = [
   {
     name: "🎯 Eyewear — Pitchable (entry+mid, multi-brand)",
@@ -29,7 +39,6 @@ const LISTS: SmartListDef[] = [
       "stores with multi-brand assortments (less than 40% one brand). " +
       "Excludes the Premium/Luxury price ceiling.",
     filters: {
-      source_query: ["eyewear_inventory_v1_2026-06"],
       tag_and: ["eyewear_cohort", "eyewear_multi_brand_assortment"],
       tag_not: ["eyewear_price_too_high"],
       has_email: "true",
@@ -38,10 +47,10 @@ const LISTS: SmartListDef[] = [
   {
     name: "🎯 Eyewear — All affordable matches",
     description:
-      "Broader cut: every eyewear-carrying store in the entry+mid " +
-      "tier, regardless of brand concentration.",
+      "Broader cut: every eyewear-carrying store in the entry+mid tier, " +
+      "regardless of brand concentration. Includes merged storeleads-source " +
+      "rows that picked up eyewear data on import.",
     filters: {
-      source_query: ["eyewear_inventory_v1_2026-06"],
       tag_and: ["eyewear_cohort"],
       tag_not: ["eyewear_price_too_high"],
     },
@@ -50,7 +59,6 @@ const LISTS: SmartListDef[] = [
     name: "🎯 Eyewear — Reading-glasses cohort",
     description: "Stores carrying reading glasses (separately or alongside sunglasses).",
     filters: {
-      source_query: ["eyewear_inventory_v1_2026-06"],
       tag_and: ["eyewear_cohort", "carries_reading_glasses"],
     },
   },
@@ -58,7 +66,6 @@ const LISTS: SmartListDef[] = [
     name: "🎯 Eyewear — Carries both categories",
     description: "Stores carrying both sunglasses AND reading glasses.",
     filters: {
-      source_query: ["eyewear_inventory_v1_2026-06"],
       tag_and: ["eyewear_cohort", "carries_both"],
     },
   },
@@ -66,7 +73,6 @@ const LISTS: SmartListDef[] = [
     name: "📦 Eyewear — Premium/Luxury (out of scope for now)",
     description: "Eyewear stores with AOV above $100 — too premium for Jaxy's current positioning.",
     filters: {
-      source_query: ["eyewear_inventory_v1_2026-06"],
       tag_and: ["eyewear_cohort", "eyewear_price_too_high"],
     },
   },
@@ -74,7 +80,6 @@ const LISTS: SmartListDef[] = [
     name: "🗂 Apparel no-eyewear — Vintage stores",
     description: "Apparel boutiques with no current eyewear shelf, tagged as Vintage.",
     filters: {
-      source_query: ["apparel_no_eyewear_v1_2026-06"],
       tag_and: ["apparel_no_eyewear_v1", "industry_vintage"],
     },
   },
@@ -82,7 +87,6 @@ const LISTS: SmartListDef[] = [
     name: "🗂 Apparel no-eyewear — Gift / lifestyle stores",
     description: "Apparel boutiques with no current eyewear shelf, tagged as Gifts.",
     filters: {
-      source_query: ["apparel_no_eyewear_v1_2026-06"],
       tag_and: ["apparel_no_eyewear_v1", "industry_gifts"],
     },
   },
@@ -90,7 +94,6 @@ const LISTS: SmartListDef[] = [
     name: "🗂 Apparel no-eyewear — All others",
     description: "Every other apparel boutique with no current eyewear shelf.",
     filters: {
-      source_query: ["apparel_no_eyewear_v1_2026-06"],
       tag_and: ["apparel_no_eyewear_v1"],
       tag_not: ["industry_vintage", "industry_gifts"],
     },

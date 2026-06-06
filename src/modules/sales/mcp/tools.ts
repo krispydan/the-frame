@@ -244,6 +244,60 @@ mcpRegistry.register(
   }
 );
 
+// ── sales.import_eyewear_crawl ──
+// Re-runnable ingestion of the Shopify eyewear-crawl output. The
+// underlying importer handles strong domain-level dedup (selectByDomain
+// is source-agnostic, so storeleads/outscraper/manual rows with the
+// same domain get the eyewear data merged in via COALESCE rather than
+// duplicated). The companies.tags column always picks up the
+// `eyewear_cohort` label on merge so the canned Smart Lists work
+// regardless of the row's original source.
+//
+// Paths must be accessible to the server process running this tool
+// (Railway prod, `/data` or `/tmp` mounts). For a one-shot bulk upload
+// of new CSVs, use scripts/upload-eyewear-to-prod.sh instead — that
+// posts multipart to /api/v1/sales/import-eyewear-crawl which uses
+// the same importer.
+mcpRegistry.register(
+  "sales.import_eyewear_crawl",
+  "Re-run the Shopify eyewear-crawl importer against staged CSVs. " +
+  "Idempotent — dedup by normalized domain. Merges fresh eyewear " +
+  "aggregates (top brand, price range, sample titles) into existing " +
+  "rows and appends `eyewear_cohort` / `apparel_no_eyewear_v1` tags.",
+  z.object({
+    products_path: z.string().describe("Path to sunglasses-products.csv on the server"),
+    state_path: z.string().describe("Path to sunglasses-state.jsonl on the server"),
+    cohort_path: z.string().describe("Path to apparel-filtered.csv on the server"),
+    dry_run: z.boolean().optional().describe("Skip writes — just parse + report what would happen"),
+    limit: z.number().optional().describe("Cap NEW inserts per cohort (existing-row merges still run)"),
+    skip_classifier: z.boolean().optional().describe("Skip the ICP classifier pass at the end"),
+  }),
+  async (args) => {
+    try {
+      // Dynamic import — the script file lives outside the Next.js
+      // source tree (under /scripts) so a top-level require would
+      // miss it on some build configurations. Resolving relative to
+      // process.cwd() gives the path Railway uses too.
+      const { runEyewearImport } = await import("../../../../scripts/import-eyewear-crawl");
+      const result = await runEyewearImport({
+        productsCsv: args.products_path,
+        stateLog: args.state_path,
+        cohortCsv: args.cohort_path,
+        dryRun: args.dry_run,
+        limit: args.limit ?? null,
+        noClassifier: args.skip_classifier,
+        log: () => { /* suppress — return structured stats */ },
+      });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: "text" as const, text: `Eyewear import error: ${(err as Error).message}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
 // ── sales.run_icp_classifier ──
 mcpRegistry.register(
   "sales.run_icp_classifier",
