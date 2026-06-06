@@ -290,6 +290,284 @@ export function buildAmazonListingPrompt(
   };
 }
 
+// ── Group-level listing (Phase 2 of group-restructure) ─────────────────
+// Used to generate ONE Amazon parent listing per shape group, replacing
+// per-product generation. Children stay per-product; the group's copy
+// covers them all generically.
+
+/** Per-style summary for the group prompt — Claude sees the dominant
+ *  vibe of each style and chooses copy that flatters the whole set. */
+export interface AmazonGroupStyleSummary {
+  productName: string;
+  skuPrefix: string;
+  /** First (hero) image URL of this style — Claude uses these to
+   *  ground colour, frame finish, lens tint observations in reality. */
+  heroImageUrl: string | null;
+  /** Frame colour names available for this style (across SKUs). */
+  colors: string[];
+  /** "polarized" or "uv400" — drives feature claims. Per the parent
+   *  inheritance rule, the group may mix; the prompt tells Claude to
+   *  use "Polarized or UV400" generically when mixed. */
+  lensType: string | null;
+}
+
+export interface AmazonGroupListingInput {
+  /** Canonical group identity — e.g. "aviator", "round". */
+  groupKey: string;
+  /** Capitalised display name for the group (e.g. "Round"). */
+  shapeDisplay: string;
+  /** Styles in the group, including the chosen representative (first). */
+  styles: AmazonGroupStyleSummary[];
+  /** Curated frame material — backfilled as "acetate" or "metal" via
+   *  scripts/backfill-amazon-group-key.ts. The dominant value for the
+   *  group; per-child rows can still override at row-composition time. */
+  dominantFrameMaterial: string | null;
+  /** "Polarized" / "UV400" / "Polarized or UV400" — what the parent
+   *  listing claims at the title level. The orchestrator computes
+   *  this from the group's actual mix. */
+  polarizationClaim: string;
+  /** Curated keyword research across the group (deduped). */
+  keywords: string[];
+}
+
+export interface AmazonGroupListingOutput {
+  /** Amazon item_name for the GROUP parent. ≤200 chars (parent rows
+   *  have a generous limit; only children inherit the 50-char cap).
+   *  Per Amazon's template warning, MUST NOT contain individual style
+   *  names, colours, or per-child variant detail. */
+  title: string;
+  /** 5 bullets describing the COLLECTION, not specific styles. */
+  bullet_points: [string, string, string, string, string];
+  /** Group description. Plain text; line breaks ok; no HTML. Mentions
+   *  the number of styles + key shapes within the group, treating the
+   *  set as a curated collection rather than one product. */
+  description: string;
+  /** Space-delimited search terms, ≤240 bytes. Covers the entire
+   *  group's keyword surface — shape + multiple style synonyms. */
+  generic_keywords: string;
+  /** suggested_frame_material at the GROUP level — dominant material. */
+  suggested_frame_material: string;
+  /** suggested_polarization at the GROUP level — picks the dominant
+   *  claim, children can override. */
+  suggested_polarization: string;
+  /** Self-reported character counts for cross-checking. */
+  char_count: {
+    title: number;
+    bullets: number[];
+    description: number;
+    generic_keywords: number;
+  };
+}
+
+function buildGroupSystemPrompt(): string {
+  const frameMaterials = (getEnumValues("frame_material_type") ?? []).join(" | ");
+  const polarization = (getEnumValues("polarization_type") ?? []).join(" | ");
+
+  return `\
+You are an Amazon SEO copywriter for Jaxy, a fashion sunglasses brand.
+You are writing the PARENT listing for a SHAPE COLLECTION — multiple
+styles share this listing with each colour/style appearing as a child
+variant. The parent's title and bullets must read as a collection
+overview, NEVER as a single product.
+
+CRITICAL: per Amazon's variation guidelines —
+"Parent SKU titles should never contain size or color information as
+they represent the entire SKU family, not any specific size or color."
+
+OUTPUT FORMAT — strict JSON only, no prose, no code fences:
+{
+  "title": "…",
+  "bullet_points": ["…", "…", "…", "…", "…"],
+  "description": "…",
+  "generic_keywords": "…",
+  "suggested_frame_material": "…",
+  "suggested_polarization": "…",
+  "char_count": { "title": 0, "bullets": [0,0,0,0,0], "description": 0, "generic_keywords": 0 }
+}
+
+TITLE RULES — group parent:
+- ≤140 chars HARD CAP. Parents have a more generous limit than children.
+- Lead with the shape + category: "Round Polarized Sunglasses",
+  "Aviator Sunglasses for Women", etc.
+- Mention the brand "Jaxy" once if it fits.
+- Reference the GROUP nature when natural: "Round Sunglasses
+  Collection by Jaxy", "Polarized Aviator Sunglasses Set" — but DO
+  NOT name individual styles (Havana Haze, Monroe, etc.).
+- NO colour names ("Tortoise", "Black", "Sand") — those live on the
+  children.
+- No promotional language, no ALL CAPS, no emoji, no SKU codes.
+
+BULLET POINT RULES — exactly 5 bullets, ≤500 chars each:
+- Describe the COLLECTION'S attributes — lens technology, frame
+  material, fit, occasion versatility, brand promise — not a single
+  pair of glasses.
+- It's OK to say "the collection includes X distinct silhouettes" or
+  "choose from N curated styles" — count comes from the user input.
+- Use "each pair" or "every frame" when describing a feature shared by
+  all children.
+- Never name individual styles in the bullets.
+
+DESCRIPTION RULES:
+- 800–1800 chars. Plain text; line breaks allowed; no HTML.
+- 2–3 short paragraphs. First sentence: collection-level lead benefit.
+- Reuse 3–4 high-intent keywords from the title naturally.
+- End with a benefit sentence, never a CTA.
+
+GENERIC_KEYWORDS:
+- ≤240 bytes. Space-delimited. All lowercase. No commas.
+- Cover the breadth of the collection — shape synonyms, lens type,
+  gender, era ("retro", "vintage" if applicable), use-case
+  ("driving", "everyday").
+
+SUGGESTED_* — must be literal enum values:
+- suggested_frame_material ∈ ${frameMaterials}
+- suggested_polarization ∈ ${polarization}
+
+Use the IMAGES to validate that the colour palette and lens tints
+described match what's actually in the photos.
+
+WORDS YOU MUST NEVER USE (any case):
+${SEO_FORBIDDEN_TERMS.map((t) => `- ${t}`).join("\n")}
+
+Return ONLY the JSON object. No preamble, no explanation, no markdown.`;
+}
+
+const GROUP_SYSTEM_PROMPT = buildGroupSystemPrompt();
+
+/**
+ * Build the Anthropic message structure for a GROUP listing.
+ * Sequences images from each style's hero photo so Claude can ground
+ * its colour and silhouette claims in the actual product range.
+ */
+export function buildAmazonGroupListingPrompt(
+  input: AmazonGroupListingInput,
+  opts?: { repairIssues?: string[] },
+): {
+  system: string;
+  messages: Array<{ role: "user"; content: AnthropicContentBlock[] }>;
+} {
+  const blocks: AnthropicContentBlock[] = [];
+
+  // Take one hero image per style, capped at 8 (cost ceiling). The
+  // first image in the list is the group's representative — per
+  // Daniel's call, first product's hero photo.
+  const heroes = input.styles
+    .map((s) => s.heroImageUrl)
+    .filter((url): url is string => !!url)
+    .slice(0, 8);
+  for (const url of heroes) {
+    blocks.push({ type: "image", source: { type: "url", url } });
+  }
+
+  const lines: string[] = [];
+  if (opts?.repairIssues && opts.repairIssues.length > 0) {
+    lines.push("⚠️ FIX THESE FROM PREVIOUS ATTEMPT:");
+    for (const issue of opts.repairIssues) lines.push(`  • ${issue}`);
+    lines.push("");
+  }
+
+  lines.push(`Shape collection: ${input.shapeDisplay}`);
+  lines.push(`Group key: ${input.groupKey}`);
+  lines.push(`Styles in this collection: ${input.styles.length}`);
+  lines.push(`Dominant frame material: ${input.dominantFrameMaterial ?? "(unspecified)"}`);
+  lines.push(`Polarization claim: ${input.polarizationClaim}`);
+  lines.push("");
+  lines.push("Styles (do NOT name in copy, list provided for grounding only):");
+  for (const s of input.styles) {
+    const colorsPart = s.colors.length ? ` — colours: ${s.colors.join(", ")}` : "";
+    lines.push(`  • ${s.productName} (${s.skuPrefix})${colorsPart}`);
+  }
+
+  if (input.keywords.length > 0) {
+    lines.push("");
+    lines.push("Keyword research across the group (use naturally, no stuffing):");
+    for (const kw of input.keywords.slice(0, 12)) lines.push(`  - ${kw}`);
+  }
+
+  lines.push("");
+  lines.push("Generate the GROUP-LEVEL Amazon listing per the system rules. Return JSON only.");
+  blocks.push({ type: "text", text: lines.join("\n") });
+
+  return {
+    system: GROUP_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: blocks }],
+  };
+}
+
+/**
+ * Validate Claude's group-level JSON output. Mirrors
+ * validateAmazonListingOutput() but applies the group-specific
+ * length/forbidden-content rules.
+ */
+export function validateAmazonGroupListingOutput(raw: unknown): {
+  output: AmazonGroupListingOutput | null;
+  warnings: string[];
+  errors: string[];
+} {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (!raw || typeof raw !== "object") {
+    errors.push("output is not an object");
+    return { output: null, errors, warnings };
+  }
+  const r = raw as Record<string, unknown>;
+
+  const title = typeof r.title === "string" ? r.title.trim() : "";
+  const description = typeof r.description === "string" ? r.description.trim() : "";
+  const genericKeywords = typeof r.generic_keywords === "string" ? r.generic_keywords.trim() : "";
+  const bulletsRaw = Array.isArray(r.bullet_points) ? r.bullet_points : [];
+  const bullets = bulletsRaw.map((b) => (typeof b === "string" ? b.trim() : "")).filter(Boolean);
+  const frameMaterial = typeof r.suggested_frame_material === "string"
+    ? r.suggested_frame_material.trim() : "";
+  const polarization = typeof r.suggested_polarization === "string"
+    ? r.suggested_polarization.trim() : "";
+
+  if (!title) errors.push("title is missing");
+  else if (title.length > 140) warnings.push(`title is ${title.length} chars (>140)`);
+  if (!description) errors.push("description is missing");
+  else if (description.length < 500) warnings.push(`description is short (${description.length} chars)`);
+  if (bullets.length !== 5) errors.push(`bullet_points must be 5 items (got ${bullets.length})`);
+  if (!genericKeywords) errors.push("generic_keywords is missing");
+  else if (genericKeywords.length > 240) warnings.push(`generic_keywords is ${genericKeywords.length} chars (>240)`);
+
+  // Forbidden content — group titles must NOT contain colour or style
+  // names per Amazon variation rules.
+  const FORBIDDEN_IN_TITLE = ["tortoise", "black", "blue", "brown", "green", "red", "amber"];
+  const lowerTitle = title.toLowerCase();
+  for (const banned of FORBIDDEN_IN_TITLE) {
+    if (lowerTitle.includes(banned)) {
+      warnings.push(`title contains colour word "${banned}" — parent titles must be colour-agnostic`);
+    }
+  }
+
+  if (HIGH_ASCII_RE.test(title) || HIGH_ASCII_RE.test(description) ||
+      bullets.some((b) => HIGH_ASCII_RE.test(b))) {
+    errors.push("contains forbidden high-ASCII character (®, ©, or ™)");
+  }
+
+  if (errors.length > 0) return { output: null, errors, warnings };
+
+  return {
+    output: {
+      title,
+      bullet_points: bullets.slice(0, 5) as [string, string, string, string, string],
+      description,
+      generic_keywords: genericKeywords,
+      suggested_frame_material: frameMaterial,
+      suggested_polarization: polarization,
+      char_count: {
+        title: title.length,
+        bullets: bullets.slice(0, 5).map((b) => b.length),
+        description: description.length,
+        generic_keywords: genericKeywords.length,
+      },
+    },
+    warnings,
+    errors,
+  };
+}
+
 // ── Output validation ───────────────────────────────────────────────────
 
 const HIGH_ASCII_RE = /[®©™]/;
