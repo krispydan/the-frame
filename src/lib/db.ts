@@ -354,6 +354,45 @@ try {
   sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_amazon_listing_product ON catalog_amazon_listings(product_id)`);
 } catch (e) { console.error("[db] catalog_amazon_listings creation error:", e); }
 
+// ── Amazon Listing Groups (Phase 1 of the group-restructure plan) ──
+// Replaces one-listing-per-product on the Amazon feed with one
+// listing per shape group (e.g. ROUND, AVIATOR). Children stay per
+// (style, color, fulfillment) tuple.
+//
+// catalog_amazon_listings stays untouched — it still drives Shopify
+// storefront copy and other channels. Only the Amazon TSV switches
+// to group-level.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS catalog_amazon_listing_groups (
+    id TEXT PRIMARY KEY NOT NULL,
+    group_key TEXT NOT NULL UNIQUE,         -- e.g. "round", "aviator"
+    shape TEXT NOT NULL,                     -- canonical shape ("round", "cat-eye")
+    display_name TEXT NOT NULL,              -- "Jaxy Round Sunglasses"
+    title TEXT NOT NULL,                     -- Amazon listing title (≤200 chars)
+    product_description TEXT NOT NULL,
+    bullet_point_1 TEXT,
+    bullet_point_2 TEXT,
+    bullet_point_3 TEXT,
+    bullet_point_4 TEXT,
+    bullet_point_5 TEXT,
+    generic_keywords TEXT,
+    representative_product_id TEXT REFERENCES catalog_products(id),
+    model_used TEXT,
+    prompt_version TEXT,
+    generated_at TEXT,
+    approved_at TEXT,
+    approved_by TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_amazon_listing_group_key ON catalog_amazon_listing_groups(group_key)`);
+} catch (e) { console.error("[db] catalog_amazon_listing_groups creation error:", e); }
+
+// Group key on each product — lets the row composer slice products
+// by group in O(1). Backfilled from the curated frameShape tag.
+try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN amazon_group_key TEXT"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_products_amazon_group_key ON catalog_products(amazon_group_key)"); } catch { /* exists */ }
+
 // Image editor: seed angle-based image types
 try {
   const angleTypes = [

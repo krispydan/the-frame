@@ -90,6 +90,10 @@ export const products = sqliteTable("catalog_products", {
   aiCategorization: text("ai_categorization"),
   aiCategorizedAt: text("ai_categorized_at"),
   aiCategorizationModel: text("ai_categorization_model"),
+  /** Which Amazon parent listing this product belongs to in the shape-
+   *  grouped restructure. e.g. "round", "aviator". Backfilled from
+   *  curated `frameShape` tag; null until backfill runs. */
+  amazonGroupKey: text("amazon_group_key"),
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 });
@@ -316,6 +320,40 @@ export const productListingImages = sqliteTable("catalog_product_listing_images"
 // Amazon's categorical enums (lens_color_map, frame_material_type, etc.) —
 // downstream the column-mapper prefers these over tag-derived defaults
 // since the model saw the actual product photos.
+/**
+ * One row per Amazon parent listing in the shape-grouped restructure
+ * (Phase 1 of ~/.claude/plans/tender-dazzling-sparkle.md). Replaces
+ * the per-product Amazon listings on the feed side. The catalog
+ * `amazonListings` table below still owns Shopify storefront copy
+ * etc. — only the Amazon TSV switches to group-level.
+ */
+export const amazonListingGroups = sqliteTable("catalog_amazon_listing_groups", {
+  id: id(),
+  groupKey: text("group_key").notNull().unique(),           // "round", "aviator"
+  shape: text("shape").notNull(),                            // canonical lower-case
+  displayName: text("display_name").notNull(),               // "Jaxy Round Sunglasses"
+  title: text("title").notNull(),                            // Amazon title (≤200)
+  productDescription: text("product_description").notNull(),
+  bulletPoint1: text("bullet_point_1"),
+  bulletPoint2: text("bullet_point_2"),
+  bulletPoint3: text("bullet_point_3"),
+  bulletPoint4: text("bullet_point_4"),
+  bulletPoint5: text("bullet_point_5"),
+  genericKeywords: text("generic_keywords"),
+  /** Hero image source — the product whose photos represent the
+   *  group's parent listing on Amazon. Picked at generation time. */
+  representativeProductId: text("representative_product_id").references(() => products.id),
+  modelUsed: text("model_used"),
+  promptVersion: text("prompt_version"),
+  generatedAt: text("generated_at"),
+  approvedAt: text("approved_at"),
+  approvedBy: text("approved_by"),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  uniqueIndex("uq_amazon_listing_group_key").on(table.groupKey),
+]);
+
 export const amazonListings = sqliteTable("catalog_amazon_listings", {
   id: id(),
   productId: text("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
