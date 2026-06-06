@@ -56,6 +56,12 @@ export interface ValidationSummary {
   blocked: number;
   missingListing?: number;
   missingImages?: number;
+  /** Phase 4 group-restructure: distinguishes feed shape so the
+   *  toast and dialog can show "7 parents + 192 children" instead
+   *  of treating each composed entry as one product. */
+  mode?: "grouped" | "per-product";
+  parentCount?: number;
+  childCount?: number;
 }
 
 interface Props {

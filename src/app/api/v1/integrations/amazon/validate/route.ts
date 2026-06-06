@@ -50,6 +50,26 @@ export async function POST(req: NextRequest) {
   }));
   const results = validateAmazonBatch(inputs);
 
+  // Group mode marker: every composed entry has a skuPrefix starting
+  // with `JAXY-GROUP-` when composeAmazonRows() ran the Phase 4 group
+  // path. Per-product mode produces catalog SKU prefixes (JX1001
+  // etc.). Used to render mode-aware counts in the UI.
+  const isGroupMode = composed.length > 0
+    && composed.every((c) => c.skuPrefix.startsWith("JAXY-GROUP-"));
+
+  // Aggregate parent + child counts across composed entries. In
+  // per-product mode there's one parent per product + N children
+  // (2 × num SKUs). In group mode there's one parent per group + many
+  // children (2 × all SKUs in the group).
+  let parentCount = 0;
+  let childCount = 0;
+  for (const c of composed) {
+    for (const row of c.rows) {
+      if (row.parent_child === "Parent") parentCount++;
+      else if (row.parent_child === "Child") childCount++;
+    }
+  }
+
   const summary = {
     ready: results.filter((r) => r.status === "ready").length,
     warning: results.filter((r) => r.status === "warning").length,
@@ -59,6 +79,12 @@ export async function POST(req: NextRequest) {
      *  purely on missing prerequisites. */
     missingListing: composed.filter((c) => !c.hasListing).length,
     missingImages: composed.filter((c) => !c.hasImages).length,
+    /** Phase 4 of group-restructure: distinguishes the two feed
+     *  shapes so the UI can show "7 parents + 192 children" instead
+     *  of "39 products" when running in group mode. */
+    mode: isGroupMode ? ("grouped" as const) : ("per-product" as const),
+    parentCount,
+    childCount,
   };
 
   // Persist a tiny summary (settings k/v table) so the page can render
@@ -75,6 +101,9 @@ export async function POST(req: NextRequest) {
         warning: summary.warning,
         blocked: summary.blocked,
         productCount: composed.length,
+        mode: summary.mode,
+        parentCount: summary.parentCount,
+        childCount: summary.childCount,
         at: new Date().toISOString(),
       }));
   } catch (e) {

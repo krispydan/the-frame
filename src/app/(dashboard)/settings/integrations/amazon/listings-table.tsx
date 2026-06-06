@@ -209,7 +209,14 @@ export function ListingsTable({ initialRows }: Props) {
       setValidationSummary(s);
       setValidationDialogOpen(true);
 
+      // In grouped mode (Phase 4), prepend the structural counts so the
+      // operator sees "7 parents + 192 children" before the
+      // ready/warning/blocked breakdown.
+      const structural = s.mode === "grouped" && s.parentCount != null && s.childCount != null
+        ? `${s.parentCount} parents + ${s.childCount} children`
+        : "";
       const description = [
+        structural,
         `${s.ready} ready`,
         `${s.warning} warning`,
         `${s.blocked} blocked`,

@@ -133,6 +133,10 @@ export default function AmazonIntegrationPage() {
     warning: number;
     blocked: number;
     at: string;
+    mode?: "grouped" | "per-product";
+    parentCount?: number;
+    childCount?: number;
+    productCount?: number;
   } | null = null;
   try {
     if (lastValidation?.value) lastSummary = JSON.parse(lastValidation.value);
@@ -192,7 +196,16 @@ export default function AmazonIntegrationPage() {
               ok={lastSummary.blocked === 0}
               label="Last validation"
               value={`${lastSummary.ready} ready · ${lastSummary.warning} warning · ${lastSummary.blocked} blocked`}
-              sub={`Run at ${lastSummary.at}`}
+              sub={
+                // Phase 4 group restructure: report parents + children
+                // when the validate run was in group mode so the
+                // operator can sanity-check the structural change.
+                lastSummary.mode === "grouped" &&
+                lastSummary.parentCount != null &&
+                lastSummary.childCount != null
+                  ? `Grouped feed: ${lastSummary.parentCount} parents + ${lastSummary.childCount} children · run at ${lastSummary.at}`
+                  : `Run at ${lastSummary.at}`
+              }
             />
           )}
         </CardContent>
