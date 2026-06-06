@@ -47,10 +47,14 @@ import { sqlite } from "../src/lib/db";
 import { icpClassifierHandler } from "../src/modules/sales/agents/icp-classifier";
 
 // ── Config knobs ───────────────────────────────────────────────────────────
+// Default input paths — used by the CLI when no overrides are supplied.
+// The runEyewearImport() function below accepts explicit paths so the
+// admin API endpoint can point at files that arrived via chunked upload
+// in /tmp/, rather than relying on ~/Downloads/.
 const DL = path.join(os.homedir(), "Downloads");
-const PRODUCTS_CSV = path.join(DL, "sunglasses-products.csv");
-const STATE_LOG = path.join(DL, "sunglasses-state.jsonl");
-const COHORT_CSV = path.join(DL, "apparel-filtered.csv");
+const DEFAULT_PRODUCTS_CSV = path.join(DL, "sunglasses-products.csv");
+const DEFAULT_STATE_LOG = path.join(DL, "sunglasses-state.jsonl");
+const DEFAULT_COHORT_CSV = path.join(DL, "apparel-filtered.csv");
 
 const EYEWEAR_SOURCE_QUERY = "eyewear_inventory_v1_2026-06";
 const NO_EYEWEAR_SOURCE_QUERY = "apparel_no_eyewear_v1_2026-06";
@@ -219,8 +223,8 @@ function brandSlug(brand: string): string {
 }
 
 // ── Load + group products ───────────────────────────────────────────────────
-function loadProducts(): Map<string, ProductRow[]> {
-  const csvText = fs.readFileSync(PRODUCTS_CSV, "utf8");
+function loadProducts(productsCsv: string): Map<string, ProductRow[]> {
+  const csvText = fs.readFileSync(productsCsv, "utf8");
   const parsed = Papa.parse<ProductRow>(csvText, {
     header: true, skipEmptyLines: true,
   });
@@ -274,8 +278,8 @@ function rollUp(domain: string, products: ProductRow[]): EyewearAggregate {
 }
 
 // ── Load cohort firmographics ──────────────────────────────────────────────
-function loadCohort(): Map<string, CohortRow> {
-  const csvText = fs.readFileSync(COHORT_CSV, "utf8");
+function loadCohort(cohortCsv: string): Map<string, CohortRow> {
+  const csvText = fs.readFileSync(cohortCsv, "utf8");
   const parsed = Papa.parse<CohortRow>(csvText, {
     header: true, skipEmptyLines: true,
   });
@@ -289,10 +293,10 @@ function loadCohort(): Map<string, CohortRow> {
 }
 
 // ── Load state log → settled-domain → outcome ───────────────────────────────
-function loadState(): Map<string, "has_sunglasses" | "no_sunglasses" | "error"> {
+function loadState(stateLog: string): Map<string, "has_sunglasses" | "no_sunglasses" | "error"> {
   const out = new Map<string, "has_sunglasses" | "no_sunglasses" | "error">();
-  if (!fs.existsSync(STATE_LOG)) return out;
-  for (const line of fs.readFileSync(STATE_LOG, "utf8").split("\n")) {
+  if (!fs.existsSync(stateLog)) return out;
+  for (const line of fs.readFileSync(stateLog, "utf8").split("\n")) {
     if (!line.trim()) continue;
     try {
       const obj = JSON.parse(line) as StateLine;
@@ -529,45 +533,60 @@ function upsert(
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────
-interface Args {
-  dryRun: boolean;
-  limit: number | null;
-  noClassifier: boolean;
+// ── Public API: callable from the admin endpoint ───────────────────────────
+// Exposes the same flow as the CLI but with explicit input paths, an
+// optional logger to stream progress somewhere other than stdout, and a
+// return value containing the full stats so the API caller can render
+// them as a JSON response.
+
+export interface RunEyewearImportOpts {
+  productsCsv: string;
+  stateLog: string;
+  cohortCsv: string;
+  dryRun?: boolean;
+  limit?: number | null;
+  noClassifier?: boolean;
+  /** Optional logger — defaults to console.log so the CLI prints
+   *  normally. The API route passes a buffered logger that collects
+   *  lines to return in the response body. */
+  log?: (line: string) => void;
 }
 
-function parseArgs(): Args {
-  const args: Args = { dryRun: false, limit: null, noClassifier: false };
-  for (let i = 2; i < process.argv.length; i++) {
-    const a = process.argv[i];
-    if (a === "--dry-run") args.dryRun = true;
-    else if (a === "--no-classifier") args.noClassifier = true;
-    else if (a === "--limit") args.limit = parseInt(process.argv[++i] || "0", 10) || null;
-  }
-  return args;
+export interface RunEyewearImportResult {
+  eyewear: ImportStats;
+  noEyewear: ImportStats;
+  classifierTiers: Record<string, number> | null;
+  instantlyOverlap: {
+    totalTouchedEyewear: number;
+    mergedExisting: number;
+    alreadyInInstantly: number;
+  };
+  durationMs: number;
 }
 
-async function main() {
-  const args = parseArgs();
-  console.log(`Eyewear crawl importer ${args.dryRun ? "(DRY RUN)" : ""}`);
-  for (const p of [PRODUCTS_CSV, STATE_LOG, COHORT_CSV]) {
-    if (!fs.existsSync(p)) {
-      console.error(`Missing: ${p}`);
-      process.exit(1);
-    }
+export async function runEyewearImport(opts: RunEyewearImportOpts): Promise<RunEyewearImportResult> {
+  const log = opts.log ?? ((s: string) => console.log(s));
+  const dryRun = !!opts.dryRun;
+  const limit = opts.limit ?? null;
+  const noClassifier = !!opts.noClassifier;
+
+  log(`Eyewear crawl importer ${dryRun ? "(DRY RUN)" : ""}`);
+  for (const p of [opts.productsCsv, opts.stateLog, opts.cohortCsv]) {
+    if (!fs.existsSync(p)) throw new Error(`Missing input file: ${p}`);
   }
 
   const t0 = Date.now();
-  console.log(`\nReading ${COHORT_CSV}…`);
-  const cohort = loadCohort();
-  console.log(`  ${cohort.size.toLocaleString()} firmographic rows`);
+  log(`Reading ${opts.cohortCsv}…`);
+  const cohort = loadCohort(opts.cohortCsv);
+  log(`  ${cohort.size.toLocaleString()} firmographic rows`);
 
-  console.log(`Reading ${STATE_LOG}…`);
-  const state = loadState();
-  console.log(`  ${state.size.toLocaleString()} processed domains`);
+  log(`Reading ${opts.stateLog}…`);
+  const state = loadState(opts.stateLog);
+  log(`  ${state.size.toLocaleString()} processed domains`);
 
-  console.log(`Reading ${PRODUCTS_CSV}…`);
-  const productsByDomain = loadProducts();
-  console.log(`  ${productsByDomain.size.toLocaleString()} matched domains`);
+  log(`Reading ${opts.productsCsv}…`);
+  const productsByDomain = loadProducts(opts.productsCsv);
+  log(`  ${productsByDomain.size.toLocaleString()} matched domains`);
 
   // ── Build per-domain rollups for the eyewear cohort ──
   console.log(`\nRolling up eyewear aggregates…`);
@@ -581,8 +600,8 @@ async function main() {
     }
     eyewearAggs.set(domain, agg);
   }
-  console.log(`  ${eyewearAggs.size.toLocaleString()} eyewear stores after AJ Morgan exclusion`);
-  console.log(`  ${ajMorganSkipped.toLocaleString()} stores excluded (AJ Morgan)`);
+  log(`  ${eyewearAggs.size.toLocaleString()} eyewear stores after AJ Morgan exclusion`);
+  log(`  ${ajMorganSkipped.toLocaleString()} stores excluded (AJ Morgan)`);
 
   // ── Process eyewear cohort ──
   const now = new Date().toISOString();
@@ -593,12 +612,11 @@ async function main() {
   };
   const eyewearCompanyIds: string[] = [];
 
-  if (!args.dryRun) {
-    console.log(`\nUpserting eyewear cohort (${eyewearAggs.size.toLocaleString()} stores)…`);
+  if (!dryRun) {
+    log(`Upserting eyewear cohort (${eyewearAggs.size.toLocaleString()} stores)…`);
     const txn = sqlite.transaction(() => {
-      let count = 0;
       for (const [domain, agg] of Array.from(eyewearAggs.entries())) {
-        if (args.limit && eyewearStats.inserted >= args.limit) break;
+        if (limit && eyewearStats.inserted >= limit) break;
         const cohortRow = cohort.get(domain);
         if (!cohortRow) {
           eyewearStats.skippedNoCohort++;
@@ -609,7 +627,6 @@ async function main() {
         const tier = priceTierTag(medianPrice);
         const tags = eyewearTags(agg, tier);
 
-        // Top brand + competitors
         const sortedVendors = Array.from(agg.vendor_counts.entries())
           .sort((a, b) => b[1] - a[1]);
         const topBrand = sortedVendors[0]?.[0] || null;
@@ -633,21 +650,16 @@ async function main() {
         eyewearCompanyIds.push(res.companyId);
         if (res.created) eyewearStats.inserted++;
         else eyewearStats.mergedExisting++;
-
-        if (++count % 1000 === 0) {
-          process.stdout.write(`\r  ${count.toLocaleString()} processed…`);
-        }
       }
-      process.stdout.write("\n");
     });
     txn();
   }
 
-  console.log(`Eyewear cohort done:`);
-  console.log(`  Inserted:           ${eyewearStats.inserted.toLocaleString()}`);
-  console.log(`  Merged existing:    ${eyewearStats.mergedExisting.toLocaleString()}`);
-  console.log(`  Skipped no-cohort:  ${eyewearStats.skippedNoCohort.toLocaleString()}`);
-  console.log(`  Skipped AJ Morgan:  ${eyewearStats.skippedAjMorgan.toLocaleString()}`);
+  log(`Eyewear cohort done:`);
+  log(`  Inserted:           ${eyewearStats.inserted.toLocaleString()}`);
+  log(`  Merged existing:    ${eyewearStats.mergedExisting.toLocaleString()}`);
+  log(`  Skipped no-cohort:  ${eyewearStats.skippedNoCohort.toLocaleString()}`);
+  log(`  Skipped AJ Morgan:  ${eyewearStats.skippedAjMorgan.toLocaleString()}`);
 
   // ── Process no-eyewear cohort ──
   const noEyewearStats: ImportStats = {
@@ -657,11 +669,7 @@ async function main() {
   };
   const noEyewearCompanyIds: string[] = [];
 
-  if (!args.dryRun) {
-    // The no-eyewear cohort = domains in state log with status==
-    // "no_sunglasses" that have a cohort row but are NOT in
-    // eyewearAggs. Errors are skipped — the crawl never confirmed
-    // their state.
+  if (!dryRun) {
     const noEyewearDomains: string[] = [];
     for (const [domain, status] of Array.from(state.entries())) {
       if (status === "no_sunglasses" && cohort.has(domain) && !eyewearAggs.has(domain)) {
@@ -670,12 +678,11 @@ async function main() {
         noEyewearStats.skippedErrorState++;
       }
     }
-    console.log(`\nUpserting no-eyewear cohort (${noEyewearDomains.length.toLocaleString()} stores)…`);
+    log(`Upserting no-eyewear cohort (${noEyewearDomains.length.toLocaleString()} stores)…`);
 
     const txn = sqlite.transaction(() => {
-      let count = 0;
       for (const domain of noEyewearDomains) {
-        if (args.limit && noEyewearStats.inserted >= args.limit) break;
+        if (limit && noEyewearStats.inserted >= limit) break;
         const cohortRow = cohort.get(domain)!;
         const tags = noEyewearTags(cohortRow);
 
@@ -691,52 +698,43 @@ async function main() {
         noEyewearCompanyIds.push(res.companyId);
         if (res.created) noEyewearStats.inserted++;
         else noEyewearStats.mergedExisting++;
-
-        if (++count % 5000 === 0) {
-          process.stdout.write(`\r  ${count.toLocaleString()} processed…`);
-        }
       }
-      process.stdout.write("\n");
     });
     txn();
   }
 
-  console.log(`No-eyewear cohort done:`);
-  console.log(`  Inserted:           ${noEyewearStats.inserted.toLocaleString()}`);
-  console.log(`  Merged existing:    ${noEyewearStats.mergedExisting.toLocaleString()}`);
-  console.log(`  Skipped error-state:${noEyewearStats.skippedErrorState.toLocaleString()}`);
+  log(`No-eyewear cohort done:`);
+  log(`  Inserted:           ${noEyewearStats.inserted.toLocaleString()}`);
+  log(`  Merged existing:    ${noEyewearStats.mergedExisting.toLocaleString()}`);
+  log(`  Skipped error-state:${noEyewearStats.skippedErrorState.toLocaleString()}`);
 
   // ── ICP classifier pass ──
-  if (!args.dryRun && !args.noClassifier) {
+  let classifierTiers: Record<string, number> | null = null;
+  if (!dryRun && !noClassifier) {
     const allIds = [...eyewearCompanyIds, ...noEyewearCompanyIds];
     if (allIds.length > 0) {
-      console.log(`\nRunning ICP classifier on ${allIds.length.toLocaleString()} new rows…`);
+      log(`Running ICP classifier on ${allIds.length.toLocaleString()} new rows…`);
       const res = await icpClassifierHandler({ companyIds: allIds });
       if (res.success && res.data) {
         const summary = (res.data as { summary?: Record<string, number> }).summary;
         if (summary) {
-          console.log(`  Tier summary:`);
+          classifierTiers = summary;
+          log(`  Tier summary:`);
           for (const [tier, n] of Object.entries(summary)) {
-            console.log(`    ${tier}: ${(n as number).toLocaleString()}`);
+            log(`    ${tier}: ${(n as number).toLocaleString()}`);
           }
         }
       } else {
-        console.warn(`  Classifier returned: ${JSON.stringify(res)}`);
+        log(`  Classifier returned: ${JSON.stringify(res)}`);
       }
     }
-  } else if (args.noClassifier) {
-    console.log(`\nSkipping classifier (--no-classifier flag).`);
+  } else if (noClassifier) {
+    log(`Skipping classifier (--no-classifier flag).`);
   }
 
-  // ── Instantly overlap report ──
-  // Daniel: "a lot of these stores are already in the frame and some
-  // may be in instantly, if they are we should just update them with
-  // the data we collected so we don't double the work." This summary
-  // tells him exactly how many of the now-imported eyewear leads are
-  // already sitting in an Instantly campaign — they'll get their new
-  // top_brand / ai_opener_email1/2 / etc. shipped via the existing
-  // backfill-custom-vars endpoint (no re-push needed).
-  if (!args.dryRun && eyewearCompanyIds.length > 0) {
+  // ── Instantly overlap ──
+  let alreadyInInstantly = 0;
+  if (!dryRun && eyewearCompanyIds.length > 0) {
     const ph = eyewearCompanyIds.map(() => "?").join(",");
     const overlap = sqlite.prepare(
       `SELECT COUNT(DISTINCT co.id) AS n
@@ -745,27 +743,66 @@ async function main() {
         WHERE co.id IN (${ph})
           AND cl.instantly_lead_id IS NOT NULL`,
     ).get(...eyewearCompanyIds) as { n: number };
+    alreadyInInstantly = overlap.n;
 
     const merged = eyewearStats.mergedExisting;
     const totalEyewear = eyewearStats.inserted + merged;
-    console.log(`\nEyewear cohort × Instantly overlap:`);
-    console.log(`  Total touched this run:       ${totalEyewear.toLocaleString()}`);
-    console.log(`  Already existed in The Frame: ${merged.toLocaleString()}  (got eyewear aggregates merged)`);
-    console.log(`  Already in Instantly:         ${overlap.n.toLocaleString()}`);
-    if (overlap.n > 0) {
-      console.log(`\n  → To ship the new top_brand / eyewear_price_range / ai_opener_*`);
-      console.log(`    fields to Instantly for these ${overlap.n.toLocaleString()} leads:`);
-      console.log(`      curl -X POST https://theframe.getjaxy.com/api/v1/integrations/instantly/backfill-custom-vars \\`);
-      console.log(`        -H 'cookie: session-token=...' -d '{"resetMarks":true}'`);
-      console.log(`    Run the AI opener generator FIRST so the opener vars are populated before the backfill.`);
-    }
+    log(`Eyewear cohort × Instantly overlap:`);
+    log(`  Total touched this run:       ${totalEyewear.toLocaleString()}`);
+    log(`  Already existed in The Frame: ${merged.toLocaleString()}  (got eyewear aggregates merged)`);
+    log(`  Already in Instantly:         ${alreadyInInstantly.toLocaleString()}`);
   }
 
-  const dur = (Date.now() - t0) / 1000;
-  console.log(`\nDone in ${dur.toFixed(1)}s.`);
+  const durationMs = Date.now() - t0;
+  log(`Done in ${(durationMs / 1000).toFixed(1)}s.`);
+
+  return {
+    eyewear: eyewearStats,
+    noEyewear: noEyewearStats,
+    classifierTiers,
+    instantlyOverlap: {
+      totalTouchedEyewear: eyewearStats.inserted + eyewearStats.mergedExisting,
+      mergedExisting: eyewearStats.mergedExisting,
+      alreadyInInstantly,
+    },
+    durationMs,
+  };
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// ── CLI wrapper ────────────────────────────────────────────────────────────
+interface Args {
+  dryRun: boolean;
+  limit: number | null;
+  noClassifier: boolean;
+}
+
+function parseArgs(): Args {
+  const args: Args = { dryRun: false, limit: null, noClassifier: false };
+  for (let i = 2; i < process.argv.length; i++) {
+    const a = process.argv[i];
+    if (a === "--dry-run") args.dryRun = true;
+    else if (a === "--no-classifier") args.noClassifier = true;
+    else if (a === "--limit") args.limit = parseInt(process.argv[++i] || "0", 10) || null;
+  }
+  return args;
+}
+
+async function main() {
+  const cli = parseArgs();
+  await runEyewearImport({
+    productsCsv: DEFAULT_PRODUCTS_CSV,
+    stateLog: DEFAULT_STATE_LOG,
+    cohortCsv: DEFAULT_COHORT_CSV,
+    dryRun: cli.dryRun,
+    limit: cli.limit,
+    noClassifier: cli.noClassifier,
+  });
+}
+
+// Only run main() when invoked as a script (not when imported by the API).
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
