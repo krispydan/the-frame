@@ -471,3 +471,257 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
 
   return [parent, ...children];
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Group-level row composition (Phase 4 of the group-restructure plan).
+//
+// Pattern:
+//   - ONE parent row for the entire shape group. Parent SKU is
+//     `JAXY-GROUP-<groupKey>` so it doesn't collide with any catalog
+//     prefix. Parent's content fields come from the group's persisted
+//     listing in catalog_amazon_listing_groups.
+//   - Children: still two rows per (style, color) — one FBM, one FBA.
+//     Their `parent_sku` references the group parent. Their
+//     `color_name` becomes `"<Style Name> - <Color>"` so style identity
+//     surfaces in the variant picker (the only place it does).
+//   - `model` on each child stays per-style (JX1001, JX1002, …) so
+//     Amazon's internal grouping for ad reporting stays granular.
+//
+// All inherited fields (item_shape, frame_material_type,
+// polarization_type, target_gender) follow Amazon's rule: parent
+// carries the dominant value; child rows MAY override.
+// ─────────────────────────────────────────────────────────────────────
+
+/** Group-level listing snapshot from catalog_amazon_listing_groups
+ *  (loaded by Phase 3's getAmazonGroupListing). Independent of the
+ *  per-product AmazonListingInput shape — none of the per-style
+ *  enums (color_map, item_shape, etc.) live on this row. */
+export interface AmazonGroupListing {
+  /** Group identifier — e.g. "round", "aviator". Used to construct
+   *  the parent_sku as `JAXY-GROUP-<groupKey>`. */
+  groupKey: string;
+  /** Lower-case shape ("round", "cat-eye") — drives item_shape on
+   *  the parent + every child unless overridden by per-product. */
+  shape: string;
+  /** Parent title from the group prompt (≤140 chars, colour-agnostic). */
+  title: string;
+  /** Parent product description. */
+  productDescription: string;
+  bulletPoint1: string | null;
+  bulletPoint2: string | null;
+  bulletPoint3: string | null;
+  bulletPoint4: string | null;
+  bulletPoint5: string | null;
+  genericKeywords: string | null;
+  /** "Acetate" / "Metal" / "Plastic" — dominant material across the
+   *  group. Per-child override happens automatically when the SKU's
+   *  curated material differs. */
+  suggestedFrameMaterial: string | null;
+  /** "Polarized" / "UV400" / "Non-Polarized" — dominant claim. */
+  suggestedPolarization: string | null;
+}
+
+export interface MapGroupInput {
+  /** Group-level Amazon listing (from catalog_amazon_listing_groups). */
+  group: AmazonGroupListing;
+  /** Products that belong to this group. ORDER MATTERS — the first
+   *  product's images become the parent's image set per Daniel's
+   *  call ("we will just use the 1st product as the image"). */
+  products: ExportProduct[];
+  /** Per-product image URLs, keyed by product.product.id. Hero of
+   *  products[0] is the parent's main_image_url. */
+  imageUrlsByProductId: Map<string, string[]>;
+}
+
+/** Build the parent + all children for one shape group. Returns
+ *  `[groupParent, ...children]` ready for the TSV writer.
+ *
+ *  Children are per (product × sku × fulfillment-channel) — so 4
+ *  products × 3 SKUs × 2 (FBM/FBA) = 24 children under one parent.
+ */
+export function buildAmazonGroupRows(input: MapGroupInput): Record<string, string>[] {
+  const { group, products, imageUrlsByProductId } = input;
+  if (products.length === 0) return [];
+
+  // ── Parent ──
+  const parentSku = `JAXY-GROUP-${group.groupKey.toUpperCase()}`;
+  // First-product image set per Daniel's call.
+  const representative = products[0];
+  const representativeImages = imageUrlsByProductId.get(representative.product.id) ?? [];
+  const mainImage = representativeImages[0] ?? "";
+  const otherImages: string[] = [];
+  for (let i = 1; i <= 8; i++) otherImages.push(representativeImages[i] ?? "");
+
+  // Inherited fields from the group listing (Phase 3 fields). Honest
+  // defaults when group listing missing a value: fall back to the
+  // representative product's curated attrs.
+  const repCurated = curatedAttrsFromTags(
+    representative.tags.map((t) => ({ tagName: t.tagName, dimension: t.dimension })),
+  );
+  const itemShape = mapItemShape(group.shape) || "";
+  const frameMaterial = group.suggestedFrameMaterial?.trim()
+    || mapFrameMaterial(repCurated.frameMaterial) || "";
+  const lensMaterial = mapLensMaterial(repCurated.lensType) || "Plastic";
+  const polarization = group.suggestedPolarization?.trim()
+    || mapPolarizationFromTags(tagSetFromRows(representative.tags));
+
+  const parentTitle = truncateAtWord(group.title, 200);
+
+  const parent: Record<string, string> = {
+    feed_product_type: STATIC.feed_product_type,
+    item_sku: parentSku,
+    brand_name: STATIC.brand_name,
+    manufacturer: STATIC.manufacturer,
+    // Parent model_number is the group key — distinct from any per-
+    // product SKU prefix. model_name is the group title. Both are
+    // optional on the snapshot but help with internal organisation.
+    model: parentSku,
+    model_name: truncateAtWord(group.title, 50),
+    item_name: parentTitle,
+    item_type: STATIC.item_type,
+    item_type_name: STATIC.item_type_name,
+    external_product_id: "",
+    external_product_id_type: "",
+    parent_child: "Parent",
+    parent_sku: "",
+    relationship_type: "Variation",
+    variation_theme: "color/lenscolor",
+    product_description: group.productDescription,
+    bullet_point1: group.bulletPoint1 ?? "",
+    bullet_point2: group.bulletPoint2 ?? "",
+    bullet_point3: group.bulletPoint3 ?? "",
+    bullet_point4: group.bulletPoint4 ?? "",
+    bullet_point5: group.bulletPoint5 ?? "",
+    generic_keywords: group.genericKeywords ?? "",
+    department_name: "Unisex Adult",
+    target_gender: "Unisex",
+    age_range_description: STATIC.age_range_description,
+    item_shape: itemShape,
+    frame_material_type: frameMaterial,
+    lens_material_type: lensMaterial,
+    polarization_type: polarization,
+    main_image_url: mainImage,
+    other_image_url1: otherImages[0],
+    other_image_url2: otherImages[1],
+    other_image_url3: otherImages[2],
+    other_image_url4: otherImages[3],
+    other_image_url5: otherImages[4],
+    other_image_url6: otherImages[5],
+    other_image_url7: otherImages[6],
+    other_image_url8: otherImages[7],
+    // Use representative's frame dimensions for the parent — they're
+    // inherited so they need a value; the actual per-style dimensions
+    // are written on each child.
+    ...frameDimensionsBlock(representative.product),
+    ...packageDimensionsBlock(),
+    country_of_origin: STATIC.country_of_origin,
+    import_designation: STATIC.import_designation,
+    batteries_required: STATIC.batteries_required,
+    are_batteries_included: STATIC.are_batteries_included,
+    supplier_declared_dg_hz_regulation1: STATIC.supplier_declared_dg_hz_regulation1,
+  };
+
+  // ── Children: one per (product × sku × {FBM, FBA}) ──
+  const children: Record<string, string>[] = [];
+  for (const ep of products) {
+    const p = ep.product;
+    const curated = curatedAttrsFromTags(
+      ep.tags.map((t) => ({ tagName: t.tagName, dimension: t.dimension })),
+    );
+    const tagSet = tagSetFromRows(ep.tags);
+    const styleFrameMaterial = mapFrameMaterial(curated.frameMaterial) || frameMaterial;
+    const styleLensMaterial = mapLensMaterial(curated.lensType) || lensMaterial;
+    const stylePolarization = mapPolarizationFromTags(tagSet);
+    const styleImages = imageUrlsByProductId.get(p.id) ?? [];
+    const childMainImage = styleImages[0] ?? mainImage;
+    const childOtherImages: string[] = [];
+    for (let i = 1; i <= 8; i++) childOtherImages.push(styleImages[i] ?? "");
+
+    // model + model_name stay per-STYLE so Amazon's internal model
+    // attribute tracks the individual sub-listing for ad reporting.
+    const styleModel = p.skuPrefix;
+    const styleName = truncateAtWord(p.name?.trim() || p.skuPrefix, 50);
+
+    for (const sku of ep.skus) {
+      const colorRaw = sku.colorName?.trim() || "";
+      // Style identity surfaces in the variant picker via color_name.
+      // Format: "<Style Name> - <Frame Color>". When colour is empty,
+      // fall back to the style name alone (rare but possible).
+      const composedColor = colorRaw
+        ? `${p.name?.trim() ?? p.skuPrefix} - ${colorRaw}`
+        : (p.name?.trim() ?? p.skuPrefix);
+      const colorMap = mapAmazonColor(colorRaw);
+      const upc = sku.upc?.trim() || "";
+      const price = (ep.retailPrice && ep.retailPrice > 0)
+        ? ep.retailPrice.toFixed(2)
+        : (ep.msrp && ep.msrp > 0 ? ep.msrp.toFixed(2) : "");
+      const listPrice = (ep.msrp && ep.msrp > 0) ? ep.msrp.toFixed(2) : price;
+      const itemWeight = "1.60";
+      const baseSku = sku.sku ?? "";
+
+      const fbmChild: Record<string, string> = {
+        feed_product_type: STATIC.feed_product_type,
+        item_sku: baseSku,
+        brand_name: STATIC.brand_name,
+        manufacturer: STATIC.manufacturer,
+        model: styleModel,
+        model_name: styleName,
+        // Children inherit content from parent — Amazon's processor
+        // pulls title/desc/bullets from the parent automatically.
+        // We populate item_name so the row passes the per-row title
+        // validator; description + bullets stay empty.
+        item_name: styleName,
+        item_type: STATIC.item_type,
+        parent_child: "Child",
+        parent_sku: parentSku,
+        relationship_type: "Variation",
+        variation_theme: "color/lenscolor",
+        // The variation axis — frame + lens colour, with style baked
+        // into the colour label.
+        color_name: composedColor,
+        color_map: colorMap,
+        lens_color: composedColor,
+        lens_color_map: colorMap,
+        size_name: "One Size",
+        external_product_id: upc,
+        external_product_id_type: upc ? "UPC" : "",
+        list_price: listPrice,
+        [`purchasable_offer[marketplace_id=${STATIC.us_marketplace_id}]#1.our_price#1.schedule#1.value_with_tax`]: price,
+        "fulfillment_availability#1.fulfillment_channel_code": STATIC.fulfillment_channel_code,
+        "fulfillment_availability#1.quantity": String(sku.inventoryQuantity ?? 0),
+        "fulfillment_availability#1.is_inventory_available": "Enabled",
+        item_weight: itemWeight,
+        item_weight_unit_of_measure: STATIC.item_weight_unit,
+        department_name: "Unisex Adult",
+        target_gender: "Unisex",
+        age_range_description: STATIC.age_range_description,
+        item_shape: itemShape, // inherits from parent; same shape across the group
+        frame_material_type: styleFrameMaterial,
+        lens_material_type: styleLensMaterial,
+        polarization_type: stylePolarization,
+        main_image_url: childMainImage,
+        other_image_url1: childOtherImages[0],
+        other_image_url2: childOtherImages[1],
+        other_image_url3: childOtherImages[2],
+        other_image_url4: childOtherImages[3],
+        ...frameDimensionsBlock(p),
+        ...packageDimensionsBlock(),
+        country_of_origin: STATIC.country_of_origin,
+        import_designation: STATIC.import_designation,
+        batteries_required: STATIC.batteries_required,
+        are_batteries_included: STATIC.are_batteries_included,
+        supplier_declared_dg_hz_regulation1: STATIC.supplier_declared_dg_hz_regulation1,
+      };
+      const fbaChild: Record<string, string> = {
+        ...fbmChild,
+        item_sku: baseSku ? `${baseSku}-FBA` : "",
+        "fulfillment_availability#1.fulfillment_channel_code": "Fulfillment by Amazon (NA)",
+        "fulfillment_availability#1.quantity": "",
+        "fulfillment_availability#1.is_inventory_available": "Enabled",
+      };
+      children.push(fbmChild, fbaChild);
+    }
+  }
+
+  return [parent, ...children];
+}
