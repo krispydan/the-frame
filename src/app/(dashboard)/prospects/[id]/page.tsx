@@ -7,7 +7,7 @@ import Link from "next/link";
 import {
   ArrowLeft, ArrowRight, Building2, Globe, Phone, Mail, MapPin, Tag, Star,
   Edit, UserPlus, MessageSquare, Clock, ExternalLink, Plus, Save, X,
-  Briefcase, Sparkles, Loader2, CheckCircle2, AlertCircle, Search, Store,
+  Briefcase, Sparkles, Loader2, CheckCircle2, AlertCircle, Search, Store, Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -66,7 +66,55 @@ interface Company {
   source_type: string | null;
   source_id: string | null;
   source_query: string | null;
+  // ── StoreLeads firmographics (filled on storeleads import / live
+  //    enrichment via the storeleads/customer-sync flow) ──
+  storeleads_id?: string | null;
+  storeleads_last_synced_at?: string | null;
+  description?: string | null;
+  meta_description?: string | null;
+  industry?: string | null;
+  ecom_platform?: string | null;
+  employee_count?: number | null;
+  estimated_yearly_sales_cents?: number | null;
+  estimated_monthly_visits?: number | null;
+  average_product_price_cents?: number | null;
+  contact_form_url?: string | null;
+  tiktok_url?: string | null;
+  tiktok_followers?: number | null;
+  youtube_url?: string | null;
+  youtube_followers?: number | null;
+  // ── Email verification (NeverBounce cache) ──
+  email_verification_status?: string | null;
+  email_verified_at?: string | null;
+  // ── Eyewear crawl aggregates (from shopify_crawl source) ──
+  top_brand?: string | null;
+  eyewear_categories?: string | null;
+  eyewear_sku_count?: number | null;
+  eyewear_price_range?: string | null;
+  eyewear_price_median_cents?: number | null;
+  eyewear_top_competitors?: string | null;
+  eyewear_sample_titles?: string | null;
+  // ── AI-generated cold-email opening lines ──
+  ai_opener_email1?: string | null;
+  ai_opener_email2?: string | null;
+  ai_opener_generated_at?: string | null;
+  ai_opener_model?: string | null;
   created_at: string; updated_at: string;
+}
+
+// Format money cents → "$1.2M" / "$450K" / "$320"
+function fmtMoneyShortFromCents(cents: number | null | undefined): string | null {
+  if (cents == null || !Number.isFinite(cents)) return null;
+  const usd = cents / 100;
+  if (usd >= 1_000_000) return `$${(usd / 1_000_000).toFixed(usd >= 10_000_000 ? 0 : 1)}M`;
+  if (usd >= 1_000) return `$${Math.round(usd / 1_000)}K`;
+  return `$${Math.round(usd)}`;
+}
+function fmtNumberShort(n: number | null | undefined): string | null {
+  if (n == null || !Number.isFinite(n)) return null;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
+  return String(Math.round(n));
 }
 
 interface Store {
@@ -856,6 +904,272 @@ export default function CompanyDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* ─── Store Profile (StoreLeads firmographics) ─────────────────
+              Surfaces every column the storeleads importer + live
+              enrichment populate: site copy (description, meta_description),
+              platform, employee count, sales/visits estimates, average
+              product price, social URLs with follower counts. Renders
+              only when at least one field is present so non-storeleads
+              rows don't show an empty card. */}
+          {(company.description || company.meta_description || company.industry ||
+            company.ecom_platform || company.employee_count != null ||
+            company.estimated_yearly_sales_cents != null ||
+            company.estimated_monthly_visits != null ||
+            company.average_product_price_cents != null ||
+            company.tiktok_url || company.youtube_url ||
+            company.storeleads_id || company.contact_form_url ||
+            company.email_verification_status) && (
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Store className="w-4 h-4 text-blue-600" /> Store Profile
+                  </CardTitle>
+                  {company.storeleads_last_synced_at && (
+                    <span className="text-xs text-gray-400">
+                      synced {new Date(company.storeleads_last_synced_at).toLocaleDateString()}
+                    </span>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Site copy — useful as opener-source material */}
+                {(company.meta_description || company.description) && (
+                  <div className="space-y-2">
+                    {company.meta_description && (
+                      <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <p className="text-xs font-medium text-gray-500 mb-1">Meta description</p>
+                        <p className="text-sm text-gray-700 dark:text-gray-300">{company.meta_description}</p>
+                      </div>
+                    )}
+                    {company.description && company.description !== company.meta_description && (
+                      <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <p className="text-xs font-medium text-gray-500 mb-1">About us</p>
+                        <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{company.description}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Firmographic facts grid */}
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                  {company.industry && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-0.5">Industry</p>
+                      <p className="font-medium">{company.industry}</p>
+                    </div>
+                  )}
+                  {company.ecom_platform && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-0.5">Platform</p>
+                      <p className="font-medium capitalize">{company.ecom_platform}</p>
+                    </div>
+                  )}
+                  {company.employee_count != null && company.employee_count > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-0.5">Employees</p>
+                      <p className="font-medium">{company.employee_count.toLocaleString()}</p>
+                    </div>
+                  )}
+                  {company.estimated_yearly_sales_cents != null && company.estimated_yearly_sales_cents > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-0.5">Est. yearly sales</p>
+                      <p className="font-medium">{fmtMoneyShortFromCents(company.estimated_yearly_sales_cents)}</p>
+                    </div>
+                  )}
+                  {company.estimated_monthly_visits != null && company.estimated_monthly_visits > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-0.5">Monthly visits</p>
+                      <p className="font-medium">{fmtNumberShort(company.estimated_monthly_visits)}</p>
+                    </div>
+                  )}
+                  {company.average_product_price_cents != null && company.average_product_price_cents > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-0.5">Avg product price</p>
+                      <p className="font-medium">{fmtMoneyShortFromCents(company.average_product_price_cents)}</p>
+                    </div>
+                  )}
+                  {company.email_verification_status && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-0.5">Email verified</p>
+                      <p className={`font-medium capitalize ${
+                        company.email_verification_status === "valid" ? "text-green-700 dark:text-green-400" :
+                        company.email_verification_status === "catchall" ? "text-yellow-700 dark:text-yellow-400" :
+                        "text-gray-600 dark:text-gray-400"
+                      }`}>
+                        {company.email_verification_status}
+                      </p>
+                    </div>
+                  )}
+                  {company.storeleads_id && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-0.5">StoreLeads ID</p>
+                      <p className="font-mono text-xs">{company.storeleads_id}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Additional social with followers */}
+                {(company.tiktok_url || company.youtube_url || company.contact_form_url) && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {company.tiktok_url && (
+                      <a href={company.tiktok_url} target="_blank" rel="noopener"
+                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200">
+                        TikTok
+                        {company.tiktok_followers != null && company.tiktok_followers > 0 && (
+                          <span className="text-gray-500">· {fmtNumberShort(company.tiktok_followers)}</span>
+                        )}
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                    {company.youtube_url && (
+                      <a href={company.youtube_url} target="_blank" rel="noopener"
+                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-red-50 text-red-700 hover:bg-red-100">
+                        YouTube
+                        {company.youtube_followers != null && company.youtube_followers > 0 && (
+                          <span className="text-red-500">· {fmtNumberShort(company.youtube_followers)}</span>
+                        )}
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                    {company.contact_form_url && (
+                      <a href={company.contact_form_url} target="_blank" rel="noopener"
+                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-50 text-emerald-700 hover:bg-emerald-100">
+                        Contact form <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ─── Eyewear Inventory (from the Shopify /products.json crawl)
+              Per-store rollup of what this boutique already stocks. Used
+              as the LLM context for the AI opener and as competitive
+              intel for outreach. Renders only when a store actually
+              carries eyewear (top_brand is the easiest signal). */}
+          {(company.top_brand || company.eyewear_sku_count != null ||
+            company.eyewear_sample_titles || company.eyewear_top_competitors) && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Eye className="w-4 h-4 text-purple-600" /> Eyewear Inventory
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                  {company.top_brand && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-0.5">Top brand</p>
+                      <p className="font-medium">{company.top_brand}</p>
+                    </div>
+                  )}
+                  {company.eyewear_categories && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-0.5">Carries</p>
+                      <p className="font-medium capitalize">
+                        {company.eyewear_categories.split(",").map((c) => c.replace(/_/g, " ")).join(" + ")}
+                      </p>
+                    </div>
+                  )}
+                  {company.eyewear_sku_count != null && company.eyewear_sku_count > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-0.5">Eyewear SKUs</p>
+                      <p className="font-medium">{company.eyewear_sku_count}{company.eyewear_sku_count >= 25 ? "+" : ""}</p>
+                    </div>
+                  )}
+                  {company.eyewear_price_range && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-0.5">Price range</p>
+                      <p className="font-medium">{company.eyewear_price_range}</p>
+                    </div>
+                  )}
+                  {company.eyewear_price_median_cents != null && company.eyewear_price_median_cents > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-0.5">Median price</p>
+                      <p className="font-medium">${(company.eyewear_price_median_cents / 100).toFixed(0)}</p>
+                    </div>
+                  )}
+                </div>
+
+                {company.eyewear_top_competitors && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 mb-1.5">Competing brands carried</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {company.eyewear_top_competitors.split("|").map((c) => c.trim()).filter(Boolean).map((c) => (
+                        <Badge key={c} variant="outline" className="text-xs">{c}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {company.eyewear_sample_titles && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 mb-1.5">Sample products on their site</p>
+                    <ul className="space-y-1">
+                      {company.eyewear_sample_titles.split("|").map((t) => t.trim()).filter(Boolean).map((t, i) => (
+                        <li key={i} className="text-sm text-gray-700 dark:text-gray-300 flex gap-2">
+                          <span className="text-gray-400 shrink-0">•</span>
+                          <span>{t}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ─── AI Outreach Openers (from generate-eyewear-openers)
+              The two opening lines Claude wrote for this lead. Shipped
+              to Instantly as {{ai_opener_email1}} and {{ai_opener_email2}}
+              custom variables. Surfacing them here lets Daniel spot-check
+              the copy before sending, and surfaces the model/timestamp
+              so we know when to regenerate. */}
+          {(company.ai_opener_email1 || company.ai_opener_email2) && (
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-500" /> AI Outreach Openers
+                  </CardTitle>
+                  <div className="text-xs text-gray-400 flex items-center gap-3">
+                    {company.ai_opener_model && <span className="font-mono">{company.ai_opener_model}</span>}
+                    {company.ai_opener_generated_at && (
+                      <span>{new Date(company.ai_opener_generated_at).toLocaleDateString()}</span>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {company.ai_opener_email1 && (
+                  <div className="p-3 border-l-4 border-amber-300 bg-amber-50/50 dark:bg-amber-900/10 rounded-r-lg">
+                    <p className="text-xs font-medium text-amber-700 dark:text-amber-400 mb-1">
+                      Email 1 — first touch
+                    </p>
+                    <p className="text-sm text-gray-800 dark:text-gray-200 italic">
+                      "{company.ai_opener_email1}"
+                    </p>
+                  </div>
+                )}
+                {company.ai_opener_email2 && (
+                  <div className="p-3 border-l-4 border-amber-200 bg-amber-50/30 dark:bg-amber-900/5 rounded-r-lg">
+                    <p className="text-xs font-medium text-amber-700 dark:text-amber-400 mb-1">
+                      Email 2 — follow-up
+                    </p>
+                    <p className="text-sm text-gray-800 dark:text-gray-200 italic">
+                      "{company.ai_opener_email2}"
+                    </p>
+                  </div>
+                )}
+                <p className="text-xs text-gray-400 italic">
+                  Renders in Instantly as <code className="font-mono not-italic bg-gray-100 dark:bg-gray-800 px-1 rounded">{`{{ai_opener_email1}}`}</code> and <code className="font-mono not-italic bg-gray-100 dark:bg-gray-800 px-1 rounded">{`{{ai_opener_email2}}`}</code>.
+                </p>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Stores & Contacts */}
           <Card>
