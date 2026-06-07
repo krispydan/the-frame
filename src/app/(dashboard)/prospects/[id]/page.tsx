@@ -94,6 +94,8 @@ interface Company {
   eyewear_price_median_cents?: number | null;
   eyewear_top_competitors?: string | null;
   eyewear_sample_titles?: string | null;
+  eyewear_sample_urls?: string | null;
+  eyewear_sample_images?: string | null;
   // ── AI-generated cold-email opening lines ──
   ai_opener_email1?: string | null;
   ai_opener_email2?: string | null;
@@ -1105,19 +1107,69 @@ export default function CompanyDetailPage() {
                   </div>
                 )}
 
-                {company.eyewear_sample_titles && (
-                  <div>
-                    <p className="text-xs font-medium text-gray-500 mb-1.5">Sample products on their site</p>
-                    <ul className="space-y-1">
-                      {company.eyewear_sample_titles.split("|").map((t) => t.trim()).filter(Boolean).map((t, i) => (
-                        <li key={i} className="text-sm text-gray-700 dark:text-gray-300 flex gap-2">
-                          <span className="text-gray-400 shrink-0">•</span>
-                          <span>{t}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                {company.eyewear_sample_titles && (() => {
+                  // Zip the three parallel arrays back into per-product
+                  // tuples. titles is required; urls + images are
+                  // optional (some pre-fix rows have only titles).
+                  const titles = company.eyewear_sample_titles!.split("|").map((s) => s.trim());
+                  const urls = (company.eyewear_sample_urls || "").split("|").map((s) => s.trim());
+                  const images = (company.eyewear_sample_images || "").split("|").map((s) => s.trim());
+                  const samples = titles
+                    .map((title, i) => ({ title, url: urls[i] || "", image: images[i] || "" }))
+                    .filter((s) => s.title);
+                  if (samples.length === 0) return null;
+                  return (
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 mb-2">Sample products on their site</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {samples.map((s, i) => {
+                          const inner = (
+                            <>
+                              {s.image ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={s.image}
+                                  alt={s.title}
+                                  className="w-full h-32 object-cover rounded-md bg-gray-100 dark:bg-gray-800"
+                                  loading="lazy"
+                                  // Some Shopify CDN images are gated by referrer; fall back to
+                                  // a placeholder block on load failure.
+                                  onError={(e) => {
+                                    (e.currentTarget as HTMLImageElement).style.display = "none";
+                                  }}
+                                />
+                              ) : (
+                                <div className="w-full h-32 rounded-md bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-gray-400">
+                                  <Eye className="w-6 h-6" />
+                                </div>
+                              )}
+                              <div className="mt-2 flex items-start gap-1.5">
+                                <span className="text-sm text-gray-700 dark:text-gray-300 line-clamp-2 flex-1">
+                                  {s.title}
+                                </span>
+                                {s.url && <ExternalLink className="w-3.5 h-3.5 shrink-0 mt-0.5 text-gray-400" />}
+                              </div>
+                            </>
+                          );
+                          return s.url ? (
+                            <a
+                              key={i}
+                              href={s.url}
+                              target="_blank"
+                              rel="noopener"
+                              className="block group hover:opacity-90 transition-opacity"
+                              title={s.title}
+                            >
+                              {inner}
+                            </a>
+                          ) : (
+                            <div key={i}>{inner}</div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
               </CardContent>
             </Card>
           )}

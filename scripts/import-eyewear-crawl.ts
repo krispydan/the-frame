@@ -140,7 +140,13 @@ interface EyewearAggregate {
   vendor_counts: Map<string, number>;
   prices: number[];
   categories: Set<"sunglasses" | "reading_glasses">;
-  sample_titles: string[];   // first 3 distinct titles encountered
+  // Three parallel arrays — same length, same order. Picked in
+  // rollUp() at the same point so each title's index lines up with
+  // its URL and image. The UI relies on the parallel-index
+  // contract to render bullets as clickable thumbnails.
+  sample_titles: string[];
+  sample_urls: string[];
+  sample_images: string[];
   total_sku_count: number;
   has_aj_morgan: boolean;
 }
@@ -247,6 +253,8 @@ function rollUp(domain: string, products: ProductRow[]): EyewearAggregate {
     prices: [],
     categories: new Set(),
     sample_titles: [],
+    sample_urls: [],
+    sample_images: [],
     total_sku_count: products.length,
     has_aj_morgan: false,
   };
@@ -271,7 +279,13 @@ function rollUp(domain: string, products: ProductRow[]): EyewearAggregate {
 
     if (p.product_title && agg.sample_titles.length < 3 && !seenTitles.has(p.product_title)) {
       seenTitles.add(p.product_title);
+      // Push title + URL + image at the same time so the three
+      // parallel arrays stay index-aligned. Empty strings preserve
+      // the slot when one field is missing — UI checks per-element.
       agg.sample_titles.push(p.product_title);
+      // Strip stray whitespace; tolerate missing fields.
+      agg.sample_urls.push((p.product_url || "").trim());
+      agg.sample_images.push((p.product_image || "").trim());
     }
   }
   return agg;
@@ -381,6 +395,8 @@ interface UpsertContext {
   eyewearPriceMedianCents: number | null;
   eyewearTopCompetitors: string | null;
   eyewearSampleTitles: string | null;
+  eyewearSampleUrls: string | null;
+  eyewearSampleImages: string | null;
 }
 
 // Lazy-prepared statements. Top-level `sqlite.prepare(...)` would
@@ -389,10 +405,14 @@ interface UpsertContext {
 // (no migrations applied yet) and "no such table: companies" kills
 // the build. Each statement is prepared on first use instead, which
 // is at runtime when the schema is ready.
+// The `unknown[]` generic tells better-sqlite3's typings that the
+// statement takes an unspecified-length positional bind array. Without
+// it the inferred type is "no parameters" and tsc rejects every .run()
+// call with TS2554: Expected 1 arguments, but got N.
 interface PreparedStmts {
   selectByDomain: ReturnType<typeof sqlite.prepare<[string]>>;
-  insertNew: ReturnType<typeof sqlite.prepare>;
-  mergeExisting: ReturnType<typeof sqlite.prepare>;
+  insertNew: ReturnType<typeof sqlite.prepare<unknown[]>>;
+  mergeExisting: ReturnType<typeof sqlite.prepare<unknown[]>>;
 }
 let _stmts: PreparedStmts | null = null;
 function stmts(): PreparedStmts {
@@ -401,7 +421,7 @@ function stmts(): PreparedStmts {
     selectByDomain: sqlite.prepare<[string]>(
       `SELECT id, status, tags FROM companies WHERE domain = ? LIMIT 1`,
     ),
-    insertNew: sqlite.prepare(
+    insertNew: sqlite.prepare<unknown[]>(
       `INSERT INTO companies (
          id, name, type, domain, website, phone, email,
          address, city, state, country, status,
@@ -412,6 +432,7 @@ function stmts(): PreparedStmts {
          top_brand, eyewear_categories, eyewear_sku_count,
          eyewear_price_range, eyewear_price_median_cents,
          eyewear_top_competitors, eyewear_sample_titles,
+         eyewear_sample_urls, eyewear_sample_images,
          tags, created_at, updated_at
        ) VALUES (
          ?, ?, 'online', ?, ?, ?, ?,
@@ -423,13 +444,14 @@ function stmts(): PreparedStmts {
          ?, ?, ?,
          ?, ?,
          ?, ?,
+         ?, ?,
          ?, ?, ?
        )`,
     ),
     // Asymmetric merge — two rules in one UPDATE:
     //   Firmographics → COALESCE(existing, new) preserves edits
     //   Eyewear aggregates → COALESCE(new, existing) prefers fresh
-    mergeExisting: sqlite.prepare(
+    mergeExisting: sqlite.prepare<unknown[]>(
       `UPDATE companies
           SET name              = COALESCE(name, ?),
               phone             = COALESCE(phone, ?),
@@ -451,6 +473,8 @@ function stmts(): PreparedStmts {
               eyewear_price_median_cents   = COALESCE(?, eyewear_price_median_cents),
               eyewear_top_competitors      = COALESCE(?, eyewear_top_competitors),
               eyewear_sample_titles        = COALESCE(?, eyewear_sample_titles),
+              eyewear_sample_urls          = COALESCE(?, eyewear_sample_urls),
+              eyewear_sample_images        = COALESCE(?, eyewear_sample_images),
               tags              = ?,
               updated_at        = ?
         WHERE id = ?`,
@@ -516,6 +540,7 @@ function upsert(
       ctx.topBrand, ctx.eyewearCategories, ctx.eyewearSkuCount,
       ctx.eyewearPriceRange, ctx.eyewearPriceMedianCents,
       ctx.eyewearTopCompetitors, ctx.eyewearSampleTitles,
+      ctx.eyewearSampleUrls, ctx.eyewearSampleImages,
       mergedTags, ctx.now, existing.id,
     );
     return { created: false, companyId: existing.id };
@@ -533,6 +558,7 @@ function upsert(
     ctx.topBrand, ctx.eyewearCategories, ctx.eyewearSkuCount,
     ctx.eyewearPriceRange, ctx.eyewearPriceMedianCents,
     ctx.eyewearTopCompetitors, ctx.eyewearSampleTitles,
+    ctx.eyewearSampleUrls, ctx.eyewearSampleImages,
     mergedTags, ctx.now, ctx.now,
   );
   return { created: true, companyId: id };
@@ -640,6 +666,13 @@ export async function runEyewearImport(opts: RunEyewearImportOpts): Promise<RunE
         const categories = Array.from(agg.categories).sort().join(",") || null;
         const priceRange = fmtPriceRange(agg.prices);
         const sampleTitles = agg.sample_titles.join("|") || null;
+        // URLs + images are stored with the SAME pipe-join scheme as
+        // titles so the UI can split-and-zip the three arrays back
+        // into per-product tuples. Empty slots are preserved (a missing
+        // image still uses up an index so the URL/title at that index
+        // stays aligned with the right product).
+        const sampleUrls = agg.sample_urls.join("|") || null;
+        const sampleImages = agg.sample_images.join("|") || null;
 
         const ctx: UpsertContext = {
           now, sourceQuery: EYEWEAR_SOURCE_QUERY, sourceLabel: SOURCE_LABEL_EYEWEAR,
@@ -650,6 +683,8 @@ export async function runEyewearImport(opts: RunEyewearImportOpts): Promise<RunE
           eyewearPriceMedianCents: medianPrice === null ? null : Math.round(medianPrice * 100),
           eyewearTopCompetitors: competitors,
           eyewearSampleTitles: sampleTitles,
+          eyewearSampleUrls: sampleUrls,
+          eyewearSampleImages: sampleImages,
         };
 
         const res = upsert(domain, cohortRow, ctx);
@@ -698,6 +733,7 @@ export async function runEyewearImport(opts: RunEyewearImportOpts): Promise<RunE
           topBrand: null, eyewearCategories: null, eyewearSkuCount: null,
           eyewearPriceRange: null, eyewearPriceMedianCents: null,
           eyewearTopCompetitors: null, eyewearSampleTitles: null,
+          eyewearSampleUrls: null, eyewearSampleImages: null,
         };
 
         const res = upsert(domain, cohortRow, ctx);

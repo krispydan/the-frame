@@ -210,6 +210,12 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN eyewear_price_range TEXT"); 
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN eyewear_price_median_cents INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN eyewear_top_competitors TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN eyewear_sample_titles TEXT"); } catch { /* exists */ }
+// Pipe-joined alongside eyewear_sample_titles — same length, same order.
+// Lets the prospect detail UI render each sample as a clickable link to
+// the actual product on the store's site + a thumbnail image. Source
+// data lives in the crawl CSV's product_url + product_image columns.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN eyewear_sample_urls TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN eyewear_sample_images TEXT"); } catch { /* exists */ }
 // Two AI opener slots — one per email in the Instantly sequence.
 // Distinct columns (rather than JSON) so they ship cleanly through
 // the existing instantly buildCustomVariables() pipe.

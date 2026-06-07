@@ -105,6 +105,11 @@ export const companies = sqliteTable("companies", {
   eyewearPriceMedianCents: integer("eyewear_price_median_cents"),
   eyewearTopCompetitors: text("eyewear_top_competitors"), // pipe-joined top 3
   eyewearSampleTitles: text("eyewear_sample_titles"),     // pipe-joined top 3
+  // Parallel arrays to eyewear_sample_titles — same N items, same
+  // order. Used by the prospect detail UI to render each sample as
+  // a clickable link + thumbnail image.
+  eyewearSampleUrls: text("eyewear_sample_urls"),
+  eyewearSampleImages: text("eyewear_sample_images"),
   // AI-generated opening lines per email in the Instantly sequence.
   // Two distinct slots so email 1 and email 2 don't repeat the same
   // observation about the store.
