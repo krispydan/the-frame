@@ -81,11 +81,24 @@ for KEY in products state cohort; do
   CHUNK_NUM=0
   while [ $CHUNK_NUM -lt $CHUNKS ]; do
     CHUNK_NUM=$((CHUNK_NUM + 1))
-    # Extract chunk N (1-indexed) as base64. dd's skip is 0-indexed so
-    # the right block is (CHUNK_NUM - 1).
-    DATA=$(dd if="$P" bs=$CHUNK_SIZE skip=$((CHUNK_NUM - 1)) count=1 2>/dev/null | base64)
-    BODY=$(printf '{"action":"chunk","file":"%s","chunk":%d,"data":"%s"}' "$KEY" "$CHUNK_NUM" "$DATA")
-    RESP=$(post_json "$BODY")
+    # Build the JSON body in a tmpfile and stream it to curl via
+    # --data-binary @file. Inline -d on a 4MB chunk overflows
+    # ARG_MAX on macOS (~256KB). Also strip newlines from base64
+    # output — macOS `base64` line-wraps at 76 columns by default,
+    # and raw \n inside a JSON string literal is a parse error.
+    TMP_BODY="$(mktemp -t eyewear-chunk.XXXXXX)"
+    {
+      printf '{"action":"chunk","file":"%s","chunk":%d,"data":"' "$KEY" "$CHUNK_NUM"
+      dd if="$P" bs=$CHUNK_SIZE skip=$((CHUNK_NUM - 1)) count=1 2>/dev/null | base64 | tr -d '\n'
+      printf '"}'
+    } > "$TMP_BODY"
+
+    RESP=$(curl -s -X POST "$IMPORT_URL" \
+      -H "x-admin-key: $ADMIN_KEY" \
+      -H "Content-Type: application/json" \
+      --data-binary "@$TMP_BODY")
+    rm -f "$TMP_BODY"
+
     SIZE_AFTER=$(echo "$RESP" | python3 -c "import sys,json
 try: d=json.load(sys.stdin); print(d.get('size','?'))
 except: print('parse-error')" 2>/dev/null || echo "?")
