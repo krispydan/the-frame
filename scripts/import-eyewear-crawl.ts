@@ -125,6 +125,16 @@ interface CohortRow {
   categories?: string;
   contact_page_url?: string;
   source_label?: string;
+  // Extended cohort fields (StoreLeads CSV columns we now also import).
+  estimated_monthly_pageviews?: string;
+  installed_apps_names?: string;
+  cluster_domains?: string;
+  meta_keywords?: string;
+  tiktok?: string;
+  tiktok_followers?: string;
+  youtube?: string;
+  youtube_followers?: string;
+  created?: string;       // YYYY-MM-DD when StoreLeads first observed the store
 }
 
 interface StateLine {
@@ -147,6 +157,7 @@ interface EyewearAggregate {
   sample_titles: string[];
   sample_urls: string[];
   sample_images: string[];
+  sample_prices_cents: (number | null)[];  // null when product had no parseable price
   total_sku_count: number;
   has_aj_morgan: boolean;
 }
@@ -255,6 +266,7 @@ function rollUp(domain: string, products: ProductRow[]): EyewearAggregate {
     sample_titles: [],
     sample_urls: [],
     sample_images: [],
+    sample_prices_cents: [],
     total_sku_count: products.length,
     has_aj_morgan: false,
   };
@@ -279,13 +291,13 @@ function rollUp(domain: string, products: ProductRow[]): EyewearAggregate {
 
     if (p.product_title && agg.sample_titles.length < 3 && !seenTitles.has(p.product_title)) {
       seenTitles.add(p.product_title);
-      // Push title + URL + image at the same time so the three
+      // Push title + URL + image + price at the same time so all four
       // parallel arrays stay index-aligned. Empty strings preserve
       // the slot when one field is missing — UI checks per-element.
       agg.sample_titles.push(p.product_title);
-      // Strip stray whitespace; tolerate missing fields.
       agg.sample_urls.push((p.product_url || "").trim());
       agg.sample_images.push((p.product_image || "").trim());
+      agg.sample_prices_cents.push(parseCurrencyToCents(p.product_price));
     }
   }
   return agg;
@@ -397,6 +409,7 @@ interface UpsertContext {
   eyewearSampleTitles: string | null;
   eyewearSampleUrls: string | null;
   eyewearSampleImages: string | null;
+  eyewearSamplePricesCents: string | null;  // pipe-joined cents per sample
 }
 
 // Lazy-prepared statements. Top-level `sqlite.prepare(...)` would
@@ -424,27 +437,37 @@ function stmts(): PreparedStmts {
     insertNew: sqlite.prepare<unknown[]>(
       `INSERT INTO companies (
          id, name, type, domain, website, phone, email,
-         address, city, state, country, status,
+         address, city, state, country, zip, status,
          source, source_type, source_query,
          description, meta_description,
-         ecom_platform, estimated_yearly_sales_cents, estimated_monthly_visits,
+         ecom_platform,
+         estimated_yearly_sales_cents, estimated_monthly_visits,
+         estimated_monthly_sales_cents, estimated_monthly_pageviews,
          facebook_url, instagram_url,
+         tiktok_url, tiktok_followers, youtube_url, youtube_followers,
+         installed_apps_names, about_us_url,
+         storeleads_first_seen_at, cluster_domains, meta_keywords,
          top_brand, eyewear_categories, eyewear_sku_count,
          eyewear_price_range, eyewear_price_median_cents,
          eyewear_top_competitors, eyewear_sample_titles,
-         eyewear_sample_urls, eyewear_sample_images,
+         eyewear_sample_urls, eyewear_sample_images, eyewear_sample_prices_cents,
          tags, created_at, updated_at
        ) VALUES (
          ?, ?, 'online', ?, ?, ?, ?,
-         ?, ?, ?, ?, 'new',
+         ?, ?, ?, ?, ?, 'new',
          ?, 'shopify_crawl', ?,
          ?, ?,
-         ?, ?, ?,
+         ?,
+         ?, ?,
+         ?, ?,
+         ?, ?,
+         ?, ?, ?, ?,
          ?, ?,
          ?, ?, ?,
+         ?, ?, ?,
          ?, ?,
          ?, ?,
-         ?, ?,
+         ?, ?, ?,
          ?, ?, ?
        )`,
     ),
@@ -459,13 +482,25 @@ function stmts(): PreparedStmts {
               city              = COALESCE(city, ?),
               state             = COALESCE(state, ?),
               country           = COALESCE(country, ?),
+              zip               = COALESCE(zip, ?),
               description       = COALESCE(description, ?),
               meta_description  = COALESCE(meta_description, ?),
               ecom_platform     = COALESCE(ecom_platform, ?),
               estimated_yearly_sales_cents = COALESCE(estimated_yearly_sales_cents, ?),
               estimated_monthly_visits     = COALESCE(estimated_monthly_visits, ?),
+              estimated_monthly_sales_cents = COALESCE(estimated_monthly_sales_cents, ?),
+              estimated_monthly_pageviews   = COALESCE(estimated_monthly_pageviews, ?),
               facebook_url      = COALESCE(facebook_url, ?),
               instagram_url     = COALESCE(instagram_url, ?),
+              tiktok_url        = COALESCE(tiktok_url, ?),
+              tiktok_followers  = COALESCE(tiktok_followers, ?),
+              youtube_url       = COALESCE(youtube_url, ?),
+              youtube_followers = COALESCE(youtube_followers, ?),
+              installed_apps_names      = COALESCE(installed_apps_names, ?),
+              about_us_url              = COALESCE(about_us_url, ?),
+              storeleads_first_seen_at  = COALESCE(storeleads_first_seen_at, ?),
+              cluster_domains           = COALESCE(cluster_domains, ?),
+              meta_keywords             = COALESCE(meta_keywords, ?),
               top_brand                    = COALESCE(?, top_brand),
               eyewear_categories           = COALESCE(?, eyewear_categories),
               eyewear_sku_count            = COALESCE(?, eyewear_sku_count),
@@ -475,6 +510,7 @@ function stmts(): PreparedStmts {
               eyewear_sample_titles        = COALESCE(?, eyewear_sample_titles),
               eyewear_sample_urls          = COALESCE(?, eyewear_sample_urls),
               eyewear_sample_images        = COALESCE(?, eyewear_sample_images),
+              eyewear_sample_prices_cents  = COALESCE(?, eyewear_sample_prices_cents),
               tags              = ?,
               updated_at        = ?
         WHERE id = ?`,
@@ -527,20 +563,46 @@ function upsert(
   const ecomPlatform = (cohort.platform || "").trim().toLowerCase() || null;
   const yearlySalesCents = parseCurrencyToCents(cohort.estimated_yearly_sales);
   const monthlyVisits = parseFloatLoose(cohort.estimated_monthly_visits);
+  const monthlyPageviews = parseFloatLoose(cohort.estimated_monthly_pageviews);
+  const monthlySalesCents = parseCurrencyToCents(cohort.estimated_monthly_sales);
   const facebookUrl = pickFirst(cohort.facebook);
   const instagramUrl = pickFirst(cohort.instagram);
+  // Extended cohort fields. All optional + null-safe — non-StoreLeads
+  // sources won't populate them, but when we have them they're high
+  // signal:
+  //   zip            geo routing (cold-call territory assignment)
+  //   apps           which Shopify apps they run — competitive intel
+  //   about_us_url   linkable resource for opener research
+  //   created        proxy for store age (when StoreLeads first saw them)
+  //   cluster        sister-domain detection
+  //   tiktok / yt    social presence + reach
+  const zip = (cohort.zip || "").trim() || null;
+  const apps = (cohort.installed_apps_names || "").trim() || null;
+  const aboutUrl = (cohort.about_us_url || "").trim() || null;
+  const firstSeen = (cohort.created || "").trim() || null;
+  const cluster = (cohort.cluster_domains || "").trim() || null;
+  const metaKw = (cohort.meta_keywords || "").trim() || null;
+  const tiktokUrl = pickFirst(cohort.tiktok);
+  const tiktokFollowers = parseFloatLoose(cohort.tiktok_followers);
+  const youtubeUrl = pickFirst(cohort.youtube);
+  const youtubeFollowers = parseFloatLoose(cohort.youtube_followers);
 
   if (existing) {
     s.mergeExisting.run(
-      merchantName, phone, email, city, state, country,
+      merchantName, phone, email, city, state, country, zip,
       description, metaDescription, ecomPlatform,
       yearlySalesCents,
       monthlyVisits === null ? null : Math.round(monthlyVisits),
+      monthlySalesCents,
+      monthlyPageviews === null ? null : Math.round(monthlyPageviews),
       facebookUrl, instagramUrl,
+      tiktokUrl, tiktokFollowers === null ? null : Math.round(tiktokFollowers),
+      youtubeUrl, youtubeFollowers === null ? null : Math.round(youtubeFollowers),
+      apps, aboutUrl, firstSeen, cluster, metaKw,
       ctx.topBrand, ctx.eyewearCategories, ctx.eyewearSkuCount,
       ctx.eyewearPriceRange, ctx.eyewearPriceMedianCents,
       ctx.eyewearTopCompetitors, ctx.eyewearSampleTitles,
-      ctx.eyewearSampleUrls, ctx.eyewearSampleImages,
+      ctx.eyewearSampleUrls, ctx.eyewearSampleImages, ctx.eyewearSamplePricesCents,
       mergedTags, ctx.now, existing.id,
     );
     return { created: false, companyId: existing.id };
@@ -549,16 +611,21 @@ function upsert(
   const id = crypto.randomUUID();
   s.insertNew.run(
     id, merchantName, domain, website, phone, email,
-    address, city, state, country,
+    address, city, state, country, zip,
     ctx.sourceLabel, ctx.sourceQuery,
     description, metaDescription,
     ecomPlatform, yearlySalesCents,
     monthlyVisits === null ? null : Math.round(monthlyVisits),
+    monthlySalesCents,
+    monthlyPageviews === null ? null : Math.round(monthlyPageviews),
     facebookUrl, instagramUrl,
+    tiktokUrl, tiktokFollowers === null ? null : Math.round(tiktokFollowers),
+    youtubeUrl, youtubeFollowers === null ? null : Math.round(youtubeFollowers),
+    apps, aboutUrl, firstSeen, cluster, metaKw,
     ctx.topBrand, ctx.eyewearCategories, ctx.eyewearSkuCount,
     ctx.eyewearPriceRange, ctx.eyewearPriceMedianCents,
     ctx.eyewearTopCompetitors, ctx.eyewearSampleTitles,
-    ctx.eyewearSampleUrls, ctx.eyewearSampleImages,
+    ctx.eyewearSampleUrls, ctx.eyewearSampleImages, ctx.eyewearSamplePricesCents,
     mergedTags, ctx.now, ctx.now,
   );
   return { created: true, companyId: id };
@@ -673,6 +740,9 @@ export async function runEyewearImport(opts: RunEyewearImportOpts): Promise<RunE
         // stays aligned with the right product).
         const sampleUrls = agg.sample_urls.join("|") || null;
         const sampleImages = agg.sample_images.join("|") || null;
+        // Prices as cents, "" for the null/unparseable slot. UI tile
+        // hides the price line when this slot is empty.
+        const samplePrices = agg.sample_prices_cents.map((c) => c === null ? "" : String(c)).join("|") || null;
 
         const ctx: UpsertContext = {
           now, sourceQuery: EYEWEAR_SOURCE_QUERY, sourceLabel: SOURCE_LABEL_EYEWEAR,
@@ -685,6 +755,7 @@ export async function runEyewearImport(opts: RunEyewearImportOpts): Promise<RunE
           eyewearSampleTitles: sampleTitles,
           eyewearSampleUrls: sampleUrls,
           eyewearSampleImages: sampleImages,
+          eyewearSamplePricesCents: samplePrices,
         };
 
         const res = upsert(domain, cohortRow, ctx);
@@ -734,6 +805,7 @@ export async function runEyewearImport(opts: RunEyewearImportOpts): Promise<RunE
           eyewearPriceRange: null, eyewearPriceMedianCents: null,
           eyewearTopCompetitors: null, eyewearSampleTitles: null,
           eyewearSampleUrls: null, eyewearSampleImages: null,
+          eyewearSamplePricesCents: null,
         };
 
         const res = upsert(domain, cohortRow, ctx);

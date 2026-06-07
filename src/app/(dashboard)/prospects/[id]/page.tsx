@@ -83,6 +83,14 @@ interface Company {
   tiktok_followers?: number | null;
   youtube_url?: string | null;
   youtube_followers?: number | null;
+  // Extended cohort fields (added in the wider-import pass)
+  estimated_monthly_sales_cents?: number | null;
+  estimated_monthly_pageviews?: number | null;
+  installed_apps_names?: string | null;   // colon- or comma-delimited list
+  about_us_url?: string | null;
+  storeleads_first_seen_at?: string | null;
+  cluster_domains?: string | null;
+  meta_keywords?: string | null;
   // ── Email verification (NeverBounce cache) ──
   email_verification_status?: string | null;
   email_verified_at?: string | null;
@@ -96,6 +104,7 @@ interface Company {
   eyewear_sample_titles?: string | null;
   eyewear_sample_urls?: string | null;
   eyewear_sample_images?: string | null;
+  eyewear_sample_prices_cents?: string | null;  // pipe-joined cents per sample
   // ── AI-generated cold-email opening lines ──
   ai_opener_email1?: string | null;
   ai_opener_email2?: string | null;
@@ -917,11 +926,14 @@ export default function CompanyDetailPage() {
           {(company.description || company.meta_description || company.industry ||
             company.ecom_platform || company.employee_count != null ||
             company.estimated_yearly_sales_cents != null ||
+            company.estimated_monthly_sales_cents != null ||
             company.estimated_monthly_visits != null ||
+            company.estimated_monthly_pageviews != null ||
             company.average_product_price_cents != null ||
+            company.storeleads_first_seen_at ||
             company.tiktok_url || company.youtube_url ||
             company.storeleads_id || company.contact_form_url ||
-            company.email_verification_status) && (
+            company.about_us_url || company.email_verification_status) && (
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
@@ -980,16 +992,34 @@ export default function CompanyDetailPage() {
                       <p className="font-medium">{fmtMoneyShortFromCents(company.estimated_yearly_sales_cents)}</p>
                     </div>
                   )}
+                  {company.estimated_monthly_sales_cents != null && company.estimated_monthly_sales_cents > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-0.5">Monthly sales</p>
+                      <p className="font-medium">{fmtMoneyShortFromCents(company.estimated_monthly_sales_cents)}</p>
+                    </div>
+                  )}
                   {company.estimated_monthly_visits != null && company.estimated_monthly_visits > 0 && (
                     <div>
                       <p className="text-xs text-gray-500 mb-0.5">Monthly visits</p>
                       <p className="font-medium">{fmtNumberShort(company.estimated_monthly_visits)}</p>
                     </div>
                   )}
+                  {company.estimated_monthly_pageviews != null && company.estimated_monthly_pageviews > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-0.5">Monthly pageviews</p>
+                      <p className="font-medium">{fmtNumberShort(company.estimated_monthly_pageviews)}</p>
+                    </div>
+                  )}
                   {company.average_product_price_cents != null && company.average_product_price_cents > 0 && (
                     <div>
                       <p className="text-xs text-gray-500 mb-0.5">Avg product price</p>
                       <p className="font-medium">{fmtMoneyShortFromCents(company.average_product_price_cents)}</p>
+                    </div>
+                  )}
+                  {company.storeleads_first_seen_at && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-0.5">First seen by StoreLeads</p>
+                      <p className="font-medium">{company.storeleads_first_seen_at}</p>
                     </div>
                   )}
                   {company.email_verification_status && (
@@ -1012,9 +1042,15 @@ export default function CompanyDetailPage() {
                   )}
                 </div>
 
-                {/* Additional social with followers */}
-                {(company.tiktok_url || company.youtube_url || company.contact_form_url) && (
+                {/* Additional social + linkable URLs */}
+                {(company.tiktok_url || company.youtube_url || company.contact_form_url || company.about_us_url) && (
                   <div className="flex flex-wrap gap-2 pt-1">
+                    {company.about_us_url && (
+                      <a href={company.about_us_url} target="_blank" rel="noopener"
+                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-300">
+                        About page <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
                     {company.tiktok_url && (
                       <a href={company.tiktok_url} target="_blank" rel="noopener"
                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200">
@@ -1043,9 +1079,64 @@ export default function CompanyDetailPage() {
                     )}
                   </div>
                 )}
+
+                {/* Cluster domains — sister sites in the same brand family. */}
+                {company.cluster_domains && company.cluster_domains.split(",").filter((d) => d.trim() && d.trim() !== company.domain).length > 0 && (
+                  <div className="pt-1">
+                    <p className="text-xs font-medium text-gray-500 mb-1.5">Related domains</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {company.cluster_domains.split(",").map((d) => d.trim()).filter((d) => d && d !== company.domain).map((d) => (
+                        <a key={d} href={`https://${d}`} target="_blank" rel="noopener"
+                           className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-mono">
+                          {d}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
+
+          {/* ─── Tech Stack (Shopify apps installed)
+              installed_apps_names is a delimited list of every app
+              the store runs. High competitive intel: tells us which
+              email-marketing / reviews / loyalty / subscription /
+              shipping platforms they're already on — useful both as
+              an opener anchor and to gauge sophistication. */}
+          {company.installed_apps_names && (() => {
+            // StoreLeads delimits with `:` for apps but uses `,` sometimes too.
+            // Normalize and dedupe.
+            const apps = company.installed_apps_names!
+              .split(/[:,]/)
+              .map((s) => s.trim())
+              .filter(Boolean);
+            const unique = Array.from(new Set(apps));
+            if (unique.length === 0) return null;
+            return (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Briefcase className="w-4 h-4 text-cyan-600" /> Tech Stack
+                    <span className="text-xs text-gray-400 font-normal">· {unique.length} apps</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap gap-1.5">
+                    {unique.map((app) => (
+                      <Badge key={app} variant="outline" className="text-xs">
+                        {app}
+                      </Badge>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-400 italic mt-3">
+                    Useful as an opener anchor — e.g. "saw you're on Klaviyo" or
+                    "we work with a lot of Yotpo-powered boutiques."
+                  </p>
+                </CardContent>
+              </Card>
+            );
+          })()}
 
           {/* ─── Eyewear Inventory (from the Shopify /products.json crawl)
               Per-store rollup of what this boutique already stocks. Used
@@ -1108,14 +1199,24 @@ export default function CompanyDetailPage() {
                 )}
 
                 {company.eyewear_sample_titles && (() => {
-                  // Zip the three parallel arrays back into per-product
-                  // tuples. titles is required; urls + images are
-                  // optional (some pre-fix rows have only titles).
+                  // Zip the four parallel arrays back into per-product
+                  // tuples. titles is required; urls / images / prices
+                  // are all optional (pre-fix rows have only titles).
                   const titles = company.eyewear_sample_titles!.split("|").map((s) => s.trim());
                   const urls = (company.eyewear_sample_urls || "").split("|").map((s) => s.trim());
                   const images = (company.eyewear_sample_images || "").split("|").map((s) => s.trim());
+                  // prices are integer cents per slot, "" when not parseable.
+                  const prices = (company.eyewear_sample_prices_cents || "").split("|").map((s) => {
+                    const n = parseInt(s, 10);
+                    return Number.isFinite(n) && n > 0 ? n : null;
+                  });
                   const samples = titles
-                    .map((title, i) => ({ title, url: urls[i] || "", image: images[i] || "" }))
+                    .map((title, i) => ({
+                      title,
+                      url: urls[i] || "",
+                      image: images[i] || "",
+                      priceCents: prices[i] ?? null,
+                    }))
                     .filter((s) => s.title);
                   if (samples.length === 0) return null;
                   return (
@@ -1149,6 +1250,11 @@ export default function CompanyDetailPage() {
                                 </span>
                                 {s.url && <ExternalLink className="w-3.5 h-3.5 shrink-0 mt-0.5 text-gray-400" />}
                               </div>
+                              {s.priceCents != null && (
+                                <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 mt-1">
+                                  ${(s.priceCents / 100).toFixed(2)}
+                                </p>
+                              )}
                             </>
                           );
                           return s.url ? (

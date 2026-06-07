@@ -110,6 +110,15 @@ export const companies = sqliteTable("companies", {
   // a clickable link + thumbnail image.
   eyewearSampleUrls: text("eyewear_sample_urls"),
   eyewearSampleImages: text("eyewear_sample_images"),
+  eyewearSamplePricesCents: text("eyewear_sample_prices_cents"),
+  // Additional StoreLeads cohort fields (rounded out from the CSV).
+  estimatedMonthlySalesCents: integer("estimated_monthly_sales_cents"),
+  estimatedMonthlyPageviews: integer("estimated_monthly_pageviews"),
+  installedAppsNames: text("installed_apps_names"),
+  aboutUsUrl: text("about_us_url"),
+  storeleadsFirstSeenAt: text("storeleads_first_seen_at"),
+  clusterDomains: text("cluster_domains"),
+  metaKeywords: text("meta_keywords"),
   // AI-generated opening lines per email in the Instantly sequence.
   // Two distinct slots so email 1 and email 2 don't repeat the same
   // observation about the store.

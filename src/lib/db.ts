@@ -216,6 +216,31 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN eyewear_sample_titles TEXT")
 // data lives in the crawl CSV's product_url + product_image columns.
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN eyewear_sample_urls TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN eyewear_sample_images TEXT"); } catch { /* exists */ }
+// Per-sample prices, pipe-joined alongside titles/urls/images. Lets
+// the prospect detail tiles show "$82" under each product instead of
+// only the title.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN eyewear_sample_prices_cents TEXT"); } catch { /* exists */ }
+
+// Additional StoreLeads cohort fields. None of these were on the
+// original schema — but they're already present in the CSV, so the
+// importer can fill them on every run without re-crawling.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN estimated_monthly_sales_cents INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN estimated_monthly_pageviews INTEGER"); } catch { /* exists */ }
+// Pipe-joined list of Shopify apps installed at the store. High-signal
+// competitive intel — e.g. "Klaviyo|Yotpo|Loop|Smile.io|Recharge" tells
+// us their email-marketing stack, review platform, returns flow,
+// loyalty program, subscription tooling. Useful as opener fodder
+// ("saw you're on Klaviyo — happy to send our Klaviyo-tagged catalog").
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN installed_apps_names TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN about_us_url TEXT"); } catch { /* exists */ }
+// When StoreLeads first observed the store. Proxy for store age —
+// useful for "established 5 years vs. brand new" classification.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN storeleads_first_seen_at TEXT"); } catch { /* exists */ }
+// Comma-joined list of related domains in the same brand cluster.
+// Helps spot multi-domain merchants and prevents duplicate outreach
+// when sister sites share a buying decision.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN cluster_domains TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN meta_keywords TEXT"); } catch { /* exists */ }
 // Two AI opener slots — one per email in the Instantly sequence.
 // Distinct columns (rather than JSON) so they ship cleanly through
 // the existing instantly buildCustomVariables() pipe.
