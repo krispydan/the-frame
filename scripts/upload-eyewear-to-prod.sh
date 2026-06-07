@@ -1,32 +1,34 @@
 #!/bin/bash
 # upload-eyewear-to-prod.sh
 #
-# Push the three local eyewear-crawl CSVs to prod in a single
-# multipart/form-data request, run the import, refresh smart lists.
+# Chunked upload of the three eyewear-crawl CSVs to prod, then trigger
+# the import, then refresh the canned Smart Lists.
+#
+# We chunk at 4 MB because Cloudflare's request body limit is 100 MB
+# on the free/pro plans — total payload here is ~160 MB (apparel-
+# filtered.csv alone is ~101 MB), so a single multipart request would
+# get rejected at the edge before reaching Next.js.
 #
 # Usage:
-#   ./scripts/upload-eyewear-to-prod.sh           # full run
+#   ./scripts/upload-eyewear-to-prod.sh           # full run with classifier
 #   ./scripts/upload-eyewear-to-prod.sh --no-classifier
 #   ./scripts/upload-eyewear-to-prod.sh --dry-run
 #   ./scripts/upload-eyewear-to-prod.sh --limit 100
 #
-# Input files (must exist in ~/Downloads/):
-#   sunglasses-products.csv  ~24 MB
-#   sunglasses-state.jsonl   ~20 MB
-#   apparel-filtered.csv     ~17 MB
-# Total ~60 MB → multipart request fits under Cloudflare's 100 MB cap.
-#
-# This calls the user-facing REST endpoint at
-#   POST /api/v1/sales/import-eyewear-crawl
-# which is the same path the `sales.import_eyewear_crawl` MCP tool
-# uses internally. Dedup is by normalized domain — re-running this
-# is safe (existing rows get COALESCE-merged with the fresh data).
+# Files expected in ~/Downloads/:
+#   sunglasses-products.csv   ~31 MB
+#   sunglasses-state.jsonl    ~28 MB
+#   apparel-filtered.csv      ~101 MB
+# Total ~160 MB → ~40 chunks @ 4 MB → ~2-3 minute upload, then import.
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-https://theframe.getjaxy.com}"
-IMPORT_URL="$BASE_URL/api/v1/sales/import-eyewear-crawl"
-SEED_URL="$BASE_URL/api/admin/eyewear-seed-smart-lists"
+# Auth: chunked admin endpoint uses x-admin-key (matches restore-db
+# pattern). No session-token needed for this script.
 ADMIN_KEY="${ADMIN_KEY:-jaxy2026}"
+BASE_URL="${BASE_URL:-https://theframe.getjaxy.com}"
+IMPORT_URL="$BASE_URL/api/admin/eyewear-import"
+SEED_URL="$BASE_URL/api/admin/eyewear-seed-smart-lists"
+CHUNK_SIZE=4194304   # 4 MB
 
 DOWNLOADS="${HOME}/Downloads"
 PRODUCTS="$DOWNLOADS/sunglasses-products.csv"
@@ -40,41 +42,98 @@ for P in "$PRODUCTS" "$STATE" "$COHORT"; do
   fi
 done
 
-# Auth: user-facing /api/v1/sales/* endpoints require a session-token
-# cookie. Read it from the SESSION_TOKEN env var. Easiest to grab from
-# the browser DevTools → Application → Cookies tab on theframe.getjaxy.com.
-if [ -z "${SESSION_TOKEN:-}" ]; then
-  echo "❌ SESSION_TOKEN env var required."
-  echo "   Grab from browser DevTools → Application → Cookies → session-token"
+post_json() {
+  curl -s -X POST "$IMPORT_URL" \
+    -H "x-admin-key: $ADMIN_KEY" \
+    -H "Content-Type: application/json" \
+    -d "$1"
+}
+
+# 1. Pre-flight check — endpoint must exist
+echo "🔍 Checking endpoint deploy status…"
+PRE=$(post_json '{"action":"status"}' 2>&1 | head -c 200)
+if echo "$PRE" | grep -q "404\|This page could not be found"; then
+  echo "❌ Endpoint not deployed yet. Check Railway dashboard for build/deploy status."
+  echo "   Current prod commit: $(curl -s $BASE_URL/api/health | python3 -c 'import sys,json; print(json.load(sys.stdin).get(\"version\",\"unknown\"))')"
   exit 1
 fi
+echo "  $PRE"
 
-# Forward CLI flags to the import endpoint as form fields.
-EXTRA_ARGS=""
-for ARG in "$@"; do
-  case "$ARG" in
-    --no-classifier) EXTRA_ARGS="$EXTRA_ARGS -F noClassifier=true" ;;
-    --dry-run)       EXTRA_ARGS="$EXTRA_ARGS -F dryRun=true" ;;
-    --limit)         shift; EXTRA_ARGS="$EXTRA_ARGS -F limit=${1:-0}" ;;
+# 2. Reset all three staging files on the server
+echo
+echo "🧹 Resetting staging on prod…"
+post_json '{"action":"start"}'
+echo
+
+# 3. Upload each file in chunks
+for KEY in products state cohort; do
+  case "$KEY" in
+    products) P="$PRODUCTS" ;;
+    state)    P="$STATE" ;;
+    cohort)   P="$COHORT" ;;
   esac
+  SIZE=$(stat -f%z "$P" 2>/dev/null || stat -c%s "$P")
+  CHUNKS=$(( (SIZE + CHUNK_SIZE - 1) / CHUNK_SIZE ))
+  HUMAN=$(du -h "$P" | cut -f1)
+  echo
+  echo "📤 Uploading $KEY ($HUMAN, $CHUNKS chunks)…"
+
+  CHUNK_NUM=0
+  while [ $CHUNK_NUM -lt $CHUNKS ]; do
+    CHUNK_NUM=$((CHUNK_NUM + 1))
+    # Extract chunk N (1-indexed) as base64. dd's skip is 0-indexed so
+    # the right block is (CHUNK_NUM - 1).
+    DATA=$(dd if="$P" bs=$CHUNK_SIZE skip=$((CHUNK_NUM - 1)) count=1 2>/dev/null | base64)
+    BODY=$(printf '{"action":"chunk","file":"%s","chunk":%d,"data":"%s"}' "$KEY" "$CHUNK_NUM" "$DATA")
+    RESP=$(post_json "$BODY")
+    SIZE_AFTER=$(echo "$RESP" | python3 -c "import sys,json
+try: d=json.load(sys.stdin); print(d.get('size','?'))
+except: print('parse-error')" 2>/dev/null || echo "?")
+    printf "\r  chunk %d/%d → %s bytes on disk     " "$CHUNK_NUM" "$CHUNKS" "$SIZE_AFTER"
+  done
+  echo
 done
 
-echo "📤 Uploading 3 CSVs ($(du -ch "$PRODUCTS" "$STATE" "$COHORT" | tail -1 | cut -f1)) to $IMPORT_URL"
-echo "   This is a single multipart request — be patient on the upload."
-
-curl -s --max-time 600 -X POST "$IMPORT_URL" \
-  -H "cookie: session-token=$SESSION_TOKEN" \
-  -F "products=@$PRODUCTS" \
-  -F "state=@$STATE" \
-  -F "cohort=@$COHORT" \
-  $EXTRA_ARGS | python3 -m json.tool
-
+# 4. Trigger the import (forward CLI flags)
 echo
-echo "📋 Refreshing Smart Lists on prod..."
+echo "🚀 Triggering import on prod…"
+RUN_BODY='{"action":"run"'
+NEXT_IS_LIMIT=false
+for ARG in "$@"; do
+  if [ "$NEXT_IS_LIMIT" = "true" ]; then
+    RUN_BODY="$RUN_BODY,\"limit\":$ARG"
+    NEXT_IS_LIMIT=false
+    continue
+  fi
+  case "$ARG" in
+    --no-classifier) RUN_BODY="$RUN_BODY,\"noClassifier\":true" ;;
+    --dry-run)       RUN_BODY="$RUN_BODY,\"dryRun\":true" ;;
+    --limit)         NEXT_IS_LIMIT=true ;;
+  esac
+done
+RUN_BODY="$RUN_BODY}"
+echo "  body: $RUN_BODY"
+
+# This can take up to 5 min on Railway under load. maxDuration on the
+# route is 300s; give curl matching headroom.
+curl -s --max-time 360 -X POST "$IMPORT_URL" \
+  -H "x-admin-key: $ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d "$RUN_BODY" | python3 -m json.tool
+
+# 5. Cleanup staging
+echo
+echo "🧹 Cleaning up staging on prod…"
+post_json '{"action":"cleanup"}'
+echo
+
+# 6. Refresh smart lists
+echo
+echo "📋 Refreshing Smart Lists on prod…"
 curl -s -X POST "$SEED_URL" \
   -H "x-admin-key: $ADMIN_KEY" \
   -H "Content-Type: application/json" \
   -d '{}' | python3 -m json.tool
-
 echo
+
 echo "✅ Done."
