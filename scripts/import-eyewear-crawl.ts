@@ -383,76 +383,81 @@ interface UpsertContext {
   eyewearSampleTitles: string | null;
 }
 
-const selectByDomain = sqlite.prepare<[string]>(
-  `SELECT id, status, tags FROM companies WHERE domain = ? LIMIT 1`,
-);
-
-const insertNew = sqlite.prepare(
-  `INSERT INTO companies (
-     id, name, type, domain, website, phone, email,
-     address, city, state, country, status,
-     source, source_type, source_query,
-     description, meta_description,
-     ecom_platform, estimated_yearly_sales_cents, estimated_monthly_visits,
-     facebook_url, instagram_url,
-     top_brand, eyewear_categories, eyewear_sku_count,
-     eyewear_price_range, eyewear_price_median_cents,
-     eyewear_top_competitors, eyewear_sample_titles,
-     tags, created_at, updated_at
-   ) VALUES (
-     ?, ?, 'online', ?, ?, ?, ?,
-     ?, ?, ?, ?, 'new',
-     ?, 'shopify_crawl', ?,
-     ?, ?,
-     ?, ?, ?,
-     ?, ?,
-     ?, ?, ?,
-     ?, ?,
-     ?, ?,
-     ?, ?, ?
-   )`,
-);
-
-const mergeExisting = sqlite.prepare(
-  // Asymmetric merge — two different rules in one UPDATE:
-  //
-  //   Firmographic fields (name, phone, email, city, description, etc.)
-  //   → COALESCE(existing, new). Preserves any value that's already set,
-  //   including hand-edited values from earlier ops work. Only fills NULLs.
-  //
-  //   Eyewear aggregates (top_brand, eyewear_*).
-  //   → COALESCE(new, existing). PREFERS the fresh crawl data. Daniel's
-  //   note: "a lot of these stores are already in the frame and we should
-  //   just update them with the data we collected so we don't double the
-  //   work." This is the right semantic for computed-from-crawl fields.
-  //   The fallback-to-existing handles the case where this row is being
-  //   touched by the no-eyewear cohort pass — ctx values are NULL, the
-  //   earlier eyewear aggregate survives.
-  `UPDATE companies
-      SET name              = COALESCE(name, ?),
-          phone             = COALESCE(phone, ?),
-          email             = COALESCE(email, ?),
-          city              = COALESCE(city, ?),
-          state             = COALESCE(state, ?),
-          country           = COALESCE(country, ?),
-          description       = COALESCE(description, ?),
-          meta_description  = COALESCE(meta_description, ?),
-          ecom_platform     = COALESCE(ecom_platform, ?),
-          estimated_yearly_sales_cents = COALESCE(estimated_yearly_sales_cents, ?),
-          estimated_monthly_visits     = COALESCE(estimated_monthly_visits, ?),
-          facebook_url      = COALESCE(facebook_url, ?),
-          instagram_url     = COALESCE(instagram_url, ?),
-          top_brand                    = COALESCE(?, top_brand),
-          eyewear_categories           = COALESCE(?, eyewear_categories),
-          eyewear_sku_count            = COALESCE(?, eyewear_sku_count),
-          eyewear_price_range          = COALESCE(?, eyewear_price_range),
-          eyewear_price_median_cents   = COALESCE(?, eyewear_price_median_cents),
-          eyewear_top_competitors      = COALESCE(?, eyewear_top_competitors),
-          eyewear_sample_titles        = COALESCE(?, eyewear_sample_titles),
-          tags              = ?,
-          updated_at        = ?
-    WHERE id = ?`,
-);
+// Lazy-prepared statements. Top-level `sqlite.prepare(...)` would
+// evaluate during module import, which breaks Next.js's "Collecting
+// page data" build step — at that point the in-memory DB is empty
+// (no migrations applied yet) and "no such table: companies" kills
+// the build. Each statement is prepared on first use instead, which
+// is at runtime when the schema is ready.
+interface PreparedStmts {
+  selectByDomain: ReturnType<typeof sqlite.prepare<[string]>>;
+  insertNew: ReturnType<typeof sqlite.prepare>;
+  mergeExisting: ReturnType<typeof sqlite.prepare>;
+}
+let _stmts: PreparedStmts | null = null;
+function stmts(): PreparedStmts {
+  if (_stmts) return _stmts;
+  _stmts = {
+    selectByDomain: sqlite.prepare<[string]>(
+      `SELECT id, status, tags FROM companies WHERE domain = ? LIMIT 1`,
+    ),
+    insertNew: sqlite.prepare(
+      `INSERT INTO companies (
+         id, name, type, domain, website, phone, email,
+         address, city, state, country, status,
+         source, source_type, source_query,
+         description, meta_description,
+         ecom_platform, estimated_yearly_sales_cents, estimated_monthly_visits,
+         facebook_url, instagram_url,
+         top_brand, eyewear_categories, eyewear_sku_count,
+         eyewear_price_range, eyewear_price_median_cents,
+         eyewear_top_competitors, eyewear_sample_titles,
+         tags, created_at, updated_at
+       ) VALUES (
+         ?, ?, 'online', ?, ?, ?, ?,
+         ?, ?, ?, ?, 'new',
+         ?, 'shopify_crawl', ?,
+         ?, ?,
+         ?, ?, ?,
+         ?, ?,
+         ?, ?, ?,
+         ?, ?,
+         ?, ?,
+         ?, ?, ?
+       )`,
+    ),
+    // Asymmetric merge — two rules in one UPDATE:
+    //   Firmographics → COALESCE(existing, new) preserves edits
+    //   Eyewear aggregates → COALESCE(new, existing) prefers fresh
+    mergeExisting: sqlite.prepare(
+      `UPDATE companies
+          SET name              = COALESCE(name, ?),
+              phone             = COALESCE(phone, ?),
+              email             = COALESCE(email, ?),
+              city              = COALESCE(city, ?),
+              state             = COALESCE(state, ?),
+              country           = COALESCE(country, ?),
+              description       = COALESCE(description, ?),
+              meta_description  = COALESCE(meta_description, ?),
+              ecom_platform     = COALESCE(ecom_platform, ?),
+              estimated_yearly_sales_cents = COALESCE(estimated_yearly_sales_cents, ?),
+              estimated_monthly_visits     = COALESCE(estimated_monthly_visits, ?),
+              facebook_url      = COALESCE(facebook_url, ?),
+              instagram_url     = COALESCE(instagram_url, ?),
+              top_brand                    = COALESCE(?, top_brand),
+              eyewear_categories           = COALESCE(?, eyewear_categories),
+              eyewear_sku_count            = COALESCE(?, eyewear_sku_count),
+              eyewear_price_range          = COALESCE(?, eyewear_price_range),
+              eyewear_price_median_cents   = COALESCE(?, eyewear_price_median_cents),
+              eyewear_top_competitors      = COALESCE(?, eyewear_top_competitors),
+              eyewear_sample_titles        = COALESCE(?, eyewear_sample_titles),
+              tags              = ?,
+              updated_at        = ?
+        WHERE id = ?`,
+    ),
+  };
+  return _stmts;
+}
 
 /** Merge a new tag set into an existing JSON-array tags column.
  *  Returns the JSON-stringified deduped union. */
@@ -473,7 +478,8 @@ function upsert(
   cohort: CohortRow,
   ctx: UpsertContext,
 ): { created: boolean; companyId: string } {
-  const existing = selectByDomain.get(domain) as
+  const s = stmts();
+  const existing = s.selectByDomain.get(domain) as
     | { id: string; status: string; tags: string | null } | undefined;
 
   const mergedTags = mergeTags(existing?.tags ?? null, ctx.tagsForRow);
@@ -501,7 +507,7 @@ function upsert(
   const instagramUrl = pickFirst(cohort.instagram);
 
   if (existing) {
-    mergeExisting.run(
+    s.mergeExisting.run(
       merchantName, phone, email, city, state, country,
       description, metaDescription, ecomPlatform,
       yearlySalesCents,
@@ -516,7 +522,7 @@ function upsert(
   }
 
   const id = crypto.randomUUID();
-  insertNew.run(
+  s.insertNew.run(
     id, merchantName, domain, website, phone, email,
     address, city, state, country,
     ctx.sourceLabel, ctx.sourceQuery,
