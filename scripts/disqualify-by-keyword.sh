@@ -41,15 +41,20 @@ fi
 
 # Build JSON array of keywords
 KW_JSON=$(printf '%s\n' "${KEYWORDS[@]}" | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))")
-DRY=$([ "$APPLY" = "true" ] && echo "false" || echo "true")
+# Python booleans are PascalCase — substituting shell-style lowercase
+# `true`/`false` blew up with NameError. Use Python literals here.
+DRY=$([ "$APPLY" = "true" ] && echo "False" || echo "True")
 REASON_JSON=${REASON:-"${KEYWORDS[*]} — disqualified by keyword sweep"}
 
-BODY=$(python3 -c "
-import json
+# Pass values via env to the python3 inline script — avoids the
+# pain of escaping em-dashes and quotes inside a heredoc-style
+# string substitution.
+BODY=$(KW="$KW_JSON" R="$REASON_JSON" D="$DRY" python3 -c "
+import os, json
 print(json.dumps({
-  'keywords': $KW_JSON,
-  'reason': '''$REASON_JSON''',
-  'dry_run': $DRY,
+  'keywords': json.loads(os.environ['KW']),
+  'reason':   os.environ['R'],
+  'dry_run':  os.environ['D'] == 'True',
 }))
 ")
 
