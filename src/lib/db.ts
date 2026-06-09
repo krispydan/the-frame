@@ -419,6 +419,29 @@ try {
   sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_amazon_listing_group_key ON catalog_amazon_listing_groups(group_key)`);
 } catch (e) { console.error("[db] catalog_amazon_listing_groups creation error:", e); }
 
+// Helium 10 Cerebro keyword research, scrubbed + classified by
+// keywords/scrub.ts. One row per (phrase, source). Feeds the per-product
+// keyword assembler that builds Amazon title/bullet/backend pools.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS catalog_keywords (
+    id TEXT PRIMARY KEY NOT NULL,
+    phrase TEXT NOT NULL,
+    search_volume INTEGER DEFAULT 0,
+    title_density INTEGER DEFAULT 0,
+    competing_products INTEGER DEFAULT 0,
+    keyword_sales INTEGER DEFAULT 0,
+    cerebro_iq INTEGER DEFAULT 0,
+    classification TEXT,                       -- head|shape|feature|audience|use_case
+    shape TEXT,                                -- canonical shape, or NULL = shared head term
+    verdict TEXT NOT NULL,                     -- keep|brand|irrelevant|off_intent|junk
+    source TEXT NOT NULL,                      -- e.g. "cerebro-round-2026-06-09"
+    imported_at TEXT DEFAULT (datetime('now')),
+    override_status TEXT                        -- whitelist|blacklist (manual)
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_catalog_keywords_phrase_source ON catalog_keywords(phrase, source)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_catalog_keywords_shape_verdict ON catalog_keywords(shape, verdict)`);
+} catch (e) { console.error("[db] catalog_keywords creation error:", e); }
+
 // Group key on each product — lets the row composer slice products
 // by group in O(1). Backfilled from the curated frameShape tag.
 try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN amazon_group_key TEXT"); } catch { /* exists */ }

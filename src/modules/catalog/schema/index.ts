@@ -354,6 +354,40 @@ export const amazonListingGroups = sqliteTable("catalog_amazon_listing_groups", 
   uniqueIndex("uq_amazon_listing_group_key").on(table.groupKey),
 ]);
 
+/**
+ * Helium 10 Cerebro keyword research, scrubbed + classified by
+ * keywords/scrub.ts. One row per (phrase, source). `shape` is null for
+ * shared head/feature/audience terms; set to a canonical frame shape for
+ * shape-specific terms. The per-product assembler (keywords/assemble.ts)
+ * reads verdict='keep' rows, keyed off each product's shape(s), to build
+ * the title/bullet/backend keyword pools.
+ */
+export const keywords = sqliteTable("catalog_keywords", {
+  id: id(),
+  /** Normalized search phrase (lowercased, collapsed whitespace). */
+  phrase: text("phrase").notNull(),
+  /** Helium 10 metrics — search volume drives ranking. */
+  searchVolume: integer("search_volume").default(0),
+  titleDensity: integer("title_density").default(0),
+  competingProducts: integer("competing_products").default(0),
+  keywordSales: integer("keyword_sales").default(0),
+  cerebroIq: integer("cerebro_iq").default(0),
+  /** Pool label from scrub: head | shape | feature | audience | use_case. */
+  classification: text("classification"),
+  /** Canonical frame shape (round, cat-eye, …) or null = shared head term. */
+  shape: text("shape"),
+  /** keep | brand | irrelevant | off_intent | junk. */
+  verdict: text("verdict").notNull(),
+  /** Import provenance, e.g. "cerebro-round-2026-06-09". */
+  source: text("source").notNull(),
+  importedAt: timestamp("imported_at"),
+  /** Manual operator override from the review UI: whitelist | blacklist. */
+  overrideStatus: text("override_status"),
+}, (table) => [
+  uniqueIndex("uq_catalog_keywords_phrase_source").on(table.phrase, table.source),
+  index("idx_catalog_keywords_shape_verdict").on(table.shape, table.verdict),
+]);
+
 export const amazonListings = sqliteTable("catalog_amazon_listings", {
   id: id(),
   productId: text("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
