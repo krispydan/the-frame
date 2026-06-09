@@ -54,49 +54,12 @@ export interface AiSeoOutput {
 
 /**
  * Trademark and brand-name terms that must never appear in our copy.
- * Wayfarer is Ray-Ban's trademark; the others are competitor brand names
- * that would mislead shoppers. Lower-cased; the prompt instructs the
- * model to avoid these in any case.
+ * Single source of truth lives in the keyword scrub module (brands +
+ * trademarks + pricing words) so the Amazon + Google Shopping + SEO
+ * prompts all forbid the same list. Re-exported here for backwards
+ * compatibility with existing importers.
  */
-const FORBIDDEN_TERMS = [
-  // Trademarked product line names
-  "wayfarer",
-  "clubmaster",
-  "erika",
-  "justin",
-  "andy",
-  "predator",
-  // Competitor brand names
-  "ray-ban",
-  "rayban",
-  "ray ban",
-  "persol",
-  "oakley",
-  "gucci",
-  "prada",
-  "dior",
-  "tom ford",
-  "celine",
-  "saint laurent",
-  "ysl",
-  "versace",
-  "chanel",
-  "miu miu",
-  "fendi",
-  "balenciaga",
-  "bottega",
-  "maui jim",
-  "warby parker",
-  "quay",
-  // Pricing/quality words we don't use
-  "cheap",
-  "discount",
-  "bargain",
-  "knock-off",
-  "knockoff",
-  "dupe",
-  "imitation",
-];
+import { FORBIDDEN_TERMS } from "@/modules/catalog/lib/keywords/scrub";
 
 const SYSTEM_PROMPT = `\
 You are a Google Shopping SEO copywriter for Jaxy, a fashion sunglasses
