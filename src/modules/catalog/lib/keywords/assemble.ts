@@ -16,7 +16,7 @@
  * budget (Amazon hard-caps at 250).
  */
 import { sqlite } from "@/lib/db";
-import { normalizeShape, CANONICAL_SHAPES, BRAND_SINGLE_TOKENS } from "./scrub";
+import { canonicalShapeFor, BRAND_SINGLE_TOKENS } from "./scrub";
 
 export interface AssembledKeywords {
   /** Generic head terms for the title (e.g. "sunglasses for women"). */
@@ -62,13 +62,6 @@ const STOPWORDS = new Set([
   "my", "or", "by", "best", "top", "new", "that", "fit", "over",
 ]);
 
-/** Map any shape label to its canonical key, or null if unrecognized. */
-function canonicalizeShape(s: string | null | undefined): string | null {
-  if (!s) return null;
-  const n = normalizeShape(s);
-  return CANONICAL_SHAPES.find((c) => normalizeShape(c) === n) ?? null;
-}
-
 /** Split a phrase into indexable tokens (lowercase alphanumerics). */
 function tokenize(phrase: string): string[] {
   return phrase.toLowerCase().match(/[a-z0-9]+/g) ?? [];
@@ -80,9 +73,9 @@ export function assembleProductKeywords(opts: AssembleOptions): AssembledKeyword
   const featureLimit = opts.featureLimit ?? 6;
   const budget = opts.backendByteBudget ?? 240;
 
-  const primary = canonicalizeShape(opts.primaryShape);
+  const primary = canonicalShapeFor(opts.primaryShape);
   const secondaries = (opts.secondaryShapes ?? [])
-    .map(canonicalizeShape)
+    .map(canonicalShapeFor)
     .filter((s): s is string => !!s && s !== primary);
   const shapeSet = new Set([primary, ...secondaries].filter((s): s is string => !!s));
 

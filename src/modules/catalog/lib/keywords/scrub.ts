@@ -196,6 +196,22 @@ export function normalizeShape(shape: string | null | undefined): string {
 /** Canonical shape keys, exposed for the importer/assembler/UI tabs. */
 export const CANONICAL_SHAPES = Object.keys(SHAPE_SYNONYMS);
 
+/**
+ * Map any shape label (curated tag value, free-form) to its canonical
+ * key via the synonym table — "hexagonal" → "hexagon", "Cat Eye" →
+ * "cat-eye". Returns null when unrecognized.
+ */
+export function canonicalShapeFor(label: string | null | undefined): string | null {
+  if (!label) return null;
+  const n = normalizeShape(label);
+  if (!n) return null;
+  for (const [canonical, synonyms] of Object.entries(SHAPE_SYNONYMS)) {
+    if (normalizeShape(canonical) === n) return canonical;
+    if (synonyms.some((s) => normalizeShape(s) === n)) return canonical;
+  }
+  return null;
+}
+
 // ── Classification ───────────────────────────────────────────────────────
 
 export type KeywordVerdict = "keep" | "brand" | "irrelevant" | "off_intent" | "junk";
