@@ -10,6 +10,7 @@
     "gaming glasses",
     "reading glasses",
     "readers",
+    "reader",
     "reading glass",
     "bifocal",
     "bifocals",
@@ -41,7 +42,14 @@
     "costume glasses",
     "novelty glasses",
     "party glasses",
-    "eclipse glasses"
+    "eclipse glasses",
+    "dog",
+    "doggles",
+    "pet",
+    "fake",
+    "replica",
+    "knockoff",
+    "knock off"
   ],
   "wrong_audience": [
     "kids",

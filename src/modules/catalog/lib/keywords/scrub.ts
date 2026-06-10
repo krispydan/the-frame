@@ -31,6 +31,15 @@ export const BRAND_TERMS: string[] = [
   ...(brandData.brands ?? []),
 ].map((t) => t.toLowerCase().trim()).filter(Boolean);
 
+/**
+ * Single-word brand tokens, for defense-in-depth in the backend keyword
+ * builder: even if a multi-word brand phrase slips past classification,
+ * no individual brand token can be packed into generic_keywords.
+ */
+export const BRAND_SINGLE_TOKENS: ReadonlySet<string> = new Set(
+  BRAND_TERMS.filter((t) => !t.includes(" ") && !t.includes("-")),
+);
+
 /** Pricing / quality words we never use in our own copy. Not brands, so
  *  they don't scrub a keyword (people DO search "cheap sunglasses"), but
  *  they must never appear in generated titles/bullets. */
