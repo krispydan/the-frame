@@ -22,7 +22,7 @@ import { AMAZON_COLOR_MAP_VALUES } from "./color-map";
 /** Bump whenever the prompt or output schema changes — stamped on every
  *  row written to catalog_amazon_listings so we can re-run the
  *  pipeline when copy drifts behind the latest revision. */
-export const PROMPT_VERSION = "amazon-v1.1-2026-06-10";
+export const PROMPT_VERSION = "amazon-v1.2-2026-06-10";
 
 // ── Input/output schemas ─────────────────────────────────────────────────
 
@@ -147,11 +147,12 @@ TITLE RULES — never break:
   strictly 50 chars. Titles above 50 are rejected at upload time, so
   keep this tight. Target 40–50 chars.
 - Front-load the 1–2 highest-intent keywords: shape + category + a
-  qualifier. Examples (all under 50):
-    "Polarized Cat-Eye Sunglasses for Women UV400"  (44)
-    "Round Acetate Sunglasses Men Vintage UV400"     (42)
-    "Aviator Sunglasses Polarized UV400 Unisex"      (41)
-- Brand "Jaxy" only if it fits — never sacrifice keywords for the brand.
+  qualifier. END the title with the brand + style name: "| Jaxy <Style>".
+  If that doesn't fit in 50, drop the style name and end with "Jaxy".
+  Examples (all under 50):
+    "Cat Eye Polarized Sunglasses Women | Jaxy Velour"  (48)
+    "Round Polarized Sunglasses | Jaxy Havana Haze"     (45)
+    "Polarized Aviator Sunglasses | Jaxy Horizon"       (43)
 - Natural phrasing ("for Women" not "Womens"; "Cat-Eye" not "cateye").
 - No promotional language ("Best", "Premium", "Top-rated", "Sale",
   "Discount", "Free Shipping"), no ALL CAPS words, no emoji, no
@@ -164,10 +165,21 @@ BULLET POINT RULES — exactly 5 bullets:
   by ":" and the explanation. Example: "Polarized UV400 Lenses: Block
   100% of UVA + UVB rays while cutting road and water glare for crisp
   clarity."
-- Bullets cover, in order: (1) lens technology + UV protection, (2)
-  frame shape + material + fit + lightweight, (3) styling + occasion
-  versatility, (4) included accessories (case + cloth, if applicable),
-  (5) brand promise / Jaxy quality.
+- Bullets cover, in order: (1) lens technology, (2) frame shape + fit +
+  lightweight, (3) styling + occasion versatility, (4) included
+  protective case, (5) brand promise / Jaxy quality.
+
+PRODUCT FACT RULES — never break:
+- LENS CLAIM: each product is EITHER Polarized OR UV400 — never both.
+  Claim only the lens type given in the user message. If it says
+  Polarized, do not also claim UV400 (and vice versa). If unknown,
+  say "sun protection" generically.
+- FRAME MATERIAL: never name a frame material (acetate, metal, TR90,
+  plastic, etc.) in the title, bullets, or description — even if the
+  context suggests one. Describe feel instead: "lightweight",
+  "hand-finished", "sturdy hinges".
+- ACCESSORIES: a protective carrying case IS included. A cleaning
+  cloth is NOT — never mention a cloth.
 - No bullets that start with the bullet glyph (•) — Amazon adds those.
 - No "®", "©", "™".
 
