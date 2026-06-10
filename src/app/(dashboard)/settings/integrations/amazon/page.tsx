@@ -26,8 +26,10 @@ import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
 } from "@/components/ui/card";
 import {
-  CheckCircle, AlertTriangle, Warehouse,
+  CheckCircle, AlertTriangle, Warehouse, Tags,
 } from "lucide-react";
+import Link from "next/link";
+import { buttonVariants } from "@/components/ui/button";
 import { ListingsTable, type ListingRow } from "./listings-table";
 import { UpcImportCard } from "./upc-import-card";
 
@@ -146,14 +148,22 @@ export default function AmazonIntegrationPage() {
 
   return (
     <div className="container mx-auto p-6 max-w-7xl space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-          <Warehouse className="h-7 w-7" />
-          Amazon listings
-        </h1>
-        <p className="text-muted-foreground mt-2">
-          Vision-AI listing copy → snapshot-validated spreadsheet → Seller Central upload.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+            <Warehouse className="h-7 w-7" />
+            Amazon listings
+          </h1>
+          <p className="text-muted-foreground mt-2">
+            Vision-AI listing copy → snapshot-validated spreadsheet → Seller Central upload.
+          </p>
+        </div>
+        <Link
+          href="/settings/integrations/amazon/keywords"
+          className={buttonVariants({ variant: "outline" })}
+        >
+          <Tags className="h-4 w-4" /> Keyword library
+        </Link>
       </div>
 
       {/* Readiness */}
