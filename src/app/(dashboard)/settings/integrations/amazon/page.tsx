@@ -29,7 +29,6 @@ import {
   CheckCircle, AlertTriangle, Warehouse, Tags,
 } from "lucide-react";
 import Link from "next/link";
-import { buttonVariants } from "@/components/ui/button";
 import { ListingsTable, type ListingRow } from "./listings-table";
 import { UpcImportCard } from "./upc-import-card";
 
@@ -158,11 +157,14 @@ export default function AmazonIntegrationPage() {
             Vision-AI listing copy → snapshot-validated spreadsheet → Seller Central upload.
           </p>
         </div>
+        {/* Static classes (matches Button outline/default) — buttonVariants
+            is a client-module function and CANNOT be called from this
+            server component in this Next.js version. */}
         <Link
           href="/settings/integrations/amazon/keywords"
-          className={buttonVariants({ variant: "outline" })}
+          className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-sm font-medium whitespace-nowrap transition-all hover:bg-muted hover:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50 [&_svg]:size-4 [&_svg]:shrink-0"
         >
-          <Tags className="h-4 w-4" /> Keyword library
+          <Tags /> Keyword library
         </Link>
       </div>
 
