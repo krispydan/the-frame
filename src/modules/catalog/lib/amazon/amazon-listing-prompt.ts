@@ -22,7 +22,7 @@ import { AMAZON_COLOR_MAP_VALUES } from "./color-map";
 /** Bump whenever the prompt or output schema changes — stamped on every
  *  row written to catalog_amazon_listings so we can re-run the
  *  pipeline when copy drifts behind the latest revision. */
-export const PROMPT_VERSION = "amazon-v1.0-2026-05-24";
+export const PROMPT_VERSION = "amazon-v1.1-2026-06-10";
 
 // ── Input/output schemas ─────────────────────────────────────────────────
 
@@ -41,8 +41,21 @@ export interface AmazonListingInput {
   gender: string | null;
   /** Polarized / UV400 etc. */
   lensType: string | null;
-  /** Free-form keyword research already curated by SEO flow. */
-  keywords: string[];
+  /**
+   * Ranked, brand-scrubbed keyword pools from the per-product assembler
+   * (keywords/assemble.ts), keyed off the product's frame shape(s).
+   * - head:    generic high-volume terms to front-load in the title
+   * - shape:   shape-specific terms for the title + bullets
+   * - feature: feature terms (polarized, uv400) for the bullets
+   * - backend: ready-made generic_keywords string (≤240 bytes, deduped
+   *            against title/bullets) — copied verbatim by the prompt.
+   */
+  keywordSet: {
+    head: string[];
+    shape: string[];
+    feature: string[];
+    backend: string;
+  };
   /** Comma-separated colour names across the SKUs. */
   availableColors: string[];
   /** HTTPS image URLs (Shopify CDN). First = hero. */
@@ -166,11 +179,10 @@ DESCRIPTION RULES:
 - Do NOT claim warranty, lifetime guarantee, or free returns/shipping.
 
 GENERIC_KEYWORDS:
-- ≤240 bytes (Amazon hard-caps at 250). Space-delimited search terms.
-- All lowercase. No commas, no punctuation. No duplicates with title or
-  bullets (Amazon de-prioritises overlap).
-- Include long-tail queries the buyer would type ("polarized sunglasses
-  women uv400", "trendy cat eye sunglasses").
+- The user message provides a ready-made BACKEND SEARCH STRING. Copy it
+  VERBATIM into generic_keywords — it is already lowercase, deduped
+  against the title/bullets, and within Amazon's byte budget. Do not add,
+  reorder, or remove tokens.
 
 SUGGESTED_* — must be literal enum values:
 - suggested_color_map ∈ ${lensColorMap}
@@ -267,10 +279,28 @@ export function buildAmazonListingPrompt(
     );
   }
 
-  if (input.keywords.length > 0) {
+  const ks = input.keywordSet;
+  if (ks.head.length || ks.shape.length || ks.feature.length) {
     lines.push("");
-    lines.push("Keyword research (already curated, no forbidden terms — incorporate naturally):");
-    for (const kw of input.keywords) lines.push(`  - ${kw}`);
+    lines.push("KEYWORD RESEARCH — ranked by real Amazon search volume, brand-scrubbed:");
+    if (ks.head.length) {
+      lines.push("Head terms (highest volume — front-load 1–2 in the TITLE):");
+      for (const k of ks.head) lines.push(`  - ${k}`);
+    }
+    if (ks.shape.length) {
+      lines.push("Shape terms (work into the title + bullets — this is what differentiates this product):");
+      for (const k of ks.shape) lines.push(`  - ${k}`);
+    }
+    if (ks.feature.length) {
+      lines.push("Feature terms (use in bullets where true to the product):");
+      for (const k of ks.feature) lines.push(`  - ${k}`);
+    }
+  }
+  if (ks.backend) {
+    lines.push("");
+    lines.push("BACKEND SEARCH STRING — copy VERBATIM into generic_keywords (already");
+    lines.push("deduped against title/bullets and within the byte budget; do not edit):");
+    lines.push(ks.backend);
   }
 
   if (input.existingDescription) {

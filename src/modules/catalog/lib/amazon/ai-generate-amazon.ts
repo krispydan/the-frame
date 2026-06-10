@@ -12,6 +12,7 @@ import { db, sqlite } from "@/lib/db";
 import { products, skus, tags, copyVersions, amazonListings } from "@/modules/catalog/schema";
 import { eq, inArray } from "drizzle-orm";
 import { curatedAttrsFromTags } from "@/modules/catalog/lib/curated-attributes";
+import { assembleProductKeywords } from "@/modules/catalog/lib/keywords/assemble";
 import {
   buildAmazonListingPrompt,
   validateAmazonListingOutput,
@@ -108,10 +109,20 @@ async function buildInput(productId: string): Promise<BuildInputResult | null> {
     allTags.map((t) => ({ tagName: t.tagName, dimension: t.dimension })),
   );
 
-  const keywords = allTags
-    .filter((t) => (t.dimension ?? "").toLowerCase() === "keyword")
+  // Secondary shapes (catalog_tags dimension='secondary_shape') let a
+  // style that legitimately reads as two shapes pull keywords from both
+  // pools, so it ranks for each. Primary shape is the curated frameShape.
+  const secondaryShapes = allTags
+    .filter((t) => (t.dimension ?? "").toLowerCase() === "secondary_shape")
     .map((t) => (t.tagName ?? "").trim())
     .filter(Boolean);
+
+  // Ranked, brand-scrubbed keyword pools from the assembler — replaces
+  // the old raw dimension='keyword' tag dump.
+  const keywordSet = assembleProductKeywords({
+    primaryShape: curated.frameShape,
+    secondaryShapes,
+  });
 
   const availableColors = Array.from(
     new Set(allSkus.map((s) => (s.colorName ?? "").trim()).filter(Boolean)),
@@ -135,7 +146,7 @@ async function buildInput(productId: string): Promise<BuildInputResult | null> {
       frameMaterial: curated.frameMaterial,
       gender: curated.gender,
       lensType: curated.lensType,
-      keywords,
+      keywordSet,
       availableColors,
       imageUrls,
       existingDescription: product.description,
@@ -313,6 +324,16 @@ export async function generateAmazonListing(
       promptVersion: PROMPT_VERSION,
       persisted: false,
     };
+  }
+
+  // Ship the assembler's backend verbatim into generic_keywords — it's
+  // volume-ranked, brand-scrubbed, token-deduped against the title/
+  // bullets and byte-safe, so it beats whatever the model returns.
+  // Guard against an empty pool (e.g. a shapeless product).
+  const backend = built.input.keywordSet.backend;
+  if (backend) {
+    output.generic_keywords = backend;
+    output.char_count.generic_keywords = Buffer.byteLength(backend, "utf8");
   }
 
   let persisted = false;
