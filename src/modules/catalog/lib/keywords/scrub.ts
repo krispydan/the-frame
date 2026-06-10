@@ -164,6 +164,20 @@ function matchesAny(haystack: string, needles: string[]): string | null {
   return null;
 }
 
+/**
+ * Like matchesAny but tolerates a trailing plural/possessive on the brand
+ * token, so "ray bans" / "raybans" / "oakley's" all match "ray ban" /
+ * "rayban" / "oakley". Brand pollution is the #1 thing we must catch.
+ */
+function matchesBrand(haystack: string, needles: string[]): string | null {
+  for (const n of needles) {
+    if (!n) continue;
+    const re = new RegExp(`(?:^|[^a-z0-9])${escapeRe(n)}(?:['’]s|s)?(?:$|[^a-z0-9])`, "i");
+    if (re.test(haystack)) return n;
+  }
+  return null;
+}
+
 /** Normalize a shape label for matching: lowercase, strip spaces/hyphens.
  *  "Cat-Eye" / "cat eye" / "cateye" all collapse to "cateye". */
 export function normalizeShape(shape: string | null | undefined): string {
@@ -218,8 +232,8 @@ export function classifyKeyword(
   const whitelisted = opts.whitelist?.has(phrase) ?? false;
 
   if (!whitelisted) {
-    // 3. Brand / trademark.
-    const brand = matchesAny(phrase, BRAND_TERMS);
+    // 3. Brand / trademark (plural/possessive-tolerant).
+    const brand = matchesBrand(phrase, BRAND_TERMS);
     if (brand) {
       return { phrase, verdict: "brand", pool: null, shape: null, reason: `brand:${brand}` };
     }
