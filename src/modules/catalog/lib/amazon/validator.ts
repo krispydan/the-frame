@@ -70,11 +70,15 @@ function checkCell(
   /** "parent" or the SKU string. Drives which required-empty checks
    *  fire. */
   scope: string = "parent",
+  /** Skip ALL required-empty checks — used for PartialUpdate feeds
+   *  where omitted attributes keep their existing catalog values. */
+  skipRequired = false,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const trimmed = value.trim();
 
   if (col.required && !trimmed) {
+    if (skipRequired) return issues;
     // Skip required-empty on parent rows for fields that live only on
     // children in a Variation listing.
     const isParent = scope === "parent";
@@ -190,9 +194,18 @@ function checkSoftRules(parent: AmazonRow): ValidationIssue[] {
  * Validate a single product's rows. The parent row is row 0; child rows
  * are 1..N, parallel to skuIdentifiers.
  */
-export function validateProductRows(input: ValidateInput): ProductValidationResult {
+export function validateProductRows(
+  input: ValidateInput,
+  opts?: { feedMode?: "establish" | "update" },
+): ProductValidationResult {
   const columns = getAmazonColumns();
   const [parentRow, ...childRows] = input.rows;
+
+  // PartialUpdate feeds (feedMode "update") only change the attributes
+  // they carry — blank required columns keep their existing catalog
+  // values, so required-empty must not block the batch.
+  const skipRequired = opts?.feedMode === "update"
+    || (parentRow?.update_delete === "PartialUpdate");
 
   const productIssues: ValidationIssue[] = [];
 
@@ -208,7 +221,7 @@ export function validateProductRows(input: ValidateInput): ProductValidationResu
       // `who` is "parent" for the parent row, or the SKU string for
       // children. checkCell uses it to decide which required-empty
       // checks fire (e.g. external_product_id is skipped on parent).
-      for (const issue of checkCell(col, value, who)) {
+      for (const issue of checkCell(col, value, who, skipRequired)) {
         out.push({ ...issue, field: `${who}.${issue.field}` });
       }
     }
@@ -250,8 +263,11 @@ export function validateProductRows(input: ValidateInput): ProductValidationResu
  * Validate a whole batch. Convenience over validateProductRows for the
  * download endpoint, which needs the array.
  */
-export function validateAmazonBatch(inputs: ValidateInput[]): ProductValidationResult[] {
-  return inputs.map(validateProductRows);
+export function validateAmazonBatch(
+  inputs: ValidateInput[],
+  opts?: { feedMode?: "establish" | "update" },
+): ProductValidationResult[] {
+  return inputs.map((i) => validateProductRows(i, opts));
 }
 
 /** Returns true when zero products have any blocked-severity issue. */

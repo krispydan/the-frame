@@ -48,11 +48,27 @@ export interface AmazonListingInput {
   suggestedItemShape: string | null;
 }
 
+/**
+ * Feed posture toward Amazon's catalog:
+ *   - "establish": first-time registration. Children carry UPCs so
+ *     Amazon can match/create ASINs; full rows.
+ *   - "update": every SKU already exists on Amazon. Rows go out as
+ *     update_delete=PartialUpdate WITHOUT product ids (re-sending the
+ *     UPC re-runs catalog matching and raises 8541 "data conflicts with
+ *     Amazon catalog" against our own ASINs) and WITHOUT the
+ *     fulfillment/quantity block (Amazon rejects quantity for
+ *     registered SKUs with error 90248 "allowed maximum is 0 values";
+ *     inventory is owned by Manage Inventory / FBA receipts).
+ */
+export type AmazonFeedMode = "establish" | "update";
+
 export interface MapInput {
   product: ExportProduct;
   listing: AmazonListingInput | null;
   /** Ordered Shopify CDN URLs. First = main_image_url, rest fill other_image_url1..8. */
   imageUrls: string[];
+  /** Defaults to "update" — the catalog was established 2026-06. */
+  feedMode?: AmazonFeedMode;
 }
 
 // ── Static defaults ─────────────────────────────────────────────────────
@@ -303,7 +319,10 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
     // exact format, not a free-text label).
     parent_child: "Parent",
     parent_sku: "",
-    relationship_type: "Variation",
+    // relationship_type lives on CHILD rows only — Amazon warns 99007
+    // ("conflicts with parent_child=Parent, ignored") when a parent
+    // carries Variation here.
+    relationship_type: "",
     // "color/lenscolor" = Amazon's two-axis theme covering frame color
     // (Amazon's "color_name") AND lens color (Amazon's "lens_color").
     // Matches Jaxy's actual SKU pattern: "Brown/Purple", "Green",
@@ -469,7 +488,26 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
     children.push(fbmChild, fbaChild);
   }
 
-  return [parent, ...children];
+  const rows = [parent, ...children];
+
+  // ── Update-mode transform ───────────────────────────────────────────
+  // See AmazonFeedMode docs: PartialUpdate every row, strip product ids
+  // and the fulfillment/quantity block from children. Applied last so
+  // both FBM and FBA twins (built via spread) get the same treatment.
+  if ((input.feedMode ?? "update") === "update") {
+    for (const row of rows) {
+      row.update_delete = "PartialUpdate";
+      if (row.parent_child === "Child") {
+        row.external_product_id = "";
+        row.external_product_id_type = "";
+        row["fulfillment_availability#1.fulfillment_channel_code"] = "";
+        row["fulfillment_availability#1.quantity"] = "";
+        row["fulfillment_availability#1.is_inventory_available"] = "";
+      }
+    }
+  }
+
+  return rows;
 }
 
 // ─────────────────────────────────────────────────────────────────────
