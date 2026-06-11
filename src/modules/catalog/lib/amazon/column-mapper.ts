@@ -328,7 +328,7 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
     // Matches Jaxy's actual SKU pattern: "Brown/Purple", "Green",
     // "Tortoise/Rose" — frame and lens vary together. "LensColor" alone
     // implied only the lens tint changed across SKUs, which isn't right.
-    variation_theme: "color/lenscolor",
+    variation_theme: "LensColor",
     // Content
     product_description: description,
     bullet_point1: bullets[0] ?? "",
@@ -422,7 +422,7 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
     // Matches Jaxy's actual SKU pattern: "Brown/Purple", "Green",
     // "Tortoise/Rose" — frame and lens vary together. "LensColor" alone
     // implied only the lens tint changed across SKUs, which isn't right.
-    variation_theme: "color/lenscolor",
+    variation_theme: "LensColor",
       // Variation axis — color
       color_name: colorName,
       color_map: colorMap,
@@ -623,7 +623,7 @@ export function buildAmazonGroupRows(input: MapGroupInput): Record<string, strin
     parent_child: "Parent",
     parent_sku: "",
     relationship_type: "Variation",
-    variation_theme: "color/lenscolor",
+    variation_theme: "LensColor",
     product_description: group.productDescription,
     bullet_point1: group.bulletPoint1 ?? "",
     bullet_point2: group.bulletPoint2 ?? "",
@@ -713,7 +713,7 @@ export function buildAmazonGroupRows(input: MapGroupInput): Record<string, strin
         parent_child: "Child",
         parent_sku: parentSku,
         relationship_type: "Variation",
-        variation_theme: "color/lenscolor",
+        variation_theme: "LensColor",
         // The variation axis — frame + lens colour, with style baked
         // into the colour label.
         color_name: composedColor,
