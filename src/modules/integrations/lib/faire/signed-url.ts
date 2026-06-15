@@ -6,17 +6,24 @@
  * Faire API token publicly, so we host a tightly-scoped proxy route that
  * re-fetches the PDF from Faire on the inbound request.
  *
- * Each URL is bound to a single Faire order id and expires after a short
- * window (default 24h). HMAC signed with PACKING_SLIP_SIGNING_SECRET (falls
- * back to a derivation of SHOPIFY_APP_SECRET for envs that haven't set the
- * dedicated secret yet — both are server-side only).
+ * URLs are HMAC-signed and bound to a single Faire order id. They do NOT
+ * expire — the warehouse may open the attachment days or weeks after the
+ * order is allocated, and a TTL that runs out before pick produces a
+ * confusing "Expired" error that looks like a login wall.
+ *
+ * Legacy URLs (minted before 2026-06-15) included an `exp` query param and
+ * signed over `${orderId}|${exp}`. The verifier still accepts those — it
+ * re-signs with the same exp and just skips the expiry check — so existing
+ * attachments in ShipHero start working again on deploy without a backfill.
+ *
+ * HMAC signed with PACKING_SLIP_SIGNING_SECRET (falls back to a derivation
+ * of SHOPIFY_APP_SECRET for envs that haven't set the dedicated secret yet
+ * — both are server-side only).
  *
  * See: docs/shiphero-webhooks-and-faire-slips.md
  */
 
 import { createHmac, timingSafeEqual } from "crypto";
-
-const DEFAULT_TTL_SECONDS = 24 * 60 * 60; // 24h
 
 function getSigningSecret(): string {
   const explicit = process.env.PACKING_SLIP_SIGNING_SECRET;
@@ -36,7 +43,18 @@ function getSigningSecret(): string {
   return createHmac("sha256", base).update("faire-packing-slip-v1").digest("hex");
 }
 
-function sign(orderId: string, exp: number): string {
+/** Current scheme: HMAC over the orderId alone. */
+function sign(orderId: string): string {
+  const secret = getSigningSecret();
+  return createHmac("sha256", secret).update(orderId).digest("hex");
+}
+
+/**
+ * Legacy scheme used before 2026-06-15: HMAC over `${orderId}|${exp}`.
+ * Retained only for verification so URLs already stored as ShipHero
+ * attachments keep validating.
+ */
+function signLegacy(orderId: string, exp: number): string {
   const secret = getSigningSecret();
   return createHmac("sha256", secret)
     .update(`${orderId}|${exp}`)
@@ -50,37 +68,44 @@ export function mintPackingSlipUrl(opts: {
   baseUrl: string;
   /** Optional display id used to build a nicer filename. */
   displayId?: string;
-  /** Override the default 24h TTL. */
-  ttlSeconds?: number;
 }): string {
-  const exp = Math.floor(Date.now() / 1000) + (opts.ttlSeconds ?? DEFAULT_TTL_SECONDS);
-  const sig = sign(opts.faireOrderId, exp);
+  const sig = sign(opts.faireOrderId);
   const params = new URLSearchParams({
     order: opts.faireOrderId,
-    exp: String(exp),
     sig,
   });
   if (opts.displayId) params.set("display", opts.displayId);
   return `${opts.baseUrl.replace(/\/$/, "")}/api/v1/integrations/faire/packing-slip?${params.toString()}`;
 }
 
+function safeEqualHex(expected: string, actual: string): boolean {
+  const a = Buffer.from(expected);
+  const b = Buffer.from(actual);
+  if (a.length !== b.length) return false;
+  try {
+    return timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
 export function verifyPackingSlipUrl(opts: {
   faireOrderId: string;
-  exp: number;
+  /** Legacy URLs include this. Omit for current-scheme URLs. */
+  exp?: number;
   signature: string;
 }): { ok: true } | { ok: false; reason: string } {
-  if (!Number.isFinite(opts.exp)) return { ok: false, reason: "Invalid exp" };
-  if (Math.floor(Date.now() / 1000) > opts.exp) {
-    return { ok: false, reason: "Expired" };
+  // Current scheme.
+  if (safeEqualHex(sign(opts.faireOrderId), opts.signature)) return { ok: true };
+
+  // Legacy scheme — verify with the exp the URL was originally signed with.
+  // Expiry is intentionally NOT checked: the whole point of Option A is that
+  // ShipHero attachments need to keep working long past any TTL we'd pick.
+  if (opts.exp !== undefined && Number.isFinite(opts.exp)) {
+    if (safeEqualHex(signLegacy(opts.faireOrderId, opts.exp), opts.signature)) {
+      return { ok: true };
+    }
   }
-  const expected = sign(opts.faireOrderId, opts.exp);
-  const a = Buffer.from(expected);
-  const b = Buffer.from(opts.signature);
-  if (a.length !== b.length) return { ok: false, reason: "Signature mismatch" };
-  try {
-    if (timingSafeEqual(a, b)) return { ok: true };
-    return { ok: false, reason: "Signature mismatch" };
-  } catch {
-    return { ok: false, reason: "Signature mismatch" };
-  }
+
+  return { ok: false, reason: "Signature mismatch" };
 }

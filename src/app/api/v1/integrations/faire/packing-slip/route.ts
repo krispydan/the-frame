@@ -4,35 +4,39 @@ import { fetchFairePackingSlip } from "@/modules/integrations/lib/faire/packing-
 import { verifyPackingSlipUrl } from "@/modules/integrations/lib/faire/signed-url";
 
 /**
- * GET /api/v1/integrations/faire/packing-slip?order=bo_xxx&exp=...&sig=...&display=...
+ * GET /api/v1/integrations/faire/packing-slip?order=bo_xxx&sig=...&display=...
  *
  * Signed-URL proxy that ShipHero pulls from. ShipHero's order_add_attachment
  * mutation takes a `url` field rather than a base64 body — they fetch the
- * document themselves. This route accepts a short-lived (24h) HMAC-signed
- * URL minted at attach time, re-fetches the corresponding Faire packing-slip
- * PDF, and streams it back.
+ * document themselves. This route accepts an HMAC-signed URL minted at
+ * attach time, re-fetches the corresponding Faire packing-slip PDF, and
+ * streams it back.
  *
- * The signed URL binds to a single Faire order id and expires automatically,
- * so leaking one URL would only expose one customer's packing slip until
- * `exp` passes — and not the Faire API token itself.
+ * The signature binds the URL to a single Faire order id. URLs do not
+ * expire — the warehouse may open the attachment days or weeks after
+ * allocation. Leaking a URL exposes one customer's packing slip; the
+ * Faire API token itself remains protected.
+ *
+ * Legacy URLs that include `&exp=…` are still accepted (the verifier
+ * checks the legacy signature scheme but ignores the expiry).
  *
  * See: docs/shiphero-webhooks-and-faire-slips.md
  */
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const faireOrderId = url.searchParams.get("order") || "";
-  const expRaw = url.searchParams.get("exp") || "";
+  const expRaw = url.searchParams.get("exp");
   const sig = url.searchParams.get("sig") || "";
   const displayId = url.searchParams.get("display") || undefined;
 
-  if (!faireOrderId || !expRaw || !sig) {
+  if (!faireOrderId || !sig) {
     return NextResponse.json(
-      { error: "Missing order, exp, or sig parameter" },
+      { error: "Missing order or sig parameter" },
       { status: 400 },
     );
   }
 
-  const exp = Number(expRaw);
+  const exp = expRaw !== null && expRaw !== "" ? Number(expRaw) : undefined;
   const verify = verifyPackingSlipUrl({ faireOrderId, exp, signature: sig });
   if (!verify.ok) {
     return NextResponse.json({ error: verify.reason }, { status: 401 });
