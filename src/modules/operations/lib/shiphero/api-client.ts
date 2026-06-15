@@ -1,11 +1,15 @@
 /**
  * ShipHero GraphQL API client.
  * Bearer-token auth, cursor-based pagination, credit-aware rate limiting.
+ *
+ * The access token is read live via getAccessToken() so the daily refresh
+ * cron's writes are picked up without a process restart. On 401 we
+ * self-heal by calling refreshAccessToken() and retrying once.
  */
 
-const SHIPHERO_GRAPHQL_URL = "https://public-api.shiphero.com/graphql";
+import { getAccessToken, refreshAccessToken, isTokenConfigured } from "./auth";
 
-const ACCESS_TOKEN = process.env.SHIPHERO_ACCESS_TOKEN;
+const SHIPHERO_GRAPHQL_URL = "https://public-api.shiphero.com/graphql";
 
 export interface ShipHeroInventoryItem {
   sku: string;
@@ -45,19 +49,38 @@ interface WarehouseProductsResponse {
   errors?: Array<{ message: string }>;
 }
 
-async function gql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
-  if (!ACCESS_TOKEN) {
-    throw new Error("SHIPHERO_ACCESS_TOKEN is not configured");
+async function gql<T>(
+  query: string,
+  variables?: Record<string, unknown>,
+  allowRetry = true,
+): Promise<T> {
+  const token = getAccessToken();
+  if (!token) {
+    throw new Error(
+      "ShipHero not configured — bootstrap via POST /api/admin/shiphero/bootstrap",
+    );
   }
 
   const res = await fetch(SHIPHERO_GRAPHQL_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${ACCESS_TOKEN}`,
+      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({ query, variables }),
   });
+
+  // 401 → token rotated faster than the cron caught it (or first call after
+  // expiry). One self-healing retry: refresh + try once more.
+  if (res.status === 401 && allowRetry) {
+    try {
+      await refreshAccessToken();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(`ShipHero 401 and refresh failed: ${msg}`);
+    }
+    return gql<T>(query, variables, false);
+  }
 
   if (!res.ok) {
     const text = await res.text();
@@ -257,9 +280,9 @@ export async function getOrders(opts?: {
   return all;
 }
 
-/** Check if ShipHero is configured */
+/** Check if ShipHero is configured (token in settings or env). */
 export function isConfigured(): boolean {
-  return !!ACCESS_TOKEN;
+  return isTokenConfigured();
 }
 
 // ── Webhooks ──

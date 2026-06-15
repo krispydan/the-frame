@@ -23,6 +23,7 @@ import { syncShopifyPayouts } from "@/modules/integrations/lib/xero/payout-sync"
 import { postDailyDigest, postWeeklyDigest } from "@/modules/integrations/lib/slack/digests";
 import { syncShipHeroOrders } from "@/modules/operations/lib/shiphero/sync-orders";
 import { syncShipHeroInventory, isDuringBusinessHours } from "@/modules/operations/lib/shiphero/sync-inventory";
+import { refreshIfExpiringSoon as refreshShipHeroToken } from "@/modules/operations/lib/shiphero/auth";
 import { runShopifyMetafieldSync } from "@/modules/catalog/lib/shopify-metafields/bulk-sync-job";
 import { syncSettlementsAllShops } from "@/modules/finance/lib/shopify-settlements";
 import { runShipmentRevenueRecognition } from "@/modules/finance/lib/shipment-revenue-recognition";
@@ -130,6 +131,15 @@ export const CRON_JOBS: CronJob[] = [
   },
 
   // ── ShipHero ──
+  // Access tokens have a ~28-day life. This job refreshes when expiry is
+  // within 7 days; quiet on other days. Without it, the integration goes
+  // silently dark every 28 days (see May 29 – Jun 15 2026 outage).
+  {
+    id: "shiphero-token-refresh",
+    schedule: "0 6 * * *",  // 06:00 UTC daily ≈ 11pm PT
+    description: "Refresh ShipHero access token when expiry is <7 days away",
+    handler: () => refreshShipHeroToken(7),
+  },
   {
     id: "shiphero-orders-sync",
     schedule: "*/15 * * * *",  // every 15 min during business hours
