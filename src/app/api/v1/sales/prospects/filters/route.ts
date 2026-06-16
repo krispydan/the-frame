@@ -9,7 +9,8 @@ import { INDUSTRY_DISPLAY, type Industry } from "@/modules/sales/lib/industry-ma
  * Cleanup history (May 2026):
  *  - REPLACED  `categories` (317 distinct raw tag values) with `industries`
  *              (16 curated buckets from industry-mapping.ts)
- *  - REMOVED   `segments` (1 distinct value, useless as a filter)
+ *  - REINTRODUCED `segments` after JAX-355 so the review queue and prospect
+ *                 views can filter on the structured segment model again
  *  - REMOVED   `sourceIds` (32K+ near-unique values, unusable as a filter)
  *  - RENAMED   `companyCategories` → `productsCarried` to disambiguate from
  *              the industry filter
@@ -63,6 +64,17 @@ export async function GET() {
     };
   });
 
+  // Get segments with counts
+  const segments = sqlite.prepare(`
+    SELECT COALESCE(s.name, c.segment) as segment, count(*) as count
+    FROM companies c
+    LEFT JOIN segments s ON s.id = c.segment_id
+    WHERE COALESCE(s.name, c.segment) IS NOT NULL
+      AND COALESCE(s.name, c.segment) != ''
+    GROUP BY COALESCE(s.name, c.segment)
+    ORDER BY count DESC, segment ASC
+  `).all() as { segment: string; count: number }[];
+
   // Products carried (formerly mislabeled as "category") — what eyewear
   // categories the prospect already merchandises.
   const productsCarried = sqlite.prepare(`
@@ -89,6 +101,7 @@ export async function GET() {
     statuses,
     sources,
     industries,
+    segments,
     productsCarried,
     icpRange,
     sourceTypes,

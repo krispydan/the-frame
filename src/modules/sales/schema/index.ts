@@ -5,6 +5,23 @@ import { users } from "@/modules/core/schema";
 const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
 const timestamp = (name: string) => text(name).default(sql`(datetime('now'))`);
 
+// ── Segments ──
+export const segments = sqliteTable("segments", {
+  id: id(),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  description: text("description"),
+  icpProfile: text("icp_profile"),
+  emailTemplates: text("email_templates", { mode: "json" }).$type<Record<string, string>>(),
+  outreachNotes: text("outreach_notes"),
+  status: text("status", { enum: ["active", "paused", "retired"] }).notNull().default("active"),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  uniqueIndex("idx_segments_slug").on(table.slug),
+  index("idx_segments_status").on(table.status),
+]);
+
 // ── Companies ──
 export const companies = sqliteTable("companies", {
   id: id(),
@@ -35,6 +52,7 @@ export const companies = sqliteTable("companies", {
   tags: text("tags", { mode: "json" }).$type<string[]>(),
   notes: text("notes"),
   disqualifyReason: text("disqualify_reason"),
+  segmentId: text("segment_id").references(() => segments.id),
   segment: text("segment"),
   category: text("category"),
   // Curated ICP-aligned industry bucket. Derived from `tags` by
@@ -134,6 +152,7 @@ export const companies = sqliteTable("companies", {
   index("idx_companies_state").on(table.state),
   index("idx_companies_owner").on(table.ownerId),
   index("idx_companies_domain").on(table.domain),
+  index("idx_companies_segment_id").on(table.segmentId),
   index("idx_companies_source_type").on(table.sourceType),
   index("idx_companies_source_id").on(table.sourceId),
   index("idx_companies_storeleads_id").on(table.storeleadsId),

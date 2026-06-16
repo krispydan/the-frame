@@ -1159,6 +1159,24 @@ try {
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shiphero_inv_synced ON shiphero_inventory(synced_at)`);
 } catch (e) { console.error("[db] ShipHero inventory table error:", e); }
 
+// Ensure segment data model exists before app code reads it.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS segments (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    description TEXT,
+    icp_profile TEXT,
+    email_templates TEXT,
+    outreach_notes TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_segments_slug ON segments (slug)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_segments_status ON segments (status)`);
+} catch (e) { console.error("[db] Segment ensure error:", e); }
+
 // Auto-run migrations on startup (idempotent — safe to run every time)
 try {
   const migrationsFolder = path.join(process.cwd(), "drizzle", "migrations");
@@ -1171,4 +1189,27 @@ try {
 }
 
 }  // end if (!IS_BUILD_PHASE)
+try {
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_companies_segment_id ON companies (segment_id)`);
+  sqlite.exec(`
+    INSERT OR IGNORE INTO segments (id, name, slug, status, created_at, updated_at)
+    SELECT lower(hex(randomblob(16))), trim(segment), lower(replace(trim(segment), ' ', '-')), 'active', datetime('now'), datetime('now')
+    FROM companies
+    WHERE segment IS NOT NULL AND trim(segment) != ''
+    GROUP BY lower(trim(segment))
+  `);
+  sqlite.exec(`
+    UPDATE companies
+    SET segment_id = (
+      SELECT s.id
+      FROM segments s
+      WHERE lower(trim(s.name)) = lower(trim(companies.segment))
+      LIMIT 1
+    )
+    WHERE segment_id IS NULL
+      AND segment IS NOT NULL
+      AND trim(segment) != ''
+  `);
+} catch (e) { console.error("[db] Segment sync error:", e); }
 
+}  // end if (!IS_BUILD_PHASE)
