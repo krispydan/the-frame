@@ -55,7 +55,7 @@ export async function GET(
     whereParams.push(...sourceFilter.map(s => `%${s}%`));
   }
   if (segmentFilter.length > 0) {
-    whereClauses.push(`c.segment IN (${segmentFilter.map(() => "?").join(",")})`);
+    whereClauses.push(`COALESCE(s.name, c.segment) IN (${segmentFilter.map(() => "?").join(",")})`);
     whereParams.push(...segmentFilter);
   }
   if (statusFilter.length > 0) {
@@ -72,6 +72,7 @@ export async function GET(
   else if (hasPhone === "false") whereClauses.push(`(c.phone IS NULL OR c.phone = '')`);
 
   const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+  const fromSQL = `FROM companies c LEFT JOIN segments s ON s.id = c.segment_id`;
 
   const sortColumns: Record<string, string> = {
     name: "c.name", state: "c.state", city: "c.city",
@@ -81,7 +82,7 @@ export async function GET(
 
   // Get ordered list of IDs
   const rows = sqlite.prepare(`
-    SELECT c.id FROM companies c ${whereSQL} ORDER BY ${sortCol} ${order} NULLS LAST
+    SELECT c.id ${fromSQL} ${whereSQL} ORDER BY ${sortCol} ${order} NULLS LAST
   `).all(...whereParams) as { id: string }[];
 
   const total = rows.length;

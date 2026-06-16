@@ -49,13 +49,15 @@ export async function parseResponse<T = unknown>(response: Response): Promise<{ 
 export function seedTestData() {
   const db = getTestDb();
 
+  db.prepare(`INSERT INTO segments (id, name, slug, status) VALUES ('seg1', 'Surf Shops', 'surf-shops', 'active')`).run();
+
   // Companies
-  db.prepare(`INSERT INTO companies (id, name, state, status, email, phone, icp_score, icp_tier, source, type, domain)
-    VALUES ('c1', 'Sunny Shades', 'CA', 'qualified', 'info@sunny.com', '555-0001', 85, 'A', 'google', 'boutique', 'sunny.com')`).run();
-  db.prepare(`INSERT INTO companies (id, name, state, status, email, phone, icp_score, icp_tier, source, type, domain)
-    VALUES ('c2', 'Cool Frames', 'NY', 'new', NULL, '555-0002', 45, 'C', 'faire', 'chain', 'coolframes.com')`).run();
-  db.prepare(`INSERT INTO companies (id, name, state, status, email, icp_score, icp_tier)
-    VALUES ('c3', 'Beach Eyewear', 'FL', 'contacted', 'hello@beach.com', 72, 'B')`).run();
+  db.prepare(`INSERT INTO companies (id, name, state, status, email, phone, icp_score, icp_tier, source, source_type, type, domain, segment_id, industry)
+    VALUES ('c1', 'Sunny Shades', 'CA', 'qualified', 'info@sunny.com', '555-0001', 85, 'A', 'google', 'maps', 'boutique', 'sunny.com', 'seg1', 'surf')`).run();
+  db.prepare(`INSERT INTO companies (id, name, state, status, email, phone, icp_score, icp_tier, source, source_type, type, domain, segment, industry)
+    VALUES ('c2', 'Cool Frames', 'NY', 'new', NULL, '555-0002', 45, 'C', 'faire', 'marketplace', 'chain', 'coolframes.com', 'Museum Gift Shops', 'gift')`).run();
+  db.prepare(`INSERT INTO companies (id, name, state, status, email, icp_score, icp_tier, source_type)
+    VALUES ('c3', 'Beach Eyewear', 'FL', 'contacted', 'hello@beach.com', 72, 'B', 'maps')`).run();
 
   // FTS
   try {

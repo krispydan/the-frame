@@ -5,6 +5,7 @@ import { createRequest, parseResponse, seedTestData, seedDeals, seedCampaigns } 
 // ── Route handler imports ──
 import { GET as getProspects } from "@/app/api/v1/sales/prospects/route";
 import { GET as getProspectDetail, PATCH as patchProspect } from "@/app/api/v1/sales/prospects/[id]/route";
+import { GET as getAdjacentProspect } from "@/app/api/v1/sales/prospects/[id]/adjacent/route";
 import { POST as bulkProspects } from "@/app/api/v1/sales/prospects/bulk/route";
 import { GET as getDeals, POST as postDeal } from "@/app/api/v1/sales/deals/route";
 import { GET as getDealDetail, PATCH as patchDeal, DELETE as deleteDeal } from "@/app/api/v1/sales/deals/[id]/route";
@@ -15,6 +16,7 @@ import { GET as getCampaignDetail, PATCH as patchCampaign, DELETE as deleteCampa
 import { POST as postContact, PATCH as patchContact } from "@/app/api/v1/sales/contacts/route";
 import { GET as getSmartLists, POST as postSmartList, PUT as putSmartList, DELETE as deleteSmartList } from "@/app/api/v1/sales/smart-lists/route";
 import { GET as getDashboard } from "@/app/api/v1/sales/dashboard/route";
+import { GET as getReviewQueue } from "@/app/api/v1/prospects/review/route";
 
 // Helper to create params object matching Next.js dynamic route pattern
 function routeParams(id: string) {
@@ -88,6 +90,48 @@ describe("Sales API Routes", () => {
       expect(data.data.length).toBe(2);
       expect(data.total).toBe(3);
       expect(data.totalPages).toBe(2);
+    });
+
+    it("GET returns normalized segment names from segment_id", async () => {
+      const req = createRequest("GET", "/api/v1/sales/prospects", {
+        searchParams: { status: "qualified" },
+      });
+      const res = await getProspects(req);
+      const { data } = await parseResponse<any>(res);
+      expect(data.data[0].segment).toBe("Surf Shops");
+    });
+
+    it("GET filters by structured segment names", async () => {
+      const req = createRequest("GET", "/api/v1/sales/prospects", {
+        searchParams: { segment: "Surf Shops", status: "qualified" },
+      });
+      const res = await getProspects(req);
+      const { data } = await parseResponse<any>(res);
+      expect(data.total).toBe(1);
+      expect(data.data[0].id).toBe("c1");
+    });
+
+    it("Review queue filters by structured segment names", async () => {
+      const req = createRequest("GET", "/api/v1/prospects/review", {
+        searchParams: { segment: "Surf Shops", status: "all" },
+      });
+      const res = await getReviewQueue(req);
+      const { data } = await parseResponse<any>(res);
+      expect(data.total).toBe(1);
+      expect(data.data[0].id).toBe("c1");
+      expect(data.data[0].segment).toBe("Surf Shops");
+    });
+
+    it("Adjacent navigation respects structured segment filters", async () => {
+      const req = createRequest("GET", "/api/v1/sales/prospects/c1/adjacent", {
+        searchParams: { segment: "Surf Shops", status: "qualified" },
+      });
+      const res = await getAdjacentProspect(req, routeParams("c1"));
+      const { data } = await parseResponse<any>(res);
+      expect(data.total).toBe(1);
+      expect(data.position).toBe(1);
+      expect(data.prev).toBeNull();
+      expect(data.next).toBeNull();
     });
 
     it("GET prospect detail by id", async () => {

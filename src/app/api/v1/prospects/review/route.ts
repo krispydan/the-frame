@@ -33,11 +33,12 @@ export async function GET(request: NextRequest) {
     whereParams.push(`%${category}%`);
   }
   if (segment && segment !== "all") {
-    whereClauses.push("c.segment = ?");
+    whereClauses.push("COALESCE(s.name, c.segment) = ?");
     whereParams.push(segment);
   }
 
   const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+  const fromSQL = `FROM companies c LEFT JOIN segments s ON s.id = c.segment_id`;
 
   let orderSQL = "ORDER BY RANDOM()";
   if (sort === "name") orderSQL = "ORDER BY c.name ASC";
@@ -46,7 +47,7 @@ export async function GET(request: NextRequest) {
 
   // Total count (for the specific filters)
   const countResult = sqlite.prepare(
-    `SELECT count(*) as total FROM companies c ${whereSQL}`
+    `SELECT count(*) as total ${fromSQL} ${whereSQL}`
   ).get(...whereParams) as { total: number };
 
   // Total reviewed (qualified + rejected) with same filters except status
@@ -58,20 +59,20 @@ export async function GET(request: NextRequest) {
     if (status && status !== "all" && i === 0) return false;
     return true;
   });
-  const reviewedCountSQL = `SELECT count(*) as total FROM companies c WHERE c.status IN ('qualified', 'rejected')${reviewedWhere ? ` AND ${reviewedWhere}` : ""}`;
+  const reviewedCountSQL = `SELECT count(*) as total ${fromSQL} WHERE c.status IN ('qualified', 'rejected')${reviewedWhere ? ` AND ${reviewedWhere}` : ""}`;
   const reviewedResult = sqlite.prepare(reviewedCountSQL).get(...reviewedParams) as { total: number };
 
   // Total across all statuses with same non-status filters
-  const allCountSQL = `SELECT count(*) as total FROM companies c${reviewedWhere ? ` WHERE ${reviewedWhere}` : ""}`;
+  const allCountSQL = `SELECT count(*) as total ${fromSQL}${reviewedWhere ? ` WHERE ${reviewedWhere}` : ""}`;
   const allResult = sqlite.prepare(allCountSQL).get(...reviewedParams) as { total: number };
 
   // Data query - lightweight fields only
   const rows = sqlite.prepare(`
     SELECT c.id, c.name, c.address, c.city, c.state, c.zip, c.phone, c.email,
            c.website, c.domain, c.google_rating, c.google_review_count,
-           c.source_type, c.source_query, c.category, c.segment, c.status,
+           c.source_type, c.source_query, c.category, COALESCE(s.name, c.segment) as segment, c.status,
            c.source, c.tags
-    FROM companies c
+    ${fromSQL}
     ${whereSQL}
     ${orderSQL}
     LIMIT ? OFFSET ?

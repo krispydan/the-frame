@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
   const hasEmail = params.get("has_email");
   const hasPhone = params.get("has_phone");
   const sourceTypeFilter = params.getAll("source_type");
+  const segmentFilter = params.getAll("segment");
   // source_query filter — exact match. Used by the eyewear smart
   // lists to slice by crawl cohort ("eyewear_inventory_v1_2026-06"
   // vs "apparel_no_eyewear_v1_2026-06") without polluting tags.
@@ -34,8 +35,7 @@ export async function GET(request: NextRequest) {
   //   eyewear_cohort AND (entry OR mid) AND multi_brand AND NOT too_high
   const tagAndFilter = params.getAll("tag_and");
   const tagNotFilter = params.getAll("tag_not");
-  // segment + source_id filters dropped (1-value and 32K-values respectively
-  // — useless as filters). If someone bookmarked URLs with them, just ignore.
+  // source_id filter dropped — 32K+ near-unique values made it useless.
 
   const offset = (page - 1) * limit;
   // `ids_only=1` returns just the matching company IDs (up to 50k) so the
@@ -125,6 +125,10 @@ export async function GET(request: NextRequest) {
     whereClauses.push(`c.source_type IN (${sourceTypeFilter.map(() => "?").join(",")})`);
     whereParams.push(...sourceTypeFilter);
   }
+  if (segmentFilter.length > 0) {
+    whereClauses.push(`COALESCE(s.name, c.segment) IN (${segmentFilter.map(() => "?").join(",")})`);
+    whereParams.push(...segmentFilter);
+  }
   if (sourceQueryFilter.length > 0) {
     whereClauses.push(`c.source_query IN (${sourceQueryFilter.map(() => "?").join(",")})`);
     whereParams.push(...sourceQueryFilter);
@@ -143,8 +147,6 @@ export async function GET(request: NextRequest) {
       whereParams.push(`%${t}%`);
     }
   }
-  // source_id filter dropped — 32K+ near-unique values made it useless.
-
   if (hasPhone === "true") {
     whereClauses.push(`c.phone IS NOT NULL AND c.phone != ''`);
   } else if (hasPhone === "false") {
@@ -152,6 +154,7 @@ export async function GET(request: NextRequest) {
   }
 
   const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+  const fromSQL = `FROM companies c LEFT JOIN segments s ON s.id = c.segment_id`;
 
   // Validate sort column
   const sortColumns: Record<string, string> = {
@@ -169,7 +172,7 @@ export async function GET(request: NextRequest) {
   // from a runaway "select all of 130k companies" request.
   if (idsOnly) {
     const idRows = sqlite.prepare(
-      `SELECT c.id FROM companies c ${whereSQL} LIMIT 50000`,
+      `SELECT c.id ${fromSQL} ${whereSQL} LIMIT 50000`,
     ).all(...whereParams) as Array<{ id: string }>;
     return NextResponse.json({
       ids: idRows.map((r) => r.id),
@@ -179,14 +182,14 @@ export async function GET(request: NextRequest) {
   }
 
   // Count query
-  const countResult = sqlite.prepare(`SELECT count(*) as total FROM companies c ${whereSQL}`).get(...whereParams) as { total: number };
+  const countResult = sqlite.prepare(`SELECT count(*) as total ${fromSQL} ${whereSQL}`).get(...whereParams) as { total: number };
 
   // Data query
   const rows = sqlite.prepare(`
     SELECT c.id, c.name, c.city, c.state, c.type, c.source, c.phone, c.email,
-           c.icp_score, c.status, c.tags, c.website, c.domain, c.enrichment_status, c.segment, c.category,
+           c.icp_score, c.status, c.tags, c.website, c.domain, c.enrichment_status, COALESCE(s.name, c.segment) as segment, c.category,
            c.industry, c.source_type, c.source_id, c.source_query
-    FROM companies c
+    ${fromSQL}
     ${whereSQL}
     ORDER BY ${sortCol} ${order} NULLS LAST
     LIMIT ? OFFSET ?
