@@ -248,12 +248,14 @@ function ProspectsPage() {
   const industryFilter = searchParams.getAll("industry");
   const sourceFilter = searchParams.getAll("source");
   const statusFilter = searchParams.getAll("status");
+  const legacySegmentFilter = searchParams.getAll("segment");
   const hasEmail = searchParams.get("has_email");
   const hasPhone = searchParams.get("has_phone");
   const icpMin = searchParams.get("icp_min");
   const icpMax = searchParams.get("icp_max");
   const sourceTypeFilter = searchParams.getAll("source_type");
-  // Old `category`, `segment`, `source_id` filters are retired (May 2026).
+  // Old `category`, `source_id` filters are retired (May 2026).
+  // `segment` was brought back for JAX-355 after Segments became first-class.
   // The API still honors `category` if a bookmarked URL has it.
   const legacyCategoryFilter = searchParams.getAll("category");
 
@@ -329,7 +331,7 @@ function ProspectsPage() {
   const [mergeSuccess, setMergeSuccess] = useState<string | null>(null);
 
   const activeFilterCount = stateFilter.length + industryFilter.length + sourceFilter.length + statusFilter.length
-    + sourceTypeFilter.length + legacyCategoryFilter.length
+    + sourceTypeFilter.length + legacyCategoryFilter.length + legacySegmentFilter.length
     + (hasEmail ? 1 : 0) + (hasPhone ? 1 : 0) + (icpMin ? 1 : 0) + (icpMax ? 1 : 0);
 
   const buildUrl = useCallback((overrides: Record<string, string | string[] | null>) => {
@@ -337,7 +339,7 @@ function ProspectsPage() {
     const vals: Record<string, string | string[] | null> = {
       page: String(page), search, sort, order,
       state: stateFilter, industry: industryFilter, source: sourceFilter, status: statusFilter,
-      source_type: sourceTypeFilter, category: legacyCategoryFilter,
+      source_type: sourceTypeFilter, category: legacyCategoryFilter, segment: legacySegmentFilter,
       has_email: hasEmail, has_phone: hasPhone, icp_min: icpMin, icp_max: icpMax,
       ...overrides,
     };
@@ -347,7 +349,7 @@ function ProspectsPage() {
       else p.set(k, v);
     }
     return `/prospects?${p.toString()}`;
-  }, [page, search, sort, order, stateFilter, industryFilter, sourceFilter, statusFilter, sourceTypeFilter, legacyCategoryFilter, hasEmail, hasPhone, icpMin, icpMax]);
+  }, [page, search, sort, order, stateFilter, industryFilter, sourceFilter, statusFilter, sourceTypeFilter, legacyCategoryFilter, legacySegmentFilter, hasEmail, hasPhone, icpMin, icpMax]);
 
   const currentFilters = useCallback(() => {
     const f: Record<string, unknown> = {};
@@ -357,12 +359,13 @@ function ProspectsPage() {
     if (statusFilter.length) f.status = statusFilter;
     if (sourceTypeFilter.length) f.source_type = sourceTypeFilter;
     if (legacyCategoryFilter.length) f.category = legacyCategoryFilter;
+    if (legacySegmentFilter.length) f.segment = legacySegmentFilter;
     if (hasEmail) f.has_email = hasEmail;
     if (hasPhone) f.has_phone = hasPhone;
     if (icpMin) f.icp_min = icpMin;
     if (icpMax) f.icp_max = icpMax;
     return f;
-  }, [stateFilter, industryFilter, sourceFilter, statusFilter, sourceTypeFilter, legacyCategoryFilter, hasEmail, hasPhone, icpMin, icpMax]);
+  }, [stateFilter, industryFilter, sourceFilter, statusFilter, sourceTypeFilter, legacyCategoryFilter, legacySegmentFilter, hasEmail, hasPhone, icpMin, icpMax]);
 
   // Fetch data
   useEffect(() => {
@@ -567,6 +570,7 @@ function ProspectsPage() {
     router.push(buildUrl({
       state: (f.state as string[]) || null, category: (f.category as string[]) || null,
       source: (f.source as string[]) || null, status: (f.status as string[]) || null,
+      segment: (f.segment as string[]) || null,
       has_email: (f.has_email as string) || null, has_phone: (f.has_phone as string) || null,
       icp_min: (f.icp_min as string) || null, icp_max: (f.icp_max as string) || null,
       page: "1",
@@ -784,7 +788,20 @@ function ProspectsPage() {
               ))}
             </div>
           </div>
-          {/* Segment filter removed — single-value filter is not useful. */}
+          {filterOptions.segments?.length > 0 && (
+            <div>
+              <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Segment</h4>
+              <div className="max-h-48 overflow-y-auto space-y-1">
+                {filterOptions.segments.map(s => (
+                  <label key={s.segment} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 px-1 rounded">
+                    <input type="checkbox" checked={legacySegmentFilter.includes(s.segment)} onChange={() => toggleFilterValue("segment", s.segment, legacySegmentFilter)} className="rounded" />
+                    <span className="text-gray-700 dark:text-gray-300">{s.segment}</span>
+                    <span className="text-gray-400 text-xs ml-auto">{s.count.toLocaleString()}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
           {filterOptions.sourceTypes?.length > 0 && (
             <div>
               <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Source Type</h4>
