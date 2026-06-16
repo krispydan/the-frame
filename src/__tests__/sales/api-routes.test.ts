@@ -140,6 +140,7 @@ describe("Sales API Routes", () => {
       const { status, data } = await parseResponse<any>(res);
       expect(status).toBe(200);
       expect(data.company.name).toBe("Sunny Shades");
+      expect(data.company.segment).toBe("Surf Shops");
       expect(data.stores.length).toBe(1);
       expect(data.contacts.length).toBe(1);
     });

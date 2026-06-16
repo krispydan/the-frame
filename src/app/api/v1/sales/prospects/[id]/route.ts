@@ -9,8 +9,9 @@ export async function GET(
   const { id } = await params;
 
   const company = sqlite.prepare(`
-    SELECT c.*, COALESCE(c.owner_name, u.name) as owner_name, u.name as assigned_owner_name
+    SELECT c.*, COALESCE(s.name, c.segment) as segment, COALESCE(c.owner_name, u.name) as owner_name, u.name as assigned_owner_name
     FROM companies c
+    LEFT JOIN segments s ON s.id = c.segment_id
     LEFT JOIN users u ON u.id = c.owner_id
     WHERE c.id = ?
   `).get(id) as Record<string, unknown> | undefined;
