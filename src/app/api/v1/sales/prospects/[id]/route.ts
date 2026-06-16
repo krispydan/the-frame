@@ -87,6 +87,7 @@ export async function PATCH(
 
   const sets: string[] = [];
   const values: unknown[] = [];
+  let pendingSegmentName: string | null | undefined;
 
   for (const [key, val] of Object.entries(body)) {
     const col = allowedFields[key];
@@ -104,10 +105,28 @@ export async function PATCH(
 
     sets.push(`${col} = ?`);
     values.push(key === "tags" ? JSON.stringify(val) : val);
+    if (key === "segment") {
+      pendingSegmentName = typeof val === "string" ? val.trim() : val == null ? null : String(val).trim();
+    }
   }
 
   if (sets.length === 0) {
     return NextResponse.json({ error: "No valid fields" }, { status: 400 });
+  }
+
+  if (pendingSegmentName !== undefined) {
+    let segmentId: string | null = null;
+    if (pendingSegmentName) {
+      sqlite.prepare(`
+        INSERT OR IGNORE INTO segments (id, name, slug, status, created_at, updated_at)
+        VALUES (lower(hex(randomblob(16))), ?, lower(replace(trim(?), ' ', '-')), 'active', datetime('now'), datetime('now'))
+      `).run(pendingSegmentName, pendingSegmentName);
+      segmentId = (sqlite.prepare(
+        `SELECT id FROM segments WHERE lower(trim(name)) = lower(trim(?)) LIMIT 1`
+      ).get(pendingSegmentName) as { id: string } | undefined)?.id ?? null;
+    }
+    sets.push("segment_id = ?");
+    values.push(segmentId);
   }
 
   // If the reviewer touched icp_score / icp_tier / icp_reasoning, treat the

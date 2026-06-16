@@ -59,6 +59,7 @@ interface FilterOptions {
   statuses: { status: string; count: number }[];
   sources: { source: string; count: number }[];
   industries: IndustryOption[];               // NEW: curated industry buckets
+  segments: { segment: string; count: number }[];
   productsCarried: { category: string; count: number }[];  // renamed from companyCategories
   icpRange: { min: number; max: number };
   sourceTypes: { source_type: string; count: number }[];
@@ -1470,7 +1471,7 @@ function ProspectsPage() {
                   <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                     <SegmentCell
                       value={p.segment}
-                      segments={[]}
+                      segments={filterOptions?.segments || []}
                       onChange={async (newSegment) => {
                         try {
                           await fetch(`/api/v1/sales/prospects/${p.id}`, {
