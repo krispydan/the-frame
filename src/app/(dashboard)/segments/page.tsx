@@ -110,6 +110,7 @@ export default function SegmentsPage() {
                   <TableHead className="text-right">Customers</TableHead>
                   <TableHead className="text-right">Deals</TableHead>
                   <TableHead className="text-right">Campaigns</TableHead>
+                  <TableHead className="text-right">Orders</TableHead>
                   <TableHead className="text-right">Revenue</TableHead>
                   <TableHead className="text-right">Explore</TableHead>
                 </TableRow>
@@ -149,6 +150,7 @@ export default function SegmentsPage() {
                         <div className="text-xs text-muted-foreground">${segment.pipeline_value.toLocaleString()}</div>
                       </TableCell>
                       <TableCell className="text-right">{segment.campaign_count.toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{segment.order_count.toLocaleString()}</TableCell>
                       <TableCell className="text-right">
                         <div>${segment.revenue.toLocaleString()}</div>
                         <div className="text-xs text-muted-foreground">${averageOrderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })} AOV</div>
