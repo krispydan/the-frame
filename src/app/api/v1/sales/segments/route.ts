@@ -26,20 +26,56 @@ export async function GET() {
       s.slug,
       s.description,
       s.status,
-      count(DISTINCT c.id) as prospect_count,
-      count(DISTINCT CASE WHEN c.status = 'qualified' THEN c.id END) as qualified_count,
-      count(DISTINCT CASE WHEN c.status = 'customer' THEN c.id END) as customer_count,
-      count(DISTINCT CASE WHEN d.stage NOT IN ('order_placed', 'not_interested') THEN d.id END) as active_deals,
-      coalesce(sum(CASE WHEN d.stage NOT IN ('order_placed', 'not_interested') THEN coalesce(d.value, 0) ELSE 0 END), 0) as pipeline_value,
-      count(DISTINCT o.id) as order_count,
-      coalesce(sum(CASE WHEN o.status NOT IN ('cancelled', 'returned') THEN coalesce(o.total, 0) ELSE 0 END), 0) as revenue,
-      count(DISTINCT camp.id) as campaign_count
+      (
+        SELECT count(*)
+        FROM companies c
+        WHERE c.segment_id = s.id OR lower(trim(c.segment)) = lower(trim(s.name))
+      ) as prospect_count,
+      (
+        SELECT count(*)
+        FROM companies c
+        WHERE (c.segment_id = s.id OR lower(trim(c.segment)) = lower(trim(s.name)))
+          AND c.status = 'qualified'
+      ) as qualified_count,
+      (
+        SELECT count(*)
+        FROM companies c
+        WHERE (c.segment_id = s.id OR lower(trim(c.segment)) = lower(trim(s.name)))
+          AND c.status = 'customer'
+      ) as customer_count,
+      (
+        SELECT count(*)
+        FROM deals d
+        JOIN companies c ON c.id = d.company_id
+        WHERE (c.segment_id = s.id OR lower(trim(c.segment)) = lower(trim(s.name)))
+          AND d.stage NOT IN ('order_placed', 'not_interested')
+      ) as active_deals,
+      (
+        SELECT coalesce(sum(coalesce(d.value, 0)), 0)
+        FROM deals d
+        JOIN companies c ON c.id = d.company_id
+        WHERE (c.segment_id = s.id OR lower(trim(c.segment)) = lower(trim(s.name)))
+          AND d.stage NOT IN ('order_placed', 'not_interested')
+      ) as pipeline_value,
+      (
+        SELECT count(*)
+        FROM orders o
+        JOIN companies c ON c.id = o.company_id
+        WHERE c.segment_id = s.id OR lower(trim(c.segment)) = lower(trim(s.name))
+      ) as order_count,
+      (
+        SELECT coalesce(sum(coalesce(o.total, 0)), 0)
+        FROM orders o
+        JOIN companies c ON c.id = o.company_id
+        WHERE (c.segment_id = s.id OR lower(trim(c.segment)) = lower(trim(s.name)))
+          AND o.status NOT IN ('cancelled', 'returned')
+      ) as revenue,
+      (
+        SELECT count(*)
+        FROM campaigns camp
+        WHERE lower(trim(camp.target_segment)) = lower(trim(s.name))
+      ) as campaign_count
     FROM segments s
-    LEFT JOIN companies c ON c.segment_id = s.id OR lower(trim(c.segment)) = lower(trim(s.name))
-    LEFT JOIN deals d ON d.company_id = c.id
-    LEFT JOIN orders o ON o.company_id = c.id
-    LEFT JOIN campaigns camp ON lower(trim(camp.target_segment)) = lower(trim(s.name))
-    GROUP BY s.id, s.name, s.slug, s.description, s.status
     ORDER BY prospect_count DESC, s.name ASC
   `).all() as SegmentRow[];
 
