@@ -115,40 +115,55 @@ export default function SegmentsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {segments.map((segment) => (
-                  <TableRow key={segment.id}>
-                    <TableCell>
-                      <div className="space-y-1">
-                        <div className="font-medium text-gray-900 dark:text-white">{segment.name}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {segment.description || "No ICP profile written yet."}
+                {segments.map((segment) => {
+                  const conversionRate = segment.prospect_count > 0
+                    ? (segment.customer_count / segment.prospect_count) * 100
+                    : 0;
+                  const averageOrderValue = segment.order_count > 0
+                    ? segment.revenue / segment.order_count
+                    : 0;
+
+                  return (
+                    <TableRow key={segment.id}>
+                      <TableCell>
+                        <div className="space-y-1">
+                          <div className="font-medium text-gray-900 dark:text-white">{segment.name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {segment.description || "No ICP profile written yet."}
+                          </div>
                         </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusTone[segment.status]}`}>
-                        {segment.status}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">{segment.prospect_count.toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{segment.qualified_count.toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{segment.customer_count.toLocaleString()}</TableCell>
-                    <TableCell className="text-right">
-                      <div>{segment.active_deals.toLocaleString()}</div>
-                      <div className="text-xs text-muted-foreground">${segment.pipeline_value.toLocaleString()}</div>
-                    </TableCell>
-                    <TableCell className="text-right">{segment.campaign_count.toLocaleString()}</TableCell>
-                    <TableCell className="text-right">${segment.revenue.toLocaleString()}</TableCell>
-                    <TableCell className="text-right">
-                      <Link
-                        href={`/prospects?segment=${encodeURIComponent(segment.name)}`}
-                        className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
-                      >
-                        Prospects <ChevronRight className="w-3 h-3" />
-                      </Link>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                      <TableCell>
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusTone[segment.status]}`}>
+                          {segment.status}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">{segment.prospect_count.toLocaleString()}</TableCell>
+                      <TableCell className="text-right">{segment.qualified_count.toLocaleString()}</TableCell>
+                      <TableCell className="text-right">
+                        <div>{segment.customer_count.toLocaleString()}</div>
+                        <div className="text-xs text-muted-foreground">{conversionRate.toFixed(1)}% conv.</div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div>{segment.active_deals.toLocaleString()}</div>
+                        <div className="text-xs text-muted-foreground">${segment.pipeline_value.toLocaleString()}</div>
+                      </TableCell>
+                      <TableCell className="text-right">{segment.campaign_count.toLocaleString()}</TableCell>
+                      <TableCell className="text-right">
+                        <div>${segment.revenue.toLocaleString()}</div>
+                        <div className="text-xs text-muted-foreground">${averageOrderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })} AOV</div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Link
+                          href={`/prospects?segment=${encodeURIComponent(segment.name)}`}
+                          className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
+                        >
+                          Prospects <ChevronRight className="w-3 h-3" />
+                        </Link>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
