@@ -621,6 +621,11 @@ function ProspectsPage() {
             <Tag className="w-4 h-4" />
             Lead Sources
           </Link>
+          <Link href="/segments"
+            className="px-4 py-2.5 border border-teal-300 bg-teal-50 text-teal-700 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-teal-100 dark:bg-teal-900/20 dark:border-teal-700 dark:text-teal-400">
+            <Tag className="w-4 h-4" />
+            Segments
+          </Link>
           <button onClick={findDuplicates}
             className="px-4 py-2.5 border border-amber-300 bg-amber-50 text-amber-700 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-amber-100 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-400">
             <Search className="w-4 h-4" />
