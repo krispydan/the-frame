@@ -83,7 +83,9 @@ export async function POST(request: NextRequest) {
       phoneburner: async () => {
         const key = db.select().from(settings).where(eq(settings.key, "phoneburner_api_key")).get();
         if (!key?.value) return { ok: false, message: "API key is required" };
-        const res = await fetch("https://www.phoneburner.com/rest/1/me", {
+        // PB doesn't expose a /me endpoint; use a low-cost folder list
+        // as the auth probe. Auth failure returns 401; bad routing 404.
+        const res = await fetch("https://www.phoneburner.com/rest/1/folders?page_size=1", {
           headers: {
             Authorization: `Bearer ${key.value}`,
             Accept: "application/json",

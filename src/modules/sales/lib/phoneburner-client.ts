@@ -203,9 +203,16 @@ class PhoneBurnerClient {
     throw lastError ?? new Error("PhoneBurner request failed");
   }
 
-  // ── Auth probe (settings card test button) ──
-  async me(): Promise<{ ok: boolean; raw: unknown }> {
-    const raw = await this.request<unknown>("GET", "/me");
+  // ── Auth probe ──
+  // PhoneBurner has no /me endpoint. A 1-item folder list is the
+  // cheapest auth-required call.
+  async authProbe(): Promise<{ ok: boolean; raw: unknown }> {
+    const raw = await this.request<unknown>(
+      "GET",
+      "/folders",
+      undefined,
+      { page_size: 1 },
+    );
     return { ok: true, raw };
   }
 
