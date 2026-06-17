@@ -71,8 +71,9 @@ interface LeadRowJoined {
   estimated_yearly_sales_cents: number | null;
   // primary phone (from company_phones join)
   primary_phone: string | null;
-  // optional contact name
-  contact_name: string | null;
+  // optional contact name (contacts table stores first/last separately)
+  contact_first_name: string | null;
+  contact_last_name: string | null;
   contact_email: string | null;
 }
 
@@ -136,7 +137,8 @@ function loadLeadsForCampaign(campaignId: string): LeadRowJoined[] {
                 WHERE cp.company_id = co.id
                 ORDER BY cp.is_primary DESC, cp.created_at ASC
                 LIMIT 1) AS primary_phone,
-              ct.name            AS contact_name,
+              ct.first_name      AS contact_first_name,
+              ct.last_name       AS contact_last_name,
               ct.email           AS contact_email
          FROM campaign_leads cl
          JOIN companies co ON co.id = cl.company_id
@@ -147,13 +149,17 @@ function loadLeadsForCampaign(campaignId: string): LeadRowJoined[] {
     .all(campaignId) as LeadRowJoined[];
 }
 
-function splitName(full: string | null): { first?: string; last?: string } {
-  if (!full) return {};
-  const trimmed = full.trim();
-  if (!trimmed) return {};
-  const parts = trimmed.split(/\s+/);
-  if (parts.length === 1) return { first: parts[0] };
-  return { first: parts[0], last: parts.slice(1).join(" ") };
+/** Contacts table already has first/last separate; use them directly. */
+function pickName(lead: { contact_first_name: string | null; contact_last_name: string | null }): {
+  first?: string;
+  last?: string;
+} {
+  const first = (lead.contact_first_name ?? "").trim();
+  const last = (lead.contact_last_name ?? "").trim();
+  return {
+    first: first || undefined,
+    last: last || undefined,
+  };
 }
 
 function fmtMoneyFromCents(cents: number | null): string | null {
@@ -172,7 +178,7 @@ function buildContactPayload(opts: {
   const phone = formatToPbPhone(lead.primary_phone);
   if (!phone) return null;
 
-  const { first, last } = splitName(lead.contact_name);
+  const { first, last } = pickName(lead);
   const email = (lead.email ?? lead.contact_email ?? "").trim() || undefined;
 
   // Custom fields carry firmographics — PB has no native company/website.
