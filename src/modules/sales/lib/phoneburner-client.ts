@@ -31,6 +31,11 @@ interface PbCustomField {
 }
 
 export interface PbContactPayload {
+  /** PB requires owner_id OR owner_username on every contact create.
+   *  Resolved automatically by phoneburner-sync from settings or by
+   *  probing an existing contact. */
+  owner_id?: string;
+  owner_username?: string;
   first_name?: string;
   last_name?: string;
   email?: string;
@@ -214,6 +219,39 @@ class PhoneBurnerClient {
       { page_size: 1 },
     );
     return { ok: true, raw };
+  }
+
+  /**
+   * Discover the API key's owner user_id by inspecting an existing
+   * contact. PB requires owner_id on every contact create, but there's
+   * no /me endpoint to ask for it directly. Workaround: GET the first
+   * existing contact (any folder) and read its owner_id.
+   *
+   * Returns null if the workspace is empty (no contacts to inspect).
+   */
+  async discoverOwnerId(): Promise<string | null> {
+    const raw = await this.request<Record<string, unknown>>(
+      "GET",
+      "/contacts",
+      undefined,
+      { page_size: 1 },
+    );
+    // PB nests contact arrays under `_embedded.contacts` and also
+    // sometimes returns numeric index keys at the top level. Be lenient.
+    const candidates: unknown[] = [];
+    const embedded = (raw?._embedded as { contacts?: unknown[] } | undefined)?.contacts;
+    if (Array.isArray(embedded)) candidates.push(...embedded);
+    for (const v of Object.values(raw)) {
+      if (v && typeof v === "object" && "owner_id" in (v as Record<string, unknown>)) {
+        candidates.push(v);
+      }
+    }
+    for (const c of candidates) {
+      const ownerId = (c as { owner_id?: unknown }).owner_id;
+      if (typeof ownerId === "string" && ownerId.length > 0) return ownerId;
+      if (typeof ownerId === "number") return String(ownerId);
+    }
+    return null;
   }
 
   // ── Folders ──

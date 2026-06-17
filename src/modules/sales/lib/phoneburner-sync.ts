@@ -173,8 +173,9 @@ function fmtMoneyFromCents(cents: number | null): string | null {
 function buildContactPayload(opts: {
   lead: LeadRowJoined;
   folderId: string;
+  ownerId: string;
 }): PbContactPayload | null {
-  const { lead, folderId } = opts;
+  const { lead, folderId, ownerId } = opts;
   const phone = formatToPbPhone(lead.primary_phone);
   if (!phone) return null;
 
@@ -202,6 +203,7 @@ function buildContactPayload(opts: {
   ].filter((f) => f.value !== "" && f.value !== null && f.value !== undefined);
 
   return {
+    owner_id: ownerId,
     first_name: first,
     last_name: last,
     email,
@@ -239,6 +241,35 @@ async function runWithConcurrency<T, R>(
   return results;
 }
 
+/**
+ * Resolve the PhoneBurner owner_id we'll stamp on every contact create.
+ * PB requires owner_id (or owner_username) and has no /me endpoint,
+ * so we discover it once by inspecting an existing contact and cache
+ * in settings.phoneburner_owner_id.
+ */
+async function resolveOwnerId(): Promise<string> {
+  const fromSettings = sqlite
+    .prepare("SELECT value FROM settings WHERE key = 'phoneburner_owner_id' LIMIT 1")
+    .get() as { value: string | null } | undefined;
+  if (fromSettings?.value) return fromSettings.value;
+
+  const discovered = await phoneBurnerClient.discoverOwnerId();
+  if (!discovered) {
+    throw new Error(
+      "Could not discover PhoneBurner owner_id — workspace appears empty. " +
+        "Create at least one contact in PB manually first, then re-run.",
+    );
+  }
+  sqlite
+    .prepare(
+      `INSERT INTO settings (key, value, type, module, updated_at)
+       VALUES ('phoneburner_owner_id', ?, 'string', 'phoneburner', datetime('now'))
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+    )
+    .run(discovered);
+  return discovered;
+}
+
 export async function pushCampaignToPhoneBurner(
   campaignId: string,
   opts?: { dryRun?: boolean },
@@ -251,6 +282,10 @@ export async function pushCampaignToPhoneBurner(
   const folderId = opts?.dryRun
     ? campaign.phoneburner_folder_id ?? "(dry-run, would create)"
     : await ensurePbFolder(campaign);
+
+  // owner_id is required on every contact create; resolved once
+  // per push and reused. Dry-run skips the API call.
+  const ownerId = opts?.dryRun ? "(dry-run-owner)" : await resolveOwnerId();
 
   const leads = loadLeadsForCampaign(campaignId);
 
@@ -272,7 +307,11 @@ export async function pushCampaignToPhoneBurner(
       summary.skipped_already_pushed++;
       continue;
     }
-    const payload = buildContactPayload({ lead, folderId: typeof folderId === "string" ? folderId : "" });
+    const payload = buildContactPayload({
+      lead,
+      folderId: typeof folderId === "string" ? folderId : "",
+      ownerId,
+    });
     if (!payload) {
       summary.skipped_no_phone++;
       continue;
