@@ -1548,7 +1548,53 @@ export default function CompanyDetailPage() {
                             {a.event_type === "company_updated" && "Company updated"}
                             {a.event_type === "contact_created" && "New contact added"}
                             {a.event_type === "status_change" && `Status changed`}
-                            {!["change", "company_updated", "contact_created", "status_change"].includes(a.event_type) && a.event_type}
+                            {a.event_type.startsWith("instantly_") && (() => {
+                              const campaign = (data.campaign_name as string) || "campaign";
+                              const subject = (data.email_subject as string) || "";
+                              const snippet = (data.reply_snippet as string) || "";
+                              const step = data.step != null ? ` (step ${data.step})` : "";
+                              switch (a.event_type) {
+                                case "instantly_email_sent":
+                                  return <>📧 Sent in <span className="font-medium">{campaign}</span>{step}</>;
+                                case "instantly_email_opened":
+                                  return <>👁 Opened {subject ? <em>“{subject}”</em> : <>email</>} in {campaign}</>;
+                                case "instantly_link_clicked":
+                                  return <>🔗 Clicked link in {campaign}</>;
+                                case "instantly_reply_received":
+                                  return (
+                                    <>📨 <span className="font-medium">Replied</span> in {campaign}
+                                      {snippet && (
+                                        <div className="mt-1 text-xs text-gray-600 bg-gray-50 border-l-2 border-gray-300 pl-2 py-1 italic">
+                                          {snippet.slice(0, 240)}{snippet.length > 240 ? "…" : ""}
+                                        </div>
+                                      )}
+                                    </>
+                                  );
+                                case "instantly_auto_reply_received":
+                                  return <>↩️ Auto-reply in {campaign}</>;
+                                case "instantly_email_bounced":
+                                  return <>⚠️ Bounced in {campaign}</>;
+                                case "instantly_lead_unsubscribed":
+                                  return <>🚫 Unsubscribed from {campaign}</>;
+                                case "instantly_lead_interested":
+                                  return <>✅ <span className="font-medium">Marked Interested</span> in {campaign}</>;
+                                case "instantly_lead_not_interested":
+                                  return <>❌ Marked Not Interested in {campaign}</>;
+                                case "instantly_lead_out_of_office":
+                                  return <>🌴 Out of office ({campaign})</>;
+                                case "instantly_lead_wrong_person":
+                                  return <>🙅 Wrong person ({campaign})</>;
+                                case "instantly_lead_meeting_booked":
+                                  return <>📅 <span className="font-medium">Meeting booked</span> ({campaign})</>;
+                                case "instantly_lead_meeting_completed":
+                                  return <>🎉 Meeting completed ({campaign})</>;
+                                case "instantly_campaign_completed":
+                                  return <>🏁 Campaign completed: {campaign}</>;
+                                default:
+                                  return <>📨 {a.event_type.replace("instantly_", "")} ({campaign})</>;
+                              }
+                            })()}
+                            {!["change", "company_updated", "contact_created", "status_change"].includes(a.event_type) && !a.event_type.startsWith("instantly_") && a.event_type}
                           </p>
                           <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
                             <Clock className="w-3 h-3" />

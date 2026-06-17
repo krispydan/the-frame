@@ -558,6 +558,29 @@ try { sqlite.exec("ALTER TABLE catalog_skus ADD COLUMN lens_color_name TEXT"); }
 try { sqlite.exec("ALTER TABLE catalog_skus ADD COLUMN reading_power REAL"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_skus ADD COLUMN has_blue_light_filter INTEGER"); } catch { /* exists */ }
 
+// Instantly.ai webhook receiver — idempotency + delivery audit log.
+// PK is sha256(eventType|leadEmail|campaignId|timestamp) so retried
+// deliveries fail INSERT silently. See
+// src/modules/sales/lib/instantly-webhooks.ts.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS instantly_webhook_events (
+    id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    workspace_id TEXT,
+    campaign_id TEXT,
+    campaign_name TEXT,
+    lead_email TEXT,
+    payload TEXT NOT NULL,
+    token_valid INTEGER NOT NULL,
+    handler_ok INTEGER,
+    handler_message TEXT,
+    received_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_instantly_webhook_events_lead_email ON instantly_webhook_events(lead_email)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_instantly_webhook_events_event_type ON instantly_webhook_events(event_type)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_instantly_webhook_events_received_at ON instantly_webhook_events(received_at)");
+} catch { /* exists */ }
+
 // Warehouse/ShipHero exports: PO line items, freight info on POs, shiphero sync timestamps
 try { sqlite.exec("ALTER TABLE catalog_skus ADD COLUMN shiphero_synced_at TEXT"); } catch { /* exists */ }
 // Touch-stamp the row when anything edits it (UPC bulk-import,

@@ -1,6 +1,10 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { webhookRegistry } from "@/modules/core/lib/webhooks";
+// Side-effect imports — each module registers its handler with
+// webhookRegistry at load. Required because the dispatcher route is
+// the only path Next.js guarantees will be loaded for these providers.
+import "@/modules/sales/lib/instantly-webhooks";
 import { db } from "@/lib/db";
 import { reportingLogs } from "@/modules/core/schema";
 
