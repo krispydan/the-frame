@@ -1,0 +1,4665 @@
+{
+  "generatedFrom": "/Users/danielseeff/Downloads/Jaxy-Master-PO-Data.xlsx",
+  "generatedAt": "2026-06-17",
+  "skippedReorderRows": 56,
+  "products": [
+    {
+      "skuPrefix": "JX3009",
+      "name": "Vertigo",
+      "type": "sunglasses",
+      "factory": "Geya",
+      "po": "JAX301",
+      "skus": [
+        {
+          "sku": "JX3009-S-ATO",
+          "colorCode": "ATO",
+          "colorName": "Amber/Tortoise",
+          "upc": "605547640070",
+          "costPrice": 0.8,
+          "qty": 300
+        },
+        {
+          "sku": "JX3009-S-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "605547922855",
+          "costPrice": 0.8,
+          "qty": 300
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX3010",
+      "name": "Benchmark",
+      "type": "reading_glasses",
+      "factory": "Geya",
+      "po": "JAX301",
+      "skus": [
+        {
+          "sku": "JX3010-R-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "See Readers Tab",
+          "costPrice": 0.8,
+          "qty": 336,
+          "powerVariants": [
+            {
+              "sku": "JX3010-R-BLK-BL",
+              "upc": "634607210038",
+              "costPrice": 0.8,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX3010-R-BLK-100",
+              "upc": "634607390457",
+              "costPrice": 0.8,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3010-R-BLK-150",
+              "upc": "634607245450",
+              "costPrice": 0.8,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3010-R-BLK-175",
+              "upc": "634607062491",
+              "costPrice": 0.8,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3010-R-BLK-200",
+              "upc": "634607341541",
+              "costPrice": 0.8,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3010-R-BLK-250",
+              "upc": "634607067281",
+              "costPrice": 0.8,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3010-R-BLK-300",
+              "upc": "634607138417",
+              "costPrice": 0.8,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX3010-R-GRN",
+          "colorCode": "GRN",
+          "colorName": "Green",
+          "upc": "See Readers Tab",
+          "costPrice": 0.8,
+          "qty": 336,
+          "powerVariants": [
+            {
+              "sku": "JX3010-R-GRN-BL",
+              "upc": "634607461553",
+              "costPrice": 0.8,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX3010-R-GRN-100",
+              "upc": "634607425227",
+              "costPrice": 0.8,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3010-R-GRN-150",
+              "upc": "634607262969",
+              "costPrice": 0.8,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3010-R-GRN-175",
+              "upc": "634607342494",
+              "costPrice": 0.8,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3010-R-GRN-200",
+              "upc": "634607355548",
+              "costPrice": 0.8,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3010-R-GRN-250",
+              "upc": "634607157029",
+              "costPrice": 0.8,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3010-R-GRN-300",
+              "upc": "634607111090",
+              "costPrice": 0.8,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX3010-R-TOR",
+          "colorCode": "TOR",
+          "colorName": "Tortoise",
+          "upc": "See Readers Tab",
+          "costPrice": 0.8,
+          "qty": 336,
+          "powerVariants": [
+            {
+              "sku": "JX3010-R-TOR-BL",
+              "upc": "634607447373",
+              "costPrice": 0.8,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX3010-R-TOR-100",
+              "upc": "634607179489",
+              "costPrice": 0.8,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3010-R-TOR-150",
+              "upc": "634607247546",
+              "costPrice": 0.8,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3010-R-TOR-175",
+              "upc": "634607057381",
+              "costPrice": 0.8,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3010-R-TOR-200",
+              "upc": "634607219352",
+              "costPrice": 0.8,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3010-R-TOR-250",
+              "upc": "634607024611",
+              "costPrice": 0.8,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3010-R-TOR-300",
+              "upc": "634607270728",
+              "costPrice": 0.8,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX3011",
+      "name": "Palazzo",
+      "type": "reading_glasses",
+      "factory": "Geya",
+      "po": "JAX301",
+      "skus": [
+        {
+          "sku": "JX3011-R-ATO",
+          "colorCode": "ATO",
+          "colorName": "Amber/Tortoise",
+          "upc": "See Readers Tab",
+          "costPrice": 0.9,
+          "qty": 336,
+          "powerVariants": [
+            {
+              "sku": "JX3011-R-ATO-BL",
+              "upc": "634607153786",
+              "costPrice": 0.9,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX3011-R-ATO-100",
+              "upc": "634607407018",
+              "costPrice": 0.9,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3011-R-ATO-150",
+              "upc": "634607281786",
+              "costPrice": 0.9,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3011-R-ATO-175",
+              "upc": "634607153540",
+              "costPrice": 0.9,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3011-R-ATO-200",
+              "upc": "634607139766",
+              "costPrice": 0.9,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3011-R-ATO-250",
+              "upc": "634607178680",
+              "costPrice": 0.9,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3011-R-ATO-300",
+              "upc": "634607236922",
+              "costPrice": 0.9,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX3011-R-GRN",
+          "colorCode": "GRN",
+          "colorName": "Green",
+          "upc": "See Readers Tab",
+          "costPrice": 0.9,
+          "qty": 336,
+          "powerVariants": [
+            {
+              "sku": "JX3011-R-GRN-BL",
+              "upc": "634607341336",
+              "costPrice": 0.9,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX3011-R-GRN-100",
+              "upc": "634607481964",
+              "costPrice": 0.9,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3011-R-GRN-150",
+              "upc": "634607040949",
+              "costPrice": 0.9,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3011-R-GRN-175",
+              "upc": "634607169633",
+              "costPrice": 0.9,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3011-R-GRN-200",
+              "upc": "634607243784",
+              "costPrice": 0.9,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3011-R-GRN-250",
+              "upc": "634607388409",
+              "costPrice": 0.9,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3011-R-GRN-300",
+              "upc": "634607272357",
+              "costPrice": 0.9,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX3011-R-PNK",
+          "colorCode": "PNK",
+          "colorName": "Pink",
+          "upc": "See Readers Tab",
+          "costPrice": 0.9,
+          "qty": 336,
+          "powerVariants": [
+            {
+              "sku": "JX3011-R-PNK-BL",
+              "upc": "634607058128",
+              "costPrice": 0.9,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX3011-R-PNK-100",
+              "upc": "634607054120",
+              "costPrice": 0.9,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3011-R-PNK-150",
+              "upc": "634607415211",
+              "costPrice": 0.9,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3011-R-PNK-175",
+              "upc": "634607081478",
+              "costPrice": 0.9,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3011-R-PNK-200",
+              "upc": "634607094386",
+              "costPrice": 0.9,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3011-R-PNK-250",
+              "upc": "634607202804",
+              "costPrice": 0.9,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3011-R-PNK-300",
+              "upc": "634607185442",
+              "costPrice": 0.9,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX3012",
+      "name": "Cameo",
+      "type": "reading_glasses",
+      "factory": "Geya",
+      "po": "JAX301",
+      "skus": [
+        {
+          "sku": "JX3012-R-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "See Readers Tab",
+          "costPrice": 1.05,
+          "qty": 336,
+          "powerVariants": [
+            {
+              "sku": "JX3012-R-BLK-BL",
+              "upc": "634607273781",
+              "costPrice": 1.05,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX3012-R-BLK-100",
+              "upc": "634607110185",
+              "costPrice": 1.05,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3012-R-BLK-150",
+              "upc": "634607246341",
+              "costPrice": 1.05,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3012-R-BLK-175",
+              "upc": "634607432690",
+              "costPrice": 1.05,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3012-R-BLK-200",
+              "upc": "634607482633",
+              "costPrice": 1.05,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3012-R-BLK-250",
+              "upc": "634607000158",
+              "costPrice": 1.05,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3012-R-BLK-300",
+              "upc": "634607303204",
+              "costPrice": 1.05,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX3012-R-BLU",
+          "colorCode": "BLU",
+          "colorName": "Blue",
+          "upc": "See Readers Tab",
+          "costPrice": 1.05,
+          "qty": 336,
+          "powerVariants": [
+            {
+              "sku": "JX3012-R-BLU-BL",
+              "upc": "634607048136",
+              "costPrice": 1.05,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX3012-R-BLU-100",
+              "upc": "634607013134",
+              "costPrice": 1.05,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3012-R-BLU-150",
+              "upc": "634607162610",
+              "costPrice": 1.05,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3012-R-BLU-175",
+              "upc": "634607112868",
+              "costPrice": 1.05,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3012-R-BLU-200",
+              "upc": "634607388553",
+              "costPrice": 1.05,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3012-R-BLU-250",
+              "upc": "634607330880",
+              "costPrice": 1.05,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3012-R-BLU-300",
+              "upc": "634607419158",
+              "costPrice": 1.05,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX3012-R-RED",
+          "colorCode": "RED",
+          "colorName": "Red",
+          "upc": "See Readers Tab",
+          "costPrice": 1.05,
+          "qty": 336,
+          "powerVariants": [
+            {
+              "sku": "JX3012-R-RED-BL",
+              "upc": "634607244491",
+              "costPrice": 1.05,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX3012-R-RED-100",
+              "upc": "634607495428",
+              "costPrice": 1.05,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3012-R-RED-150",
+              "upc": "634607010997",
+              "costPrice": 1.05,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3012-R-RED-175",
+              "upc": "634607112738",
+              "costPrice": 1.05,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3012-R-RED-200",
+              "upc": "634607332655",
+              "costPrice": 1.05,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3012-R-RED-250",
+              "upc": "634607413439",
+              "costPrice": 1.05,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX3012-R-RED-300",
+              "upc": "634607453947",
+              "costPrice": 1.05,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX2009",
+      "name": "Stanza",
+      "type": "sunglasses",
+      "factory": "Huide",
+      "po": "JAX201",
+      "skus": [
+        {
+          "sku": "JX2009-S-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "605547836053",
+          "costPrice": 0.91,
+          "qty": 300
+        },
+        {
+          "sku": "JX2009-S-GRN",
+          "colorCode": "GRN",
+          "colorName": "Green",
+          "upc": "605547804601",
+          "costPrice": 0.91,
+          "qty": 300
+        },
+        {
+          "sku": "JX2009-S-RST",
+          "colorCode": "RST",
+          "colorName": "Rust",
+          "upc": "605547876035",
+          "costPrice": 0.91,
+          "qty": 300
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX2010",
+      "name": "District",
+      "type": "sunglasses",
+      "factory": "Huide",
+      "po": "JAX201",
+      "skus": [
+        {
+          "sku": "JX2010-S-ATO",
+          "colorCode": "ATO",
+          "colorName": "Amber/Tortoise",
+          "upc": "605547575242",
+          "costPrice": 0.91,
+          "qty": 300
+        },
+        {
+          "sku": "JX2010-S-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "605547902130",
+          "costPrice": 0.91,
+          "qty": 300
+        },
+        {
+          "sku": "JX2010-S-RST",
+          "colorCode": "RST",
+          "colorName": "Rust",
+          "upc": "605547724299",
+          "costPrice": 0.91,
+          "qty": 300
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX2011",
+      "name": "Caliber",
+      "type": "sunglasses",
+      "factory": "Huide",
+      "po": "JAX201",
+      "skus": [
+        {
+          "sku": "JX2011-S-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "605547558061",
+          "costPrice": 1.0,
+          "qty": 300
+        },
+        {
+          "sku": "JX2011-S-GLD",
+          "colorCode": "GLD",
+          "colorName": "Gold",
+          "upc": "605547663970",
+          "costPrice": 1.0,
+          "qty": 300
+        },
+        {
+          "sku": "JX2011-S-SLV",
+          "colorCode": "SLV",
+          "colorName": "Silver",
+          "upc": "605547622748",
+          "costPrice": 1.0,
+          "qty": 300
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX2012",
+      "name": "Vesper",
+      "type": "sunglasses",
+      "factory": "Huide",
+      "po": "JAX201",
+      "skus": [
+        {
+          "sku": "JX2012-S-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "605547653919",
+          "costPrice": 0.9,
+          "qty": 300
+        },
+        {
+          "sku": "JX2012-S-TOR",
+          "colorCode": "TOR",
+          "colorName": "Tortoise",
+          "upc": "605547696107",
+          "costPrice": 0.9,
+          "qty": 300
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX2013",
+      "name": "Cabaret",
+      "type": "sunglasses",
+      "factory": "Huide",
+      "po": "JAX201",
+      "skus": [
+        {
+          "sku": "JX2013-S-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "605547728860",
+          "costPrice": 0.95,
+          "qty": 300
+        },
+        {
+          "sku": "JX2013-S-BUR",
+          "colorCode": "BUR",
+          "colorName": "Burgundy",
+          "upc": "605547591884",
+          "costPrice": 0.95,
+          "qty": 300
+        },
+        {
+          "sku": "JX2013-S-TOR",
+          "colorCode": "TOR",
+          "colorName": "Tortoise",
+          "upc": "605547855290",
+          "costPrice": 0.95,
+          "qty": 300
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX5001",
+      "name": "Podium",
+      "type": "reading_glasses",
+      "factory": "Pilot",
+      "po": "JAX501/502",
+      "skus": [
+        {
+          "sku": "JX5001-R-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "See Readers Tab",
+          "costPrice": 0.78,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5001-R-BLK-BL",
+              "upc": "634607374310",
+              "costPrice": 0.78,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5001-R-BLK-100",
+              "upc": "634607485955",
+              "costPrice": 0.78,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5001-R-BLK-150",
+              "upc": "634607015343",
+              "costPrice": 0.78,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5001-R-BLK-175",
+              "upc": "634607118143",
+              "costPrice": 0.78,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5001-R-BLK-200",
+              "upc": "634607282325",
+              "costPrice": 0.78,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5001-R-BLK-250",
+              "upc": "634607156916",
+              "costPrice": 0.78,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5001-R-BLK-300",
+              "upc": "634607237950",
+              "costPrice": 0.78,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5001-R-BLU",
+          "colorCode": "BLU",
+          "colorName": "Blue",
+          "upc": "See Readers Tab",
+          "costPrice": 0.89,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5001-R-BLU-BL",
+              "upc": "634607006143",
+              "costPrice": 0.89,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5001-R-BLU-100",
+              "upc": "634607376000",
+              "costPrice": 0.89,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5001-R-BLU-150",
+              "upc": "634607136932",
+              "costPrice": 0.89,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5001-R-BLU-175",
+              "upc": "634607204471",
+              "costPrice": 0.89,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5001-R-BLU-200",
+              "upc": "634607139230",
+              "costPrice": 0.89,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5001-R-BLU-250",
+              "upc": "634607300494",
+              "costPrice": 0.89,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5001-R-BLU-300",
+              "upc": "634607004538",
+              "costPrice": 0.89,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5001-R-TOR",
+          "colorCode": "TOR",
+          "colorName": "Tortoise",
+          "upc": "See Readers Tab",
+          "costPrice": 0.83,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5001-R-TOR-BL",
+              "upc": "634607117658",
+              "costPrice": 0.83,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5001-R-TOR-100",
+              "upc": "634607292041",
+              "costPrice": 0.83,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5001-R-TOR-150",
+              "upc": "634607243708",
+              "costPrice": 0.83,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5001-R-TOR-175",
+              "upc": "634607083205",
+              "costPrice": 0.83,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5001-R-TOR-200",
+              "upc": "634607405854",
+              "costPrice": 0.83,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5001-R-TOR-250",
+              "upc": "634607295561",
+              "costPrice": 0.83,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5001-R-TOR-300",
+              "upc": "634607195304",
+              "costPrice": 0.83,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX5002",
+      "name": "Tempo",
+      "type": "reading_glasses",
+      "factory": "Pilot",
+      "po": "JAX501/502",
+      "skus": [
+        {
+          "sku": "JX5002-R-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "See Readers Tab",
+          "costPrice": 0.68,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5002-R-BLK-BL",
+              "upc": "634607471118",
+              "costPrice": 0.68,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5002-R-BLK-100",
+              "upc": "634607148904",
+              "costPrice": 0.68,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5002-R-BLK-150",
+              "upc": "634607155773",
+              "costPrice": 0.68,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5002-R-BLK-175",
+              "upc": "634607199623",
+              "costPrice": 0.68,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5002-R-BLK-200",
+              "upc": "634607143022",
+              "costPrice": 0.68,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5002-R-BLK-250",
+              "upc": "634607307240",
+              "costPrice": 0.68,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5002-R-BLK-300",
+              "upc": "634607027995",
+              "costPrice": 0.68,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5002-R-OLV",
+          "colorCode": "OLV",
+          "colorName": "Olive",
+          "upc": "See Readers Tab",
+          "costPrice": 0.68,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5002-R-OLV-BL",
+              "upc": "634607316785",
+              "costPrice": 0.68,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5002-R-OLV-100",
+              "upc": "634607142377",
+              "costPrice": 0.68,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5002-R-OLV-150",
+              "upc": "634607387631",
+              "costPrice": 0.68,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5002-R-OLV-175",
+              "upc": "634607059477",
+              "costPrice": 0.68,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5002-R-OLV-200",
+              "upc": "634607466602",
+              "costPrice": 0.68,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5002-R-OLV-250",
+              "upc": "634607208837",
+              "costPrice": 0.68,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5002-R-OLV-300",
+              "upc": "634607388331",
+              "costPrice": 0.68,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5002-R-TOR",
+          "colorCode": "TOR",
+          "colorName": "Tortoise",
+          "upc": "See Readers Tab",
+          "costPrice": 0.78,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5002-R-TOR-BL",
+              "upc": "634607182861",
+              "costPrice": 0.78,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5002-R-TOR-100",
+              "upc": "634607350277",
+              "costPrice": 0.78,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5002-R-TOR-150",
+              "upc": "634607437879",
+              "costPrice": 0.78,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5002-R-TOR-175",
+              "upc": "634607303228",
+              "costPrice": 0.78,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5002-R-TOR-200",
+              "upc": "634607297961",
+              "costPrice": 0.78,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5002-R-TOR-250",
+              "upc": "634607181895",
+              "costPrice": 0.78,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5002-R-TOR-300",
+              "upc": "634607271985",
+              "costPrice": 0.78,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX5003",
+      "name": "Sidewalk",
+      "type": "reading_glasses",
+      "factory": "Pilot",
+      "po": "JAX501/502",
+      "skus": [
+        {
+          "sku": "JX5003-R-BRW",
+          "colorCode": "BRW",
+          "colorName": "Brown",
+          "upc": "See Readers Tab",
+          "costPrice": 0.73,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5003-R-BRW-BL",
+              "upc": "634607030339",
+              "costPrice": 0.73,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5003-R-BRW-100",
+              "upc": "634607007010",
+              "costPrice": 0.73,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5003-R-BRW-150",
+              "upc": "634607247249",
+              "costPrice": 0.73,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5003-R-BRW-175",
+              "upc": "634607033309",
+              "costPrice": 0.73,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5003-R-BRW-200",
+              "upc": "634607285357",
+              "costPrice": 0.73,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5003-R-BRW-250",
+              "upc": "634607167677",
+              "costPrice": 0.73,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5003-R-BRW-300",
+              "upc": "634607131289",
+              "costPrice": 0.73,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5003-R-GRN",
+          "colorCode": "GRN",
+          "colorName": "Green",
+          "upc": "See Readers Tab",
+          "costPrice": 0.73,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5003-R-GRN-BL",
+              "upc": "634607315757",
+              "costPrice": 0.73,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5003-R-GRN-100",
+              "upc": "634607357061",
+              "costPrice": 0.73,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5003-R-GRN-150",
+              "upc": "634607253714",
+              "costPrice": 0.73,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5003-R-GRN-175",
+              "upc": "634607256876",
+              "costPrice": 0.73,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5003-R-GRN-200",
+              "upc": "634607189068",
+              "costPrice": 0.73,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5003-R-GRN-250",
+              "upc": "634607287900",
+              "costPrice": 0.73,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5003-R-GRN-300",
+              "upc": "634607417949",
+              "costPrice": 0.73,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5003-R-PNK",
+          "colorCode": "PNK",
+          "colorName": "Pink",
+          "upc": "See Readers Tab",
+          "costPrice": 0.73,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5003-R-PNK-BL",
+              "upc": "634607196417",
+              "costPrice": 0.73,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5003-R-PNK-100",
+              "upc": "634607122171",
+              "costPrice": 0.73,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5003-R-PNK-150",
+              "upc": "634607240561",
+              "costPrice": 0.73,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5003-R-PNK-175",
+              "upc": "634607476014",
+              "costPrice": 0.73,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5003-R-PNK-200",
+              "upc": "634607102807",
+              "costPrice": 0.73,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5003-R-PNK-250",
+              "upc": "634607278991",
+              "costPrice": 0.73,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5003-R-PNK-300",
+              "upc": "634607022082",
+              "costPrice": 0.73,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX5004",
+      "name": "Agenda",
+      "type": "reading_glasses",
+      "factory": "Pilot",
+      "po": "JAX501/502",
+      "skus": [
+        {
+          "sku": "JX5004-R-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "See Readers Tab",
+          "costPrice": 0.72,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5004-R-BLK-BL",
+              "upc": "634607239855",
+              "costPrice": 0.72,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5004-R-BLK-100",
+              "upc": "634607036218",
+              "costPrice": 0.72,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5004-R-BLK-150",
+              "upc": "634607203986",
+              "costPrice": 0.72,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5004-R-BLK-175",
+              "upc": "634607100858",
+              "costPrice": 0.72,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5004-R-BLK-200",
+              "upc": "634607434090",
+              "costPrice": 0.72,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5004-R-BLK-250",
+              "upc": "634607261948",
+              "costPrice": 0.72,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5004-R-BLK-300",
+              "upc": "634607134211",
+              "costPrice": 0.72,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5004-R-GRY",
+          "colorCode": "GRY",
+          "colorName": "Grey",
+          "upc": "See Readers Tab",
+          "costPrice": 0.82,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5004-R-GRY-BL",
+              "upc": "634607144395",
+              "costPrice": 0.82,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5004-R-GRY-100",
+              "upc": "634607091354",
+              "costPrice": 0.82,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5004-R-GRY-150",
+              "upc": "634607217075",
+              "costPrice": 0.82,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5004-R-GRY-175",
+              "upc": "634607270186",
+              "costPrice": 0.82,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5004-R-GRY-200",
+              "upc": "634607118006",
+              "costPrice": 0.82,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5004-R-GRY-250",
+              "upc": "634607213329",
+              "costPrice": 0.82,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5004-R-GRY-300",
+              "upc": "634607196110",
+              "costPrice": 0.82,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5004-R-TOR",
+          "colorCode": "TOR",
+          "colorName": "Tortoise",
+          "upc": "See Readers Tab",
+          "costPrice": 0.82,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5004-R-TOR-BL",
+              "upc": "634607139773",
+              "costPrice": 0.82,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5004-R-TOR-100",
+              "upc": "634607289836",
+              "costPrice": 0.82,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5004-R-TOR-150",
+              "upc": "634607402945",
+              "costPrice": 0.82,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5004-R-TOR-175",
+              "upc": "634607342777",
+              "costPrice": 0.82,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5004-R-TOR-200",
+              "upc": "634607258733",
+              "costPrice": 0.82,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5004-R-TOR-250",
+              "upc": "634607169862",
+              "costPrice": 0.82,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5004-R-TOR-300",
+              "upc": "634607343927",
+              "costPrice": 0.82,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX5005",
+      "name": "Ombr\u00e9",
+      "type": "reading_glasses",
+      "factory": "Pilot",
+      "po": "JAX501/502",
+      "skus": [
+        {
+          "sku": "JX5005-R-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "See Readers Tab",
+          "costPrice": 0.82,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5005-R-BLK-BL",
+              "upc": "634607268077",
+              "costPrice": 0.82,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5005-R-BLK-100",
+              "upc": "634607280819",
+              "costPrice": 0.82,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5005-R-BLK-150",
+              "upc": "634607253448",
+              "costPrice": 0.82,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5005-R-BLK-175",
+              "upc": "634607156701",
+              "costPrice": 0.82,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5005-R-BLK-200",
+              "upc": "634607432799",
+              "costPrice": 0.82,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5005-R-BLK-250",
+              "upc": "634607261542",
+              "costPrice": 0.82,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5005-R-BLK-300",
+              "upc": "634607099893",
+              "costPrice": 0.82,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5005-R-BLU",
+          "colorCode": "BLU",
+          "colorName": "Blue",
+          "upc": "See Readers Tab",
+          "costPrice": 0.82,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5005-R-BLU-BL",
+              "upc": "634607329761",
+              "costPrice": 0.82,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5005-R-BLU-100",
+              "upc": "634607077693",
+              "costPrice": 0.82,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5005-R-BLU-150",
+              "upc": "634607164225",
+              "costPrice": 0.82,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5005-R-BLU-175",
+              "upc": "634607274122",
+              "costPrice": 0.82,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5005-R-BLU-200",
+              "upc": "634607265755",
+              "costPrice": 0.82,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5005-R-BLU-250",
+              "upc": "634607116699",
+              "costPrice": 0.82,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5005-R-BLU-300",
+              "upc": "634607131128",
+              "costPrice": 0.82,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5005-R-BRW",
+          "colorCode": "BRW",
+          "colorName": "Brown",
+          "upc": "See Readers Tab",
+          "costPrice": 0.78,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5005-R-BRW-BL",
+              "upc": "634607079727",
+              "costPrice": 0.78,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5005-R-BRW-100",
+              "upc": "634607145071",
+              "costPrice": 0.78,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5005-R-BRW-150",
+              "upc": "634607442101",
+              "costPrice": 0.78,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5005-R-BRW-175",
+              "upc": "634607227210",
+              "costPrice": 0.78,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5005-R-BRW-200",
+              "upc": "634607327255",
+              "costPrice": 0.78,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5005-R-BRW-250",
+              "upc": "634607383176",
+              "costPrice": 0.78,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5005-R-BRW-300",
+              "upc": "634607476380",
+              "costPrice": 0.78,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX5006",
+      "name": "Almanac",
+      "type": "reading_glasses",
+      "factory": "Pilot",
+      "po": "JAX501/502",
+      "skus": [
+        {
+          "sku": "JX5006-R-BLU",
+          "colorCode": "BLU",
+          "colorName": "Blue",
+          "upc": "See Readers Tab",
+          "costPrice": 0.68,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5006-R-BLU-BL",
+              "upc": "634607091972",
+              "costPrice": 0.68,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5006-R-BLU-100",
+              "upc": "634607102142",
+              "costPrice": 0.68,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5006-R-BLU-150",
+              "upc": "634607211387",
+              "costPrice": 0.68,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5006-R-BLU-175",
+              "upc": "634607214944",
+              "costPrice": 0.68,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5006-R-BLU-200",
+              "upc": "634607424701",
+              "costPrice": 0.68,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5006-R-BLU-250",
+              "upc": "634607064921",
+              "costPrice": 0.68,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5006-R-BLU-300",
+              "upc": "634607115920",
+              "costPrice": 0.68,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5006-R-BRW",
+          "colorCode": "BRW",
+          "colorName": "Brown",
+          "upc": "See Readers Tab",
+          "costPrice": 0.68,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5006-R-BRW-BL",
+              "upc": "634607089344",
+              "costPrice": 0.68,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5006-R-BRW-100",
+              "upc": "634607046613",
+              "costPrice": 0.68,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5006-R-BRW-150",
+              "upc": "634607384265",
+              "costPrice": 0.68,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5006-R-BRW-175",
+              "upc": "634607449636",
+              "costPrice": 0.68,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5006-R-BRW-200",
+              "upc": "634607333089",
+              "costPrice": 0.68,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5006-R-BRW-250",
+              "upc": "634607251291",
+              "costPrice": 0.68,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5006-R-BRW-300",
+              "upc": "634607161682",
+              "costPrice": 0.68,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5006-R-GRN",
+          "colorCode": "GRN",
+          "colorName": "Green",
+          "upc": "See Readers Tab",
+          "costPrice": 0.78,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5006-R-GRN-BL",
+              "upc": "634607042790",
+              "costPrice": 0.78,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5006-R-GRN-100",
+              "upc": "634607075545",
+              "costPrice": 0.78,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5006-R-GRN-150",
+              "upc": "634607071769",
+              "costPrice": 0.78,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5006-R-GRN-175",
+              "upc": "634607276713",
+              "costPrice": 0.78,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5006-R-GRN-200",
+              "upc": "634607214371",
+              "costPrice": 0.78,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5006-R-GRN-250",
+              "upc": "634607309084",
+              "costPrice": 0.78,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5006-R-GRN-300",
+              "upc": "634607281045",
+              "costPrice": 0.78,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX5007",
+      "name": "Timber",
+      "type": "reading_glasses",
+      "factory": "Pilot",
+      "po": "JAX501/502",
+      "skus": [
+        {
+          "sku": "JX5007-R-BLU",
+          "colorCode": "BLU",
+          "colorName": "Blue",
+          "upc": "See Readers Tab",
+          "costPrice": 0.78,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5007-R-BLU-BL",
+              "upc": "634607429201",
+              "costPrice": 0.78,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5007-R-BLU-100",
+              "upc": "634607415822",
+              "costPrice": 0.78,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5007-R-BLU-150",
+              "upc": "634607103217",
+              "costPrice": 0.78,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5007-R-BLU-175",
+              "upc": "634607008253",
+              "costPrice": 0.78,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5007-R-BLU-200",
+              "upc": "634607442606",
+              "costPrice": 0.78,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5007-R-BLU-250",
+              "upc": "634607158798",
+              "costPrice": 0.78,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5007-R-BLU-300",
+              "upc": "634607205263",
+              "costPrice": 0.78,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5007-R-BRW",
+          "colorCode": "BRW",
+          "colorName": "Brown",
+          "upc": "See Readers Tab",
+          "costPrice": 0.78,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5007-R-BRW-BL",
+              "upc": "634607392802",
+              "costPrice": 0.78,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5007-R-BRW-100",
+              "upc": "634607236434",
+              "costPrice": 0.78,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5007-R-BRW-150",
+              "upc": "634607009212",
+              "costPrice": 0.78,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5007-R-BRW-175",
+              "upc": "634607416348",
+              "costPrice": 0.78,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5007-R-BRW-200",
+              "upc": "634607470258",
+              "costPrice": 0.78,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5007-R-BRW-250",
+              "upc": "634607258832",
+              "costPrice": 0.78,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5007-R-BRW-300",
+              "upc": "634607037079",
+              "costPrice": 0.78,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5007-R-GRN",
+          "colorCode": "GRN",
+          "colorName": "Green",
+          "upc": "See Readers Tab",
+          "costPrice": 0.78,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5007-R-GRN-BL",
+              "upc": "634607072872",
+              "costPrice": 0.78,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5007-R-GRN-100",
+              "upc": "634607099749",
+              "costPrice": 0.78,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5007-R-GRN-150",
+              "upc": "634607171063",
+              "costPrice": 0.78,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5007-R-GRN-175",
+              "upc": "634607071813",
+              "costPrice": 0.78,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5007-R-GRN-200",
+              "upc": "634607067946",
+              "costPrice": 0.78,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5007-R-GRN-250",
+              "upc": "634607474294",
+              "costPrice": 0.78,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5007-R-GRN-300",
+              "upc": "634607268978",
+              "costPrice": 0.78,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX5008",
+      "name": "Wisp",
+      "type": "reading_glasses",
+      "factory": "Pilot",
+      "po": "JAX501/502",
+      "skus": [
+        {
+          "sku": "JX5008-R-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "See Readers Tab",
+          "costPrice": 0.9,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5008-R-BLK-BL",
+              "upc": "634607214340",
+              "costPrice": 0.9,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5008-R-BLK-100",
+              "upc": "634607275099",
+              "costPrice": 0.9,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5008-R-BLK-150",
+              "upc": "634607198947",
+              "costPrice": 0.9,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5008-R-BLK-175",
+              "upc": "634607236106",
+              "costPrice": 0.9,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5008-R-BLK-200",
+              "upc": "634607087111",
+              "costPrice": 0.9,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5008-R-BLK-250",
+              "upc": "634607196387",
+              "costPrice": 0.9,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5008-R-BLK-300",
+              "upc": "634607374846",
+              "costPrice": 0.9,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5008-R-GRN",
+          "colorCode": "GRN",
+          "colorName": "Green",
+          "upc": "See Readers Tab",
+          "costPrice": 0.9,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5008-R-GRN-BL",
+              "upc": "634607471293",
+              "costPrice": 0.9,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5008-R-GRN-100",
+              "upc": "634607192044",
+              "costPrice": 0.9,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5008-R-GRN-150",
+              "upc": "634607466923",
+              "costPrice": 0.9,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5008-R-GRN-175",
+              "upc": "634607173654",
+              "costPrice": 0.9,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5008-R-GRN-200",
+              "upc": "634607370596",
+              "costPrice": 0.9,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5008-R-GRN-250",
+              "upc": "634607171810",
+              "costPrice": 0.9,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5008-R-GRN-300",
+              "upc": "634607057947",
+              "costPrice": 0.9,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5008-R-TOR",
+          "colorCode": "TOR",
+          "colorName": "Tortoise",
+          "upc": "See Readers Tab",
+          "costPrice": 1.0,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5008-R-TOR-BL",
+              "upc": "634607077686",
+              "costPrice": 1.0,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5008-R-TOR-100",
+              "upc": "634607448851",
+              "costPrice": 1.0,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5008-R-TOR-150",
+              "upc": "634607483579",
+              "costPrice": 1.0,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5008-R-TOR-175",
+              "upc": "634607335175",
+              "costPrice": 1.0,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5008-R-TOR-200",
+              "upc": "634607341060",
+              "costPrice": 1.0,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5008-R-TOR-250",
+              "upc": "634607418922",
+              "costPrice": 1.0,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5008-R-TOR-300",
+              "upc": "634607261870",
+              "costPrice": 1.0,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX5009",
+      "name": "Boulder",
+      "type": "reading_glasses",
+      "factory": "Pilot",
+      "po": "JAX501/502",
+      "skus": [
+        {
+          "sku": "JX5009-R-BLU",
+          "colorCode": "BLU",
+          "colorName": "Blue",
+          "upc": "See Readers Tab",
+          "costPrice": 0.69,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5009-R-BLU-BL",
+              "upc": "634607388362",
+              "costPrice": 0.69,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5009-R-BLU-100",
+              "upc": "634607098056",
+              "costPrice": 0.69,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5009-R-BLU-150",
+              "upc": "634607331665",
+              "costPrice": 0.69,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5009-R-BLU-175",
+              "upc": "634607161255",
+              "costPrice": 0.69,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5009-R-BLU-200",
+              "upc": "634607308179",
+              "costPrice": 0.69,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5009-R-BLU-250",
+              "upc": "634607417802",
+              "costPrice": 0.69,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5009-R-BLU-300",
+              "upc": "634607445652",
+              "costPrice": 0.69,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5009-R-BRW",
+          "colorCode": "BRW",
+          "colorName": "Brown",
+          "upc": "See Readers Tab",
+          "costPrice": 0.69,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5009-R-BRW-BL",
+              "upc": "634607073510",
+              "costPrice": 0.69,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5009-R-BRW-100",
+              "upc": "634607316778",
+              "costPrice": 0.69,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5009-R-BRW-150",
+              "upc": "634607171292",
+              "costPrice": 0.69,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5009-R-BRW-175",
+              "upc": "634607454135",
+              "costPrice": 0.69,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5009-R-BRW-200",
+              "upc": "634607296384",
+              "costPrice": 0.69,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5009-R-BRW-250",
+              "upc": "634607252885",
+              "costPrice": 0.69,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5009-R-BRW-300",
+              "upc": "634607150587",
+              "costPrice": 0.69,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5009-R-GRN",
+          "colorCode": "GRN",
+          "colorName": "Green",
+          "upc": "See Readers Tab",
+          "costPrice": 0.69,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5009-R-GRN-BL",
+              "upc": "634607204211",
+              "costPrice": 0.69,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5009-R-GRN-100",
+              "upc": "634607000080",
+              "costPrice": 0.69,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5009-R-GRN-150",
+              "upc": "634607288297",
+              "costPrice": 0.69,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5009-R-GRN-175",
+              "upc": "634607301804",
+              "costPrice": 0.69,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5009-R-GRN-200",
+              "upc": "634607458607",
+              "costPrice": 0.69,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5009-R-GRN-250",
+              "upc": "634607236823",
+              "costPrice": 0.69,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5009-R-GRN-300",
+              "upc": "634607128319",
+              "costPrice": 0.69,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX5010",
+      "name": "Monument",
+      "type": "reading_glasses",
+      "factory": "Pilot",
+      "po": "JAX501/502",
+      "skus": [
+        {
+          "sku": "JX5010-R-GRY",
+          "colorCode": "GRY",
+          "colorName": "Grey",
+          "upc": "See Readers Tab",
+          "costPrice": 0.94,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5010-R-GRY-BL",
+              "upc": "634607265489",
+              "costPrice": 0.94,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5010-R-GRY-100",
+              "upc": "634607038281",
+              "costPrice": 0.94,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5010-R-GRY-150",
+              "upc": "634607162412",
+              "costPrice": 0.94,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5010-R-GRY-175",
+              "upc": "634607442248",
+              "costPrice": 0.94,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5010-R-GRY-200",
+              "upc": "634607253240",
+              "costPrice": 0.94,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5010-R-GRY-250",
+              "upc": "634607423124",
+              "costPrice": 0.94,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5010-R-GRY-300",
+              "upc": "634607457099",
+              "costPrice": 0.94,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5010-R-PNK",
+          "colorCode": "PNK",
+          "colorName": "Pink",
+          "upc": "See Readers Tab",
+          "costPrice": 0.84,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5010-R-PNK-BL",
+              "upc": "634607294939",
+              "costPrice": 0.84,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5010-R-PNK-100",
+              "upc": "634607430818",
+              "costPrice": 0.84,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5010-R-PNK-150",
+              "upc": "634607112776",
+              "costPrice": 0.84,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5010-R-PNK-175",
+              "upc": "634607239930",
+              "costPrice": 0.84,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5010-R-PNK-200",
+              "upc": "634607457204",
+              "costPrice": 0.84,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5010-R-PNK-250",
+              "upc": "634607226299",
+              "costPrice": 0.84,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5010-R-PNK-300",
+              "upc": "634607054465",
+              "costPrice": 0.84,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5010-R-TEA",
+          "colorCode": "TEA",
+          "colorName": "Teal",
+          "upc": "See Readers Tab",
+          "costPrice": 0.98,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5010-R-TEA-BL",
+              "upc": "634607311445",
+              "costPrice": 0.98,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5010-R-TEA-100",
+              "upc": "634607404697",
+              "costPrice": 0.98,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5010-R-TEA-150",
+              "upc": "634607266011",
+              "costPrice": 0.98,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5010-R-TEA-175",
+              "upc": "634607440558",
+              "costPrice": 0.98,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5010-R-TEA-200",
+              "upc": "634607452087",
+              "costPrice": 0.98,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5010-R-TEA-250",
+              "upc": "634607204358",
+              "costPrice": 0.98,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5010-R-TEA-300",
+              "upc": "634607329792",
+              "costPrice": 0.98,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX5011",
+      "name": "Memo",
+      "type": "reading_glasses",
+      "factory": "Pilot",
+      "po": "JAX501/502",
+      "skus": [
+        {
+          "sku": "JX5011-R-BRW",
+          "colorCode": "BRW",
+          "colorName": "Brown",
+          "upc": "See Readers Tab",
+          "costPrice": 0.79,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5011-R-BRW-BL",
+              "upc": "634607102685",
+              "costPrice": 0.79,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5011-R-BRW-100",
+              "upc": "634607473594",
+              "costPrice": 0.79,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5011-R-BRW-150",
+              "upc": "634607015862",
+              "costPrice": 0.79,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5011-R-BRW-175",
+              "upc": "634607427610",
+              "costPrice": 0.79,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5011-R-BRW-200",
+              "upc": "634607085179",
+              "costPrice": 0.79,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5011-R-BRW-250",
+              "upc": "634607252212",
+              "costPrice": 0.79,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5011-R-BRW-300",
+              "upc": "634607352776",
+              "costPrice": 0.79,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5011-R-CRY",
+          "colorCode": "CRY",
+          "colorName": "Crystal",
+          "upc": "See Readers Tab",
+          "costPrice": 0.69,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5011-R-CRY-BL",
+              "upc": "634607162191",
+              "costPrice": 0.69,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5011-R-CRY-100",
+              "upc": "634607306694",
+              "costPrice": 0.69,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5011-R-CRY-150",
+              "upc": "634607353254",
+              "costPrice": 0.69,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5011-R-CRY-175",
+              "upc": "634607134822",
+              "costPrice": 0.69,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5011-R-CRY-200",
+              "upc": "634607300159",
+              "costPrice": 0.69,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5011-R-CRY-250",
+              "upc": "634607450694",
+              "costPrice": 0.69,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5011-R-CRY-300",
+              "upc": "634607249243",
+              "costPrice": 0.69,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5011-R-GRN",
+          "colorCode": "GRN",
+          "colorName": "Green",
+          "upc": "See Readers Tab",
+          "costPrice": 0.72,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5011-R-GRN-BL",
+              "upc": "634607075798",
+              "costPrice": 0.72,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5011-R-GRN-100",
+              "upc": "634607204570",
+              "costPrice": 0.72,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5011-R-GRN-150",
+              "upc": "634607146719",
+              "costPrice": 0.72,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5011-R-GRN-175",
+              "upc": "634607396497",
+              "costPrice": 0.72,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5011-R-GRN-200",
+              "upc": "634607304744",
+              "costPrice": 0.72,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5011-R-GRN-250",
+              "upc": "634607382674",
+              "costPrice": 0.72,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5011-R-GRN-300",
+              "upc": "634607446970",
+              "costPrice": 0.72,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX5012",
+      "name": "Plume",
+      "type": "reading_glasses",
+      "factory": "Pilot",
+      "po": "JAX501/502",
+      "skus": [
+        {
+          "sku": "JX5012-R-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "See Readers Tab",
+          "costPrice": 0.89,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5012-R-BLK-BL",
+              "upc": "634607178741",
+              "costPrice": 0.89,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5012-R-BLK-100",
+              "upc": "634607397708",
+              "costPrice": 0.89,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5012-R-BLK-150",
+              "upc": "634607248710",
+              "costPrice": 0.89,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5012-R-BLK-175",
+              "upc": "634607208493",
+              "costPrice": 0.89,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5012-R-BLK-200",
+              "upc": "634607206772",
+              "costPrice": 0.89,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5012-R-BLK-250",
+              "upc": "634607174569",
+              "costPrice": 0.89,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5012-R-BLK-300",
+              "upc": "634607081607",
+              "costPrice": 0.89,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5012-R-GRN",
+          "colorCode": "GRN",
+          "colorName": "Green",
+          "upc": "See Readers Tab",
+          "costPrice": 0.82,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5012-R-GRN-BL",
+              "upc": "634607311353",
+              "costPrice": 0.82,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5012-R-GRN-100",
+              "upc": "634607394271",
+              "costPrice": 0.82,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5012-R-GRN-150",
+              "upc": "634607228347",
+              "costPrice": 0.82,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5012-R-GRN-175",
+              "upc": "634607446086",
+              "costPrice": 0.82,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5012-R-GRN-200",
+              "upc": "634607206178",
+              "costPrice": 0.82,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5012-R-GRN-250",
+              "upc": "634607235772",
+              "costPrice": 0.82,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5012-R-GRN-300",
+              "upc": "634607040826",
+              "costPrice": 0.82,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5012-R-PUR",
+          "colorCode": "PUR",
+          "colorName": "Purple",
+          "upc": "See Readers Tab",
+          "costPrice": 0.82,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5012-R-PUR-BL",
+              "upc": "634607242404",
+              "costPrice": 0.82,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5012-R-PUR-100",
+              "upc": "634607131050",
+              "costPrice": 0.82,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5012-R-PUR-150",
+              "upc": "634607420888",
+              "costPrice": 0.82,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5012-R-PUR-175",
+              "upc": "634607459734",
+              "costPrice": 0.82,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5012-R-PUR-200",
+              "upc": "634607391249",
+              "costPrice": 0.82,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5012-R-PUR-250",
+              "upc": "634607033569",
+              "costPrice": 0.82,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5012-R-PUR-300",
+              "upc": "634607054021",
+              "costPrice": 0.82,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX5013",
+      "name": "Tonic",
+      "type": "reading_glasses",
+      "factory": "Pilot",
+      "po": "JAX501/502",
+      "skus": [
+        {
+          "sku": "JX5013-R-AMB",
+          "colorCode": "AMB",
+          "colorName": "Amber",
+          "upc": "See Readers Tab",
+          "costPrice": 0.84,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5013-R-AMB-BL",
+              "upc": "634607031268",
+              "costPrice": 0.84,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5013-R-AMB-100",
+              "upc": "634607297640",
+              "costPrice": 0.84,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5013-R-AMB-150",
+              "upc": "634607142995",
+              "costPrice": 0.84,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5013-R-AMB-175",
+              "upc": "634607034962",
+              "costPrice": 0.84,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5013-R-AMB-200",
+              "upc": "634607056865",
+              "costPrice": 0.84,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5013-R-AMB-250",
+              "upc": "634607011956",
+              "costPrice": 0.84,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5013-R-AMB-300",
+              "upc": "634607098803",
+              "costPrice": 0.84,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5013-R-BLU",
+          "colorCode": "BLU",
+          "colorName": "Blue",
+          "upc": "See Readers Tab",
+          "costPrice": 0.84,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5013-R-BLU-BL",
+              "upc": "634607397159",
+              "costPrice": 0.84,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5013-R-BLU-100",
+              "upc": "634607017996",
+              "costPrice": 0.84,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5013-R-BLU-150",
+              "upc": "634607472573",
+              "costPrice": 0.84,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5013-R-BLU-175",
+              "upc": "634607117757",
+              "costPrice": 0.84,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5013-R-BLU-200",
+              "upc": "634607211059",
+              "costPrice": 0.84,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5013-R-BLU-250",
+              "upc": "634607047283",
+              "costPrice": 0.84,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5013-R-BLU-300",
+              "upc": "634607463885",
+              "costPrice": 0.84,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5013-R-GRN",
+          "colorCode": "GRN",
+          "colorName": "Green",
+          "upc": "See Readers Tab",
+          "costPrice": 0.84,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5013-R-GRN-BL",
+              "upc": "634607309459",
+              "costPrice": 0.84,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5013-R-GRN-100",
+              "upc": "634607195731",
+              "costPrice": 0.84,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5013-R-GRN-150",
+              "upc": "634607387655",
+              "costPrice": 0.84,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5013-R-GRN-175",
+              "upc": "634607471477",
+              "costPrice": 0.84,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5013-R-GRN-200",
+              "upc": "634607195779",
+              "costPrice": 0.84,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5013-R-GRN-250",
+              "upc": "634607249502",
+              "costPrice": 0.84,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5013-R-GRN-300",
+              "upc": "634607040833",
+              "costPrice": 0.84,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX5014",
+      "name": "Serenade",
+      "type": "reading_glasses",
+      "factory": "Pilot",
+      "po": "JAX501/502",
+      "skus": [
+        {
+          "sku": "JX5014-R-BLU",
+          "colorCode": "BLU",
+          "colorName": "Blue",
+          "upc": "See Readers Tab",
+          "costPrice": 0.71,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5014-R-BLU-BL",
+              "upc": "634607220525",
+              "costPrice": 0.71,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5014-R-BLU-100",
+              "upc": "634607025410",
+              "costPrice": 0.71,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5014-R-BLU-150",
+              "upc": "634607083908",
+              "costPrice": 0.71,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5014-R-BLU-175",
+              "upc": "634607086411",
+              "costPrice": 0.71,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5014-R-BLU-200",
+              "upc": "634607397401",
+              "costPrice": 0.71,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5014-R-BLU-250",
+              "upc": "634607032586",
+              "costPrice": 0.71,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5014-R-BLU-300",
+              "upc": "634607085391",
+              "costPrice": 0.71,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5014-R-CHA",
+          "colorCode": "CHA",
+          "colorName": "Champagne",
+          "upc": "See Readers Tab",
+          "costPrice": 0.71,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5014-R-CHA-BL",
+              "upc": "634607195540",
+              "costPrice": 0.71,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5014-R-CHA-100",
+              "upc": "634607394233",
+              "costPrice": 0.71,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5014-R-CHA-150",
+              "upc": "634607398514",
+              "costPrice": 0.71,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5014-R-CHA-175",
+              "upc": "634607068165",
+              "costPrice": 0.71,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5014-R-CHA-200",
+              "upc": "634607346645",
+              "costPrice": 0.71,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5014-R-CHA-250",
+              "upc": "634607313104",
+              "costPrice": 0.71,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5014-R-CHA-300",
+              "upc": "634607135331",
+              "costPrice": 0.71,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5014-R-RST",
+          "colorCode": "RST",
+          "colorName": "Rust",
+          "upc": "See Readers Tab",
+          "costPrice": 0.81,
+          "qty": 636,
+          "powerVariants": [
+            {
+              "sku": "JX5014-R-RST-BL",
+              "upc": "634607349592",
+              "costPrice": 0.81,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5014-R-RST-100",
+              "upc": "634607053994",
+              "costPrice": 0.81,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5014-R-RST-150",
+              "upc": "634607171612",
+              "costPrice": 0.81,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5014-R-RST-175",
+              "upc": "634607316006",
+              "costPrice": 0.81,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5014-R-RST-200",
+              "upc": "634607270285",
+              "costPrice": 0.81,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5014-R-RST-250",
+              "upc": "634607220655",
+              "costPrice": 0.81,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5014-R-RST-300",
+              "upc": "634607175337",
+              "costPrice": 0.81,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX5015",
+      "name": "Fizz",
+      "type": "reading_glasses",
+      "factory": "Pilot",
+      "po": "JAX501/502",
+      "skus": [
+        {
+          "sku": "JX5015-R-LTO",
+          "colorCode": "LTO",
+          "colorName": "Light Tortoise",
+          "upc": "See Readers Tab",
+          "costPrice": 0.84,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5015-R-LTO-BL",
+              "upc": "634607099329",
+              "costPrice": 0.84,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5015-R-LTO-100",
+              "upc": "634607103354",
+              "costPrice": 0.84,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5015-R-LTO-150",
+              "upc": "634607373672",
+              "costPrice": 0.84,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5015-R-LTO-175",
+              "upc": "634607188511",
+              "costPrice": 0.84,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5015-R-LTO-200",
+              "upc": "634607128708",
+              "costPrice": 0.84,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5015-R-LTO-250",
+              "upc": "634607491598",
+              "costPrice": 0.84,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5015-R-LTO-300",
+              "upc": "634607105501",
+              "costPrice": 0.84,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5015-R-ORG",
+          "colorCode": "ORG",
+          "colorName": "Orange",
+          "upc": "See Readers Tab",
+          "costPrice": 0.74,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5015-R-ORG-BL",
+              "upc": "634607228361",
+              "costPrice": 0.74,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5015-R-ORG-100",
+              "upc": "634607149192",
+              "costPrice": 0.74,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5015-R-ORG-150",
+              "upc": "634607333829",
+              "costPrice": 0.74,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5015-R-ORG-175",
+              "upc": "634607117047",
+              "costPrice": 0.74,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5015-R-ORG-200",
+              "upc": "634607373313",
+              "costPrice": 0.74,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5015-R-ORG-250",
+              "upc": "634607132460",
+              "costPrice": 0.74,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5015-R-ORG-300",
+              "upc": "634607357306",
+              "costPrice": 0.74,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX5015-R-TEA",
+          "colorCode": "TEA",
+          "colorName": "Teal",
+          "upc": "See Readers Tab",
+          "costPrice": 0.74,
+          "qty": 600,
+          "powerVariants": [
+            {
+              "sku": "JX5015-R-TEA-BL",
+              "upc": "634607134112",
+              "costPrice": 0.74,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX5015-R-TEA-100",
+              "upc": "634607200565",
+              "costPrice": 0.74,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5015-R-TEA-150",
+              "upc": "634607499235",
+              "costPrice": 0.74,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5015-R-TEA-175",
+              "upc": "634607216702",
+              "costPrice": 0.74,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5015-R-TEA-200",
+              "upc": "634607277406",
+              "costPrice": 0.74,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5015-R-TEA-250",
+              "upc": "634607058920",
+              "costPrice": 0.74,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX5015-R-TEA-300",
+              "upc": "634607204723",
+              "costPrice": 0.74,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX1013",
+      "name": "Postcard",
+      "type": "sunglasses",
+      "factory": "Taga",
+      "po": "JAX101",
+      "skus": [
+        {
+          "sku": "JX1013-S-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "605547672194",
+          "costPrice": 0.98,
+          "qty": 300
+        },
+        {
+          "sku": "JX1013-S-BRW",
+          "colorCode": "BRW",
+          "colorName": "Brown",
+          "upc": "605547758904",
+          "costPrice": 0.98,
+          "qty": 300
+        },
+        {
+          "sku": "JX1013-S-TOR",
+          "colorCode": "TOR",
+          "colorName": "Tortoise",
+          "upc": "605547791789",
+          "costPrice": 1.13,
+          "qty": 300
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX1014",
+      "name": "Skyway",
+      "type": "sunglasses",
+      "factory": "Taga",
+      "po": "JAX101",
+      "skus": [
+        {
+          "sku": "JX1014-S-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "605547539053",
+          "costPrice": 1.05,
+          "qty": 600
+        },
+        {
+          "sku": "JX1014-S-RST",
+          "colorCode": "RST",
+          "colorName": "Rust",
+          "upc": "605547512254",
+          "costPrice": 1.05,
+          "qty": 300
+        },
+        {
+          "sku": "JX1014-S-TEL",
+          "colorCode": "TEL",
+          "colorName": "Teal",
+          "upc": "605547903144",
+          "costPrice": 1.05,
+          "qty": 300
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX1015",
+      "name": "Spritz",
+      "type": "sunglasses",
+      "factory": "Taga",
+      "po": "JAX101",
+      "skus": [
+        {
+          "sku": "JX1015-S-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "605547782558",
+          "costPrice": 0.96,
+          "qty": 600
+        },
+        {
+          "sku": "JX1015-S-COR",
+          "colorCode": "COR",
+          "colorName": "Coral",
+          "upc": "605547552878",
+          "costPrice": 0.96,
+          "qty": 300
+        },
+        {
+          "sku": "JX1015-S-GRN",
+          "colorCode": "GRN",
+          "colorName": "Green",
+          "upc": "605547542695",
+          "costPrice": 0.96,
+          "qty": 300
+        },
+        {
+          "sku": "JX1015-S-TOR",
+          "colorCode": "TOR",
+          "colorName": "Tortoise",
+          "upc": "605547508486",
+          "costPrice": 1.08,
+          "qty": 300
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX1016",
+      "name": "Latitude",
+      "type": "sunglasses",
+      "factory": "Taga",
+      "po": "JAX101",
+      "skus": [
+        {
+          "sku": "JX1016-S-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "605547626463",
+          "costPrice": 1.75,
+          "qty": 300
+        },
+        {
+          "sku": "JX1016-S-CRY",
+          "colorCode": "CRY",
+          "colorName": "Crystal",
+          "upc": "605547842924",
+          "costPrice": 1.75,
+          "qty": 300
+        },
+        {
+          "sku": "JX1016-S-TOR",
+          "colorCode": "TOR",
+          "colorName": "Tortoise",
+          "upc": "605547632419",
+          "costPrice": 1.8,
+          "qty": 600
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX1017",
+      "name": "Vamp",
+      "type": "sunglasses",
+      "factory": "Taga",
+      "po": "JAX101",
+      "skus": [
+        {
+          "sku": "JX1017-S-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "605547813993",
+          "costPrice": 0.96,
+          "qty": 600
+        },
+        {
+          "sku": "JX1017-S-RED",
+          "colorCode": "RED",
+          "colorName": "Red",
+          "upc": "605547869143",
+          "costPrice": 0.96,
+          "qty": 300
+        },
+        {
+          "sku": "JX1017-S-TOR",
+          "colorCode": "TOR",
+          "colorName": "Tortoise",
+          "upc": "605547635922",
+          "costPrice": 1.08,
+          "qty": 300
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX1018",
+      "name": "Highway",
+      "type": "sunglasses",
+      "factory": "Taga",
+      "po": "JAX101",
+      "skus": [
+        {
+          "sku": "JX1018-S-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "605547764097",
+          "costPrice": 1.65,
+          "qty": 300
+        },
+        {
+          "sku": "JX1018-S-GLD",
+          "colorCode": "GLD",
+          "colorName": "Gold",
+          "upc": "605547796494",
+          "costPrice": 1.65,
+          "qty": 300
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX1019",
+      "name": "Footnote",
+      "type": "reading_glasses",
+      "factory": "Taga",
+      "po": "JAX101",
+      "skus": [
+        {
+          "sku": "JX1019-R-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "See Readers Tab",
+          "costPrice": 1.05,
+          "qty": 408,
+          "powerVariants": [
+            {
+              "sku": "JX1019-R-BLK-BL",
+              "upc": "605547750175",
+              "costPrice": 1.05,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX1019-R-BLK-100",
+              "upc": "605547941863",
+              "costPrice": 1.05,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1019-R-BLK-150",
+              "upc": "605547870262",
+              "costPrice": 1.05,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1019-R-BLK-175",
+              "upc": "605547665240",
+              "costPrice": 1.05,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1019-R-BLK-200",
+              "upc": "605547544019",
+              "costPrice": 1.05,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1019-R-BLK-250",
+              "upc": "605547833656",
+              "costPrice": 1.05,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1019-R-BLK-300",
+              "upc": "605547549212",
+              "costPrice": 1.05,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX1019-R-GRN",
+          "colorCode": "GRN",
+          "colorName": "Green",
+          "upc": "See Readers Tab",
+          "costPrice": 1.05,
+          "qty": 408,
+          "powerVariants": [
+            {
+              "sku": "JX1019-R-GRN-BL",
+              "upc": "605547505911",
+              "costPrice": 1.05,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX1019-R-GRN-100",
+              "upc": "605547923128",
+              "costPrice": 1.05,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1019-R-GRN-150",
+              "upc": "605547705946",
+              "costPrice": 1.05,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1019-R-GRN-175",
+              "upc": "605547606540",
+              "costPrice": 1.05,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1019-R-GRN-200",
+              "upc": "605547770067",
+              "costPrice": 1.05,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1019-R-GRN-250",
+              "upc": "605547815935",
+              "costPrice": 1.05,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1019-R-GRN-300",
+              "upc": "605547578465",
+              "costPrice": 1.05,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX1019-R-TOR",
+          "colorCode": "TOR",
+          "colorName": "Tortoise",
+          "upc": "See Readers Tab",
+          "costPrice": 1.17,
+          "qty": 408,
+          "powerVariants": [
+            {
+              "sku": "JX1019-R-TOR-BL",
+              "upc": "605547629150",
+              "costPrice": 1.17,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX1019-R-TOR-100",
+              "upc": "605547554131",
+              "costPrice": 1.17,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1019-R-TOR-150",
+              "upc": "605547975233",
+              "costPrice": 1.17,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1019-R-TOR-175",
+              "upc": "605547752520",
+              "costPrice": 1.17,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1019-R-TOR-200",
+              "upc": "605547664823",
+              "costPrice": 1.17,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1019-R-TOR-250",
+              "upc": "605547875595",
+              "costPrice": 1.17,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1019-R-TOR-300",
+              "upc": "605547531903",
+              "costPrice": 1.17,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX1020",
+      "name": "Slip",
+      "type": "reading_glasses",
+      "factory": "Taga",
+      "po": "JAX101",
+      "skus": [
+        {
+          "sku": "JX1020-R-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "See Readers Tab",
+          "costPrice": 1.1,
+          "qty": 408,
+          "powerVariants": [
+            {
+              "sku": "JX1020-R-BLK-BL",
+              "upc": "605547938122",
+              "costPrice": 1.1,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX1020-R-BLK-100",
+              "upc": "605547875892",
+              "costPrice": 1.1,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1020-R-BLK-150",
+              "upc": "605547707704",
+              "costPrice": 1.1,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1020-R-BLK-175",
+              "upc": "605547902505",
+              "costPrice": 1.1,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1020-R-BLK-200",
+              "upc": "605547588495",
+              "costPrice": 1.1,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1020-R-BLK-250",
+              "upc": "605547745935",
+              "costPrice": 1.1,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1020-R-BLK-300",
+              "upc": "605547511387",
+              "costPrice": 1.1,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX1020-R-BRW",
+          "colorCode": "BRW",
+          "colorName": "Brown",
+          "upc": "See Readers Tab",
+          "costPrice": 1.1,
+          "qty": 408,
+          "powerVariants": [
+            {
+              "sku": "JX1020-R-BRW-BL",
+              "upc": "605547900860",
+              "costPrice": 1.1,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX1020-R-BRW-100",
+              "upc": "605547666131",
+              "costPrice": 1.1,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1020-R-BRW-150",
+              "upc": "605547553578",
+              "costPrice": 1.1,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1020-R-BRW-175",
+              "upc": "605547856808",
+              "costPrice": 1.1,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1020-R-BRW-200",
+              "upc": "605547561443",
+              "costPrice": 1.1,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1020-R-BRW-250",
+              "upc": "605547648793",
+              "costPrice": 1.1,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1020-R-BRW-300",
+              "upc": "605547744198",
+              "costPrice": 1.1,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX1020-R-PNK",
+          "colorCode": "PNK",
+          "colorName": "Pink",
+          "upc": "See Readers Tab",
+          "costPrice": 1.1,
+          "qty": 408,
+          "powerVariants": [
+            {
+              "sku": "JX1020-R-PNK-BL",
+              "upc": "605547856723",
+              "costPrice": 1.1,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX1020-R-PNK-100",
+              "upc": "605547892493",
+              "costPrice": 1.1,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1020-R-PNK-150",
+              "upc": "605547524271",
+              "costPrice": 1.1,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1020-R-PNK-175",
+              "upc": "605547837999",
+              "costPrice": 1.1,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1020-R-PNK-200",
+              "upc": "605547888991",
+              "costPrice": 1.1,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1020-R-PNK-250",
+              "upc": "605547902635",
+              "costPrice": 1.1,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1020-R-PNK-300",
+              "upc": "605547929731",
+              "costPrice": 1.1,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX1021",
+      "name": "Headline",
+      "type": "reading_glasses",
+      "factory": "Taga",
+      "po": "JAX101",
+      "skus": [
+        {
+          "sku": "JX1021-R-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "See Readers Tab",
+          "costPrice": 1.15,
+          "qty": 408,
+          "powerVariants": [
+            {
+              "sku": "JX1021-R-BLK-BL",
+              "upc": "605547525995",
+              "costPrice": 1.15,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX1021-R-BLK-100",
+              "upc": "605547972492",
+              "costPrice": 1.15,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1021-R-BLK-150",
+              "upc": "605547971891",
+              "costPrice": 1.15,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1021-R-BLK-175",
+              "upc": "605547789755",
+              "costPrice": 1.15,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1021-R-BLK-200",
+              "upc": "605547796869",
+              "costPrice": 1.15,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1021-R-BLK-250",
+              "upc": "605547997051",
+              "costPrice": 1.15,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1021-R-BLK-300",
+              "upc": "605547700125",
+              "costPrice": 1.15,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX1021-R-BRW",
+          "colorCode": "BRW",
+          "colorName": "Brown",
+          "upc": "See Readers Tab",
+          "costPrice": 1.15,
+          "qty": 408,
+          "powerVariants": [
+            {
+              "sku": "JX1021-R-BRW-BL",
+              "upc": "605547897948",
+              "costPrice": 1.15,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX1021-R-BRW-100",
+              "upc": "605547744792",
+              "costPrice": 1.15,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1021-R-BRW-150",
+              "upc": "634607159382",
+              "costPrice": 1.15,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1021-R-BRW-175",
+              "upc": "634607300982",
+              "costPrice": 1.15,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1021-R-BRW-200",
+              "upc": "634607226527",
+              "costPrice": 1.15,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1021-R-BRW-250",
+              "upc": "634607110000",
+              "costPrice": 1.15,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1021-R-BRW-300",
+              "upc": "634607220273",
+              "costPrice": 1.15,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX1021-R-RED",
+          "colorCode": "RED",
+          "colorName": "Red",
+          "upc": "See Readers Tab",
+          "costPrice": 1.08,
+          "qty": 408,
+          "powerVariants": [
+            {
+              "sku": "JX1021-R-RED-BL",
+              "upc": "634607094881",
+              "costPrice": 1.08,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX1021-R-RED-100",
+              "upc": "634607123901",
+              "costPrice": 1.08,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1021-R-RED-150",
+              "upc": "634607351885",
+              "costPrice": 1.08,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1021-R-RED-175",
+              "upc": "634607070274",
+              "costPrice": 1.08,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1021-R-RED-200",
+              "upc": "634607111731",
+              "costPrice": 1.08,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1021-R-RED-250",
+              "upc": "634607409142",
+              "costPrice": 1.08,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1021-R-RED-300",
+              "upc": "634607213541",
+              "costPrice": 1.08,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX1022",
+      "name": "Verdict",
+      "type": "reading_glasses",
+      "factory": "Taga",
+      "po": "JAX101",
+      "skus": [
+        {
+          "sku": "JX1022-R-BLK",
+          "colorCode": "BLK",
+          "colorName": "Black",
+          "upc": "See Readers Tab",
+          "costPrice": 1.05,
+          "qty": 408,
+          "powerVariants": [
+            {
+              "sku": "JX1022-R-BLK-BL",
+              "upc": "634607236281",
+              "costPrice": 1.05,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX1022-R-BLK-100",
+              "upc": "634607206161",
+              "costPrice": 1.05,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1022-R-BLK-150",
+              "upc": "634607244293",
+              "costPrice": 1.05,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1022-R-BLK-175",
+              "upc": "634607285876",
+              "costPrice": 1.05,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1022-R-BLK-200",
+              "upc": "634607365820",
+              "costPrice": 1.05,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1022-R-BLK-250",
+              "upc": "634607156664",
+              "costPrice": 1.05,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1022-R-BLK-300",
+              "upc": "634607058654",
+              "costPrice": 1.05,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX1022-R-BUR",
+          "colorCode": "BUR",
+          "colorName": "Burgundy",
+          "upc": "See Readers Tab",
+          "costPrice": 1.17,
+          "qty": 408,
+          "powerVariants": [
+            {
+              "sku": "JX1022-R-BUR-BL",
+              "upc": "634607305840",
+              "costPrice": 1.17,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX1022-R-BUR-100",
+              "upc": "634607267445",
+              "costPrice": 1.17,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1022-R-BUR-150",
+              "upc": "634607214609",
+              "costPrice": 1.17,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1022-R-BUR-175",
+              "upc": "634607013035",
+              "costPrice": 1.17,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1022-R-BUR-200",
+              "upc": "634607380991",
+              "costPrice": 1.17,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1022-R-BUR-250",
+              "upc": "634607002152",
+              "costPrice": 1.17,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1022-R-BUR-300",
+              "upc": "634607001285",
+              "costPrice": 1.17,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX1022-R-TOR",
+          "colorCode": "TOR",
+          "colorName": "Tortoise",
+          "upc": "See Readers Tab",
+          "costPrice": 1.17,
+          "qty": 408,
+          "powerVariants": [
+            {
+              "sku": "JX1022-R-TOR-BL",
+              "upc": "634607460136",
+              "costPrice": 1.17,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX1022-R-TOR-100",
+              "upc": "634607161705",
+              "costPrice": 1.17,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1022-R-TOR-150",
+              "upc": "634607257187",
+              "costPrice": 1.17,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1022-R-TOR-175",
+              "upc": "634607083274",
+              "costPrice": 1.17,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1022-R-TOR-200",
+              "upc": "634607227326",
+              "costPrice": 1.17,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1022-R-TOR-250",
+              "upc": "634607369262",
+              "costPrice": 1.17,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1022-R-TOR-300",
+              "upc": "634607118822",
+              "costPrice": 1.17,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "skuPrefix": "JX1023",
+      "name": "Volume",
+      "type": "reading_glasses",
+      "factory": "Taga",
+      "po": "JAX101",
+      "skus": [
+        {
+          "sku": "JX1023-R-BLU",
+          "colorCode": "BLU",
+          "colorName": "Blue",
+          "upc": "See Readers Tab",
+          "costPrice": 1.18,
+          "qty": 408,
+          "powerVariants": [
+            {
+              "sku": "JX1023-R-BLU-BL",
+              "upc": "634607482640",
+              "costPrice": 1.18,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX1023-R-BLU-100",
+              "upc": "634607177058",
+              "costPrice": 1.18,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1023-R-BLU-150",
+              "upc": "634607279103",
+              "costPrice": 1.18,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1023-R-BLU-175",
+              "upc": "634607243692",
+              "costPrice": 1.18,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1023-R-BLU-200",
+              "upc": "634607237554",
+              "costPrice": 1.18,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1023-R-BLU-250",
+              "upc": "634607328191",
+              "costPrice": 1.18,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1023-R-BLU-300",
+              "upc": "634607403850",
+              "costPrice": 1.18,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX1023-R-BRW",
+          "colorCode": "BRW",
+          "colorName": "Brown",
+          "upc": "See Readers Tab",
+          "costPrice": 1.18,
+          "qty": 408,
+          "powerVariants": [
+            {
+              "sku": "JX1023-R-BRW-BL",
+              "upc": "634607244521",
+              "costPrice": 1.18,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX1023-R-BRW-100",
+              "upc": "634607268589",
+              "costPrice": 1.18,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1023-R-BRW-150",
+              "upc": "634607377908",
+              "costPrice": 1.18,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1023-R-BRW-175",
+              "upc": "634607413316",
+              "costPrice": 1.18,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1023-R-BRW-200",
+              "upc": "634607265014",
+              "costPrice": 1.18,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1023-R-BRW-250",
+              "upc": "634607259051",
+              "costPrice": 1.18,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1023-R-BRW-300",
+              "upc": "634607469214",
+              "costPrice": 1.18,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        },
+        {
+          "sku": "JX1023-R-OLV",
+          "colorCode": "OLV",
+          "colorName": "Olive",
+          "upc": "See Readers Tab",
+          "costPrice": 1.18,
+          "qty": 408,
+          "powerVariants": [
+            {
+              "sku": "JX1023-R-OLV-BL",
+              "upc": "634607093891",
+              "costPrice": 1.18,
+              "readingPower": 0.0,
+              "hasBlueLightFilter": true
+            },
+            {
+              "sku": "JX1023-R-OLV-100",
+              "upc": "634607182397",
+              "costPrice": 1.18,
+              "readingPower": 1.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1023-R-OLV-150",
+              "upc": "634607174712",
+              "costPrice": 1.18,
+              "readingPower": 1.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1023-R-OLV-175",
+              "upc": "634607015718",
+              "costPrice": 1.18,
+              "readingPower": 1.75,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1023-R-OLV-200",
+              "upc": "634607172145",
+              "costPrice": 1.18,
+              "readingPower": 2.0,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1023-R-OLV-250",
+              "upc": "634607074487",
+              "costPrice": 1.18,
+              "readingPower": 2.5,
+              "hasBlueLightFilter": false
+            },
+            {
+              "sku": "JX1023-R-OLV-300",
+              "upc": "634607018047",
+              "costPrice": 1.18,
+              "readingPower": 3.0,
+              "hasBlueLightFilter": false
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
