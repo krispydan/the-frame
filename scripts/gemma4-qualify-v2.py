@@ -473,6 +473,13 @@ def main():
                 print(f"  Empty/error response -- skipping")
                 total_stats["errors"] += 1
                 consecutive_errors += 1
+                save_checkpoint(processed_ids, total_stats)
+                save_error_progress(
+                    total_stats,
+                    total_unreviewed,
+                    time.time() - start_time,
+                    response[:300] if response else "Empty model response",
+                )
                 if consecutive_errors >= 10:
                     print("Too many errors, stopping")
                     break
