@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   Users,
+  Layers3,
   Kanban,
   Mail,
   Inbox,
@@ -74,6 +75,7 @@ const salesNav: NavItem[] = [
     children: [
       { title: "Review Queue", href: "/prospects/review", icon: Search },
       { title: "Lead Sources", href: "/prospects/sources", icon: Database },
+      { title: "Segments", href: "/segments", icon: Layers3 },
       { title: "Brand Accounts", href: "/brands", icon: Building },
     ],
   },
@@ -118,7 +120,7 @@ const bottomNav = [
 
 const ROLE_ALLOWED_HREFS: Record<string, string[]> = {
   owner: ["*"],
-  sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/pipeline", "/campaigns", "/campaigns/inbox", "/customers", "/brands", "/catalog"],
+  sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/segments", "/pipeline", "/campaigns", "/campaigns/inbox", "/customers", "/brands", "/catalog"],
   warehouse: ["/dashboard", "/orders", "/catalog", "/media", "/inventory", "/inventory/purchase-orders", "/inventory/exports"],
   finance: ["/dashboard", "/orders", "/finance", "/finance/cogs"],
   marketing: ["/dashboard", "/marketing", "/catalog", "/media", "/campaigns"],

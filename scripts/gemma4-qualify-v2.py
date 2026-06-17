@@ -362,6 +362,22 @@ def save_progress(stats, total, elapsed):
     }))
 
 
+def save_error_progress(stats, total, elapsed, message):
+    PROGRESS_FILE.write_text(json.dumps({
+        "total_prospects": total,
+        "processed": stats.get("total_processed", 0),
+        "qualified": stats.get("qualified", 0),
+        "not_qualified": stats.get("not_qualified", 0),
+        "needs_review": stats.get("needs_review", 0),
+        "emails_found": stats.get("emails_found", 0),
+        "elapsed_seconds": int(elapsed),
+        "rate_per_min": round(stats.get("total_processed", 0) / max(elapsed, 1) * 60, 1),
+        "status": "error",
+        "error": message,
+        "timestamp": datetime.utcnow().isoformat()
+    }))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Gemma 4 Prospect Qualifier v2")
     parser.add_argument("--limit", type=int, default=999999)
@@ -405,6 +421,7 @@ def main():
                    "total_processed": 0, "emails_found": 0, "errors": 0}
     start_time = time.time()
     consecutive_errors = 0
+    save_progress(total_stats, total_unreviewed, 0)
 
     while True:
         remaining_limit = args.limit - total_stats["total_processed"]
@@ -456,6 +473,13 @@ def main():
                 print(f"  Empty/error response -- skipping")
                 total_stats["errors"] += 1
                 consecutive_errors += 1
+                save_checkpoint(processed_ids, total_stats)
+                save_error_progress(
+                    total_stats,
+                    total_unreviewed,
+                    time.time() - start_time,
+                    response[:300] if response else "Empty model response",
+                )
                 if consecutive_errors >= 10:
                     print("Too many errors, stopping")
                     break
@@ -520,4 +544,17 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        try:
+            message = f"{type(e).__name__}: {e}"
+            save_error_progress(
+                {"qualified": 0, "not_qualified": 0, "needs_review": 0, "total_processed": 0, "emails_found": 0},
+                0,
+                0,
+                message,
+            )
+        except Exception:
+            pass
+        raise
