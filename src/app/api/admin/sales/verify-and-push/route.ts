@@ -54,6 +54,10 @@ export async function POST(req: NextRequest) {
     maxLeads?: number;
     concurrency?: number;
     dryRun?: boolean;
+    /** When true, push every eligible lead regardless of NeverBounce
+     *  verification status. Use when you want Instantly's built-in
+     *  email validator to handle bounces instead. Default false. */
+    skipVerificationFilter?: boolean;
   };
   try {
     body = await req.json();
@@ -71,6 +75,7 @@ export async function POST(req: NextRequest) {
   const action = body.action ?? "verify_then_push";
   const concurrency = body.concurrency ?? 10;
   const dryRun = body.dryRun === true;
+  const skipVerificationFilter = body.skipVerificationFilter === true;
 
   // ── 1. Resolve the cohort ──
   const campaign = sqlite.prepare(
@@ -174,10 +179,15 @@ export async function POST(req: NextRequest) {
     });
   }
   const idPh = cohortIds.map(() => "?").join(",");
+  // Gate: when skipVerificationFilter is on, push every eligible lead
+  // and let Instantly's built-in validator handle bounces.
+  const verificationGate = skipVerificationFilter
+    ? ""
+    : "AND c.email_verification_status IN ('valid','catchall')";
   const verified = sqlite.prepare(
     `SELECT c.id, c.email FROM companies c
       WHERE c.id IN (${idPh})
-        AND c.email_verification_status IN ('valid','catchall')
+        ${verificationGate}
         AND c.status NOT IN ('rejected','customer')
         AND NOT EXISTS (SELECT 1 FROM campaign_leads cl
                         WHERE cl.campaign_id = ? AND cl.company_id = c.id)
