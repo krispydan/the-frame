@@ -1596,7 +1596,29 @@ export default function CompanyDetailPage() {
                                   return <>📨 {a.event_type.replace("instantly_", "")} ({campaign})</>;
                               }
                             })()}
-                            {!["change", "company_updated", "contact_created", "status_change"].includes(a.event_type) && !a.event_type.startsWith("instantly_") && a.event_type}
+                            {a.event_type === "phoneburner_call_completed" && (() => {
+                              const disposition = (data.disposition as string) || "";
+                              const duration = data.duration_seconds as number | null | undefined;
+                              const agent = (data.agent_email as string) || (data.agent_id as string) || "";
+                              const recording = (data.recording_url as string) || "";
+                              const notes = (data.notes as string) || "";
+                              return (
+                                <>📞 <span className="font-medium">Called</span>
+                                  {agent && <> by {agent}</>}
+                                  {disposition && <> — <span className="font-medium">{disposition}</span></>}
+                                  {duration != null && <> ({duration}s)</>}
+                                  {recording && (
+                                    <> · <a href={recording} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">▶ Play</a></>
+                                  )}
+                                  {notes && (
+                                    <div className="mt-1 text-xs text-gray-600 bg-gray-50 border-l-2 border-gray-300 pl-2 py-1 italic">
+                                      {notes.slice(0, 240)}{notes.length > 240 ? "…" : ""}
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
+                            {!["change", "company_updated", "contact_created", "status_change", "phoneburner_call_completed"].includes(a.event_type) && !a.event_type.startsWith("instantly_") && a.event_type}
                           </p>
                           <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
                             <Clock className="w-3 h-3" />

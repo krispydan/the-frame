@@ -24,6 +24,7 @@ import { postDailyDigest, postWeeklyDigest } from "@/modules/integrations/lib/sl
 import { syncShipHeroOrders } from "@/modules/operations/lib/shiphero/sync-orders";
 import { syncShipHeroInventory, isDuringBusinessHours } from "@/modules/operations/lib/shiphero/sync-inventory";
 import { refreshIfExpiringSoon as refreshShipHeroToken } from "@/modules/operations/lib/shiphero/auth";
+import { pullPhoneBurnerCallResults } from "@/modules/sales/lib/phoneburner-sync";
 import { runShopifyMetafieldSync } from "@/modules/catalog/lib/shopify-metafields/bulk-sync-job";
 import { syncSettlementsAllShops } from "@/modules/finance/lib/shopify-settlements";
 import { runShipmentRevenueRecognition } from "@/modules/finance/lib/shipment-revenue-recognition";
@@ -153,6 +154,18 @@ export const CRON_JOBS: CronJob[] = [
     description: "Pull current inventory levels from ShipHero into local inventory table",
     handler: syncShipHeroInventory,
     guard: () => isDuringBusinessHours(),
+  },
+
+  // ── PhoneBurner ──
+  // PhoneBurner doesn't support a global webhook subscription — call
+  // result callbacks only attach per dial session. We poll the recent-calls
+  // endpoint every 5 minutes, using a 15-minute look-back as a safety net
+  // (phoneburner_call_log PK is the PB call_id, so re-ingestion is free).
+  {
+    id: "phoneburner-call-poll",
+    schedule: "*/5 * * * *",  // every 5 min
+    description: "Poll PhoneBurner for recent calls and ingest dispositions into activity feed",
+    handler: () => pullPhoneBurnerCallResults({ sinceMinutes: 15 }),
   },
 
   // ── Slack ──

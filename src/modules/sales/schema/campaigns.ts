@@ -39,6 +39,9 @@ export const campaigns = sqliteTable("campaigns", {
   status: text("status", { enum: CAMPAIGN_STATUSES }).notNull().default("draft"),
   description: text("description"),
   instantlyCampaignId: text("instantly_campaign_id"),
+  /** PhoneBurner folder ID assigned to this campaign. Set on first
+   *  push. Mirrors instantlyCampaignId. */
+  phoneburnerFolderId: text("phoneburner_folder_id"),
   targetSegment: text("target_segment"),
   targetSmartListId: text("target_smart_list_id"),
   variantASubject: text("variant_a_subject"),
@@ -72,6 +75,9 @@ export const campaignLeads = sqliteTable("campaign_leads", {
   companyId: text("company_id").notNull(),
   contactId: text("contact_id"),
   instantlyLeadId: text("instantly_lead_id"),
+  /** PhoneBurner contact ID stamped after the lead is pushed. Null
+   *  until pushed (or for non-calling campaigns). */
+  phoneburnerContactId: text("phoneburner_contact_id"),
   email: text("email"),
   status: text("status", { enum: LEAD_STATUSES }).notNull().default("queued"),
   replyText: text("reply_text"),
@@ -80,12 +86,45 @@ export const campaignLeads = sqliteTable("campaign_leads", {
   sentAt: text("sent_at"),
   openedAt: text("opened_at"),
   repliedAt: text("replied_at"),
+  /** Updated by the phoneburner-call-poll cron when a new call lands. */
+  lastCalledAt: text("last_called_at"),
+  /** Raw PhoneBurner disposition label from the most recent call (no
+   *  canonical mapping — see plan 2026-06-19). */
+  lastCallDisposition: text("last_call_disposition"),
+  /** Total calls logged for this lead — increments on each new
+   *  phoneburner_call_log row. */
+  callCount: integer("call_count").default(0),
   createdAt: timestamp("created_at"),
 }, (table) => [
   index("idx_cl_campaign").on(table.campaignId),
   index("idx_cl_company").on(table.companyId),
   index("idx_cl_status").on(table.status),
   index("idx_cl_instantly").on(table.instantlyLeadId),
+]);
+
+// PhoneBurner per-call log — one row per call event, dedup PK on PB's
+// call_id. Populated by the polling cron (every 5 min). See
+// src/modules/sales/lib/phoneburner-sync.ts.
+export const phoneburnerCallLog = sqliteTable("phoneburner_call_log", {
+  id: text("id").primaryKey(), // PB call_id, not a uuid
+  campaignLeadId: text("campaign_lead_id"),
+  companyId: text("company_id"),
+  phoneburnerContactId: text("phoneburner_contact_id"),
+  agentId: text("agent_id"),
+  agentEmail: text("agent_email"),
+  durationSeconds: integer("duration_seconds"),
+  connected: integer("connected"),
+  disposition_label: text("disposition_label"),
+  disposition_id: text("disposition_id"),
+  notes: text("notes"),
+  recordingUrl: text("recording_url"),
+  calledAt: text("called_at"),
+  ingestedAt: timestamp("ingested_at"),
+}, (table) => [
+  index("idx_phoneburner_call_log_company").on(table.companyId),
+  index("idx_phoneburner_call_log_called_at").on(table.calledAt),
+  index("idx_phoneburner_call_log_lead").on(table.campaignLeadId),
+  index("idx_phoneburner_call_log_pb_contact").on(table.phoneburnerContactId),
 ]);
 
 // Sync state tracking

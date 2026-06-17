@@ -79,6 +79,20 @@ export async function POST(request: NextRequest) {
         }
         return { ok: false, message: `HTTP ${res.status}: Authentication failed` };
       },
+
+      phoneburner: async () => {
+        const key = db.select().from(settings).where(eq(settings.key, "phoneburner_api_key")).get();
+        if (!key?.value) return { ok: false, message: "API key is required" };
+        const res = await fetch("https://www.phoneburner.com/rest/1/me", {
+          headers: {
+            Authorization: `Bearer ${key.value}`,
+            Accept: "application/json",
+          },
+        });
+        if (res.ok) return { ok: true, message: "Connected to PhoneBurner" };
+        const body = await res.text().catch(() => "");
+        return { ok: false, message: `HTTP ${res.status}: ${body.slice(0, 200) || "Authentication failed"}` };
+      },
     };
 
     const tester = testers[integration];

@@ -329,6 +329,12 @@ export default function IntegrationsIndexPage() {
             settingKey="outscraper_api_key"
             testSlug="outscraper"
           />
+          <ApiKeyCard
+            title="PhoneBurner"
+            description="Cold-calling. Paste your PhoneBurner API key, save, then push calling campaigns from the campaign detail page. Call results poll back every 5 minutes."
+            settingKey="phoneburner_api_key"
+            testSlug="phoneburner"
+          />
         </div>
       </div>
 

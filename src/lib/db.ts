@@ -581,6 +581,43 @@ try {
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_instantly_webhook_events_received_at ON instantly_webhook_events(received_at)");
 } catch { /* exists */ }
 
+// PhoneBurner integration — outbound cold-calling.
+//
+// Push side: campaigns get a PB folder; each campaign_lead's
+// PB contact id is stored after the contact is created.
+//
+// Pull side: a cron polls PB for recent calls every 5 min and
+// inserts into phoneburner_call_log (PK is PB's call_id for
+// idempotency). campaign_leads carries denormalized last-call
+// state for fast prospect-page rendering.
+try { sqlite.exec("ALTER TABLE campaigns ADD COLUMN phoneburner_folder_id TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE campaign_leads ADD COLUMN phoneburner_contact_id TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE campaign_leads ADD COLUMN last_called_at TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE campaign_leads ADD COLUMN last_call_disposition TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE campaign_leads ADD COLUMN call_count INTEGER DEFAULT 0"); } catch { /* exists */ }
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS phoneburner_call_log (
+    id TEXT PRIMARY KEY,
+    campaign_lead_id TEXT,
+    company_id TEXT,
+    phoneburner_contact_id TEXT,
+    agent_id TEXT,
+    agent_email TEXT,
+    duration_seconds INTEGER,
+    connected INTEGER,
+    disposition_label TEXT,
+    disposition_id TEXT,
+    notes TEXT,
+    recording_url TEXT,
+    called_at TEXT,
+    ingested_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_phoneburner_call_log_company ON phoneburner_call_log(company_id)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_phoneburner_call_log_called_at ON phoneburner_call_log(called_at)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_phoneburner_call_log_lead ON phoneburner_call_log(campaign_lead_id)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_phoneburner_call_log_pb_contact ON phoneburner_call_log(phoneburner_contact_id)");
+} catch { /* exists */ }
+
 // Warehouse/ShipHero exports: PO line items, freight info on POs, shiphero sync timestamps
 try { sqlite.exec("ALTER TABLE catalog_skus ADD COLUMN shiphero_synced_at TEXT"); } catch { /* exists */ }
 // Touch-stamp the row when anything edits it (UPC bulk-import,
