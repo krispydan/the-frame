@@ -159,7 +159,12 @@ export async function POST(request: NextRequest) {
         // when SKUs carry the combined name. The product option list
         // stays a single "Color" axis for backward compat.
         const variantTitles = ep.skus.map((s) =>
-          buildVariantTitle(s.colorName, s.lensColorName),
+          buildVariantTitle(
+            s.colorName,
+            s.lensColorName,
+            s.readingPower,
+            s.hasBlueLightFilter,
+          ),
         );
         const colorValues = variantTitles.filter(Boolean);
         const hasMultipleVariants = ep.skus.length > 1;

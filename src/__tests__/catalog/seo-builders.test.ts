@@ -279,4 +279,25 @@ describe("buildVariantTitle", () => {
     expect(buildVariantTitle(null, "Brown")).toBe("Default Title");
     expect(buildVariantTitle("", null)).toBe("Default Title");
   });
+
+  it("reading glasses: power replaces lens-color axis", () => {
+    expect(buildVariantTitle("Black", null, 1.5)).toBe("Black Frame / +1.50");
+    expect(buildVariantTitle("tortoise", null, 2.0)).toBe("Tortoise Frame / +2.00");
+    expect(buildVariantTitle("Black", null, 1.75)).toBe("Black Frame / +1.75");
+  });
+
+  it("reading glasses: appends Blue Light when filter is on", () => {
+    expect(buildVariantTitle("Black", null, 1.5, true)).toBe(
+      "Black Frame / +1.50 / Blue Light",
+    );
+    expect(buildVariantTitle("Sand", null, 3.0, false)).toBe(
+      "Sand Frame / +3.00",
+    );
+  });
+
+  it("reading glasses: power supersedes any lens color passed in", () => {
+    // Defensive — a reading SKU should never have a lens-color string,
+    // but if one slips through the power axis still wins.
+    expect(buildVariantTitle("Black", "Green", 2.0)).toBe("Black Frame / +2.00");
+  });
 });

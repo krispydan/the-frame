@@ -80,6 +80,8 @@ export async function loadExportProducts(productIds?: string[]): Promise<ExportP
         id: s.id, sku: s.sku, colorName: s.colorName, lensColorName: s.lensColorName,
         colorHex: s.colorHex,
         size: s.size, upc: s.upc, inStock: s.inStock,
+        readingPower: s.readingPower ?? null,
+        hasBlueLightFilter: s.hasBlueLightFilter ?? null,
         inventoryQuantity: inventoryBySku.get(s.id) ?? 0,
         costPrice: s.costPrice,
       })),

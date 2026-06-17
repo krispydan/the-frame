@@ -523,19 +523,37 @@ function titleCaseFirst(s: string): string {
  *     left = frame, right = lens
  *   - Null frame → "Default Title" (Shopify's own fallback)
  *
+ * Reading-glasses extension: when `readingPower` is provided, the lens
+ * color axis is replaced by power (and optionally a "Blue Light"
+ * coating marker):
+ *
+ *   - Color + power → "Black Frame / +1.50"
+ *   - Color + power + blue light → "Black Frame / +1.50 / Blue Light"
+ *
  * The output is used as Shopify variant `option1` so the variant title
- * is automatically displayed as the same string. We never set
- * option2/option3 — the product option list stays "Color" for backward
- * compat with existing storefronts.
+ * is automatically displayed as the same string. For sunglasses we keep
+ * the single-axis convention for backward compat; reading glasses can
+ * use multi-axis options at the Shopify product level when synced.
  */
 export function buildVariantTitle(
   frameColor: string | null | undefined,
   lensColor: string | null | undefined,
+  readingPower?: number | null,
+  hasBlueLightFilter?: boolean | null,
 ): string {
   const fc = (frameColor ?? "").trim();
   const lc = (lensColor ?? "").trim();
 
   if (!fc) return "Default Title";
+
+  // Reading-glasses path — power supersedes the lens-color axis.
+  if (readingPower != null && Number.isFinite(readingPower)) {
+    const framePart = `${titleCaseFirst(fc)} Frame`;
+    const powerPart = `+${readingPower.toFixed(2)}`;
+    const parts = [framePart, powerPart];
+    if (hasBlueLightFilter) parts.push("Blue Light");
+    return parts.join(" / ");
+  }
 
   // Legacy slash-form: "Tort/Green" with no separate lens column.
   // Split + recurse so the format stays consistent. Only when the

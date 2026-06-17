@@ -552,6 +552,12 @@ try { sqlite.exec("ALTER TABLE catalog_products ADD COLUMN collection_batch TEXT
 // future PO imports; falls back gracefully when null.
 try { sqlite.exec("ALTER TABLE catalog_skus ADD COLUMN lens_color_name TEXT"); } catch { /* exists */ }
 
+// Reading-glasses variant axes — diopter power + optional blue-light
+// filter. Both nullable so sunglass/optical SKUs are unaffected. See
+// src/modules/catalog/lib/reading-glasses.ts for the allowed-power list.
+try { sqlite.exec("ALTER TABLE catalog_skus ADD COLUMN reading_power REAL"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE catalog_skus ADD COLUMN has_blue_light_filter INTEGER"); } catch { /* exists */ }
+
 // Warehouse/ShipHero exports: PO line items, freight info on POs, shiphero sync timestamps
 try { sqlite.exec("ALTER TABLE catalog_skus ADD COLUMN shiphero_synced_at TEXT"); } catch { /* exists */ }
 // Touch-stamp the row when anything edits it (UPC bulk-import,

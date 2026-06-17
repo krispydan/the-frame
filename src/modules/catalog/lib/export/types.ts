@@ -57,6 +57,10 @@ export interface ExportProduct {
     size: string | null;
     upc: string | null;
     inStock: boolean | null;
+    /** Reading-glasses diopter, e.g. 1.50. Null for sunglasses/optical. */
+    readingPower: number | null;
+    /** Reading-glasses blue-light coating flag. Null for sunglasses/optical. */
+    hasBlueLightFilter: boolean | null;
     inventoryQuantity: number;
     costPrice: number | null;
   }[];

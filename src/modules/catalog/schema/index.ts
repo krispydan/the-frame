@@ -111,6 +111,13 @@ export const skus = sqliteTable("catalog_skus", {
   lensColorName: text("lens_color_name"),
   colorHex: text("color_hex"),
   size: text("size"),
+  /** Reading-glasses diopter power, e.g. 1.50, 2.00. Null for sunglasses
+   *  and optical SKUs. Allowed values live in
+   *  src/modules/catalog/lib/reading-glasses.ts (READING_POWERS). */
+  readingPower: real("reading_power"),
+  /** Reading-glasses blue-light coating flag. 1 = has coating, 0 = clear.
+   *  Null for sunglasses/optical (no coating axis). */
+  hasBlueLightFilter: integer("has_blue_light_filter", { mode: "boolean" }),
   upc: text("upc"),
   weightOz: real("weight_oz"),
   costPrice: real("cost_price"),
