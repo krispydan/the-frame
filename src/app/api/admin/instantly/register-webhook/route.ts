@@ -102,11 +102,35 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Compute the receiver URL. If the caller didn't pass one, deduce it
-  // from the request origin (works for any deployment without hardcoding).
+  // Receiver URL resolution. Inside the Railway container, request.url
+  // resolves to http://localhost:3456 — Instantly can't reach that. So
+  // prefer env-configured public URLs first (same fallback chain as
+  // attach-faire-slip.ts:getAppBaseUrl), then fall back to request
+  // origin for local dev, then allow the body to override either.
+  const envBaseUrl =
+    process.env.SHOPIFY_APP_URL ||
+    process.env.APP_BASE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    null;
+  const inferredBase = envBaseUrl
+    ? envBaseUrl.replace(/\/$/, "")
+    : url.origin;
   const webhookUrl =
     body.webhookUrl ??
-    `${url.origin}/api/webhooks/instantly`;
+    `${inferredBase}/api/webhooks/instantly`;
+
+  // Refuse to register a localhost URL — Instantly can't reach it and
+  // we'd end up with another orphan webhook to clean up.
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)/.test(webhookUrl)) {
+    return NextResponse.json(
+      {
+        error: "Refusing to register a localhost webhook URL — Instantly can't reach it",
+        webhookUrl,
+        hint: "Pass body.webhookUrl explicitly, or set SHOPIFY_APP_URL env var to the public URL",
+      },
+      { status: 400 },
+    );
+  }
 
   const token = randomBytes(32).toString("hex");
   const eventType = body.eventType ?? "all_events";
