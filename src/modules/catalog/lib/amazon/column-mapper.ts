@@ -407,9 +407,20 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
       // row to dedup the variation rollup.
       model: modelNumber,
       model_name: modelName,
-      // Children inherit title/desc/bullets from parent; leave blank to avoid drift.
-      // But Amazon's validator is sometimes happier with the title repeated, so we do.
+      // Children carry the FULL copy, not just the title. The child
+      // ASIN is the buyable detail page customers land on, and the
+      // sunglasses flat-file template does NOT reliably inherit
+      // description / bullets / search-terms from the parent — so a
+      // child with blank copy renders a listing with no description,
+      // no bullets, and no indexed keywords. Repeat parent copy here.
       item_name: title,
+      product_description: description,
+      bullet_point1: bullets[0] ?? "",
+      bullet_point2: bullets[1] ?? "",
+      bullet_point3: bullets[2] ?? "",
+      bullet_point4: bullets[3] ?? "",
+      bullet_point5: bullets[4] ?? "",
+      generic_keywords: genericKeywords,
       item_type: STATIC.item_type,
       // Variation chain — enum values match the snapshot exactly.
       // parent_child = "Child" (capitalized); variation_theme must
