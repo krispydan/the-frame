@@ -1558,7 +1558,7 @@ export default function CompanyDetailPage() {
                                   return <>📧 Sent in <span className="font-medium">{campaign}</span>{step}</>;
                                 case "instantly_email_opened":
                                   return <>👁 Opened {subject ? <em>“{subject}”</em> : <>email</>} in {campaign}</>;
-                                case "instantly_link_clicked":
+                                case "instantly_email_link_clicked":
                                   return <>🔗 Clicked link in {campaign}</>;
                                 case "instantly_reply_received":
                                   return (
@@ -1570,8 +1570,10 @@ export default function CompanyDetailPage() {
                                       )}
                                     </>
                                   );
-                                case "instantly_auto_reply_received":
-                                  return <>↩️ Auto-reply in {campaign}</>;
+                                case "instantly_lead_no_show":
+                                  return <>📵 Meeting no-show ({campaign})</>;
+                                case "instantly_lead_neutral":
+                                  return <>↩️ Neutral reply ({campaign})</>;
                                 case "instantly_email_bounced":
                                   return <>⚠️ Bounced in {campaign}</>;
                                 case "instantly_lead_unsubscribed":

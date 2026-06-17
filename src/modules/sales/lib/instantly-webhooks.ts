@@ -18,11 +18,13 @@
  *     and use it as the PK of instantly_webhook_events. Retries fail
  *     INSERT silently → free dedup.
  *
- *   - Event taxonomy (event_type field): email_sent, email_opened,
- *     link_clicked, reply_received, auto_reply_received, email_bounced,
- *     lead_unsubscribed, lead_interested, lead_not_interested,
- *     lead_out_of_office, lead_wrong_person, lead_meeting_booked,
- *     lead_meeting_completed, account_error, campaign_completed.
+ *   - Event taxonomy (per developer.instantly.ai/guides/webhook-events):
+ *     email_sent, email_opened, email_link_clicked, reply_received,
+ *     email_bounced, lead_unsubscribed, lead_neutral, lead_interested,
+ *     lead_not_interested, lead_out_of_office, lead_wrong_person,
+ *     lead_meeting_booked, lead_meeting_completed, lead_no_show,
+ *     lead_closed, account_error, campaign_completed,
+ *     supersearch_enrichment_completed.
  *
  * Handler flow:
  *   1. Verify X-Webhook-Token. Reject 401 if missing/wrong, but still

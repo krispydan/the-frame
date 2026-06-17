@@ -117,8 +117,13 @@ export async function POST(req: NextRequest) {
   // after a successful registration.)
   setSetting("instantly_webhook_token", token);
 
+  // Per https://developer.instantly.ai/api-reference/webhook/create-webhook
+  // The URL field is `target_hook_url` (not `url`). event_type accepts
+  // `all_events` to catch everything. campaign=null = all campaigns in
+  // workspace. headers is injected on every outbound delivery.
   const reqBody = {
-    url: webhookUrl,
+    target_hook_url: webhookUrl,
+    name: "The Frame — all events",
     event_type: eventType,
     campaign: campaignId,
     headers: { "X-Webhook-Token": token },
