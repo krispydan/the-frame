@@ -1194,7 +1194,6 @@ try {
   console.error("[db] Migration error:", err);
 }
 
-}  // end if (!IS_BUILD_PHASE)
 try {
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_companies_segment_id ON companies (segment_id)`);
   sqlite.exec(`
