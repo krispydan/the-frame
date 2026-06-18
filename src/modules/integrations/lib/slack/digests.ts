@@ -106,6 +106,96 @@ function loadLowStock(): StockAlertRow[] {
   `).all() as StockAlertRow[];
 }
 
+/**
+ * Compute the day-before-yesterday bounds (PT) — used as the
+ * comparison window for "is this up or down" deltas in the digest.
+ */
+function ptDayBeforeYesterdayBounds(): { startIso: string; endIso: string } {
+  const ptDateOf = (d: Date) =>
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Los_Angeles",
+      year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(d);
+  const target = ptDateOf(new Date(Date.now() - 2 * 24 * 3600_000));
+  const [yy, mm, dd] = target.split("-").map(Number);
+  const noonUtc = new Date(Date.UTC(yy, mm - 1, dd, 12));
+  const ptHourAtNoonUtc = parseInt(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Los_Angeles", hourCycle: "h23", hour: "2-digit",
+    }).format(noonUtc),
+    10,
+  );
+  const offsetHours = ptHourAtNoonUtc - 12;
+  const startUtc = new Date(Date.UTC(yy, mm - 1, dd, -offsetHours));
+  const endUtc = new Date(startUtc.getTime() + 24 * 3600_000);
+  return { startIso: startUtc.toISOString(), endIso: endUtc.toISOString() };
+}
+
+interface CallMetrics {
+  total: number;
+  connected: number;
+  interested: number;
+}
+
+function loadPhoneBurnerMetrics(startIso: string, endIso: string): CallMetrics {
+  const row = sqlite
+    .prepare(
+      `SELECT COUNT(*) AS total,
+              SUM(CASE WHEN connected = 1 THEN 1 ELSE 0 END) AS connected,
+              SUM(CASE WHEN lower(disposition_label) LIKE 'set appointment%' THEN 1 ELSE 0 END) AS interested
+         FROM phoneburner_call_log
+        WHERE called_at >= ? AND called_at < ?`,
+    )
+    .get(startIso, endIso) as { total: number; connected: number; interested: number } | undefined;
+  return {
+    total: row?.total ?? 0,
+    connected: row?.connected ?? 0,
+    interested: row?.interested ?? 0,
+  };
+}
+
+interface EmailMetrics {
+  sent: number;
+  replied: number;
+  interested: number;
+  bounced: number;
+}
+
+function loadInstantlyMetrics(startIso: string, endIso: string): EmailMetrics {
+  const row = sqlite
+    .prepare(
+      `SELECT SUM(CASE WHEN event_type = 'email_sent' THEN 1 ELSE 0 END) AS sent,
+              SUM(CASE WHEN event_type IN ('reply_received','auto_reply_received') THEN 1 ELSE 0 END) AS replied,
+              SUM(CASE WHEN event_type = 'lead_interested' THEN 1 ELSE 0 END) AS interested,
+              SUM(CASE WHEN event_type = 'email_bounced' THEN 1 ELSE 0 END) AS bounced
+         FROM instantly_webhook_events
+        WHERE received_at >= ? AND received_at < ?
+          AND token_valid = 1`,
+    )
+    .get(startIso, endIso) as
+    | { sent: number; replied: number; interested: number; bounced: number }
+    | undefined;
+  return {
+    sent: row?.sent ?? 0,
+    replied: row?.replied ?? 0,
+    interested: row?.interested ?? 0,
+    bounced: row?.bounced ?? 0,
+  };
+}
+
+/** "↑42" / "↓7" / "—" — chosen so the message stays scannable. */
+function delta(today: number, prior: number): string {
+  if (today === prior) return "—";
+  const arrow = today > prior ? "↑" : "↓";
+  return `${arrow}${Math.abs(today - prior)}`;
+}
+
+function deltaPctPoints(today: number, prior: number): string {
+  if (Math.abs(today - prior) < 0.5) return "—";
+  const arrow = today > prior ? "↑" : "↓";
+  return `${arrow}${Math.abs(Math.round(today - prior))}pp`;
+}
+
 function loadStuckOrders(): { count: number; oldestHours: number } {
   const row = sqlite.prepare(`
     SELECT COUNT(*) AS c,
@@ -161,6 +251,13 @@ export async function postDailyDigest(): Promise<{ ok: boolean }> {
   const lowStock = loadLowStock();
   const stuck = loadStuckOrders();
 
+  // Prospecting metrics — yesterday vs day-before, day-over-day delta.
+  const prior = ptDayBeforeYesterdayBounds();
+  const pbToday = loadPhoneBurnerMetrics(startIso, endIso);
+  const pbPrior = loadPhoneBurnerMetrics(prior.startIso, prior.endIso);
+  const emToday = loadInstantlyMetrics(startIso, endIso);
+  const emPrior = loadInstantlyMetrics(prior.startIso, prior.endIso);
+
   const channelLines = channels.length === 0
     ? "No orders in the last 24h."
     : channels.map((c) => `• *${platformLabel(c.channel)}* — ${money(c.revenue)} (${c.orders} order${c.orders === 1 ? "" : "s"})`).join("\n");
@@ -190,8 +287,48 @@ export async function postDailyDigest(): Promise<{ ok: boolean }> {
     { type: "section", text: { type: "mrkdwn", text: `*Top sellers*\n${skuLines}` } },
     { type: "section", text: { type: "mrkdwn", text: `*Inventory*\n${stockLine}` } },
     { type: "section", text: { type: "mrkdwn", text: `*Fulfillment*\n${stuckLine}` } },
-    { type: "context", elements: [{ type: "mrkdwn", text: `Generated ${new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" })}` }] },
   ];
+
+  // Cold calling — only render the block when we actually made calls
+  // yesterday OR the day before (so the digest doesn't carry an empty
+  // section on quiet weekends).
+  if (pbToday.total > 0 || pbPrior.total > 0) {
+    const pickupPctToday = pbToday.total > 0 ? (pbToday.connected / pbToday.total) * 100 : 0;
+    const pickupPctPrior = pbPrior.total > 0 ? (pbPrior.connected / pbPrior.total) * 100 : 0;
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text:
+          `*📞 Cold calling (PhoneBurner)*\n` +
+          `• Calls: *${pbToday.total}* (${delta(pbToday.total, pbPrior.total)} vs day before)\n` +
+          `• Pickup rate: *${pickupPctToday.toFixed(0)}%* (${deltaPctPoints(pickupPctToday, pickupPctPrior)}) — ${pbToday.connected}/${pbToday.total} connected\n` +
+          `• Interested: *${pbToday.interested}* (${delta(pbToday.interested, pbPrior.interested)})`,
+      },
+    });
+  }
+
+  // Cold email — render the block when we actually sent yesterday OR
+  // the day before.
+  if (emToday.sent > 0 || emPrior.sent > 0) {
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text:
+          `*📧 Cold email (Instantly)*\n` +
+          `• Emails sent: *${emToday.sent}* (${delta(emToday.sent, emPrior.sent)} vs day before)\n` +
+          `• Replies: *${emToday.replied}* (${delta(emToday.replied, emPrior.replied)})\n` +
+          `• Interested: *${emToday.interested}* (${delta(emToday.interested, emPrior.interested)})` +
+          (emToday.bounced > 0 ? `\n• Bounced: ${emToday.bounced}` : ""),
+      },
+    });
+  }
+
+  blocks.push({
+    type: "context",
+    elements: [{ type: "mrkdwn", text: `Generated ${new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" })}` }],
+  });
 
   const result = await postSlack({
     topic: "digest.daily",
