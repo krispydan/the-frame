@@ -96,6 +96,21 @@ export function resolveByCampaignLeadId(campaignLeadId: string | null): ResolveR
 }
 
 /**
+ * Resolve by our `companies.id` (UUID). The PhoneBurner push ships
+ * this as a custom_field named "Company ID" so it round-trips back
+ * on every webhook payload — the cleanest possible match.
+ */
+export function resolveByCompanyId(companyId: string | null): ResolveResult | null {
+  if (!companyId) return null;
+  const row = sqlite
+    .prepare("SELECT id FROM companies WHERE id = ? LIMIT 1")
+    .get(companyId) as { id: string } | undefined;
+  if (!row) return null;
+  // No campaign_lead context here — caller can still operate on company.
+  return { companyId: row.id, campaignLeadId: null };
+}
+
+/**
  * Resolve by PhoneBurner contact id. Used when the user_id round-trip
  * came back empty (e.g. the contact was manually added in PB outside
  * our push flow but we later stamped phoneburner_contact_id manually).

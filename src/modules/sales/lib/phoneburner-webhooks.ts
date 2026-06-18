@@ -41,33 +41,64 @@ import { webhookRegistry, type WebhookPayload } from "@/modules/core/lib/webhook
 import { ingestOneCall } from "./phoneburner-sync";
 import {
   resolveByCampaignLeadId,
+  resolveByCompanyId,
   resolveByPbContactId,
   resolveByPhone,
   type ResolveResult,
 } from "./lead-resolution";
 
 interface PbWebhookPayload {
-  // PB seems to nest most fields directly on the body, but we can't
-  // promise that without examples. Be liberal in what we accept.
+  // Confirmed shape from a real call_end payload (2026-06-18):
   event_type?: string;
   event?: string;
   type?: string;
-  call_id?: string;
-  contact_id?: string;
-  user_id?: string;       // round-tripped from contact create — our campaign_lead.id
-  agent_id?: string;
-  agent_email?: string;
+  status?: string;         // disposition label, e.g. "No Answer"
+  call_id?: number | string;
+  ds_id?: number | string;
   duration?: number;
-  connected?: boolean | number;
+  connected?: number | string | boolean;
+  start_time?: string;
+  end_time?: string;
+  recording_url?: string;
+  recording_link?: string;
+  direction?: string;
+  call_notes?: Array<string | { note?: string }>;
+  outbound_caller_id?: string;
+  contact?: {
+    user_id?: string;       // PB's contact id
+    lead_id?: string;
+    external_id?: string;
+    phone?: string;
+    phones?: Array<{ number?: string; phone_type?: string }>;
+    primary_email?: string;
+    first_name?: string;
+    last_name?: string;
+  };
+  agent?: {
+    user_id?: string;
+    email?: string;
+    username?: string;
+    first_name?: string;
+    last_name?: string;
+  };
+  owner?: { owner_id?: string | number; email?: string };
+  custom_fields?: Record<string, string | number | null | undefined>;
+  folder?: { id?: string | number; name?: string };
+  // Lingering aliases from older docs (we keep the keys so existing
+  // tests against synthetic payloads keep working):
+  call_end?: unknown;
   disposition?: string;
   disposition_label?: string;
   disposition_id?: string;
+  agent_id?: string;
+  agent_email?: string;
   notes?: string;
-  recording_url?: string;
   phone?: string;
   email?: string;
   called_at?: string;
   timestamp?: string;
+  user_id?: string;
+  contact_id?: string;
   [k: string]: unknown;
 }
 
@@ -99,33 +130,85 @@ function detectEventType(payload: WebhookPayload, body: PbWebhookPayload): strin
   return "unknown";
 }
 
+/** Pull values from the variable PB payload shape — top-level OR nested. */
+function pbCallId(body: PbWebhookPayload): string | null {
+  if (body.call_id != null) return String(body.call_id);
+  return null;
+}
+function pbContactUserId(body: PbWebhookPayload): string | null {
+  return body.contact?.user_id ?? body.contact_id ?? null;
+}
+function pbContactPhone(body: PbWebhookPayload): string | null {
+  if (body.contact?.phone) return String(body.contact.phone);
+  const phones = body.contact?.phones;
+  if (Array.isArray(phones) && phones[0]?.number) return String(phones[0].number);
+  return body.phone ?? null;
+}
+function pbCustomField(body: PbWebhookPayload, name: string): string | null {
+  const v = body.custom_fields?.[name];
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  return s ? s : null;
+}
+function pbAgentEmail(body: PbWebhookPayload): string | null {
+  return body.agent?.email ?? body.agent_email ?? null;
+}
+function pbAgentId(body: PbWebhookPayload): string | null {
+  return body.agent?.user_id ?? body.agent_id ?? null;
+}
+function pbDisposition(body: PbWebhookPayload): string | null {
+  return body.status ?? body.disposition_label ?? body.disposition ?? null;
+}
+function pbConnected(body: PbWebhookPayload): boolean {
+  const v = body.connected;
+  if (v == null) return false;
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  return String(v).trim() === "1" || String(v).trim().toLowerCase() === "true";
+}
+function pbNotes(body: PbWebhookPayload): string | null {
+  if (typeof body.notes === "string" && body.notes.trim()) return body.notes;
+  const arr = body.call_notes;
+  if (Array.isArray(arr) && arr.length) {
+    return arr
+      .map((n) => (typeof n === "string" ? n : n?.note ?? ""))
+      .filter(Boolean)
+      .join("\n") || null;
+  }
+  return null;
+}
+
 function dedupHash(eventType: string, body: PbWebhookPayload): string {
   const parts = [
     eventType,
-    body.call_id ?? "",
-    body.contact_id ?? "",
-    body.user_id ?? "",
-    body.timestamp ?? body.called_at ?? "",
-    // Include disposition + phone in the hash because for non-call
-    // events we won't have call_id; the combo still differentiates
-    // distinct deliveries reasonably.
-    body.disposition_id ?? body.disposition ?? "",
-    body.phone ?? body.email ?? "",
+    pbCallId(body) ?? "",
+    pbContactUserId(body) ?? "",
+    body.user_id ?? pbCustomField(body, "Frame Lead ID") ?? "",
+    body.start_time ?? body.timestamp ?? body.called_at ?? "",
+    pbDisposition(body) ?? "",
+    pbContactPhone(body) ?? body.email ?? "",
   ];
   return createHash("sha256").update(parts.join("|")).digest("hex");
 }
 
 /**
- * Resolve a non-call event (no call_id) to a company_id via tiered
- * lookup. call_end events bypass this and go through ingestOneCall's
- * own resolver.
+ * Resolve a non-call event to a company_id. Priority:
+ *   1. custom_fields["Company ID"]  — our companies.id round-trip
+ *   2. custom_fields["Frame Lead ID"] — our campaign_leads.id round-trip
+ *   3. body.user_id (legacy round-trip on contact)
+ *   4. PB contact user_id ↔ phoneburner_contact_id
+ *   5. Phone digits
  */
-function resolveNonCallEvent(body: PbWebhookPayload): ResolveResult | null {
-  const r1 = resolveByCampaignLeadId(body.user_id ?? null);
+function resolveEvent(body: PbWebhookPayload): ResolveResult | null {
+  const companyIdCF = pbCustomField(body, "Company ID");
+  const r1 = resolveByCompanyId(companyIdCF);
   if (r1) return r1;
-  const r2 = resolveByPbContactId(body.contact_id ?? null);
+  const frameLeadIdCF = pbCustomField(body, "Frame Lead ID");
+  const r2 = resolveByCampaignLeadId(frameLeadIdCF ?? body.user_id ?? null);
   if (r2) return r2;
-  return resolveByPhone(body.phone ?? null);
+  const r3 = resolveByPbContactId(pbContactUserId(body));
+  if (r3) return r3;
+  return resolveByPhone(pbContactPhone(body));
 }
 
 function logToActivityFeed(opts: {
@@ -204,6 +287,10 @@ async function handlePhoneBurnerWebhook(
 
   // 2. Audit-log INSERT keyed on dedup hash.
   const id = dedupHash(eventType, body);
+  const auditCallId = pbCallId(body);
+  const auditContactId = pbContactUserId(body);
+  const auditFrameLeadId =
+    pbCustomField(body, "Frame Lead ID") ?? body.user_id ?? null;
   let isNewDelivery = true;
   try {
     sqlite
@@ -216,9 +303,9 @@ async function handlePhoneBurnerWebhook(
       .run(
         id,
         eventType,
-        body.call_id ?? null,
-        body.contact_id ?? null,
-        body.user_id ?? null,
+        auditCallId,
+        auditContactId,
+        auditFrameLeadId,
         payload.body,
         tokenValid ? 1 : 0,
       );
@@ -241,29 +328,42 @@ async function handlePhoneBurnerWebhook(
   let message = "";
   try {
     if (eventType === "call_end") {
-      // Reuse the same ingestion the polling cron uses.
-      const outcome = ingestOneCall({
-        id: String(body.call_id ?? ""),
-        call_id: body.call_id ?? undefined,
-        contact_id: body.contact_id ?? undefined,
-        user_id: body.user_id ?? undefined,
-        agent_id: body.agent_id ?? undefined,
-        agent_email: body.agent_email ?? undefined,
-        duration: typeof body.duration === "number" ? body.duration : undefined,
-        connected: body.connected,
-        disposition: body.disposition ?? undefined,
-        disposition_id: body.disposition_id ?? undefined,
-        disposition_label: body.disposition_label ?? undefined,
-        notes: body.notes ?? undefined,
-        recording_url: body.recording_url ?? undefined,
-        phone: body.phone ?? undefined,
-        called_at: body.called_at ?? body.timestamp ?? undefined,
-      });
-      message = `call_end ${outcome}`;
+      // PB's actual call_end payload puts the disposition on `status`,
+      // agent fields nested under `agent`, and our companies.id /
+      // campaign_leads.id round-tripped through the custom_fields
+      // we set on push. Flatten into the shape ingestOneCall expects.
+      const disposition = pbDisposition(body);
+      const callId = pbCallId(body) ?? "";
+
+      // Resolve with custom_fields["Company ID"] FIRST — pass the
+      // result to ingestOneCall via preResolved so it doesn't fall
+      // back to its own resolver (which would walk PB's contact_id
+      // and miss the cleaner match path).
+      const match = resolveEvent(body);
+      const outcome = ingestOneCall(
+        {
+          id: callId,
+          call_id: callId,
+          contact_id: pbContactUserId(body) ?? undefined,
+          user_id: match?.campaignLeadId ?? auditFrameLeadId ?? undefined,
+          agent_id: pbAgentId(body) ?? undefined,
+          agent_email: pbAgentEmail(body) ?? undefined,
+          duration: typeof body.duration === "number" ? body.duration : undefined,
+          connected: pbConnected(body),
+          disposition: disposition ?? undefined,
+          disposition_label: disposition ?? undefined,
+          notes: pbNotes(body) ?? undefined,
+          recording_url: body.recording_url ?? undefined,
+          phone: pbContactPhone(body) ?? undefined,
+          called_at: body.start_time ?? body.end_time ?? body.timestamp ?? undefined,
+        },
+        { preResolved: match },
+      );
+      message = `call_end ${outcome} disposition=${disposition ?? "(none)"}`;
     } else {
       // Non-call events: just write to activity_feed if we can resolve
       // a company. Unmatched events get logged in the audit table only.
-      const match = resolveNonCallEvent(body);
+      const match = resolveEvent(body);
       if (match) {
         logToActivityFeed({
           companyId: match.companyId,

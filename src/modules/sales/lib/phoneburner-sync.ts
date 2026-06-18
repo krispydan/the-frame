@@ -492,12 +492,17 @@ function resolveCall(call: PbCall): ResolveResult | null {
  * call_id, so re-ingesting the same call (e.g. webhook delivered and
  * polling later catches it) fails INSERT and returns "skipped_existing".
  */
-export function ingestOneCall(call: PbCall): "ingested" | "skipped_existing" | "unmatched" {
+export function ingestOneCall(
+  call: PbCall,
+  opts?: { preResolved?: ResolveResult | null },
+): "ingested" | "skipped_existing" | "unmatched" {
   const callId = call.id || call.call_id;
   if (!callId) return "skipped_existing";
   if (callExists(callId)) return "skipped_existing";
 
-  const match = resolveCall(call);
+  // Webhook callers can pass a pre-resolved match (typically from
+  // custom_fields["Company ID"]) so we don't relitigate the lookup.
+  const match = opts?.preResolved ?? resolveCall(call);
   const companyId = match?.companyId ?? null;
   const campaignLeadId = match?.campaignLeadId ?? null;
 
