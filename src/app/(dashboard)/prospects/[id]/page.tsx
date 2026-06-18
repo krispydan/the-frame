@@ -38,6 +38,12 @@ import {
   DEAL_CHANNELS,
   type DealStage,
 } from "@/modules/sales/schema/pipeline";
+import {
+  COMPANY_STATUS_LABELS,
+  MANUAL_STATUS_OPTIONS,
+  getCompanyStatusBadge,
+} from "@/modules/sales/lib/company-status-display";
+import { ProspectActivityTimeline } from "@/modules/sales/components/prospect-activity-timeline";
 
 interface Company {
   id: string; name: string; type: string; website: string; domain: string;
@@ -148,21 +154,10 @@ interface Activity {
   data: string; user_id: string; created_at: string;
 }
 
-const statusColors: Record<string, string> = {
-  new: "bg-gray-100 text-gray-700",
-  contacted: "bg-blue-100 text-blue-700",
-  qualified: "bg-green-100 text-green-700",
-  rejected: "bg-red-100 text-red-700",
-  customer: "bg-purple-100 text-purple-700",
-};
-
-const statusLabels: Record<string, string> = {
-  new: "New",
-  contacted: "Contacted",
-  qualified: "Qualified",
-  rejected: "Not Qualified",
-  customer: "Customer",
-};
+// Status labels + colors now live in a shared module — see
+// src/modules/sales/lib/company-status-display.ts. Pre-pipeline-migration
+// values (new/qualified/rejected/contacted) still get a sensible
+// fallback via getCompanyStatusBadge so any unmigrated row renders OK.
 
 const tierColors: Record<string, string> = {
   A: "bg-green-500 text-white",
@@ -667,18 +662,23 @@ export default function CompanyDetailPage() {
           </div>
 
 
-          {/* Status dropdown */}
+          {/* Pipeline status dropdown */}
           <div className="relative">
-            <button onClick={() => setStatusDropdown(!statusDropdown)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${statusColors[company.status] || "bg-gray-100"}`}>
-              {statusLabels[company.status] || company.status}
-            </button>
+            {(() => {
+              const badge = getCompanyStatusBadge(company.status);
+              return (
+                <button onClick={() => setStatusDropdown(!statusDropdown)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium ${badge.color}`}>
+                  {badge.label}
+                </button>
+              );
+            })()}
             {statusDropdown && (
-              <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 border rounded-lg shadow-lg z-50 py-1 w-40">
-                {["new", "contacted", "qualified", "rejected", "customer"].map(s => (
+              <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 border rounded-lg shadow-lg z-50 py-1 w-44">
+                {MANUAL_STATUS_OPTIONS.map(s => (
                   <button key={s} onClick={() => changeStatus(s)}
                     className={`w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 ${s === company.status ? "font-bold" : ""}`}>
-                    {statusLabels[s] || s}
+                    {COMPANY_STATUS_LABELS[s] || s}
                   </button>
                 ))}
               </div>
@@ -1522,9 +1522,20 @@ export default function CompanyDetailPage() {
           </Card>
 
           {/* Activity Timeline */}
-          <Card>
+          <Card className="sticky top-4">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Activity</CardTitle>
+            </CardHeader>
+            <CardContent className="max-h-[calc(100vh-8rem)] overflow-y-auto">
+              <ProspectActivityTimeline activities={activities} />
+            </CardContent>
+          </Card>
+          {/* Legacy timeline preserved below for safety during cutover —
+              hidden by default. Remove once the new component proves out. */}
+          {false && (
+            <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Activity (legacy)</CardTitle>
             </CardHeader>
             <CardContent>
               {activities.length === 0 ? (
@@ -1670,6 +1681,7 @@ export default function CompanyDetailPage() {
               )}
             </CardContent>
           </Card>
+          )}
         </div>
       </div>
     </div>
