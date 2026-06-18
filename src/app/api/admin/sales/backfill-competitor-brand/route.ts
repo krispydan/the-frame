@@ -96,49 +96,77 @@ export async function POST(req: NextRequest) {
 
   // Update the column AND drop a 'brand_carrier' tag on each matching
   // company so the existing tag-based smart-list / prospects-list
-  // filtering machinery just works — no new filter type to teach the
-  // UI about. The tag is comma-appended only if not already present.
+  // filtering machinery just works.
+  //
+  // CRITICAL: tags is stored as a JSON array string. The previous
+  // version of this endpoint did `tags || ',brand_carrier'` which
+  // produced INVALID JSON like `["eyewear_cohort",...],brand_carrier`,
+  // crashing the prospects API with a 500 on rows that matched.
+  // We now read each row's current tags, parse leniently, add the
+  // tag, and write back valid JSON.
   const stmt = sqlite.prepare(
     "UPDATE companies SET primary_competitor_brand = ?, updated_at = datetime('now') WHERE id = ?",
   );
-  const tagStmt = sqlite.prepare(
-    `UPDATE companies
-        SET tags = CASE
-                      WHEN tags IS NULL OR tags = '' OR tags = '[]'
-                        THEN 'brand_carrier'
-                      WHEN tags LIKE '%brand_carrier%'
-                        THEN tags
-                      ELSE tags || ',brand_carrier'
-                    END
-      WHERE id = ?`,
+  const readTags = sqlite.prepare("SELECT tags FROM companies WHERE id = ?");
+  const writeTags = sqlite.prepare(
+    "UPDATE companies SET tags = ? WHERE id = ?",
   );
+
+  function addBrandCarrierTag(currentRaw: string | null): string {
+    // Parse leniently — same logic as the API's parseTagsLenient.
+    let arr: string[] = [];
+    if (currentRaw && currentRaw.trim()) {
+      const s = currentRaw.trim();
+      if (s.startsWith("[")) {
+        try {
+          const parsed = JSON.parse(s);
+          if (Array.isArray(parsed)) arr = parsed.map(String);
+        } catch {
+          // Hybrid form left over from the previous (buggy) backfill
+          // — split into head + tail, both of which we keep.
+          const closeIdx = s.lastIndexOf("]");
+          if (closeIdx > 0) {
+            try {
+              const head = JSON.parse(s.slice(0, closeIdx + 1));
+              if (Array.isArray(head)) {
+                arr = [
+                  ...head.map(String),
+                  ...s.slice(closeIdx + 1).split(",").map((t) => t.trim()).filter(Boolean),
+                ];
+              }
+            } catch { /* fall through */ }
+          }
+        }
+      }
+      if (arr.length === 0) {
+        arr = s.split(",").map((t) => t.trim()).filter(Boolean);
+      }
+    }
+    if (!arr.includes("brand_carrier")) arr.push("brand_carrier");
+    return JSON.stringify(arr);
+  }
+
   const txn = sqlite.transaction(() => {
     for (const u of updates) {
       stmt.run(u.brand, u.id);
-      tagStmt.run(u.id);
+      const row = readTags.get(u.id) as { tags: string | null } | undefined;
+      const updated = addBrandCarrierTag(row?.tags ?? null);
+      writeTags.run(updated, u.id);
     }
-    // Also tag rows that were already correct on the column — first
-    // run of this endpoint won't have any of those, but later runs
-    // (after the column is populated by another path) should still
-    // sync the tag.
+    // Idempotent re-tag pass: any row where the column is set but the
+    // JSON tags array doesn't have brand_carrier gets fixed. Also
+    // repairs the broken hybrid form left by the previous run.
+    const allTagged = sqlite
+      .prepare(
+        "SELECT id, tags FROM companies WHERE primary_competitor_brand IS NOT NULL",
+      )
+      .all() as Array<{ id: string; tags: string | null }>;
+    for (const r of allTagged) {
+      const fixed = addBrandCarrierTag(r.tags);
+      if (fixed !== r.tags) writeTags.run(fixed, r.id);
+    }
   });
   txn();
-  // Ensure every row with the column set also has the tag — separate
-  // pass for idempotency. Cheap because of the index.
-  sqlite
-    .prepare(
-      `UPDATE companies
-          SET tags = CASE
-                        WHEN tags IS NULL OR tags = '' OR tags = '[]'
-                          THEN 'brand_carrier'
-                        WHEN tags LIKE '%brand_carrier%'
-                          THEN tags
-                        ELSE tags || ',brand_carrier'
-                      END
-        WHERE primary_competitor_brand IS NOT NULL
-          AND (tags IS NULL OR tags NOT LIKE '%brand_carrier%')`,
-    )
-    .run();
 
   // Recompute the per-brand totals now that the writes landed —
   // alreadyTagged + new collapse into a single "tagged" count.

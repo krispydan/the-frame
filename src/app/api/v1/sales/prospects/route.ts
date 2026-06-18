@@ -213,11 +213,52 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     data: rows.map(r => ({
       ...r,
-      tags: r.tags ? JSON.parse(r.tags as string) : [],
+      tags: parseTagsLenient(r.tags as string | null),
     })),
     total: countResult.total,
     page,
     limit,
     totalPages: Math.ceil(countResult.total / limit),
   });
+}
+
+/**
+ * The companies.tags column carries a mix of formats from historical
+ * imports + backfills:
+ *
+ *   - clean JSON array:        `["a","b","c"]`
+ *   - plain comma-separated:   `a,b,c`
+ *   - hybrid (broken JSON):    `["a","b"],c`  ← created by the
+ *     brand-carrier backfill which appended ",brand_carrier" to
+ *     existing JSON arrays. JSON.parse throws on these.
+ *
+ * This parser tolerates all three. Returns [] for null/empty input.
+ * The downstream UI just needs an array of strings.
+ */
+function parseTagsLenient(raw: string | null): string[] {
+  if (!raw) return [];
+  const s = raw.trim();
+  if (!s) return [];
+  // Pure JSON array — the happy path.
+  if (s.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(s);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    } catch {
+      // Hybrid form: `["a","b"],c,d`. Find the matching `]` and
+      // split the remainder by commas.
+      const closeIdx = s.lastIndexOf("]");
+      if (closeIdx > 0) {
+        try {
+          const head = JSON.parse(s.slice(0, closeIdx + 1));
+          if (Array.isArray(head)) {
+            const tail = s.slice(closeIdx + 1).split(",").map((t) => t.trim()).filter(Boolean);
+            return [...head.map(String), ...tail];
+          }
+        } catch { /* fall through */ }
+      }
+    }
+  }
+  // Plain comma-separated string.
+  return s.split(",").map((t) => t.trim()).filter(Boolean);
 }
