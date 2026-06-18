@@ -283,6 +283,12 @@ export default function SegmentsPage() {
                           >
                             Prospects <ChevronRight className="w-3 h-3" />
                           </Link>
+                          <Link
+                            href={`/campaigns?segment=${encodeURIComponent(segment.name)}`}
+                            className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
+                          >
+                            Campaigns <ChevronRight className="w-3 h-3" />
+                          </Link>
                         </div>
                       </TableCell>
                     </TableRow>

@@ -12,6 +12,7 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const type = params.get("type");
   const status = params.get("status");
+  const segment = params.get("segment");
   const page = Math.max(1, parseInt(params.get("page") || "1"));
   const limit = Math.min(100, parseInt(params.get("limit") || "50"));
   const offset = (page - 1) * limit;
@@ -21,6 +22,7 @@ export async function GET(request: NextRequest) {
 
   if (type) { clauses.push("c.type = ?"); vals.push(type); }
   if (status) { clauses.push("c.status = ?"); vals.push(status); }
+  if (segment) { clauses.push("lower(trim(c.target_segment)) = lower(trim(?))"); vals.push(segment); }
 
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 
