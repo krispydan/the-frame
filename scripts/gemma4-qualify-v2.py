@@ -25,6 +25,7 @@ from pathlib import Path
 # --- Config ---
 MODEL = "gemma4:e4b"
 OLLAMA_GENERATE_URL = "http://127.0.0.1:11434/api/generate"
+OLLAMA_CHAT_URL = "http://127.0.0.1:11434/api/chat"
 SCRAPE_TIMEOUT = 12
 OLLAMA_TIMEOUT = 300
 BATCH_SIZE = 1
@@ -170,22 +171,32 @@ def log_ollama_error(message):
 
 def call_gemma4(prompt, timeout=OLLAMA_TIMEOUT):
     import subprocess
-    payload = json.dumps({
-        "model": MODEL,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"temperature": 0.1, "num_predict": 256, "num_ctx": 8192}
-    })
-    # Write payload to temp file to avoid shell arg length/encoding issues
-    tmp_path = '/tmp/gemma4_payload.json'
-    with open(tmp_path, 'w') as f:
-        f.write(payload)
     last_error = "ERROR: unknown"
     for attempt in range(1, OLLAMA_RETRIES + 1):
         try:
+            payload = json.dumps({
+                "model": MODEL,
+                "think": False,
+                "stream": False,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "Classify wholesale leads and reply with exactly one line: VERDICT | CONFIDENCE | TYPE | REASON | EMAIL"
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "options": {"temperature": 0.1, "num_predict": 128, "num_ctx": 8192}
+            })
+            # Write payload to temp file to avoid shell arg length/encoding issues
+            tmp_path = '/tmp/gemma4_payload.json'
+            with open(tmp_path, 'w') as f:
+                f.write(payload)
             result = subprocess.run(
                 ['curl', '-s', '-H', 'Content-Type: application/json',
-                 '-X', 'POST', OLLAMA_GENERATE_URL, '-d', f'@{tmp_path}'],
+                 '-X', 'POST', OLLAMA_CHAT_URL, '-d', f'@{tmp_path}'],
                 capture_output=True, text=True, timeout=timeout
             )
             if result.returncode != 0:
@@ -209,7 +220,11 @@ def call_gemma4(prompt, timeout=OLLAMA_TIMEOUT):
                 time.sleep(min(attempt, 3))
                 continue
 
-            response = (data.get("response") or "").strip()
+            response = (
+                (data.get("message") or {}).get("content")
+                or data.get("response")
+                or ""
+            ).strip()
             if response:
                 return response
 
@@ -516,6 +531,22 @@ def main():
                 print(f"  Empty/error response -- skipping")
                 total_stats["errors"] += 1
                 consecutive_errors += 1
+                fallback_results = [
+                    {
+                        "id": p["id"],
+                        "verdict": "NEEDS_REVIEW",
+                        "confidence": 1,
+                        "type": "unknown",
+                        "reason": "Model error: could not classify automatically",
+                        "email": None,
+                    }
+                    for p in batch
+                ]
+                batch_stats = update_db(conn, fallback_results, batch, args.dry_run)
+                for pid in [p["id"] for p in batch]:
+                    processed_ids.add(pid)
+                total_stats["total_processed"] += len(batch)
+                total_stats["needs_review"] += batch_stats["needs_review"]
                 save_checkpoint(processed_ids, total_stats)
                 save_error_progress(
                     total_stats,
