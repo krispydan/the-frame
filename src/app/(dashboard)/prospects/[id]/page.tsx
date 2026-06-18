@@ -489,33 +489,42 @@ export default function CompanyDetailPage() {
         <span className="text-gray-900 dark:text-white">{company.name}</span>
       </div>
 
-      {/* Header */}
-      <div className="flex items-start justify-between mb-6">
-        <div className="flex items-start gap-4">
-          <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xl font-bold shrink-0">
-            {company.name.charAt(0)}
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{company.name}</h1>
-            <div className="flex items-center gap-3 mt-1 text-sm text-gray-500">
-              {company.city && <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{company.city}, {company.state}</span>}
-              {company.website && (
-                <a href={company.website.startsWith("http") ? company.website : `https://${company.website}`}
-                  target="_blank" className="flex items-center gap-1 text-blue-600 hover:underline">
-                  <Globe className="w-3.5 h-3.5" />{company.domain || company.website}
-                </a>
-              )}
-              {company.source && <span className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">{company.source.split("|")[0]}</span>}
-              <a href={`https://www.google.com/search?q=${encodeURIComponent(`${company.name} ${company.city || ""} ${company.state || ""}`.trim())}`}
-                target="_blank"
-                className={`flex items-center gap-1 hover:underline ${company.website ? "text-gray-400 hover:text-gray-600" : "text-blue-600 font-medium"}`}>
-                <Search className="w-3.5 h-3.5" />{company.website ? "Google it" : "Search Google"}
-              </a>
+      {/* Header — two-row layout: title + meta on top, status + actions below */}
+      <div className="mb-6 space-y-3">
+        {/* Row 1: identity */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-4 min-w-0">
+            <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xl font-bold shrink-0">
+              {company.name.charAt(0)}
             </div>
+            <div className="min-w-0">
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-white truncate">{company.name}</h1>
+              <div className="flex items-center gap-3 mt-1 text-sm text-gray-500 flex-wrap">
+                {company.city && <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{company.city}, {company.state}</span>}
+                {company.website && (
+                  <a href={company.website.startsWith("http") ? company.website : `https://${company.website}`}
+                    target="_blank" className="flex items-center gap-1 text-blue-600 hover:underline">
+                    <Globe className="w-3.5 h-3.5" />{company.domain || company.website}
+                  </a>
+                )}
+                <a href={`https://www.google.com/search?q=${encodeURIComponent(`${company.name} ${company.city || ""} ${company.state || ""}`.trim())}`}
+                  target="_blank"
+                  className={`flex items-center gap-1 hover:underline ${company.website ? "text-gray-400 hover:text-gray-600" : "text-blue-600 font-medium"}`}>
+                  <Search className="w-3.5 h-3.5" />{company.website ? "Google" : "Search Google"}
+                </a>
+              </div>
+            </div>
+          </div>
+          {/* Secondary actions — Edit only at this level. Enrich/StoreLeads/Create Deal land in Row 2 below. */}
+          <div className="flex items-center gap-2 shrink-0">
+            <Button variant="outline" size="sm" onClick={() => { setEditing(!editing); setEditFields({}); }}>
+              <Edit className="w-4 h-4 mr-1" /> Edit
+            </Button>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Row 2: status pills (left) + action toolbar (right) */}
+        <div className="flex items-center justify-between gap-3 flex-wrap"><div className="flex items-center gap-2 flex-wrap">
           {/* ICP — clickable badge that opens the inline editor */}
           <div className="relative">
             <button
@@ -527,7 +536,7 @@ export default function CompanyDetailPage() {
                 });
                 setIcpEditorOpen((o) => !o);
               }}
-              className={`px-3 py-1.5 rounded-lg text-sm font-bold inline-flex items-center gap-1.5 ${
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 border ${
                 company.icp_tier ? (tierColors[company.icp_tier] || "bg-gray-100") : "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
               }`}
               title="Click to edit ICP tier and score"
@@ -684,6 +693,10 @@ export default function CompanyDetailPage() {
               </div>
             )}
           </div>
+          </div>{/* end left status pills */}
+
+          {/* Right-aligned action toolbar */}
+          <div className="flex items-center gap-2 flex-wrap">
 
           <Dialog open={createDealOpen} onOpenChange={setCreateDealOpen}>
             <DialogTrigger render={<Button variant="outline" size="sm" />}>
@@ -764,22 +777,30 @@ export default function CompanyDetailPage() {
             </DialogContent>
           </Dialog>
 
-          {/* Enrichment status + buttons */}
-          {company.enrichment_status === "enriched" ? (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-green-100 text-green-700">
-              <CheckCircle2 className="w-4 h-4" /> Enriched
-            </div>
-          ) : (
-            <Button variant="outline" size="sm" onClick={enrichCompany} disabled={enriching || company.enrichment_status === "queued"}>
-              {enriching || company.enrichment_status === "queued" ? (
-                <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Enriching...</>
-              ) : company.enrichment_status === "failed" ? (
-                <><AlertCircle className="w-4 h-4 mr-1 text-red-500" /> Retry Enrich</>
-              ) : (
-                <><Sparkles className="w-4 h-4 mr-1" /> Enrich</>
-              )}
-            </Button>
-          )}
+          {/* Enrichment — single button. When already enriched, the
+              button still works as a Re-enrich affordance but shows a
+              small green dot to signal current state without a full
+              status pill competing with the action toolbar. */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={enrichCompany}
+            disabled={enriching || company.enrichment_status === "queued"}
+            title={company.enrichment_status === "enriched" ? "Enriched — click to re-enrich" : "Run AI enrichment"}
+          >
+            {enriching || company.enrichment_status === "queued" ? (
+              <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Enriching...</>
+            ) : company.enrichment_status === "failed" ? (
+              <><AlertCircle className="w-4 h-4 mr-1 text-red-500" /> Retry Enrich</>
+            ) : company.enrichment_status === "enriched" ? (
+              <>
+                <span className="w-2 h-2 rounded-full bg-green-500 mr-1.5 inline-block" />
+                Enrich
+              </>
+            ) : (
+              <><Sparkles className="w-4 h-4 mr-1" /> Enrich</>
+            )}
+          </Button>
 
           {/* StoreLeads enrichment — separate channel; merges by COALESCE so
               hand-edited values are preserved. Disabled when the prospect
@@ -798,11 +819,9 @@ export default function CompanyDetailPage() {
             )}
           </Button>
 
-          <Button variant="outline" size="sm" onClick={() => { setEditing(!editing); setEditFields({}); }}>
-            <Edit className="w-4 h-4 mr-1" /> Edit
-          </Button>
-        </div>
-      </div>
+          </div>{/* end right actions */}
+        </div>{/* end row 2 */}
+      </div>{/* end header */}
 
       {/* Edit mode */}
       {editing && (
@@ -898,13 +917,21 @@ export default function CompanyDetailPage() {
                   )}
                 </div>
               )}
-              {/* Tags */}
+              {/* Tags — collapsed by default. Most prospects have 4-6
+                  internal segmentation tags (eyewear_cohort, crawl_v1,
+                  carries_*, etc.) that are noise during day-to-day use
+                  but useful when debugging segment membership. */}
               {company.tags?.length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-1.5">
-                  {company.tags.map(t => (
-                    <Badge key={t} variant="secondary" className="text-xs">{t}</Badge>
-                  ))}
-                </div>
+                <details className="mt-4 group">
+                  <summary className="text-xs text-gray-500 dark:text-gray-400 cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 select-none">
+                    Tags ({company.tags.length})
+                  </summary>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {company.tags.map(t => (
+                      <Badge key={t} variant="secondary" className="text-xs">{t}</Badge>
+                    ))}
+                  </div>
+                </details>
               )}
               {/* ICP reasoning */}
               {company.icp_reasoning && (
@@ -1329,7 +1356,12 @@ export default function CompanyDetailPage() {
             </Card>
           )}
 
-          {/* Stores & Contacts */}
+          {/* Stores & Contacts — hidden entirely when both lists are
+              empty. The common-case prospect has no linked stores and
+              no contacts at intake; the empty card is just noise.
+              When the user wants to add the first contact, they go
+              through Edit mode. */}
+          {(stores.length > 0 || contacts.length > 0) && (
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
@@ -1430,83 +1462,62 @@ export default function CompanyDetailPage() {
               )}
             </CardContent>
           </Card>
+          )}
         </div>
 
-        {/* Right sidebar */}
-        <div className="space-y-6">
-          {/* Lead Source */}
+        {/* Right sidebar — Activity dominant on top, then Notes, then Lead Source. */}
+        <div className="space-y-4">
+          {/* Activity Timeline — primary right-column content. */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Lead Source</CardTitle>
+              <CardTitle className="text-base">Activity</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {/* Source Type Badge (clickable — links to filtered list) */}
-              {company.source_type && (
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">Source Type</p>
-                  <Link
-                    href={`/prospects?${new URLSearchParams({ source_type: company.source_type, ...(company.source_id ? { source_id: company.source_id } : {}) })}`}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors cursor-pointer"
-                  >
-                    {company.source_type === "storemapper" ? "🗺 StoreMapper" :
-                     company.source_type === "outscraper" ? "🔍 Outscraper" :
-                     company.source_type === "manual" ? "✋ Manual" :
-                     company.source_type === "csv" ? "📄 CSV Import" :
-                     company.source_type === "chrome-ext" ? "🌐 Chrome Extension" :
-                     company.source_type}
-                    {company.source_id && <span className="font-mono opacity-75">#{company.source_id}</span>}
-                    <ExternalLink className="w-3 h-3" />
-                  </Link>
-                </div>
-              )}
-              {company.source_query && (
-                <div>
-                  <p className="text-xs text-gray-500">Source Query</p>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 italic">&ldquo;{company.source_query}&rdquo;</p>
-                </div>
-              )}
-              {/* Legacy source display */}
-              {company.source ? (
-                <div className="flex flex-wrap gap-1.5">
-                  {company.source.split("|").map(s => s.trim()).filter(Boolean).map(s => (
-                    <span key={s} className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${sourceColorMap[s] || "bg-gray-100 text-gray-600"}`}>
-                      {s}
-                    </span>
-                  ))}
-                </div>
-              ) : !company.source_type ? (
-                <p className="text-sm text-gray-400">Unknown source</p>
-              ) : null}
-              {company.segment && (
-                <div>
-                  <p className="text-xs text-gray-500">Segment</p>
-                  <p className="text-sm text-gray-900 dark:text-gray-100">{company.segment}</p>
-                </div>
-              )}
-              {company.category && (
-                <div>
-                  <p className="text-xs text-gray-500">Category</p>
-                  <p className="text-sm text-gray-900 dark:text-gray-100">{company.category}</p>
-                </div>
-              )}
-              {company.lead_source_detail && (
-                <div>
-                  <p className="text-xs text-gray-500">Detail</p>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">{company.lead_source_detail}</p>
-                </div>
-              )}
+            <CardContent>
+              <ProspectActivityTimeline
+                activities={activities}
+                emptyHint={(() => {
+                  const s = company.status;
+                  if (s === "prospect" || s === "not_qualified") {
+                    return (
+                      <div className="text-center py-6 text-sm text-gray-500 dark:text-gray-400">
+                        <p>Not yet contacted.</p>
+                        <Link href="/campaigns" className="inline-block mt-2 text-blue-600 dark:text-blue-400 hover:underline text-xs">
+                          Send to a campaign →
+                        </Link>
+                      </div>
+                    );
+                  }
+                  if (s === "qualified_lead") {
+                    return (
+                      <p className="text-sm text-gray-500 dark:text-gray-400 py-6 text-center">
+                        Outreach in progress. Events appear here as Instantly fires them.
+                      </p>
+                    );
+                  }
+                  return (
+                    <p className="text-sm text-amber-600 dark:text-amber-500 py-6 text-center">
+                      No activity yet, but this lead is at status <strong>{COMPANY_STATUS_LABELS[s as keyof typeof COMPANY_STATUS_LABELS] || s}</strong>. Something may be misconfigured.
+                    </p>
+                  );
+                })()}
+              />
             </CardContent>
           </Card>
 
-          {/* Notes */}
+          {/* Notes — compact: single-line input grows on focus. */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Notes</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex gap-2 mb-3">
-                <textarea placeholder="Add a note..." value={newNote} onChange={e => setNewNote(e.target.value)}
-                  className="flex-1 px-3 py-2 border rounded-lg text-sm resize-none h-16 dark:bg-gray-800 dark:border-gray-700" />
+                <textarea
+                  placeholder="Add a note..."
+                  value={newNote}
+                  onChange={e => setNewNote(e.target.value)}
+                  rows={newNote ? 3 : 1}
+                  className="flex-1 px-3 py-2 border rounded-lg text-sm resize-none dark:bg-gray-800 dark:border-gray-700 focus:rows-3 transition-all"
+                />
                 <Button size="sm" onClick={addNote} disabled={!newNote.trim()} className="self-end">
                   <Plus className="w-4 h-4" />
                 </Button>
@@ -1516,20 +1527,46 @@ export default function CompanyDetailPage() {
                   {company.notes}
                 </div>
               ) : (
-                <p className="text-sm text-gray-400">No notes yet</p>
+                <p className="text-xs text-gray-400">No notes yet</p>
               )}
             </CardContent>
           </Card>
 
-          {/* Activity Timeline */}
-          <Card className="sticky top-4">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Activity</CardTitle>
-            </CardHeader>
-            <CardContent className="max-h-[calc(100vh-8rem)] overflow-y-auto">
-              <ProspectActivityTimeline activities={activities} />
-            </CardContent>
-          </Card>
+          {/* Lead Source — compact 2-3 line summary. */}
+          {(company.source_type || company.source || company.segment) && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Lead Source</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                {company.source_type && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Link
+                      href={`/prospects?${new URLSearchParams({ source_type: company.source_type, ...(company.source_id ? { source_id: company.source_id } : {}) })}`}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50"
+                      title={company.lead_source_detail || undefined}
+                    >
+                      {company.source_type}
+                      <ExternalLink className="w-3 h-3" />
+                    </Link>
+                    {company.category && (
+                      <span className="text-xs text-gray-500 dark:text-gray-400">· {company.category}</span>
+                    )}
+                  </div>
+                )}
+                {company.source_query && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 italic">
+                    &ldquo;{company.source_query}&rdquo;
+                  </p>
+                )}
+                {company.segment && (
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
+                    <span className="text-gray-400">Segment:</span> {company.segment}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
           {/* Legacy timeline preserved below for safety during cutover —
               hidden by default. Remove once the new component proves out. */}
           {false && (

@@ -359,7 +359,19 @@ const FILTERS: { key: FilterKey; label: string; categories: EventCategory[] | nu
 
 const INITIAL_VISIBLE = 30;
 
-export function ProspectActivityTimeline({ activities }: { activities: Activity[] }) {
+export function ProspectActivityTimeline({
+  activities,
+  emptyHint,
+}: {
+  activities: Activity[];
+  /**
+   * Optional rich empty-state. Falls back to a plain "No activity yet"
+   * message when not provided. Caller typically passes a
+   * company-status-aware CTA so unsent prospects get a meaningful
+   * action instead of dead text.
+   */
+  emptyHint?: React.ReactNode;
+}) {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [showAll, setShowAll] = useState(false);
 
@@ -376,9 +388,13 @@ export function ProspectActivityTimeline({ activities }: { activities: Activity[
 
   if (activities.length === 0) {
     return (
-      <div className="text-sm text-gray-400 dark:text-gray-500 py-6 text-center">
-        No activity yet
-      </div>
+      <>
+        {emptyHint ?? (
+          <div className="text-sm text-gray-400 dark:text-gray-500 py-6 text-center">
+            No activity yet
+          </div>
+        )}
+      </>
     );
   }
 
