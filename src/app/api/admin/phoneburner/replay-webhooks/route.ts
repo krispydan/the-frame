@@ -9,6 +9,16 @@ import {
   resolveByPbContactId,
   resolveByPhone,
 } from "@/modules/sales/lib/lead-resolution";
+import { progressCompanyStatus, type CompanyStatus } from "@/modules/sales/lib/status-progression";
+
+function dispositionToStatus(d: string | null | undefined): CompanyStatus | null {
+  if (!d) return null;
+  const n = d.trim().toLowerCase().replace(/[\s.\-_]+/g, " ");
+  if (n.startsWith("set appointment") || n.startsWith("set appt")) return "interested";
+  if (n.startsWith("not interested")) return "not_interested";
+  if (n.startsWith("do not call") || n === "dnc") return "not_interested";
+  return null;
+}
 
 /**
  * POST /api/admin/phoneburner/replay-webhooks
@@ -93,6 +103,7 @@ export async function POST(req: NextRequest) {
   let alreadyComplete = 0;
   let parseFail = 0;
   let stillUnmatched = 0;
+  let statusProgressed = 0;
 
   const updateLog = sqlite.prepare(
     `UPDATE phoneburner_call_log
@@ -203,12 +214,25 @@ export async function POST(req: NextRequest) {
         calledAt ?? new Date().toISOString(),
       );
     }
+    // Pipeline progression — Set Appointment / Not Interested / DNC
+    // dispositions move companies.status forward and sync the kanban.
+    const targetStatus = dispositionToStatus(disposition);
+    if (targetStatus) {
+      try {
+        const r = progressCompanyStatus(match.companyId, targetStatus);
+        if (r.updated) statusProgressed++;
+      } catch (e) {
+        console.error("[replay-webhooks] progressCompanyStatus failed:", e);
+      }
+    }
+
     patched++;
   }
 
   return NextResponse.json({
     ok: true,
     patched,
+    status_progressed: statusProgressed,
     already_complete: alreadyComplete,
     still_unmatched: stillUnmatched,
     parse_failures: parseFail,

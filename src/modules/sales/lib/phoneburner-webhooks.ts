@@ -46,6 +46,37 @@ import {
   resolveByPhone,
   type ResolveResult,
 } from "./lead-resolution";
+import { progressCompanyStatus, type CompanyStatus } from "./status-progression";
+
+/**
+ * Map a PhoneBurner disposition label to a companies.status value, or
+ * null if the disposition doesn't change pipeline state (No Answer,
+ * Busy Phone, Left Message → still in the calling queue).
+ *
+ * Per Daniel 2026-06-18:
+ *   Set Appointment   → interested (they requested the catalog)
+ *   Not Interested    → not_interested
+ *   Do Not Call       → not_interested (kept off the dial list via
+ *                       disposition_label preserved on call_log; no
+ *                       separate DNC enum state exists yet)
+ *
+ * Matching is case-insensitive + space-tolerant so minor PB-side label
+ * tweaks ("Set Appt." etc.) don't silently break the pipeline plumbing.
+ */
+function dispositionToStatus(disposition: string | null | undefined): CompanyStatus | null {
+  if (!disposition) return null;
+  const norm = disposition.trim().toLowerCase().replace(/[\s.\-_]+/g, " ");
+  if (norm.startsWith("set appointment") || norm.startsWith("set appt")) {
+    return "interested";
+  }
+  if (norm.startsWith("not interested")) {
+    return "not_interested";
+  }
+  if (norm.startsWith("do not call") || norm === "dnc") {
+    return "not_interested";
+  }
+  return null;
+}
 
 interface PbWebhookPayload {
   // Confirmed shape from a real call_end payload (2026-06-18):
@@ -360,6 +391,26 @@ async function handlePhoneBurnerWebhook(
         { preResolved: match },
       );
       message = `call_end ${outcome} disposition=${disposition ?? "(none)"}`;
+
+      // Pipeline progression — if the disposition implies a status
+      // change (Set Appointment → interested, Not Interested / Do Not
+      // Call → not_interested), upgrade the company. progressCompanyStatus
+      // is forward-only, so re-firing the same disposition is a no-op,
+      // and a company already at "customer" or further along is never
+      // downgraded.
+      const targetStatus = dispositionToStatus(disposition);
+      if (targetStatus && match?.companyId) {
+        try {
+          const r = progressCompanyStatus(match.companyId, targetStatus);
+          if (r.updated) {
+            message += ` status=${r.from ?? "?"}→${r.to}`;
+          } else {
+            message += ` status=${r.from ?? "?"}(no-progress)`;
+          }
+        } catch (e) {
+          console.error("[phoneburner-webhook] progressCompanyStatus failed:", e);
+        }
+      }
     } else {
       // Non-call events: just write to activity_feed if we can resolve
       // a company. Unmatched events get logged in the audit table only.
