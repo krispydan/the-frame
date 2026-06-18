@@ -39,6 +39,7 @@
 import { createHash } from "crypto";
 import { sqlite } from "@/lib/db";
 import { webhookRegistry, type WebhookPayload } from "@/modules/core/lib/webhooks";
+import { progressCompanyStatus, type CompanyStatus } from "./status-progression";
 
 interface InstantlyPayload {
   event_type?: string;
@@ -313,12 +314,68 @@ async function handleInstantlyWebhook(
   // 5. Write the activity_feed entry the prospect page renders.
   logToActivityFeed({ companyId: match.companyId, eventType, payload: body });
 
-  // 6. Mark the audit row green.
+  // 6. Progress companies.status when the event implies a pipeline move.
+  //    Forward-progress only — never downgrades a customer or wipes a
+  //    later stage with an earlier one.
+  const progression = companyStatusFor(eventType, match.companyId);
+  let progressionMsg = "";
+  if (progression) {
+    const r = progressCompanyStatus(match.companyId, progression);
+    if (r.updated) progressionMsg = ` status:${r.from}→${r.to}`;
+  }
+
+  // 7. Mark the audit row green.
   sqlite
     .prepare(`UPDATE instantly_webhook_events SET handler_ok = 1, handler_message = ? WHERE id = ?`)
-    .run(`processed: company=${match.companyId}`, id);
+    .run(`processed: company=${match.companyId}${progressionMsg}`, id);
 
-  return { ok: true, message: `Processed ${eventType} for ${leadEmail}` };
+  return { ok: true, message: `Processed ${eventType} for ${leadEmail}${progressionMsg}` };
+}
+
+/**
+ * Map an Instantly event_type to the target companies.status (or null
+ * for events that don't move the pipeline). Forward-progress is
+ * enforced inside progressCompanyStatus — we only declare INTENT here.
+ *
+ * `campaign_completed` → ghosted only if NO reply_received has ever
+ * landed for this company. Otherwise the campaign ending naturally
+ * isn't a "ghost" — it's just the sequence finishing.
+ */
+function companyStatusFor(eventType: string, companyId: string): CompanyStatus | null {
+  switch (eventType) {
+    case "lead_interested":
+      return "interested";
+    case "lead_meeting_booked":
+    case "lead_meeting_completed":
+      // We don't book meetings (Jaxy's win is an order), but if PB
+      // marks one, treat as a strong "interested" signal.
+      return "interested";
+    case "lead_not_interested":
+      return "not_interested";
+    case "lead_unsubscribed":
+      // Effectively a hard no — treat as not_interested. The
+      // unsubscribe flag itself lives on contacts.opted_out / similar.
+      return "not_interested";
+    case "campaign_completed": {
+      // Ghosted ONLY if no reply ever landed for this company.
+      const hasReply = sqlite
+        .prepare(
+          `SELECT 1 FROM instantly_webhook_events
+            WHERE event_type = 'reply_received'
+              AND id IN (
+                SELECT id FROM instantly_webhook_events
+                 WHERE lead_email IN (
+                   SELECT email FROM campaign_leads WHERE company_id = ?
+                 )
+              )
+            LIMIT 1`,
+        )
+        .get(companyId);
+      return hasReply ? null : "ghosted";
+    }
+    default:
+      return null;
+  }
 }
 
 // Self-register at module load. The generic dispatcher route

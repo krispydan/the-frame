@@ -39,7 +39,23 @@ export const companies = sqliteTable("companies", {
   googlePlaceId: text("google_place_id"),
   googleRating: real("google_rating"),
   googleReviewCount: integer("google_review_count"),
-  status: text("status", { enum: ["new", "contacted", "qualified", "rejected", "customer"] }).notNull().default("new"),
+  // Lead-gen pipeline status — see src/modules/sales/lib/status-progression.ts
+  // for the transition rules. Pre-pipeline-migration values ("new",
+  // "qualified", "rejected", "contacted") are migrated by
+  // /api/admin/sales/migrate-status-pipeline.
+  status: text("status", {
+    enum: [
+      "prospect",
+      "not_qualified",
+      "qualified_lead",
+      "interested",
+      "catalog_sent",
+      "revisit_later",
+      "not_interested",
+      "ghosted",
+      "customer",
+    ],
+  }).notNull().default("prospect"),
   source: text("source"),
   icpTier: text("icp_tier", { enum: ["A", "B", "C", "D"] }),
   icpScore: integer("icp_score"),

@@ -5,6 +5,7 @@
  */
 import { sqlite } from "@/lib/db";
 import { instantlyClient, type InstantlyLead } from "./instantly-client";
+import { progressCompanyStatus } from "./status-progression";
 import { logger } from "@/modules/core/lib/logger";
 
 export interface SyncResult {
@@ -237,6 +238,18 @@ async function pushCampaigns(): Promise<{ campaigns: number; leads: number; erro
         const r = emailRaw ? byEmail.get(emailRaw.toLowerCase()) : undefined;
         if (r?.id) {
           updateOk.run(r.id, lead.id);
+          // Pushing to Instantly = we've decided this is a real lead.
+          // Bump companies.status forward. progressCompanyStatus
+          // enforces forward-only progression so a prospect that's
+          // already at 'interested' or beyond won't get downgraded.
+          const companyId = (lead.company_id || lead.companyId) as string | undefined;
+          if (companyId) {
+            try {
+              progressCompanyStatus(companyId, "qualified_lead");
+            } catch (e) {
+              console.error("[instantly-sync] status progression failed:", e);
+            }
+          }
         } else if (r?.error) {
           errors.push(`Lead ${emailRaw}: ${r.error}`);
         }
