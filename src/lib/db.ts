@@ -252,6 +252,13 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN ai_opener_model TEXT"); } ca
 // IS NOT NULL + ai_opener_email1 IS NULL when scanning for the
 // next batch of pitchable leads.
 try { sqlite.exec("CREATE INDEX idx_companies_top_brand ON companies (top_brand)"); } catch { /* exists */ }
+// Canonical sunglass-competitor brand each store carries — chosen
+// from a curated list of 17 brands Jaxy directly competes with.
+// Pushed to Instantly as the `primary_competitor` custom variable
+// for brand-specific mail-merge in the Brand Carriers campaign.
+// Populated by /api/admin/sales/backfill-competitor-brand.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN primary_competitor_brand TEXT"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_companies_primary_competitor ON companies (primary_competitor_brand)"); } catch { /* exists */ }
 
 // Image upload system: new columns on catalog_images
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN url TEXT"); } catch { /* exists */ }

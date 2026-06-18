@@ -98,6 +98,27 @@ const LISTS: SmartListDef[] = [
       tag_not: ["industry_vintage", "industry_gifts"],
     },
   },
+  {
+    // Brand-targeting cohort: stores carrying one of the 17 brands
+    // Jaxy directly competes with (FREYRS, DAX, Quay, DIFF, etc.).
+    // Each store has the canonical brand on `primary_competitor_brand`
+    // which gets pushed to Instantly as the `primary_competitor`
+    // custom variable. Drives the Brand Carriers - v1 campaign's
+    // per-lead mail-merge.
+    // See src/modules/sales/lib/competitor-brands.ts for the list +
+    // POST /api/admin/sales/backfill-competitor-brand to populate.
+    name: "🥽 Brand Carriers — competes with Jaxy",
+    description:
+      "Stores carrying one of the 17 sunglass brands Jaxy directly competes with " +
+      "(FREYRS, DAX, Quay, DIFF, Cramilo, etc.). The Brand Carriers - v1 Instantly " +
+      "campaign uses the {{primary_competitor}} mail-merge variable to personalize " +
+      "the opener per brand. Excludes leads already in pipeline so we don't pester " +
+      "active conversations.",
+    filters: {
+      tag_and: ["brand_carrier"],
+      has_email: "true",
+    },
+  },
 ];
 
 function countForFilters(filters: Record<string, unknown>): number {

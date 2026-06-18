@@ -93,6 +93,12 @@ export function buildCustomVariables(row: Record<string, unknown>): Record<strin
   put("eyewear_categories", row.eyewear_categories);
   put("eyewear_price_range", row.eyewear_price_range);
   put("eyewear_top_competitors", row.eyewear_top_competitors);
+  // Canonical Jaxy-competitor brand — one of 17 names normalized from
+  // the messier top_brand / eyewear_top_competitors. Drives the
+  // Brand Carriers campaign's mail-merge: "Hi, I see you carry
+  // {{primary_competitor}}…". Null when the store doesn't carry any
+  // of our target competitors. See src/modules/sales/lib/competitor-brands.ts.
+  put("primary_competitor", row.primary_competitor_brand);
 
   // The two AI-generated opener lines — the headline personalization
   // tokens. Christina's email 1 / email 2 sequence references them
@@ -188,6 +194,7 @@ async function pushCampaigns(): Promise<{ campaigns: number; leads: number; erro
              co.description                  as description,
              co.meta_description             as meta_description,
              co.top_brand                    as top_brand,
+             co.primary_competitor_brand     as primary_competitor_brand,
              co.eyewear_categories           as eyewear_categories,
              co.eyewear_price_range          as eyewear_price_range,
              co.eyewear_top_competitors      as eyewear_top_competitors,
