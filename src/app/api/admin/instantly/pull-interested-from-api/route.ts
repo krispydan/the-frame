@@ -17,14 +17,18 @@ import { progressCompanyStatus } from "@/modules/sales/lib/status-progression";
  * 2026-06-17 — those events never fired webhooks, so they're
  * invisible to the activity-feed backfill.
  *
- * Instantly's interest_value scale (verified from updateLeadInterestStatus):
- *   1 = Interested
- *   2 = Meeting Booked
- *   3 = Closed (sold) — also positive
- *   negative values = Not Interested / Wrong Person / Lost
+ * Instantly's lt_interest_status scale (confirmed empirically against
+ * a known-interested lead 2026-06-18):
+ *   1  = Interested
+ *   2  = Meeting Booked (often)
+ *   3  = Closed / Sold
+ *   -1 / -2 / -3 = Not Interested / Wrong Person / Lost
  *   0 / null = no classification yet
  *
- * Anything >= 1 is "we want this on the kanban as at least interested".
+ * The field key is `lt_interest_status` on the /leads/list response
+ * (NOT `interest_value`, which is the write-side field on
+ * /leads/update-interest-status). Anything >= 1 is "we want this on
+ * the kanban as at least interested".
  *
  * progressCompanyStatus is forward-only: leads already at
  * catalog_sent / customer / etc. are not downgraded.
@@ -55,6 +59,27 @@ function normalizeInterestValue(raw: unknown): number | null {
   if (typeof raw === "string" && raw.trim() !== "") {
     const n = Number(raw);
     if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+/**
+ * Extract the interest classification from a lead row returned by
+ * Instantly's POST /leads/list. The documented field is
+ * `lt_interest_status` (per the OpenAPI spec) — our outbound
+ * updateLeadInterestStatus call sends `interest_value` and Instantly
+ * stores it as `lt_interest_status` on the lead. Some legacy code
+ * paths surface it as `interest_value`; check both for safety.
+ */
+function extractInterest(raw: Record<string, unknown>): number | null {
+  const candidates = [
+    raw.lt_interest_status,
+    raw.interest_value,
+    raw.interest_status,
+  ];
+  for (const c of candidates) {
+    const n = normalizeInterestValue(c);
+    if (n !== null) return n;
   }
   return null;
 }
@@ -142,7 +167,12 @@ export async function POST(req: NextRequest) {
     summary.campaigns_walked++;
 
     for (const raw of leads) {
-      const interestValue = normalizeInterestValue(raw.interest_value);
+      // The /leads/list response uses lt_interest_status. Fall back to
+      // interest_value or interest_status for robustness in case the
+      // API shape evolves.
+      const interestValue = normalizeInterestValue(
+        raw.lt_interest_status ?? raw.interest_value ?? raw.interest_status,
+      );
       if (interestValue == null || interestValue < 1) continue;
       interestedFound++;
 
