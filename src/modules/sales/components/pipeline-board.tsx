@@ -462,8 +462,24 @@ export function PipelineBoard({ deals: initialDeals, stageSummaries, companies, 
     moveStage(dealId, targetStage);
   }
 
+  /**
+   * Per Daniel 2026-06-19: the pipeline deal-detail page and prospect
+   * detail page show essentially the same lead from different angles
+   * — companies.status and deals.stage are kept in lockstep by
+   * status-progression. So instead of maintaining two divergent
+   * detail surfaces, the kanban routes everyone to the prospect
+   * page. Opening in a new tab keeps the kanban board in view so
+   * Christina can triage multiple deals without losing her place.
+   */
   function openDetail(dealId: string) {
-    router.push(`/pipeline/${dealId}`);
+    const deal = deals.find((d) => d.id === dealId);
+    if (!deal) return;
+    if (typeof window !== "undefined") {
+      window.open(`/prospects/${deal.company_id}`, "_blank", "noopener");
+    } else {
+      // SSR fallback — shouldn't normally hit this path.
+      router.push(`/prospects/${deal.company_id}`);
+    }
   }
 
   const tabs = [

@@ -1,43 +1,28 @@
 export const dynamic = "force-dynamic";
 import { sqlite } from "@/lib/db";
-import { notFound } from "next/navigation";
-import { DealDetail } from "@/modules/sales/components/deal-detail";
+import { notFound, redirect } from "next/navigation";
 
-async function getDeal(id: string) {
-  const deal = sqlite.prepare(`
-    SELECT d.*, c.name as company_name, c.city as company_city, c.state as company_state,
-           c.email as company_email, c.phone as company_phone, c.website as company_website,
-           c.icp_tier, c.icp_score
-    FROM deals d
-    LEFT JOIN companies c ON c.id = d.company_id
-    WHERE d.id = ?
-  `).get(id) as Record<string, unknown>;
-  return deal;
-}
-
-async function getActivities(dealId: string) {
-  return sqlite.prepare(`
-    SELECT * FROM deal_activities WHERE deal_id = ? ORDER BY created_at DESC
-  `).all(dealId) as Record<string, unknown>[];
-}
-
-async function getContacts(companyId: string) {
-  return sqlite.prepare(`
-    SELECT * FROM contacts WHERE company_id = ? ORDER BY is_primary DESC
-  `).all(companyId) as Record<string, unknown>[];
-}
-
-async function getUsers() {
-  return sqlite.prepare(`SELECT id, name FROM users WHERE is_active = 1`).all() as { id: string; name: string }[];
-}
-
-export default async function DealDetailPage({ params }: { params: Promise<{ id: string }> }) {
+/**
+ * The deal-detail page is unified with the prospect detail page per
+ * Daniel 2026-06-19. companies.status and deals.stage are kept in
+ * lockstep by status-progression, so one canonical view (prospects)
+ * shows the full story without two divergent surfaces drifting apart.
+ *
+ * This route exists only to redirect inbound links — bookmarks,
+ * Slack pastes, anywhere a /pipeline/<deal_id> URL is still floating
+ * around — to the equivalent /prospects/<company_id> URL.
+ */
+export default async function DealDetailRedirect({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const { id } = await params;
-  const [deal, activities, users] = await Promise.all([getDeal(id), getActivities(id), getUsers()]);
-  if (!deal) notFound();
+  const row = sqlite
+    .prepare("SELECT company_id FROM deals WHERE id = ?")
+    .get(id) as { company_id: string | null } | undefined;
 
-  const contacts = await getContacts(deal.company_id as string);
+  if (!row?.company_id) notFound();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return <DealDetail deal={deal as any} activities={activities} contacts={contacts as any[]} users={users} />;
+  redirect(`/prospects/${row.company_id}`);
 }
