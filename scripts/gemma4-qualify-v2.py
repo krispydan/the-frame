@@ -29,9 +29,12 @@ SCRAPE_TIMEOUT = 12
 OLLAMA_TIMEOUT = 300
 BATCH_SIZE = 1
 MAX_SITE_CHARS = 1200
+MAX_PROMPT_SITE_CHARS = 900
 CONCURRENCY = 8
 CHECKPOINT_FILE = Path("/tmp/gemma4-qualify-checkpoint.json")
 PROGRESS_FILE = Path("/tmp/gemma4-qualify-progress.json")
+OLLAMA_DEBUG_LOG = Path("/tmp/gemma4-qualify-ollama-errors.log")
+OLLAMA_RETRIES = 3
 
 
 def get_db_connection(db_path):
@@ -159,37 +162,77 @@ async def scrape_batch(prospects):
         return await asyncio.gather(*tasks)
 
 
+def log_ollama_error(message):
+    timestamp = datetime.now().isoformat()
+    with OLLAMA_DEBUG_LOG.open("a") as f:
+        f.write(f"\n[{timestamp}] {message}\n")
+
+
 def call_gemma4(prompt, timeout=OLLAMA_TIMEOUT):
-    import subprocess, tempfile, os
+    import subprocess
     payload = json.dumps({
         "model": MODEL,
         "prompt": prompt,
         "stream": False,
-        "options": {"temperature": 0.1, "num_predict": 512}
+        "options": {"temperature": 0.1, "num_predict": 256, "num_ctx": 8192}
     })
     # Write payload to temp file to avoid shell arg length/encoding issues
     tmp_path = '/tmp/gemma4_payload.json'
     with open(tmp_path, 'w') as f:
         f.write(payload)
-    try:
-        result = subprocess.run(
-            ['curl', '-s', '-H', 'Content-Type: application/json',
-             '-X', 'POST', OLLAMA_GENERATE_URL, '-d', f'@{tmp_path}'],
-            capture_output=True, text=True, timeout=timeout
-        )
-        if result.returncode != 0:
-            return f"ERROR: curl failed with code {result.returncode}"
-        data = json.loads(result.stdout)
-        return data.get("response", "")
-    except subprocess.TimeoutExpired:
-        return "ERROR: timeout"
-    except Exception as e:
-        return f"ERROR: {e}"
+    last_error = "ERROR: unknown"
+    for attempt in range(1, OLLAMA_RETRIES + 1):
+        try:
+            result = subprocess.run(
+                ['curl', '-s', '-H', 'Content-Type: application/json',
+                 '-X', 'POST', OLLAMA_GENERATE_URL, '-d', f'@{tmp_path}'],
+                capture_output=True, text=True, timeout=timeout
+            )
+            if result.returncode != 0:
+                last_error = f"ERROR: curl failed with code {result.returncode}"
+                log_ollama_error(f"attempt={attempt} {last_error}")
+                time.sleep(min(attempt, 3))
+                continue
+
+            stdout = (result.stdout or "").strip()
+            if not stdout:
+                last_error = "ERROR: empty stdout from ollama"
+                log_ollama_error(f"attempt={attempt} {last_error}")
+                time.sleep(min(attempt, 3))
+                continue
+
+            try:
+                data = json.loads(stdout)
+            except json.JSONDecodeError as e:
+                last_error = f"ERROR: invalid JSON from ollama: {e}"
+                log_ollama_error(f"attempt={attempt} {last_error} raw={stdout[:500]}")
+                time.sleep(min(attempt, 3))
+                continue
+
+            response = (data.get("response") or "").strip()
+            if response:
+                return response
+
+            if data.get("error"):
+                last_error = f"ERROR: ollama error: {data['error']}"
+            else:
+                last_error = "ERROR: empty model response"
+            log_ollama_error(f"attempt={attempt} {last_error} raw={stdout[:500]}")
+            time.sleep(min(attempt, 3))
+        except subprocess.TimeoutExpired:
+            last_error = "ERROR: timeout"
+            log_ollama_error(f"attempt={attempt} {last_error}")
+        except Exception as e:
+            last_error = f"ERROR: {e}"
+            log_ollama_error(f"attempt={attempt} {last_error}")
+    return last_error
 
 
 def build_classification_prompt(prospects, site_contents):
     p = prospects[0]
     content = site_contents[0]
+    if len(content) > MAX_PROMPT_SITE_CHARS:
+        content = content[:MAX_PROMPT_SITE_CHARS]
     city = p['city'] or 'Unknown'
     state = p['state'] or 'Unknown'
     country = p['country'] or 'US'
