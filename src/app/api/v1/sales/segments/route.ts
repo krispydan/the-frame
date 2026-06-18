@@ -1,5 +1,5 @@
 export const dynamic = "force-dynamic";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 
 type SegmentRow = {
@@ -7,6 +7,8 @@ type SegmentRow = {
   name: string;
   slug: string;
   description: string | null;
+  icp_profile: string | null;
+  outreach_notes: string | null;
   status: string;
   prospect_count: number;
   qualified_count: number;
@@ -25,6 +27,8 @@ export async function GET() {
       s.name,
       s.slug,
       s.description,
+      s.icp_profile,
+      s.outreach_notes,
       s.status,
       (
         SELECT count(*)
@@ -95,4 +99,85 @@ export async function GET() {
   });
 
   return NextResponse.json({ data: rows, summary });
+}
+
+function normalizeSegmentStatus(value: unknown): "active" | "paused" | "retired" {
+  return value === "paused" || value === "retired" ? value : "active";
+}
+
+function slugifySegmentName(name: string) {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "segment";
+}
+
+export async function POST(request: NextRequest) {
+  const body = await request.json();
+  const name = String(body?.name || "").trim();
+
+  if (!name) {
+    return NextResponse.json({ error: "name is required" }, { status: 400 });
+  }
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const slug = slugifySegmentName(name);
+  const status = normalizeSegmentStatus(body?.status);
+  const description = typeof body?.description === "string" ? body.description.trim() || null : null;
+  const icpProfile = typeof body?.icp_profile === "string" ? body.icp_profile.trim() || null : null;
+  const outreachNotes = typeof body?.outreach_notes === "string" ? body.outreach_notes.trim() || null : null;
+
+  sqlite.prepare(`
+    INSERT INTO segments (id, name, slug, description, icp_profile, outreach_notes, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, name, slug, description, icpProfile, outreachNotes, status, now, now);
+
+  const segment = sqlite.prepare(`
+    SELECT id, name, slug, description, icp_profile, outreach_notes, status
+    FROM segments
+    WHERE id = ?
+  `).get(id);
+
+  return NextResponse.json({ data: segment }, { status: 201 });
+}
+
+export async function PATCH(request: NextRequest) {
+  const body = await request.json();
+  const id = String(body?.id || "").trim();
+  const name = String(body?.name || "").trim();
+
+  if (!id) {
+    return NextResponse.json({ error: "id is required" }, { status: 400 });
+  }
+
+  if (!name) {
+    return NextResponse.json({ error: "name is required" }, { status: 400 });
+  }
+
+  const now = new Date().toISOString();
+  const slug = slugifySegmentName(name);
+  const status = normalizeSegmentStatus(body?.status);
+  const description = typeof body?.description === "string" ? body.description.trim() || null : null;
+  const icpProfile = typeof body?.icp_profile === "string" ? body.icp_profile.trim() || null : null;
+  const outreachNotes = typeof body?.outreach_notes === "string" ? body.outreach_notes.trim() || null : null;
+
+  const result = sqlite.prepare(`
+    UPDATE segments
+    SET name = ?, slug = ?, description = ?, icp_profile = ?, outreach_notes = ?, status = ?, updated_at = ?
+    WHERE id = ?
+  `).run(name, slug, description, icpProfile, outreachNotes, status, now, id);
+
+  if (result.changes === 0) {
+    return NextResponse.json({ error: "segment not found" }, { status: 404 });
+  }
+
+  const segment = sqlite.prepare(`
+    SELECT id, name, slug, description, icp_profile, outreach_notes, status
+    FROM segments
+    WHERE id = ?
+  `).get(id);
+
+  return NextResponse.json({ data: segment });
 }
