@@ -147,6 +147,7 @@ export async function POST(req: NextRequest) {
        WHERE cl.campaign_id = ?
          AND cl.instantly_lead_id IS NULL
          AND cl.email IS NOT NULL
+         AND cl.status NOT IN ('bounced', 'unsubscribed')
          AND NOT EXISTS (
            SELECT 1 FROM campaign_leads cl2
             WHERE cl2.id != cl.id
@@ -182,6 +183,12 @@ export async function POST(req: NextRequest) {
 
   const updateOk = sqlite.prepare(
     "UPDATE campaign_leads SET instantly_lead_id = ?, status = 'sent' WHERE id = ?",
+  );
+  // Persistent error marker — set status='bounced' so the next chunk
+  // skips this row (the SELECT below also excludes bounced rows).
+  // Without this, blocklisted leads get retried forever.
+  const updateErr = sqlite.prepare(
+    "UPDATE campaign_leads SET status = 'bounced' WHERE id = ?",
   );
 
   let pushed = 0;
@@ -222,10 +229,14 @@ export async function POST(req: NextRequest) {
         pushed++;
       } else {
         errored++;
+        // Mark errored so the next chunk doesn't retry this row.
+        updateErr.run(l.id);
         errors.push({ email, error: r?.error ?? "no id returned" });
       }
     } catch (e) {
       errored++;
+      // Same — mark errored on thrown exception (Instantly 4xx etc.)
+      updateErr.run(l.id);
       const msg = e instanceof Error ? e.message : String(e);
       errors.push({ email, error: msg });
     }
