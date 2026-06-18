@@ -5,6 +5,13 @@ import { jobQueue } from "./job-queue";
 import { agentOrchestrator } from "./agent-orchestrator";
 import { logger } from "./logger";
 
+// Side-effect imports — each module's registerJobHandler() calls run
+// at load. The handler map lives in this file, so any module that
+// adds handlers has to be eagerly imported here (lazy imports inside
+// handler bodies are fine and recommended, but the registration call
+// itself has to be at module-load).
+import "@/modules/sales/lib/status-sync";
+
 type JobHandler = (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
 
 const handlers = new Map<string, JobHandler>();
