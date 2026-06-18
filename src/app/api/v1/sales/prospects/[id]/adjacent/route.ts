@@ -9,6 +9,12 @@ export async function GET(
   const { id } = await params;
   const sp = request.nextUrl.searchParams;
 
+  // Pipeline-walk mode: when arriving from the kanban with
+  // `?pipeline=<stage>`, scope the prev/next list to companies whose
+  // matching deal sits in that stage, ordered by deal last activity
+  // (matches the kanban's "Sorted by: Last Activity" default).
+  const pipelineStage = sp.get("pipeline")?.trim();
+
   const search = sp.get("search")?.trim();
   const sort = sp.get("sort") || "name";
   const order = sp.get("order") === "desc" ? "DESC" : "ASC";
@@ -71,18 +77,33 @@ export async function GET(
   if (hasPhone === "true") whereClauses.push(`c.phone IS NOT NULL AND c.phone != ''`);
   else if (hasPhone === "false") whereClauses.push(`(c.phone IS NULL OR c.phone = '')`);
 
+  // Pipeline walk overrides the normal filter set — only the stage
+  // filter applies, joining through the deals table.
+  if (pipelineStage) {
+    whereClauses.length = 0;
+    whereParams.length = 0;
+    whereClauses.push("d.stage = ?");
+    whereParams.push(pipelineStage);
+    whereClauses.push("(d.snooze_until IS NULL OR d.snooze_until <= datetime('now'))");
+  }
+
   const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
-  const fromSQL = `FROM companies c LEFT JOIN segments s ON s.id = c.segment_id`;
+  const fromSQL = pipelineStage
+    ? `FROM deals d JOIN companies c ON c.id = d.company_id`
+    : `FROM companies c LEFT JOIN segments s ON s.id = c.segment_id`;
 
   const sortColumns: Record<string, string> = {
     name: "c.name", state: "c.state", city: "c.city",
     icp_score: "c.icp_score", status: "c.status", created_at: "c.created_at",
   };
-  const sortCol = sortColumns[sort] || "c.name";
+  const sortCol = pipelineStage
+    ? "COALESCE(d.last_activity_at, d.updated_at, d.created_at)"
+    : (sortColumns[sort] || "c.name");
+  const sortOrder = pipelineStage ? "DESC" : `${order} NULLS LAST`;
 
   // Get ordered list of IDs
   const rows = sqlite.prepare(`
-    SELECT c.id ${fromSQL} ${whereSQL} ORDER BY ${sortCol} ${order} NULLS LAST
+    SELECT c.id ${fromSQL} ${whereSQL} ORDER BY ${sortCol} ${sortOrder}
   `).all(...whereParams) as { id: string }[];
 
   const total = rows.length;

@@ -474,11 +474,15 @@ export function PipelineBoard({ deals: initialDeals, stageSummaries, companies, 
   function openDetail(dealId: string) {
     const deal = deals.find((d) => d.id === dealId);
     if (!deal) return;
+    // `?pipeline=<stage>` lets the prospect page render prev/next
+    // navigation across the current stage so Christina can walk
+    // through every card without bouncing back to the board.
+    const target = `/prospects/${deal.company_id}?pipeline=${deal.stage}`;
     if (typeof window !== "undefined") {
-      window.open(`/prospects/${deal.company_id}`, "_blank", "noopener");
+      window.open(target, "_blank", "noopener");
     } else {
       // SSR fallback — shouldn't normally hit this path.
-      router.push(`/prospects/${deal.company_id}`);
+      router.push(target);
     }
   }
 

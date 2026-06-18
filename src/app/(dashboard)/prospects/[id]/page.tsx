@@ -7,7 +7,7 @@ import Link from "next/link";
 import {
   ArrowLeft, ArrowRight, Building2, Globe, Phone, Mail, MapPin, Tag, Star,
   Edit, UserPlus, MessageSquare, Clock, ExternalLink, Plus, Save, X,
-  Briefcase, Sparkles, Loader2, CheckCircle2, AlertCircle, Search, Store, Eye,
+  Briefcase, Sparkles, Loader2, CheckCircle2, XCircle, AlertCircle, Search, Store, Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -450,35 +450,60 @@ export default function CompanyDetailPage() {
 
   return (
     <div className="p-4 md:p-6 max-w-full xl:max-w-[1200px] mx-auto">
-      {/* Prev/Next Navigation */}
-      {(adjacent.prev || adjacent.next || adjacent.position) && (
-        <div className="flex items-center justify-between mb-3 px-3 py-1.5 bg-gray-50 dark:bg-gray-800/50 rounded-lg text-sm">
-          {adjacent.prev ? (
-            <Link href={`/prospects/${adjacent.prev}${navSuffix}`} className="flex items-center gap-1 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors">
-              <ArrowLeft className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Previous</span>
+      {/* Prev/Next Navigation. In pipeline-walk mode (when the URL
+          carries ?pipeline=<stage>) the bar is themed slightly and
+          links back to the kanban instead of the prospect list. */}
+      {(adjacent.prev || adjacent.next || adjacent.position) && (() => {
+        const pipelineStage = searchParams.get("pipeline");
+        const stageLabel = pipelineStage ? (DEAL_STAGE_LABELS[pipelineStage as keyof typeof DEAL_STAGE_LABELS] || pipelineStage) : null;
+        const backHref = pipelineStage ? "/pipeline" : `/prospects${filterQs ? `?${filterQs}` : ""}`;
+        const backLabel = pipelineStage ? "Back to Pipeline" : "Back to List";
+        return (
+          <div className={`flex items-center justify-between mb-3 px-3 py-1.5 rounded-lg text-sm ${
+            pipelineStage
+              ? "bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900"
+              : "bg-gray-50 dark:bg-gray-800/50"
+          }`}>
+            <Link
+              href={backHref}
+              className={`flex items-center gap-1.5 ${
+                pipelineStage
+                  ? "text-blue-700 dark:text-blue-300 hover:text-blue-900 dark:hover:text-blue-100 font-medium"
+                  : "text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+              } transition-colors`}
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              {backLabel}
+              {stageLabel && <span className="text-gray-500 dark:text-gray-400 font-normal">· {stageLabel}</span>}
             </Link>
-          ) : (
-            <span className="flex items-center gap-1 text-gray-300 dark:text-gray-600 cursor-not-allowed">
-              <ArrowLeft className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Previous</span>
-            </span>
-          )}
-          <span className="text-gray-500 dark:text-gray-400 tabular-nums">
-            {adjacent.position && adjacent.total
-              ? `Lead ${adjacent.position.toLocaleString()} of ${adjacent.total.toLocaleString()}`
-              : <Link href={`/prospects${filterQs ? `?${filterQs}` : ""}`} className="hover:text-gray-800 dark:hover:text-gray-200">Back to List</Link>
-            }
-          </span>
-          {adjacent.next ? (
-            <Link href={`/prospects/${adjacent.next}${navSuffix}`} className="flex items-center gap-1 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors">
-              <span className="hidden sm:inline">Next</span> <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
-          ) : (
-            <span className="flex items-center gap-1 text-gray-300 dark:text-gray-600 cursor-not-allowed">
-              <span className="hidden sm:inline">Next</span> <ArrowRight className="w-3.5 h-3.5" />
-            </span>
-          )}
-        </div>
-      )}
+            <div className="flex items-center gap-3">
+              {adjacent.position && adjacent.total ? (
+                <span className="text-gray-500 dark:text-gray-400 tabular-nums">
+                  {adjacent.position.toLocaleString()} of {adjacent.total.toLocaleString()}
+                </span>
+              ) : null}
+              {adjacent.prev ? (
+                <Link href={`/prospects/${adjacent.prev}${navSuffix}`} className="flex items-center gap-1 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors" title="Previous (← arrow)">
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                </Link>
+              ) : (
+                <span className="flex items-center gap-1 text-gray-300 dark:text-gray-600 cursor-not-allowed">
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                </span>
+              )}
+              {adjacent.next ? (
+                <Link href={`/prospects/${adjacent.next}${navSuffix}`} className="flex items-center gap-1 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors" title="Next (→ arrow)">
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              ) : (
+                <span className="flex items-center gap-1 text-gray-300 dark:text-gray-600 cursor-not-allowed">
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
@@ -515,11 +540,48 @@ export default function CompanyDetailPage() {
               </div>
             </div>
           </div>
-          {/* Secondary actions — Edit only at this level. Enrich/StoreLeads/Create Deal land in Row 2 below. */}
+          {/* Terminal-state shortcuts (Overjoy-style Won / Lost) + Edit.
+              Won → customer, Lost → not_interested. Both go through the
+              regular PATCH + progressCompanyStatus path so the
+              hub-and-spoke sync handles Instantly + PhoneBurner. */}
           <div className="flex items-center gap-2 shrink-0">
             <Button variant="outline" size="sm" onClick={() => { setEditing(!editing); setEditFields({}); }}>
               <Edit className="w-4 h-4 mr-1" /> Edit
             </Button>
+            {(() => {
+              const isWon = company.status === "customer";
+              const isLost = company.status === "not_interested";
+              return (
+                <>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      if (isLost) return;
+                      if (!confirm(`Mark ${company.name} as Not Interested? This adds them to the Instantly blocklist so they stop receiving outreach.`)) return;
+                      changeStatus("not_interested");
+                    }}
+                    disabled={isLost || isWon}
+                    title={isWon ? "Already a customer" : isLost ? "Already marked Not Interested" : "Mark as Not Interested"}
+                    className="bg-red-600 hover:bg-red-700 text-white disabled:bg-red-200 disabled:text-red-400 disabled:cursor-not-allowed"
+                  >
+                    <XCircle className="w-4 h-4 mr-1" /> Lost
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      if (isWon) return;
+                      if (!confirm(`Mark ${company.name} as Customer? This closes the deal as won and stops further outreach.`)) return;
+                      changeStatus("customer");
+                    }}
+                    disabled={isWon || isLost}
+                    title={isWon ? "Already a customer" : isLost ? "Lead marked Not Interested" : "Mark as Customer"}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white disabled:bg-emerald-200 disabled:text-emerald-400 disabled:cursor-not-allowed"
+                  >
+                    <CheckCircle2 className="w-4 h-4 mr-1" /> Won
+                  </Button>
+                </>
+              );
+            })()}
           </div>
         </div>
 
@@ -693,6 +755,43 @@ export default function CompanyDetailPage() {
               </div>
             )}
           </div>
+
+          {/* Intermediate-stage quick advance buttons. Only render when
+              a forward progression actually exists from the current
+              status — keeps the bar clean for terminal states. */}
+          {(() => {
+            const s = company.status;
+            const showCatalogSent = s === "qualified_lead" || s === "interested";
+            const showRevisitLater = s === "qualified_lead" || s === "interested" || s === "catalog_sent";
+            if (!showCatalogSent && !showRevisitLater) return null;
+            return (
+              <div className="flex items-center gap-1.5">
+                <span className="text-gray-300 dark:text-gray-600 text-sm">→</span>
+                {showCatalogSent && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => changeStatus("catalog_sent")}
+                    title="Move to Catalog Sent"
+                    className="border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-900 dark:text-blue-300 dark:hover:bg-blue-950"
+                  >
+                    Catalog Sent
+                  </Button>
+                )}
+                {showRevisitLater && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => changeStatus("revisit_later")}
+                    title="Move to Revisit Later"
+                    className="border-orange-200 text-orange-700 hover:bg-orange-50 dark:border-orange-900 dark:text-orange-300 dark:hover:bg-orange-950"
+                  >
+                    Revisit Later
+                  </Button>
+                )}
+              </div>
+            );
+          })()}
           </div>{/* end left status pills */}
 
           {/* Right-aligned action toolbar */}
