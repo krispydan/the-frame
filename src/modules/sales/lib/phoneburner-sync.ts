@@ -70,6 +70,11 @@ interface LeadRowJoined {
   source_type: string | null;
   ecom_platform: string | null;
   estimated_yearly_sales_cents: number | null;
+  // Canonical competitor brand (one of the 17 in
+  // src/modules/sales/lib/competitor-brands.ts). When set, the PB
+  // contact gets a "Stocks {brand}" line + a search-on-their-site URL
+  // so the agent can reference it on the call.
+  primary_competitor_brand: string | null;
   // primary phone (from company_phones join)
   primary_phone: string | null;
   // optional contact name (contacts table stores first/last separately)
@@ -142,6 +147,7 @@ function loadLeadsForCampaign(campaignId: string): LeadRowJoined[] {
               co.source_type     AS source_type,
               co.ecom_platform   AS ecom_platform,
               co.estimated_yearly_sales_cents AS estimated_yearly_sales_cents,
+              co.primary_competitor_brand AS primary_competitor_brand,
               (SELECT cp.phone FROM company_phones cp
                 WHERE cp.company_id = co.id
                 ORDER BY cp.is_primary DESC, cp.created_at ASC
@@ -246,6 +252,22 @@ function buildContactPayload(opts: {
   if (yearly) noteLines.push(`Est. yearly: ${yearly}`);
   if (lead.ecom_platform) noteLines.push(`Platform: ${lead.ecom_platform}`);
   if (lead.source_type) noteLines.push(`Lead source: ${lead.source_type}`);
+
+  // Brand-carrier conversation hook. When this prospect carries one of
+  // the 17 brands Jaxy competes with, surface it inline so the agent
+  // can open with "I saw you stock <brand> — here's a similar offering
+  // at lower MOQ" and click straight through to the search-result page
+  // on the prospect's own store as proof.
+  const competitorBrand = (lead.primary_competitor_brand ?? "").trim();
+  const competitorSearchUrl = competitorBrand && lead.domain
+    ? `https://${lead.domain.replace(/^https?:\/\//, "").replace(/\/$/, "")}/search?q=${encodeURIComponent(competitorBrand)}`
+    : null;
+  if (competitorBrand) {
+    const stocksLine = competitorSearchUrl
+      ? `Stocks ${competitorBrand} — see: ${competitorSearchUrl}`
+      : `Stocks ${competitorBrand}`;
+    noteLines.push(stocksLine);
+  }
   const socials: string[] = [];
   if (lead.instagram_url) socials.push(`IG: ${lead.instagram_url}`);
   if (lead.facebook_url) socials.push(`FB: ${lead.facebook_url}`);
@@ -296,6 +318,13 @@ function buildContactPayload(opts: {
     { name: "LinkedIn URL", type: "url", value: lead.linkedin_url ?? "" },
     { name: "YouTube URL", type: "url", value: lead.youtube_url ?? "" },
     { name: "Yelp URL", type: "url", value: lead.yelp_url ?? "" },
+    // Brand-carrier fields — only populated for the Brand Carriers
+    // cohort. Agents can filter PB call-lists by Competitor Brand to
+    // run per-brand call scripts; the URL pre-loads the search-results
+    // page on the prospect's own site so they can verify the stock
+    // live during the call.
+    { name: "Competitor Brand", type: "text", value: competitorBrand ?? "" },
+    { name: "Competitor Brand URL", type: "url", value: competitorSearchUrl ?? "" },
     { name: "Frame Lead ID", type: "text", value: lead.lead_id }, // for call-result polling
   ].filter((f) => f.value !== "" && f.value !== null && f.value !== undefined);
 
