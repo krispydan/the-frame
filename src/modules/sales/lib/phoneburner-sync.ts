@@ -37,6 +37,7 @@ interface PushSummary {
   folder_id: string | null;
   pushed: number;
   skipped_no_phone: number;
+  skipped_no_website: number;
   skipped_already_pushed: number;
   errors: Array<{ leadId: string; reason: string }>;
 }
@@ -75,6 +76,14 @@ interface LeadRowJoined {
   contact_first_name: string | null;
   contact_last_name: string | null;
   contact_email: string | null;
+  // socials — pulled from companies.* URL columns
+  facebook_url: string | null;
+  instagram_url: string | null;
+  twitter_url: string | null;
+  linkedin_url: string | null;
+  tiktok_url: string | null;
+  youtube_url: string | null;
+  yelp_url: string | null;
 }
 
 function loadCampaign(campaignId: string): CampaignRow | null {
@@ -139,7 +148,14 @@ function loadLeadsForCampaign(campaignId: string): LeadRowJoined[] {
                 LIMIT 1) AS primary_phone,
               ct.first_name      AS contact_first_name,
               ct.last_name       AS contact_last_name,
-              ct.email           AS contact_email
+              ct.email           AS contact_email,
+              co.facebook_url    AS facebook_url,
+              co.instagram_url   AS instagram_url,
+              co.twitter_url     AS twitter_url,
+              co.linkedin_url    AS linkedin_url,
+              co.tiktok_url      AS tiktok_url,
+              co.youtube_url     AS youtube_url,
+              co.yelp_url        AS yelp_url
          FROM campaign_leads cl
          JOIN companies co ON co.id = cl.company_id
          LEFT JOIN contacts ct ON ct.id = cl.contact_id
@@ -190,28 +206,70 @@ function fmtMoneyFromCents(cents: number | null): string | null {
   return `$${Math.round(dollars)}`;
 }
 
+/** Why a payload was rejected — drives the counters on PushSummary. */
+type SkipReason = "no_phone" | "no_website";
+
 function buildContactPayload(opts: {
   lead: LeadRowJoined;
   folderId: string;
   ownerId: string;
-}): PbContactPayload | null {
+}): PbContactPayload | { skip: SkipReason } {
   const { lead, folderId, ownerId } = opts;
   const phone = formatToPbPhone(lead.primary_phone);
-  if (!phone) return null;
+  if (!phone) return { skip: "no_phone" };
+
+  // Per Daniel 2026-06-17: leads without a website aren't ICP for
+  // cold-call outreach (likely off-platform stragglers). Skip them at
+  // build time so the agent's dial list stays high-signal.
+  const website = (lead.website ?? "").trim();
+  if (!website) return { skip: "no_website" };
 
   const { first, last } = pickName(lead);
   const email = (lead.email ?? lead.contact_email ?? "").trim() || undefined;
 
-  // Custom fields carry firmographics — PB has no native company/website.
+  // Notes carry the firmographic + social brief the caller wants in
+  // their dial UI. PB renders it inline on the contact card. Format
+  // is multiline plaintext, kept compact so the dial screen stays
+  // scannable. We also ship the structured custom_fields below (in
+  // case PB's account has them pre-configured), but notes is the
+  // belt-and-suspenders source of truth.
+  const noteLines: string[] = [];
+  if (lead.company_name) noteLines.push(`Account: ${lead.company_name}`);
+  if (website) noteLines.push(`Website: ${website}`);
+  if (lead.industry) noteLines.push(`Industry: ${lead.industry}`);
+  if (lead.icp_tier) {
+    noteLines.push(
+      `ICP: ${lead.icp_tier}${lead.icp_score != null ? ` (${lead.icp_score})` : ""}`,
+    );
+  }
+  const yearly = fmtMoneyFromCents(lead.estimated_yearly_sales_cents);
+  if (yearly) noteLines.push(`Est. yearly: ${yearly}`);
+  if (lead.ecom_platform) noteLines.push(`Platform: ${lead.ecom_platform}`);
+  if (lead.source_type) noteLines.push(`Lead source: ${lead.source_type}`);
+  const socials: string[] = [];
+  if (lead.instagram_url) socials.push(`IG: ${lead.instagram_url}`);
+  if (lead.facebook_url) socials.push(`FB: ${lead.facebook_url}`);
+  if (lead.tiktok_url) socials.push(`TT: ${lead.tiktok_url}`);
+  if (lead.twitter_url) socials.push(`X: ${lead.twitter_url}`);
+  if (lead.linkedin_url) socials.push(`LI: ${lead.linkedin_url}`);
+  if (lead.youtube_url) socials.push(`YT: ${lead.youtube_url}`);
+  if (lead.yelp_url) socials.push(`Yelp: ${lead.yelp_url}`);
+  if (socials.length) noteLines.push(`Socials: ${socials.join(" | ")}`);
+  if (lead.description) {
+    noteLines.push(`---\n${(lead.description ?? "").slice(0, 500)}`);
+  }
+  const notes = noteLines.join("\n") || undefined;
+
+  // Custom fields ship the same firmographics as structured key/value
+  // pairs for any PB consumer that wants them. PB silently drops
+  // unknown custom-field names so this is non-fatal if the workspace
+  // doesn't have them pre-created.
   const custom_fields = [
     { name: "company_name", value: lead.company_name ?? "" },
-    { name: "website", value: lead.website ?? "" },
+    { name: "website", value: website },
     { name: "domain", value: lead.domain ?? "" },
     { name: "lead_source", value: lead.source_type ?? "" },
-    {
-      name: "description",
-      value: (lead.description ?? "").slice(0, 500),
-    },
+    { name: "description", value: (lead.description ?? "").slice(0, 500) },
     { name: "industry", value: lead.industry ?? "" },
     { name: "icp_tier", value: lead.icp_tier ?? "" },
     { name: "icp_score", value: lead.icp_score ?? "" },
@@ -220,6 +278,13 @@ function buildContactPayload(opts: {
       value: fmtMoneyFromCents(lead.estimated_yearly_sales_cents) ?? "",
     },
     { name: "ecom_platform", value: lead.ecom_platform ?? "" },
+    { name: "instagram_url", value: lead.instagram_url ?? "" },
+    { name: "facebook_url", value: lead.facebook_url ?? "" },
+    { name: "tiktok_url", value: lead.tiktok_url ?? "" },
+    { name: "twitter_url", value: lead.twitter_url ?? "" },
+    { name: "linkedin_url", value: lead.linkedin_url ?? "" },
+    { name: "youtube_url", value: lead.youtube_url ?? "" },
+    { name: "yelp_url", value: lead.yelp_url ?? "" },
   ].filter((f) => f.value !== "" && f.value !== null && f.value !== undefined);
 
   return {
@@ -235,7 +300,7 @@ function buildContactPayload(opts: {
     zip: lead.zip ?? undefined,
     country: "US",
     category_id: folderId,
-    notes: lead.company_name ? `Account: ${lead.company_name}` : undefined,
+    notes,
     user_id: lead.lead_id,
     custom_fields,
     on_duplicate: "update",
@@ -314,6 +379,7 @@ export async function pushCampaignToPhoneBurner(
     folder_id: folderId,
     pushed: 0,
     skipped_no_phone: 0,
+    skipped_no_website: 0,
     skipped_already_pushed: 0,
     errors: [],
   };
@@ -327,16 +393,17 @@ export async function pushCampaignToPhoneBurner(
       summary.skipped_already_pushed++;
       continue;
     }
-    const payload = buildContactPayload({
+    const result = buildContactPayload({
       lead,
       folderId: typeof folderId === "string" ? folderId : "",
       ownerId,
     });
-    if (!payload) {
-      summary.skipped_no_phone++;
+    if ("skip" in result) {
+      if (result.skip === "no_phone") summary.skipped_no_phone++;
+      else if (result.skip === "no_website") summary.skipped_no_website++;
       continue;
     }
-    toPush.push({ lead, payload });
+    toPush.push({ lead, payload: result });
   }
 
   if (opts?.dryRun) {
