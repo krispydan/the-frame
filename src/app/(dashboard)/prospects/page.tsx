@@ -258,6 +258,11 @@ function ProspectsPage() {
   // `segment` was brought back for JAX-355 after Segments became first-class.
   // The API still honors `category` if a bookmarked URL has it.
   const legacyCategoryFilter = searchParams.getAll("category");
+  // Tag-based filters driven by smart lists (Brand Carriers, Eyewear
+  // cohorts, etc.). Read from the URL into local state so buildUrl
+  // can carry them across pagination + sort changes.
+  const tagAndFilter = searchParams.getAll("tag_and");
+  const tagNotFilter = searchParams.getAll("tag_not");
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
@@ -340,6 +345,7 @@ function ProspectsPage() {
       page: String(page), search, sort, order,
       state: stateFilter, industry: industryFilter, source: sourceFilter, status: statusFilter,
       source_type: sourceTypeFilter, category: legacyCategoryFilter, segment: legacySegmentFilter,
+      tag_and: tagAndFilter, tag_not: tagNotFilter,
       has_email: hasEmail, has_phone: hasPhone, icp_min: icpMin, icp_max: icpMax,
       ...overrides,
     };
@@ -349,7 +355,7 @@ function ProspectsPage() {
       else p.set(k, v);
     }
     return `/prospects?${p.toString()}`;
-  }, [page, search, sort, order, stateFilter, industryFilter, sourceFilter, statusFilter, sourceTypeFilter, legacyCategoryFilter, legacySegmentFilter, hasEmail, hasPhone, icpMin, icpMax]);
+  }, [page, search, sort, order, stateFilter, industryFilter, sourceFilter, statusFilter, sourceTypeFilter, legacyCategoryFilter, legacySegmentFilter, tagAndFilter, tagNotFilter, hasEmail, hasPhone, icpMin, icpMax]);
 
   const currentFilters = useCallback(() => {
     const f: Record<string, unknown> = {};
@@ -360,12 +366,14 @@ function ProspectsPage() {
     if (sourceTypeFilter.length) f.source_type = sourceTypeFilter;
     if (legacyCategoryFilter.length) f.category = legacyCategoryFilter;
     if (legacySegmentFilter.length) f.segment = legacySegmentFilter;
+    if (tagAndFilter.length) f.tag_and = tagAndFilter;
+    if (tagNotFilter.length) f.tag_not = tagNotFilter;
     if (hasEmail) f.has_email = hasEmail;
     if (hasPhone) f.has_phone = hasPhone;
     if (icpMin) f.icp_min = icpMin;
     if (icpMax) f.icp_max = icpMax;
     return f;
-  }, [stateFilter, industryFilter, sourceFilter, statusFilter, sourceTypeFilter, legacyCategoryFilter, legacySegmentFilter, hasEmail, hasPhone, icpMin, icpMax]);
+  }, [stateFilter, industryFilter, sourceFilter, statusFilter, sourceTypeFilter, legacyCategoryFilter, legacySegmentFilter, tagAndFilter, tagNotFilter, hasEmail, hasPhone, icpMin, icpMax]);
 
   // Fetch data
   useEffect(() => {
@@ -561,7 +569,7 @@ function ProspectsPage() {
     setActiveSmartList(null);
   };
   const clearAllFilters = () => {
-    router.push(buildUrl({ state: null, category: null, source: null, status: null, segment: null, source_type: null, source_id: null, has_email: null, has_phone: null, icp_min: null, icp_max: null, page: "1" }));
+    router.push(buildUrl({ state: null, category: null, source: null, status: null, segment: null, source_type: null, source_id: null, has_email: null, has_phone: null, icp_min: null, icp_max: null, tag_and: null, tag_not: null, page: "1" }));
     setActiveSmartList(null);
   };
 
@@ -571,6 +579,13 @@ function ProspectsPage() {
       state: (f.state as string[]) || null, category: (f.category as string[]) || null,
       source: (f.source as string[]) || null, status: (f.status as string[]) || null,
       segment: (f.segment as string[]) || null,
+      // Tag filters (tag_and / tag_not) drive cohorts like Brand Carriers
+      // and Eyewear — without these the prospects API ignores the smart
+      // list's actual scoping and returns every active prospect, which
+      // is what caused Select-All to sweep up 144k leads instead of the
+      // tagged ~1k cohort.
+      tag_and: (f.tag_and as string[]) || null,
+      tag_not: (f.tag_not as string[]) || null,
       has_email: (f.has_email as string) || null, has_phone: (f.has_phone as string) || null,
       icp_min: (f.icp_min as string) || null, icp_max: (f.icp_max as string) || null,
       page: "1",
