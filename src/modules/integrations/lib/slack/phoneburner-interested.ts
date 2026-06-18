@@ -94,22 +94,12 @@ export async function notifyPhoneBurnerInterested(
     ? `${opts.connected ? "✓ Connected" : "✗ Not connected"} · ${fmtDuration(opts.durationSeconds)}`
     : opts.connected ? "✓ Connected" : "";
 
-  const icpBits: string[] = [];
-  if (opts.icpTier) icpBits.push(`ICP ${opts.icpTier}`);
-  if (opts.icpScore != null && opts.icpScore !== "") icpBits.push(`(${opts.icpScore})`);
-  const icpLine = icpBits.join(" ");
-
+  // Per Daniel 2026-06-18: skip Agent + Industry/ICP rows in the
+  // Slack ping — already visible inside The Frame when the rep clicks
+  // through. Keep the message tight: phone, call outcome, website,
+  // source.
   const fields: { type: "mrkdwn"; text: string }[] = [];
   if (opts.phone) fields.push({ type: "mrkdwn", text: `*Phone*\n${phoneDisplay}` });
-  if (opts.industry || icpLine) {
-    fields.push({
-      type: "mrkdwn",
-      text: `*Industry / ICP*\n${[opts.industry, icpLine].filter(Boolean).join(" — ")}`,
-    });
-  }
-  if (opts.agentEmail) {
-    fields.push({ type: "mrkdwn", text: `*Agent*\n${opts.agentEmail}` });
-  }
   if (durationLine) {
     fields.push({ type: "mrkdwn", text: `*Call*\n${durationLine}` });
   }
