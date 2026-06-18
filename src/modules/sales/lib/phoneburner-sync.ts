@@ -260,15 +260,42 @@ function buildContactPayload(opts: {
   }
   const notes = noteLines.join("\n") || undefined;
 
-  // We don't ship custom_fields[] here. PB's auto-create for new
-  // custom field names requires `type` to be set on each entry (text,
-  // number, url, etc.) — first push without it returned 409 "Type not
-  // provided for new field company_name" on every lead. The notes
-  // block above carries the same firmographic data and is renders
-  // inline on the agent's dial screen, so the loss is purely a
-  // structured-field one. If we ever want PB-side structured fields
-  // for reporting, Daniel pre-creates them in PB's admin UI and we
-  // re-add custom_fields[] WITH type on each entry.
+  // PB's custom_fields[] need `type` set on each entry so the
+  // workspace can auto-create them on first push. Verified probe
+  // values: "text" / "url" / "number" all accepted by PB.
+  //
+  // The firmographic data is ALSO mirrored into the notes block above
+  // so agents see it inline on the dial screen, but these structured
+  // fields are what PB uses for filtering, reporting, and the
+  // contact card UI.
+  const custom_fields = [
+    { name: "company_name", type: "text", value: lead.company_name ?? "" },
+    { name: "website", type: "url", value: website },
+    { name: "domain", type: "text", value: lead.domain ?? "" },
+    { name: "lead_source", type: "text", value: lead.source_type ?? "" },
+    { name: "description", type: "text", value: (lead.description ?? "").slice(0, 500) },
+    { name: "industry", type: "text", value: lead.industry ?? "" },
+    { name: "icp_tier", type: "text", value: lead.icp_tier ?? "" },
+    {
+      name: "icp_score",
+      type: "number",
+      value: lead.icp_score != null ? Number(lead.icp_score) : "",
+    },
+    {
+      name: "estimated_yearly_sales",
+      type: "text",
+      value: fmtMoneyFromCents(lead.estimated_yearly_sales_cents) ?? "",
+    },
+    { name: "ecom_platform", type: "text", value: lead.ecom_platform ?? "" },
+    { name: "instagram_url", type: "url", value: lead.instagram_url ?? "" },
+    { name: "facebook_url", type: "url", value: lead.facebook_url ?? "" },
+    { name: "tiktok_url", type: "url", value: lead.tiktok_url ?? "" },
+    { name: "twitter_url", type: "url", value: lead.twitter_url ?? "" },
+    { name: "linkedin_url", type: "url", value: lead.linkedin_url ?? "" },
+    { name: "youtube_url", type: "url", value: lead.youtube_url ?? "" },
+    { name: "yelp_url", type: "url", value: lead.yelp_url ?? "" },
+    { name: "frame_lead_id", type: "text", value: lead.lead_id }, // our internal id for cross-system tracking
+  ].filter((f) => f.value !== "" && f.value !== null && f.value !== undefined);
 
   return {
     owner_id: ownerId,
@@ -285,6 +312,7 @@ function buildContactPayload(opts: {
     category_id: folderId,
     notes,
     user_id: lead.lead_id,
+    custom_fields,
     on_duplicate: "update",
   };
 }

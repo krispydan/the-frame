@@ -286,21 +286,45 @@ class PhoneBurnerClient {
   }
 
   // ── Contacts ──
+  /**
+   * PB's create response uses this shape:
+   *   { http_status: 201, status: "success",
+   *     contacts: { contacts: { user_id: "...", first_name, ... } } }
+   *
+   * The contact's identifier on PB is the `user_id` field (their data
+   * model treats every contact as a user record under the parent
+   * account). We map that to `.id` in the return value so callers
+   * stamp campaign_leads.phoneburner_contact_id consistently.
+   */
   async createContact(payload: PbContactPayload): Promise<PbContactResponse> {
-    const raw = await this.request<PbContactResponse | { contact?: PbContactResponse; data?: PbContactResponse }>(
+    const raw = await this.request<Record<string, unknown>>(
       "POST",
       "/contacts",
       payload,
     );
-    if ("id" in raw && raw.id) return raw as PbContactResponse;
-    const wrapped = raw as { contact?: PbContactResponse; data?: PbContactResponse };
-    const inner = wrapped.contact ?? wrapped.data;
-    if (!inner?.id) {
+    // Walk the response for the first user_id we find (handles either
+    // the documented `contacts.contacts.user_id` path or any other
+    // future shape change without breaking).
+    function findUserId(obj: unknown, depth = 0): string | null {
+      if (depth > 8 || !obj || typeof obj !== "object") return null;
+      const o = obj as Record<string, unknown>;
+      if (typeof o.user_id === "string" && o.user_id) return o.user_id;
+      if (typeof o.user_id === "number") return String(o.user_id);
+      for (const v of Object.values(o)) {
+        const found = findUserId(v, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    }
+    const id =
+      (typeof raw.id === "string" && raw.id) ||
+      findUserId(raw);
+    if (!id) {
       throw new Error(
-        `PhoneBurner createContact returned no id: ${JSON.stringify(raw).slice(0, 300)}`,
+        `PhoneBurner createContact returned no id/user_id: ${JSON.stringify(raw).slice(0, 300)}`,
       );
     }
-    return inner;
+    return { id, ...raw } as PbContactResponse;
   }
 
   async updateContact(id: string, patch: Partial<PbContactPayload>): Promise<PbContactResponse> {
