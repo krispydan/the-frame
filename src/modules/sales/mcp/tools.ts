@@ -334,7 +334,7 @@ mcpRegistry.register(
   "sales.list_deals",
   "List deals filtered by stage, owner, company",
   z.object({
-    stage: z.string().optional().describe("Filter by stage: outreach, contact_made, interested, order_placed, interested_later, not_interested"),
+    stage: z.string().optional().describe("Filter by stage: interested, catalog_sent, order_placed, interested_later, not_interested, ghosted"),
     owner_id: z.string().optional().describe("Filter by owner UUID"),
     company_id: z.string().optional().describe("Filter by company UUID"),
     tab: z.string().optional().describe("Tab: active, snoozed, reorder (default: active)"),
@@ -370,7 +370,7 @@ mcpRegistry.register(
   z.object({
     company_id: z.string().describe("Company UUID"),
     title: z.string().optional().describe("Deal title (defaults to company name)"),
-    stage: z.string().optional().describe("Initial stage (default: outreach)"),
+    stage: z.string().optional().describe("Initial stage (default: interested)"),
     channel: z.string().optional().describe("Channel: shopify, faire, phone, direct, other"),
     value: z.number().optional().describe("Deal value in USD"),
     notes: z.string().optional().describe("Initial notes"),
@@ -384,7 +384,7 @@ mcpRegistry.register(
     sqlite.prepare(`
       INSERT INTO deals (id, company_id, title, value, stage, channel, last_activity_at, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, args.company_id, title, args.value || null, args.stage || "outreach", args.channel || null, now, now, now);
+    `).run(id, args.company_id, title, args.value || null, args.stage || "interested", args.channel || null, now, now, now);
 
     if (args.notes) {
       sqlite.prepare(`INSERT INTO deal_activities (id, deal_id, company_id, type, description, created_at) VALUES (?, ?, ?, 'note', ?, ?)`).run(crypto.randomUUID(), id, args.company_id, args.notes, now);

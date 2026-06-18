@@ -216,7 +216,7 @@ function NewDealDialog({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedCompany, setSelectedCompany] = useState<string>("");
-  const [stage, setStage] = useState<DealStage>("outreach");
+  const [stage, setStage] = useState<DealStage>("interested");
   const [channel, setChannel] = useState<string>("");
   const [value, setValue] = useState("");
   const [notes, setNotes] = useState("");

@@ -199,7 +199,7 @@ export default function CompanyDetailPage() {
   };
   const [statusDropdown, setStatusDropdown] = useState(false);
   const [createDealOpen, setCreateDealOpen] = useState(false);
-  const [dealStage, setDealStage] = useState<DealStage>("outreach");
+  const [dealStage, setDealStage] = useState<DealStage>("interested");
   const [dealChannel, setDealChannel] = useState("");
   const [dealValue, setDealValue] = useState("");
   const [dealNotes, setDealNotes] = useState("");
@@ -298,7 +298,7 @@ export default function CompanyDetailPage() {
       const { id: dealId } = await res.json();
       setDealSaving(false);
       setCreateDealOpen(false);
-      setDealStage("outreach");
+      setDealStage("interested");
       setDealChannel("");
       setDealValue("");
       setDealNotes("");

@@ -73,6 +73,12 @@ function shouldProgress(from: string | null, to: CompanyStatus): boolean {
  * Progress a company's status if the proposed value is further along the
  * pipeline. No-op if the company is already at or past `to`. Returns
  * whether an UPDATE actually happened.
+ *
+ * Side-effect: when the new status corresponds to a kanban-visible stage
+ * (interested onwards), the matching `deals` row is upserted so the
+ * pipeline board reflects the new state. Per Daniel 2026-06-19 the
+ * kanban only shows leads from `interested` onwards — earlier states
+ * don't create a deal.
  */
 export function progressCompanyStatus(
   companyId: string,
@@ -88,5 +94,72 @@ export function progressCompanyStatus(
   sqlite
     .prepare("UPDATE companies SET status = ?, updated_at = datetime('now') WHERE id = ?")
     .run(to, companyId);
+  syncDealStage(companyId, to);
   return { updated: true, from, to };
+}
+
+/**
+ * Map a companies.status value to the matching deals.stage. Returns null
+ * for pre-interested states — those don't surface on the kanban.
+ */
+function dealStageFor(status: CompanyStatus): string | null {
+  switch (status) {
+    case "interested":     return "interested";
+    case "catalog_sent":   return "catalog_sent";
+    case "revisit_later":  return "interested_later";
+    case "not_interested": return "not_interested";
+    case "ghosted":        return "ghosted";
+    case "customer":       return "order_placed";
+    // prospect / not_qualified / qualified_lead → not on the board
+    default: return null;
+  }
+}
+
+/**
+ * Upsert a deal row whose stage mirrors the company's status. Creates
+ * a new deal if none exists for this company, otherwise updates the
+ * existing row's stage in place.
+ *
+ * Best-effort — a failure here doesn't roll back the companies.status
+ * update (that's the source of truth). Logged for visibility.
+ */
+function syncDealStage(companyId: string, status: CompanyStatus): void {
+  const stage = dealStageFor(status);
+  if (!stage) return;
+
+  try {
+    const existing = sqlite
+      .prepare("SELECT id FROM deals WHERE company_id = ? ORDER BY created_at ASC LIMIT 1")
+      .get(companyId) as { id: string } | undefined;
+
+    if (existing) {
+      sqlite
+        .prepare("UPDATE deals SET stage = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(stage, existing.id);
+      return;
+    }
+
+    // No deal yet — auto-create one. Pull a sensible default title +
+    // value/owner from the company so the kanban card has context.
+    const company = sqlite
+      .prepare("SELECT name, owner_id FROM companies WHERE id = ?")
+      .get(companyId) as { name: string | null; owner_id: string | null } | undefined;
+    const title = company?.name ? `${company.name} — wholesale` : "Wholesale opportunity";
+    sqlite
+      .prepare(
+        `INSERT INTO deals
+           (id, company_id, title, stage, channel, owner_id, value,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'other', ?, 0, datetime('now'), datetime('now'))`,
+      )
+      .run(
+        crypto.randomUUID(),
+        companyId,
+        title,
+        stage,
+        company?.owner_id ?? null,
+      );
+  } catch (e) {
+    console.error("[status-progression] syncDealStage failed:", e);
+  }
 }

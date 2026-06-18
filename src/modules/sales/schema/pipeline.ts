@@ -7,32 +7,46 @@ const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
 const timestamp = (name: string) => text(name).default(sql`(datetime('now'))`);
 
 // ── Pipeline Stage Enum ──
+// Kanban only shows leads from "interested" onwards (per Daniel 2026-06-19)
+// — prospects and qualified_leads that haven't responded yet don't belong
+// on the board. Mirrors the post-interested portion of companies.status:
+//
+//   companies.status   →   deals.stage
+//   interested             interested
+//   catalog_sent           catalog_sent
+//   revisit_later          interested_later
+//   not_interested         not_interested
+//   ghosted                ghosted
+//   customer               order_placed
+//
+// Auto-syncing is in src/modules/sales/lib/status-progression.ts —
+// when a company progresses, the matching deal row's stage updates.
 export const DEAL_STAGES = [
-  "outreach",
-  "contact_made",
   "interested",
+  "catalog_sent",
   "order_placed",
   "interested_later",
   "not_interested",
+  "ghosted",
 ] as const;
 export type DealStage = (typeof DEAL_STAGES)[number];
 
 export const DEAL_STAGE_LABELS: Record<DealStage, string> = {
-  outreach: "Outreach",
-  contact_made: "Contact Made",
   interested: "Interested",
+  catalog_sent: "Catalog Sent",
   order_placed: "Order Placed",
-  interested_later: "Interested Later",
+  interested_later: "Revisit Later",
   not_interested: "Not Interested",
+  ghosted: "Ghosted",
 };
 
 export const DEAL_STAGE_COLORS: Record<DealStage, string> = {
-  outreach: "bg-blue-100 text-blue-800",
-  contact_made: "bg-yellow-100 text-yellow-800",
   interested: "bg-green-100 text-green-800",
+  catalog_sent: "bg-blue-100 text-blue-800",
   order_placed: "bg-emerald-100 text-emerald-800",
   interested_later: "bg-orange-100 text-orange-800",
   not_interested: "bg-red-100 text-red-800",
+  ghosted: "bg-gray-100 text-gray-600",
 };
 
 export const DEAL_CHANNELS = ["shopify", "faire", "phone", "direct", "other"] as const;
@@ -59,7 +73,10 @@ export const deals = sqliteTable("deals", {
   contactId: text("contact_id").references(() => contacts.id),
   title: text("title").notNull(),
   value: real("value"),
-  stage: text("stage", { enum: DEAL_STAGES }).notNull().default("outreach"),
+  // Default is `interested` — the kanban's leftmost column. Deals are
+  // only created when a company progresses to `interested` or later
+  // (via syncDealStage in status-progression.ts).
+  stage: text("stage", { enum: DEAL_STAGES }).notNull().default("interested"),
   previousStage: text("previous_stage", { enum: DEAL_STAGES }),
   channel: text("channel", { enum: DEAL_CHANNELS }),
   ownerId: text("owner_id").references(() => users.id),

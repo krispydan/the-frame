@@ -196,6 +196,41 @@ export async function POST(req: NextRequest) {
 
     // Phase E intentionally not applied here — order-driven customer
     // marking lands when the order-ingestion hooks are wired (separate task).
+
+    // Phase F: backfill the deals/kanban from the new status values.
+    // For every company at interested-or-beyond, ensure exactly one deal
+    // exists with stage mirroring companies.status (per Daniel
+    // 2026-06-19 the kanban only shows interested onwards).
+    sqlite
+      .prepare(
+        `INSERT INTO deals
+           (id, company_id, title, stage, channel, owner_id, value,
+            created_at, updated_at)
+         SELECT lower(hex(randomblob(16))),
+                c.id,
+                COALESCE(c.name, 'Wholesale opportunity') || ' — wholesale',
+                CASE c.status
+                  WHEN 'interested'     THEN 'interested'
+                  WHEN 'catalog_sent'   THEN 'catalog_sent'
+                  WHEN 'revisit_later'  THEN 'interested_later'
+                  WHEN 'not_interested' THEN 'not_interested'
+                  WHEN 'ghosted'        THEN 'ghosted'
+                  WHEN 'customer'       THEN 'order_placed'
+                END,
+                'other',
+                c.owner_id,
+                0,
+                datetime('now'),
+                datetime('now')
+           FROM companies c
+          WHERE c.status IN
+              ('interested', 'catalog_sent', 'revisit_later',
+               'not_interested', 'ghosted', 'customer')
+            AND NOT EXISTS (
+              SELECT 1 FROM deals d WHERE d.company_id = c.id
+            )`,
+      )
+      .run();
   });
   txn();
 
