@@ -260,32 +260,15 @@ function buildContactPayload(opts: {
   }
   const notes = noteLines.join("\n") || undefined;
 
-  // Custom fields ship the same firmographics as structured key/value
-  // pairs for any PB consumer that wants them. PB silently drops
-  // unknown custom-field names so this is non-fatal if the workspace
-  // doesn't have them pre-created.
-  const custom_fields = [
-    { name: "company_name", value: lead.company_name ?? "" },
-    { name: "website", value: website },
-    { name: "domain", value: lead.domain ?? "" },
-    { name: "lead_source", value: lead.source_type ?? "" },
-    { name: "description", value: (lead.description ?? "").slice(0, 500) },
-    { name: "industry", value: lead.industry ?? "" },
-    { name: "icp_tier", value: lead.icp_tier ?? "" },
-    { name: "icp_score", value: lead.icp_score ?? "" },
-    {
-      name: "estimated_yearly_sales",
-      value: fmtMoneyFromCents(lead.estimated_yearly_sales_cents) ?? "",
-    },
-    { name: "ecom_platform", value: lead.ecom_platform ?? "" },
-    { name: "instagram_url", value: lead.instagram_url ?? "" },
-    { name: "facebook_url", value: lead.facebook_url ?? "" },
-    { name: "tiktok_url", value: lead.tiktok_url ?? "" },
-    { name: "twitter_url", value: lead.twitter_url ?? "" },
-    { name: "linkedin_url", value: lead.linkedin_url ?? "" },
-    { name: "youtube_url", value: lead.youtube_url ?? "" },
-    { name: "yelp_url", value: lead.yelp_url ?? "" },
-  ].filter((f) => f.value !== "" && f.value !== null && f.value !== undefined);
+  // We don't ship custom_fields[] here. PB's auto-create for new
+  // custom field names requires `type` to be set on each entry (text,
+  // number, url, etc.) — first push without it returned 409 "Type not
+  // provided for new field company_name" on every lead. The notes
+  // block above carries the same firmographic data and is renders
+  // inline on the agent's dial screen, so the loss is purely a
+  // structured-field one. If we ever want PB-side structured fields
+  // for reporting, Daniel pre-creates them in PB's admin UI and we
+  // re-add custom_fields[] WITH type on each entry.
 
   return {
     owner_id: ownerId,
@@ -302,7 +285,6 @@ function buildContactPayload(opts: {
     category_id: folderId,
     notes,
     user_id: lead.lead_id,
-    custom_fields,
     on_duplicate: "update",
   };
 }
