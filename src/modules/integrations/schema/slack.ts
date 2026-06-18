@@ -57,6 +57,8 @@ export type SlackTopic =
   | "ops.connected_store"
   | "ops.webhook_flood"
   | "orders.stuck"
+  // Sales
+  | "sales.phoneburner_interested"
   // Digests
   | "digest.daily"
   | "digest.weekly"
@@ -88,6 +90,9 @@ export const SLACK_TOPICS: { topic: SlackTopic; label: string; defaultChannel: s
   { topic: "finance.payout_received", label: "Shopify payout synced",         defaultChannel: "jaxy-finance-bot",   group: "Finance",      description: "A new payout was synced to Xero as a manual journal." },
   { topic: "finance.cogs_posted",     label: "COGS journal posted",           defaultChannel: "jaxy-finance-bot",   group: "Finance",      description: "Companion COGS journal posted with per-SKU breakdown." },
   { topic: "finance.xero_sync_failed",label: "Xero sync failed",              defaultChannel: "jaxy-finance-bot",   group: "Finance",      description: "A Xero sync errored — token issue, mapping missing, etc." },
+
+  // Sales
+  { topic: "sales.phoneburner_interested", label: "PhoneBurner interested lead", defaultChannel: "sales-leads", group: "Sales", description: "Fires the moment an agent sets a 'Set Appointment' disposition in PhoneBurner. Includes company, phone, ICP, agent, recording link, and a one-click jump into The Frame." },
 
   // Digests
   { topic: "digest.daily",            label: "Daily morning digest",          defaultChannel: "jaxy-daily-digest",  group: "Digests",      description: "Yesterday's orders, fulfillment, inventory at 7am PT." },
