@@ -401,7 +401,7 @@ async function handlePhoneBurnerWebhook(
       const targetStatus = dispositionToStatus(disposition);
       if (targetStatus && match?.companyId) {
         try {
-          const r = progressCompanyStatus(match.companyId, targetStatus);
+          const r = progressCompanyStatus(match.companyId, targetStatus, { source: "phoneburner" });
           if (r.updated) {
             message += ` status=${r.from ?? "?"}→${r.to}`;
           } else {

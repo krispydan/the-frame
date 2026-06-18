@@ -245,7 +245,7 @@ async function pushCampaigns(): Promise<{ campaigns: number; leads: number; erro
           const companyId = (lead.company_id || lead.companyId) as string | undefined;
           if (companyId) {
             try {
-              progressCompanyStatus(companyId, "qualified_lead");
+              progressCompanyStatus(companyId, "qualified_lead", { source: "system" });
             } catch (e) {
               console.error("[instantly-sync] status progression failed:", e);
             }

@@ -335,6 +335,62 @@ class InstantlyClient {
   }
 
   /**
+   * Update a lead's interest status (Interested / Not Interested /
+   * OOO / etc.). Used by the bidirectional status-sync flow — when
+   * The Frame's companies.status changes, we propagate the matching
+   * Instantly interest value here.
+   *
+   * Allowed values (per developer.instantly.ai):
+   *    1 = Interested
+   *    2 = Meeting Booked
+   *    3 = Meeting Completed
+   *    4 = Won
+   *    0 = Out of Office
+   *   -1 = Not Interested
+   *   -2 = Wrong Person
+   *   -3 = Lost
+   *   -4 = No Show
+   *  null = reset to base "Lead" status
+   *
+   * Idempotent — setting to the same value is a no-op on Instantly's
+   * side. Safe to retry from the job worker on transient failures.
+   */
+  async updateLeadInterestStatus(
+    leadEmail: string,
+    interestValue: number | null,
+    opts?: { campaignId?: string; aiInterestValue?: number; disableAutoInterest?: boolean },
+  ): Promise<{ message: string }> {
+    const body: Record<string, unknown> = {
+      lead_email: leadEmail,
+      interest_value: interestValue,
+    };
+    if (opts?.campaignId) body.campaign_id = opts.campaignId;
+    if (opts?.aiInterestValue !== undefined) body.ai_interest_value = opts.aiInterestValue;
+    if (opts?.disableAutoInterest !== undefined) body.disable_auto_interest = opts.disableAutoInterest;
+    return await this.request<{ message: string }>("POST", "/leads/update-interest-status", body);
+  }
+
+  /**
+   * Add an email or domain to the workspace's block list so the lead
+   * stops receiving emails from any current or future campaign.
+   *
+   * Used for terminal "no" states (not_interested, unsubscribed) where
+   * we want to ensure no further outreach happens — Instantly's
+   * own per-campaign pause isn't enough since the lead could be added
+   * to a different campaign later.
+   *
+   * Idempotent: Instantly won't create a duplicate entry for the same
+   * `bl_value`. Safe to retry.
+   */
+  async addToBlocklist(emailOrDomain: string): Promise<{ id: string; bl_value: string }> {
+    return await this.request<{ id: string; bl_value: string }>(
+      "POST",
+      "/block-lists-entries",
+      { bl_value: emailOrDomain },
+    );
+  }
+
+  /**
    * Fetch the analytics overview for a single campaign. The v2 path is
    * /campaigns/analytics/overview?id=X (NOT /campaigns/{id}/analytics —
    * verified 404 against the real API). Field names in the response are

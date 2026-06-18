@@ -74,15 +74,28 @@ function shouldProgress(from: string | null, to: CompanyStatus): boolean {
  * pipeline. No-op if the company is already at or past `to`. Returns
  * whether an UPDATE actually happened.
  *
- * Side-effect: when the new status corresponds to a kanban-visible stage
- * (interested onwards), the matching `deals` row is upserted so the
- * pipeline board reflects the new state. Per Daniel 2026-06-19 the
- * kanban only shows leads from `interested` onwards — earlier states
- * don't create a deal.
+ * Side-effects (only when `updated === true`):
+ *
+ *   1. The matching `deals` row's stage is upserted to mirror the new
+ *      status, so the kanban board stays in sync. Pre-interested
+ *      states don't create a deal.
+ *
+ *   2. The change fans out to the OTHER external platforms (Instantly
+ *      + PhoneBurner) where this lead lives, so a status change in
+ *      one place propagates everywhere. The `opts.source` parameter
+ *      identifies the origin of the change so we skip syncing back to
+ *      it (loop prevention). See ./status-sync.ts.
+ *
+ * Idempotent re-progressions (status unchanged) skip BOTH side-effects.
+ * That's how we kill echo loops: when Instantly fires lead_interested,
+ * we update locally → fan out to PB only (not Instantly). When PB then
+ * fires its own update echoing the Instantly value, our progression is
+ * a no-op → no fan-out at all.
  */
 export function progressCompanyStatus(
   companyId: string,
   to: CompanyStatus,
+  opts?: { source?: "instantly" | "phoneburner" | "ui" | "system" },
 ): { updated: boolean; from: string | null; to: CompanyStatus } {
   const row = sqlite
     .prepare("SELECT status FROM companies WHERE id = ?")
@@ -95,6 +108,27 @@ export function progressCompanyStatus(
     .prepare("UPDATE companies SET status = ?, updated_at = datetime('now') WHERE id = ?")
     .run(to, companyId);
   syncDealStage(companyId, to);
+
+  // Fan out to external platforms. Default source "system" — anything
+  // that doesn't specify is treated as Frame-initiated (not from a
+  // specific external webhook), so both platforms get notified.
+  //
+  // Lazy import to avoid a circular-dependency loop: status-sync.ts
+  // registers job handlers at module load, and the handlers themselves
+  // import the Instantly/PB clients. Importing it at the top would
+  // mean status-progression → status-sync → instantly-client → ...
+  // get loaded synchronously together at every entry point.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { fanOutStatusChange } = require("./status-sync") as typeof import("./status-sync");
+    fanOutStatusChange(companyId, to, opts?.source ?? "system");
+  } catch (e) {
+    // Fan-out failure must NOT prevent the local state change. Log
+    // and move on — the job worker will retry the syncs if any
+    // enqueued.
+    console.error("[status-progression] fan-out failed:", e);
+  }
+
   return { updated: true, from, to };
 }
 

@@ -77,14 +77,46 @@ export async function PATCH(
   const allowedFields: Record<string, string> = {
     name: "name", email: "email", phone: "phone", website: "website",
     address: "address", city: "city", state: "state", zip: "zip",
-    status: "status", owner_id: "owner_id", notes: "notes",
+    owner_id: "owner_id", notes: "notes",
     icp_score: "icp_score", icp_tier: "icp_tier", icp_reasoning: "icp_reasoning",
     tags: "tags",
     disqualify_reason: "disqualify_reason",
     segment: "segment",
     category: "category",
     lead_source_detail: "lead_source_detail",
+    // NOTE: `status` is intentionally NOT in allowedFields here. Status
+    // changes route through progressCompanyStatus (see below) so they
+    // get forward-progression enforcement AND fan-out to Instantly +
+    // PhoneBurner.
   };
+
+  // ── status: special path through progressCompanyStatus ──
+  let statusProgressionResult:
+    | { updated: boolean; from: string | null; to: string }
+    | null = null;
+  if (typeof body.status === "string" && body.status.trim()) {
+    const target = body.status.trim();
+    // Log to change_logs the same way other fields do — preserves the
+    // existing audit pattern.
+    const oldStatus = (sqlite
+      .prepare("SELECT status FROM companies WHERE id = ?")
+      .get(id) as { status: string | null } | undefined)?.status ?? "";
+    sqlite
+      .prepare(
+        `INSERT INTO change_logs (id, entity_type, entity_id, field, old_value, new_value, source)
+         VALUES (?, 'company', ?, 'status', ?, ?, 'ui')`,
+      )
+      .run(crypto.randomUUID(), id, oldStatus, target);
+
+    const { progressCompanyStatus } = await import(
+      "@/modules/sales/lib/status-progression"
+    );
+    statusProgressionResult = progressCompanyStatus(
+      id,
+      target as Parameters<typeof progressCompanyStatus>[1],
+      { source: "ui" },
+    );
+  }
 
   const sets: string[] = [];
   const values: unknown[] = [];
@@ -111,8 +143,25 @@ export async function PATCH(
     }
   }
 
-  if (sets.length === 0) {
+  // A status-only PATCH is valid — it goes through the special
+  // progressCompanyStatus path above. Only return 400 when neither
+  // status nor any other field was supplied.
+  if (sets.length === 0 && !statusProgressionResult) {
     return NextResponse.json({ error: "No valid fields" }, { status: 400 });
+  }
+  // Status-only patch — short-circuit before the UPDATE/segment block.
+  if (sets.length === 0) {
+    sqlite
+      .prepare(
+        `INSERT INTO activity_feed (id, event_type, module, entity_type, entity_id, data)
+         VALUES (?, 'company_updated', 'sales', 'company', ?, ?)`,
+      )
+      .run(
+        crypto.randomUUID(),
+        id,
+        JSON.stringify({ fields: ["status"], status: statusProgressionResult }),
+      );
+    return NextResponse.json({ success: true, status: statusProgressionResult });
   }
 
   if (pendingSegmentName !== undefined) {

@@ -223,7 +223,7 @@ export async function POST(req: NextRequest) {
     const targetStatus = dispositionToStatus(disposition);
     if (targetStatus) {
       try {
-        const r = progressCompanyStatus(match.companyId, targetStatus);
+        const r = progressCompanyStatus(match.companyId, targetStatus, { source: "phoneburner" });
         if (r.updated) statusProgressed++;
       } catch (e) {
         console.error("[replay-webhooks] progressCompanyStatus failed:", e);

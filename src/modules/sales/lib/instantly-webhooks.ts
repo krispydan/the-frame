@@ -320,7 +320,7 @@ async function handleInstantlyWebhook(
   const progression = companyStatusFor(eventType, match.companyId);
   let progressionMsg = "";
   if (progression) {
-    const r = progressCompanyStatus(match.companyId, progression);
+    const r = progressCompanyStatus(match.companyId, progression, { source: "instantly" });
     if (r.updated) progressionMsg = ` status:${r.from}→${r.to}`;
   }
 
