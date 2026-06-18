@@ -247,7 +247,8 @@ export async function postDailyDigest(): Promise<{ ok: boolean }> {
   const channels = loadChannelRevenue(startIso, endIso);
   const totalRevenue = channels.reduce((s, c) => s + c.revenue, 0);
   const totalOrders = channels.reduce((s, c) => s + c.orders, 0);
-  const topSkus = loadTopSkus(startIso, endIso, 5);
+  // Top sellers omitted per Daniel 2026-06-18 — wasn't being read.
+  // Still surfaced in the Monday weekly digest.
   const lowStock = loadLowStock();
   const stuck = loadStuckOrders();
 
@@ -261,10 +262,6 @@ export async function postDailyDigest(): Promise<{ ok: boolean }> {
   const channelLines = channels.length === 0
     ? "No orders in the last 24h."
     : channels.map((c) => `• *${platformLabel(c.channel)}* — ${money(c.revenue)} (${c.orders} order${c.orders === 1 ? "" : "s"})`).join("\n");
-
-  const skuLines = topSkus.length === 0
-    ? "_No items sold yet._"
-    : topSkus.map((s) => `${skuLabel(s)} \`${s.sku}\` × ${s.qty}`).join("\n");
 
   const stockLine = lowStock.length === 0
     ? "✅ All SKUs above reorder point"
@@ -284,7 +281,6 @@ export async function postDailyDigest(): Promise<{ ok: boolean }> {
       text: { type: "mrkdwn", text: `*Yesterday at a glance* — ${new Date(`${ptDate}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: "America/Los_Angeles" })}\nTotal: *${money(totalRevenue)}* across *${totalOrders}* order${totalOrders === 1 ? "" : "s"}` },
     },
     { type: "section", text: { type: "mrkdwn", text: `*Revenue by channel*\n${channelLines}` } },
-    { type: "section", text: { type: "mrkdwn", text: `*Top sellers*\n${skuLines}` } },
     { type: "section", text: { type: "mrkdwn", text: `*Inventory*\n${stockLine}` } },
     { type: "section", text: { type: "mrkdwn", text: `*Fulfillment*\n${stuckLine}` } },
   ];
