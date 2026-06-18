@@ -149,17 +149,37 @@ function loadLeadsForCampaign(campaignId: string): LeadRowJoined[] {
     .all(campaignId) as LeadRowJoined[];
 }
 
-/** Contacts table already has first/last separate; use them directly. */
-function pickName(lead: { contact_first_name: string | null; contact_last_name: string | null }): {
-  first?: string;
-  last?: string;
-} {
-  const first = (lead.contact_first_name ?? "").trim();
-  const last = (lead.contact_last_name ?? "").trim();
-  return {
-    first: first || undefined,
-    last: last || undefined,
-  };
+/**
+ * Pick what we'll send as first_name / last_name on the PB contact.
+ *
+ * Most Storeleads / cold-email leads have no real human contact name
+ * (the contacts table row is null or just an email). In that case
+ * the agents need SOMETHING to read on their dial screen, so we fall
+ * back to the company name as first_name — that's the screen identity
+ * the caller will use ("Hi, am I speaking with the owner of <Acme
+ * Boutique>?").
+ *
+ * If a real contact name IS present we use it as-is.
+ */
+function pickName(lead: {
+  contact_first_name: string | null;
+  contact_last_name: string | null;
+  company_name: string | null;
+}): { first?: string; last?: string } {
+  const cf = (lead.contact_first_name ?? "").trim();
+  const cl = (lead.contact_last_name ?? "").trim();
+  if (cf || cl) {
+    return {
+      first: cf || undefined,
+      last: cl || undefined,
+    };
+  }
+  // No human name on file — use the company as the display identity.
+  const company = (lead.company_name ?? "").trim();
+  if (company) return { first: company, last: undefined };
+  // Should never hit this path (companies.name is NOT NULL), but
+  // defend against it so PB's required-field check doesn't 400.
+  return { first: "Unknown", last: undefined };
 }
 
 function fmtMoneyFromCents(cents: number | null): string | null {
