@@ -48,22 +48,37 @@ export async function GET(request: NextRequest) {
   const whereClauses: string[] = [];
   const whereParams: unknown[] = [];
 
-  // FTS search - get matching rowids first
+  // Search routing:
+  //   - Email-shaped queries (contain @) → direct LIKE on email. The
+  //     companies_fts index doesn't include email, and FTS5's default
+  //     tokenizer splits on @ and . anyway, so neither path works for
+  //     email lookups. LIKE is slow on 130K rows (~300ms) but it works.
+  //   - Everything else → FTS5 with prefix match.
   let ftsRowIds: number[] | null = null;
   if (search) {
-    try {
-      const ftsResults = sqlite.prepare(`
-        SELECT rowid FROM companies_fts WHERE companies_fts MATCH ? LIMIT 10000
-      `).all(search + "*") as { rowid: number }[];
-      ftsRowIds = ftsResults.map(r => r.rowid);
-      if (ftsRowIds.length === 0) {
-        return NextResponse.json({ data: [], total: 0, page, limit, totalPages: 0 });
+    if (search.includes("@")) {
+      whereClauses.push(`LOWER(c.email) LIKE ?`);
+      whereParams.push(`%${search.toLowerCase()}%`);
+    } else {
+      try {
+        const ftsResults = sqlite.prepare(`
+          SELECT rowid FROM companies_fts WHERE companies_fts MATCH ? LIMIT 10000
+        `).all(search + "*") as { rowid: number }[];
+        ftsRowIds = ftsResults.map(r => r.rowid);
+        // If FTS finds nothing, also try LIKE on email as a fallback —
+        // catches partial-email queries like "theebossylook2024" without
+        // the @-domain part.
+        if (ftsRowIds.length === 0) {
+          whereClauses.push(`(c.name LIKE ? OR LOWER(c.email) LIKE ?)`);
+          whereParams.push(`%${search}%`, `%${search.toLowerCase()}%`);
+        } else {
+          whereClauses.push(`c.rowid IN (${ftsRowIds.join(",")})`);
+        }
+      } catch {
+        // FTS query syntax error (rare) → LIKE on name + email
+        whereClauses.push(`(c.name LIKE ? OR LOWER(c.email) LIKE ?)`);
+        whereParams.push(`%${search}%`, `%${search.toLowerCase()}%`);
       }
-      whereClauses.push(`c.rowid IN (${ftsRowIds.join(",")})`);
-    } catch {
-      // Fallback to LIKE search if FTS query is invalid
-      whereClauses.push(`c.name LIKE ?`);
-      whereParams.push(`%${search}%`);
     }
   }
 
