@@ -482,7 +482,17 @@ function resolveCall(call: PbCall): ResolveResult | null {
   return resolveByPhone(call.phone ?? null);
 }
 
-function ingestOneCall(call: PbCall): "ingested" | "skipped_existing" | "unmatched" {
+/**
+ * Ingest one PhoneBurner call event. Called by:
+ *   - The polling cron (this file's pullPhoneBurnerCallResults loop)
+ *   - The webhook handler (src/modules/sales/lib/phoneburner-webhooks.ts)
+ *     on `call_end` events
+ *
+ * Idempotent: the PRIMARY KEY on phoneburner_call_log.id is PB's
+ * call_id, so re-ingesting the same call (e.g. webhook delivered and
+ * polling later catches it) fails INSERT and returns "skipped_existing".
+ */
+export function ingestOneCall(call: PbCall): "ingested" | "skipped_existing" | "unmatched" {
   const callId = call.id || call.call_id;
   if (!callId) return "skipped_existing";
   if (callExists(callId)) return "skipped_existing";

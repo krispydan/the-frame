@@ -618,6 +618,28 @@ try {
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_phoneburner_call_log_pb_contact ON phoneburner_call_log(phoneburner_contact_id)");
 } catch { /* exists */ }
 
+// PhoneBurner webhook delivery log — workspace-wide webhooks per the
+// PB Settings UI (see webhooksSettings.pdf). PK is a content hash so
+// retried deliveries fail INSERT silently → free idempotency. Mirrors
+// instantly_webhook_events. See src/modules/sales/lib/phoneburner-webhooks.ts.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS phoneburner_webhook_events (
+    id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    pb_call_id TEXT,
+    pb_contact_id TEXT,
+    frame_lead_id TEXT,
+    payload TEXT NOT NULL,
+    token_valid INTEGER NOT NULL,
+    handler_ok INTEGER,
+    handler_message TEXT,
+    received_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_pb_webhook_events_event_type ON phoneburner_webhook_events(event_type)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_pb_webhook_events_pb_contact ON phoneburner_webhook_events(pb_contact_id)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_pb_webhook_events_received ON phoneburner_webhook_events(received_at)");
+} catch { /* exists */ }
+
 // Warehouse/ShipHero exports: PO line items, freight info on POs, shiphero sync timestamps
 try { sqlite.exec("ALTER TABLE catalog_skus ADD COLUMN shiphero_synced_at TEXT"); } catch { /* exists */ }
 // Touch-stamp the row when anything edits it (UPC bulk-import,

@@ -1618,7 +1618,45 @@ export default function CompanyDetailPage() {
                                 </>
                               );
                             })()}
-                            {!["change", "company_updated", "contact_created", "status_change", "phoneburner_call_completed"].includes(a.event_type) && !a.event_type.startsWith("instantly_") && a.event_type}
+                            {a.event_type !== "phoneburner_call_completed" && a.event_type.startsWith("phoneburner_") && (() => {
+                              const agent = (data.agent_email as string) || (data.agent_id as string) || "";
+                              const t = a.event_type;
+                              const agentSuffix = agent ? ` by ${agent}` : "";
+                              switch (t) {
+                                case "phoneburner_call_started":
+                                  return <>📞 Dialing…{agentSuffix}</>;
+                                case "phoneburner_contact_displayed":
+                                  return <>👁 Viewed in PhoneBurner{agentSuffix}</>;
+                                case "phoneburner_email_unsubscribed":
+                                  return <>🚫 Unsubscribed from PhoneBurner email</>;
+                                case "phoneburner_sms_opt_out":
+                                  return <>🚫 Replied STOP to SMS</>;
+                                case "phoneburner_email_sent":
+                                  return <>📧 PhoneBurner email sent{agentSuffix}</>;
+                                case "phoneburner_email_opened":
+                                  return <>👁 Opened PhoneBurner email</>;
+                                case "phoneburner_email_clicked":
+                                  return <>🔗 Clicked PhoneBurner email link</>;
+                                case "phoneburner_email_resubscribed":
+                                  return <>✅ Resubscribed to PhoneBurner email</>;
+                                case "phoneburner_link_pickup":
+                                case "phoneburner_document_pickup":
+                                case "phoneburner_image_pickup":
+                                case "phoneburner_smartpack_pickup":
+                                  return <>📎 Opened {t.replace("phoneburner_", "").replace("_", " ")}</>;
+                                case "phoneburner_appointment_scheduled":
+                                  return <>📅 <span className="font-medium">Appointment booked</span>{agentSuffix}</>;
+                                case "phoneburner_task_created":
+                                  return <>✅ Task created in PhoneBurner{agentSuffix}</>;
+                                case "phoneburner_call_transfer":
+                                  return <>↪️ Call transferred{agentSuffix}</>;
+                                case "phoneburner_manual_trigger":
+                                  return <>🔔 Manual webhook from PhoneBurner</>;
+                                default:
+                                  return <>📞 {t.replace("phoneburner_", "")}{agentSuffix}</>;
+                              }
+                            })()}
+                            {!["change", "company_updated", "contact_created", "status_change"].includes(a.event_type) && !a.event_type.startsWith("instantly_") && !a.event_type.startsWith("phoneburner_") && a.event_type}
                           </p>
                           <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
                             <Clock className="w-3 h-3" />

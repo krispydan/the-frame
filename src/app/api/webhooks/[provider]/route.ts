@@ -5,10 +5,11 @@ import { webhookRegistry } from "@/modules/core/lib/webhooks";
 // webhookRegistry at load. Required because the dispatcher route is
 // the only path Next.js guarantees will be loaded for these providers.
 import "@/modules/sales/lib/instantly-webhooks";
+import "@/modules/sales/lib/phoneburner-webhooks";
 import { db } from "@/lib/db";
 import { reportingLogs } from "@/modules/core/schema";
 
-const SUPPORTED_PROVIDERS = ["shopify", "faire", "instantly", "xero", "test"];
+const SUPPORTED_PROVIDERS = ["shopify", "faire", "instantly", "phoneburner", "xero", "test"];
 
 export async function POST(
   request: NextRequest,
@@ -33,6 +34,24 @@ export async function POST(
   request.headers.forEach((value, key) => {
     headers[key] = value;
   });
+
+  // PhoneBurner's webhook UI accepts a URL only — no custom-header
+  // field. Daniel pastes URLs of the form:
+  //   /api/webhooks/phoneburner?secret=<token>&event=<hint>
+  // Pull both into the headers map so the handler reads them the same
+  // way it would read any other normalized header.
+  const url = request.nextUrl;
+  const querySecret = url.searchParams.get("secret");
+  if (querySecret) headers["x-pb-webhook-secret"] = querySecret;
+  const queryEvent = url.searchParams.get("event");
+  if (queryEvent) {
+    headers["x-pb-event"] = queryEvent;
+    // Also inject into parsedBody as a fallback hint for the handler's
+    // detectEventType walk.
+    if (parsedBody && typeof parsedBody === "object") {
+      (parsedBody as Record<string, unknown>).event = (parsedBody as Record<string, unknown>).event ?? queryEvent;
+    }
+  }
 
   // Log incoming webhook
   try {

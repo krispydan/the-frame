@@ -25,6 +25,7 @@ import { syncShipHeroOrders } from "@/modules/operations/lib/shiphero/sync-order
 import { syncShipHeroInventory, isDuringBusinessHours } from "@/modules/operations/lib/shiphero/sync-inventory";
 import { refreshIfExpiringSoon as refreshShipHeroToken } from "@/modules/operations/lib/shiphero/auth";
 import { pullPhoneBurnerCallResults } from "@/modules/sales/lib/phoneburner-sync";
+import { postPhoneBurnerCallDigest } from "@/modules/integrations/lib/slack/phoneburner-digest";
 import { runShopifyMetafieldSync } from "@/modules/catalog/lib/shopify-metafields/bulk-sync-job";
 import { syncSettlementsAllShops } from "@/modules/finance/lib/shopify-settlements";
 import { runShipmentRevenueRecognition } from "@/modules/finance/lib/shipment-revenue-recognition";
@@ -157,15 +158,24 @@ export const CRON_JOBS: CronJob[] = [
   },
 
   // ── PhoneBurner ──
-  // PhoneBurner doesn't support a global webhook subscription — call
-  // result callbacks only attach per dial session. We poll the recent-calls
-  // endpoint every 5 minutes, using a 15-minute look-back as a safety net
-  // (phoneburner_call_log PK is the PB call_id, so re-ingestion is free).
+  // We discovered PB DOES expose workspace-wide webhooks via the
+  // Settings UI (webhooksSettings.pdf). The webhook receiver is the
+  // primary delivery path; this polling cron stays as a safety net at
+  // a slower cadence to catch any deliveries PB might have dropped.
+  // After ~2 weeks of clean webhook deliveries, disable via the cron UI.
   {
     id: "phoneburner-call-poll",
-    schedule: "*/5 * * * *",  // every 5 min
-    description: "Poll PhoneBurner for recent calls and ingest dispositions into activity feed",
-    handler: () => pullPhoneBurnerCallResults({ sinceMinutes: 15 }),
+    schedule: "*/30 * * * *",  // every 30 min — safety net only
+    description: "Safety-net poll for PhoneBurner calls (webhooks are primary). Re-ingestion is idempotent on call_id PK.",
+    handler: () => pullPhoneBurnerCallResults({ sinceMinutes: 60 }),
+  },
+  // Daily call activity summary posted to Slack — totals, connect rate,
+  // top dispositions, agent breakdown. Skipped on zero-call days.
+  {
+    id: "phoneburner-digest-daily",
+    schedule: "0 15 * * *",  // 15:00 UTC ≈ 8am PT (alongside other morning digests)
+    description: "Daily PhoneBurner call summary to Slack — totals, connect rate, top dispositions, agents",
+    handler: postPhoneBurnerCallDigest,
   },
 
   // ── Slack ──

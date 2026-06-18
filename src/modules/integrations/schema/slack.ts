@@ -60,6 +60,7 @@ export type SlackTopic =
   // Digests
   | "digest.daily"
   | "digest.weekly"
+  | "digest.phoneburner"
   // Finance/ops
   | "finance.payout_received"
   | "finance.cogs_posted"
@@ -91,4 +92,5 @@ export const SLACK_TOPICS: { topic: SlackTopic; label: string; defaultChannel: s
   // Digests
   { topic: "digest.daily",            label: "Daily morning digest",          defaultChannel: "jaxy-daily-digest",  group: "Digests",      description: "Yesterday's orders, fulfillment, inventory at 7am PT." },
   { topic: "digest.weekly",           label: "Weekly Monday digest",          defaultChannel: "jaxy-weekly-review", group: "Digests",      description: "Last week's revenue, top SKUs, slow movers, margin." },
+  { topic: "digest.phoneburner",      label: "Daily PhoneBurner call summary", defaultChannel: "jaxy-daily-digest", group: "Digests",      description: "Yesterday's call activity: total dials, connect rate, top dispositions, top contacts. Skipped on zero-call days." },
 ];
