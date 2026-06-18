@@ -134,10 +134,14 @@ export async function POST(req: NextRequest) {
 
   for (const r of rows) {
     if (!r.pb_call_id) continue;
-    // Already complete?
+    // PB sends call_id as a JSON number; better-sqlite3 normalises it
+    // to "3024349467.0" when stored in pb_call_id (TEXT column), but
+    // call_log.id was inserted as the integer-stringified "3024349467"
+    // from ingestOneCall. Strip the trailing ".0" so the JOIN lands.
+    const callLogKey = r.pb_call_id.replace(/\.0$/, "");
     const existing = sqlite
       .prepare("SELECT id, company_id FROM phoneburner_call_log WHERE id = ?")
-      .get(r.pb_call_id) as { id: string; company_id: string | null } | undefined;
+      .get(callLogKey) as { id: string; company_id: string | null } | undefined;
     if (!existing) continue; // call_log row doesn't exist — webhook hit before sync
     if (existing.company_id) {
       alreadyComplete++;
@@ -180,7 +184,7 @@ export async function POST(req: NextRequest) {
       typeof body.duration === "number" ? Math.round(body.duration) : null,
       notesFrom(body),
       body.recording_url ?? null,
-      r.pb_call_id,
+      callLogKey,
     );
 
     if (match.campaignLeadId) {
@@ -196,7 +200,7 @@ export async function POST(req: NextRequest) {
             AND data LIKE ?
           LIMIT 1`,
       )
-      .get(match.companyId, `%"call_id":"${r.pb_call_id}"%`);
+      .get(match.companyId, `%"call_id":"${callLogKey}"%`);
     if (!dupFeed) {
       insertFeed.run(
         crypto.randomUUID(),
