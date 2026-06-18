@@ -18,7 +18,7 @@
  */
 import { sqlite } from "@/lib/db";
 import { jobQueue } from "@/modules/core/lib/job-queue";
-import { registerJobHandler } from "@/modules/core/lib/job-worker";
+import { registerJobHandler } from "@/modules/core/lib/job-handler-registry";
 import type { CompanyStatus } from "./status-progression";
 
 export type StatusChangeSource = "instantly" | "phoneburner" | "ui" | "system";

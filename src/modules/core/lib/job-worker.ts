@@ -4,25 +4,23 @@ import { eq } from "drizzle-orm";
 import { jobQueue } from "./job-queue";
 import { agentOrchestrator } from "./agent-orchestrator";
 import { logger } from "./logger";
+import {
+  registerJobHandler,
+  getJobHandler,
+  type JobHandler,
+} from "./job-handler-registry";
 
 // Side-effect imports — each module's registerJobHandler() calls run
-// at load. The handler map lives in this file, so any module that
-// adds handlers has to be eagerly imported here (lazy imports inside
-// handler bodies are fine and recommended, but the registration call
-// itself has to be at module-load).
+// at load. The registry lives in job-handler-registry.ts (extracted
+// from this file to break a circular import: status-sync.ts also
+// needs registerJobHandler, and importing it from THIS file caused
+// a TDZ crash at server startup).
 import "@/modules/sales/lib/status-sync";
 
-type JobHandler = (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
-
-const handlers = new Map<string, JobHandler>();
-
-/**
- * Register a handler for a job type.
- * Convention: each module registers handlers like "catalog.import", "sales.enrich"
- */
-export function registerJobHandler(type: string, handler: JobHandler): void {
-  handlers.set(type, handler);
-}
+// Re-export so existing callers (route.ts files, tests, etc.) that
+// import registerJobHandler from job-worker keep working unchanged.
+export { registerJobHandler };
+export type { JobHandler };
 
 // Built-in handler: ShipHero inventory sync (hourly, PST business hours)
 registerJobHandler("shiphero.sync-inventory", async () => {
@@ -93,7 +91,7 @@ async function processNext(): Promise<boolean> {
   const job = jobQueue.dequeue();
   if (!job) return false;
 
-  const handler = handlers.get(job.type);
+  const handler = getJobHandler(job.type);
   if (!handler) {
     jobQueue.fail(job.id, `No handler registered for job type: ${job.type}`, false);
     logger.logError("warn", "job-worker", `No handler for job type: ${job.type}`);
