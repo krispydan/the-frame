@@ -1144,6 +1144,119 @@ try {
   // Comparing on TRIM/LOWER would be more robust but keeps the SQL
   // index simple; callers normalize before insert.
   sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_company_phones ON company_phones (company_id, phone)`);
+
+  // ── Phone-storage consolidation (2026-06-19) ────────────────────
+  //
+  // Daniel: "merge these fields so there is 1 source of truth for
+  // phone numbers." The legacy `companies.phone` column historically
+  // held the single primary; `company_phones` was added later for
+  // multi-number support but never became authoritative — which
+  // caused the Brand Carriers v1 PhoneBurner push to skip 349 leads
+  // whose phones lived only in the legacy column.
+  //
+  // The resolution:
+  //   1. company_phones is the canonical store. All new writes go here.
+  //   2. companies.phone becomes a read-only DENORMALIZED CACHE of the
+  //      primary phone, maintained by triggers so legacy reads keep
+  //      working without a 14-file refactor.
+  //   3. Below: one-time backfill + triggers that keep the cache in
+  //      sync. Both idempotent — safe to run on every boot.
+
+  // Backfill: any company with a legacy phone but no row in
+  // company_phones gets one inserted as primary. INSERT OR IGNORE
+  // makes this safe to re-run; the unique index on (company_id, phone)
+  // prevents dupes.
+  sqlite.exec(`
+    INSERT OR IGNORE INTO company_phones (id, company_id, phone, source, is_primary, created_at, updated_at)
+    SELECT
+      lower(hex(randomblob(16))),
+      c.id,
+      TRIM(c.phone),
+      'legacy_backfill',
+      1,
+      datetime('now'),
+      datetime('now')
+    FROM companies c
+    WHERE TRIM(COALESCE(c.phone, '')) <> ''
+      AND NOT EXISTS (
+        SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id
+      )
+  `);
+
+  // Triggers: keep companies.phone synced to the primary phone of
+  // company_phones. Re-creating triggers is cheap; drop+recreate so
+  // any schema change to the trigger body propagates on next boot.
+  sqlite.exec(`DROP TRIGGER IF EXISTS trg_company_phones_after_insert`);
+  sqlite.exec(`DROP TRIGGER IF EXISTS trg_company_phones_after_update`);
+  sqlite.exec(`DROP TRIGGER IF EXISTS trg_company_phones_after_delete`);
+
+  // The "refresh primary" pattern: pick the highest-ranked phone
+  // (is_primary DESC, then oldest-first as tiebreaker) and write it
+  // back to companies.phone. If no rows remain, NULL out the cache.
+  const refreshSql = (cidCol: string) => `
+    UPDATE companies
+       SET phone = (
+         SELECT phone FROM company_phones
+          WHERE company_id = ${cidCol}
+          ORDER BY is_primary DESC, created_at ASC
+          LIMIT 1
+       )
+     WHERE id = ${cidCol};
+  `;
+
+  sqlite.exec(`
+    CREATE TRIGGER trg_company_phones_after_insert
+    AFTER INSERT ON company_phones
+    BEGIN ${refreshSql("NEW.company_id")} END;
+  `);
+  sqlite.exec(`
+    CREATE TRIGGER trg_company_phones_after_update
+    AFTER UPDATE ON company_phones
+    BEGIN ${refreshSql("NEW.company_id")} END;
+  `);
+  sqlite.exec(`
+    CREATE TRIGGER trg_company_phones_after_delete
+    AFTER DELETE ON company_phones
+    BEGIN ${refreshSql("OLD.company_id")} END;
+  `);
+
+  // Reverse-direction mirror: any legacy code path that writes to
+  // companies.phone (chrome-extension capture, storeleads cleanup,
+  // manual SQL fixups, seed/test data) gets an automatic row in
+  // company_phones so the canonical store stays complete. INSERT OR
+  // IGNORE makes this idempotent; the (company_id, phone) unique
+  // index dedupes naturally. SQLite's default `recursive_triggers=0`
+  // prevents the cache-refresh trigger above from firing in response
+  // to this insert and looping back.
+  sqlite.exec(`DROP TRIGGER IF EXISTS trg_companies_phone_insert_mirror`);
+  sqlite.exec(`DROP TRIGGER IF EXISTS trg_companies_phone_update_mirror`);
+
+  const mirrorBody = `
+    INSERT OR IGNORE INTO company_phones
+      (id, company_id, phone, source, is_primary, created_at, updated_at)
+    VALUES (
+      lower(hex(randomblob(16))),
+      NEW.id,
+      TRIM(NEW.phone),
+      'legacy_companies_write',
+      1,
+      datetime('now'),
+      datetime('now')
+    );
+  `;
+
+  sqlite.exec(`
+    CREATE TRIGGER trg_companies_phone_insert_mirror
+    AFTER INSERT ON companies
+    WHEN NEW.phone IS NOT NULL AND TRIM(NEW.phone) <> ''
+    BEGIN ${mirrorBody} END;
+  `);
+  sqlite.exec(`
+    CREATE TRIGGER trg_companies_phone_update_mirror
+    AFTER UPDATE OF phone ON companies
+    WHEN NEW.phone IS NOT NULL AND TRIM(NEW.phone) <> ''
+    BEGIN ${mirrorBody} END;
+  `);
   sqlite.exec(`CREATE TABLE IF NOT EXISTS magic_link_tokens (
     id TEXT PRIMARY KEY NOT NULL,
     email TEXT NOT NULL,
