@@ -16,6 +16,7 @@ interface CustomerRow {
   id: string;
   company_id: string;
   company_name: string;
+  segment: string | null;
   tier: CustomerTier;
   lifetime_value: number;
   total_orders: number;
@@ -37,6 +38,7 @@ function daysUntilReorder(est: string | null): number | null {
 export function CustomerList({ customers }: { customers: CustomerRow[] }) {
   const [tierFilter, setTierFilter] = useState<CustomerTier | "all">("all");
   const [healthFilter, setHealthFilter] = useState<HealthStatus | "all">("all");
+  const [segmentFilter, setSegmentFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<SortField>("lifetime_value");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [search, setSearch] = useState("");
@@ -91,13 +93,22 @@ export function CustomerList({ customers }: { customers: CustomerRow[] }) {
     }
   }, []);
 
+  const segmentOptions = useMemo(
+    () => Array.from(new Set(customers.map((c) => c.segment?.trim()).filter((segment): segment is string => Boolean(segment)))).sort(),
+    [customers],
+  );
+
   const filtered = useMemo(() => {
     let list = customers;
     if (tierFilter !== "all") list = list.filter((c) => c.tier === tierFilter);
     if (healthFilter !== "all") list = list.filter((c) => c.health_status === healthFilter);
+    if (segmentFilter !== "all") list = list.filter((c) => c.segment === segmentFilter);
     if (search) {
       const q = search.toLowerCase();
-      list = list.filter((c) => c.company_name.toLowerCase().includes(q));
+      list = list.filter((c) =>
+        c.company_name.toLowerCase().includes(q) ||
+        (c.segment || "").toLowerCase().includes(q),
+      );
     }
     list = [...list].sort((a, b) => {
       if (sortBy === "days_until_reorder") {
@@ -110,7 +121,7 @@ export function CustomerList({ customers }: { customers: CustomerRow[] }) {
       return sortDir === "desc" ? (bv > av ? 1 : -1) : (av > bv ? 1 : -1);
     });
     return list;
-  }, [customers, tierFilter, healthFilter, sortBy, sortDir, search]);
+  }, [customers, tierFilter, healthFilter, segmentFilter, sortBy, sortDir, search]);
 
   const toggleSort = (field: SortField) => {
     if (sortBy === field) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
@@ -171,13 +182,17 @@ export function CustomerList({ customers }: { customers: CustomerRow[] }) {
           onChange={(e) => setSearch(e.target.value)}
           className="rounded-lg border px-3 py-2 text-sm w-64"
         />
-        <select value={tierFilter} onChange={(e) => setTierFilter(e.target.value as any)} className="rounded-lg border px-3 py-2 text-sm">
+        <select value={tierFilter} onChange={(e) => setTierFilter(e.target.value as CustomerTier | "all")} className="rounded-lg border px-3 py-2 text-sm">
           <option value="all">All Tiers</option>
           {CUSTOMER_TIERS.map((t) => <option key={t} value={t}>{TIER_LABELS[t]}</option>)}
         </select>
-        <select value={healthFilter} onChange={(e) => setHealthFilter(e.target.value as any)} className="rounded-lg border px-3 py-2 text-sm">
+        <select value={healthFilter} onChange={(e) => setHealthFilter(e.target.value as HealthStatus | "all")} className="rounded-lg border px-3 py-2 text-sm">
           <option value="all">All Health</option>
           {HEALTH_STATUSES.map((s) => <option key={s} value={s}>{s.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}</option>)}
+        </select>
+        <select value={segmentFilter} onChange={(e) => setSegmentFilter(e.target.value)} className="rounded-lg border px-3 py-2 text-sm">
+          <option value="all">All Segments</option>
+          {segmentOptions.map((segment) => <option key={segment} value={segment}>{segment}</option>)}
         </select>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
           {syncResult && (
@@ -234,6 +249,7 @@ export function CustomerList({ customers }: { customers: CustomerRow[] }) {
           <thead className="bg-gray-50 text-left text-gray-600">
             <tr>
               <th className="px-4 py-3">Company</th>
+              <th className="px-4 py-3">Segment</th>
               <th className="px-4 py-3">Tier</th>
               <th className="px-4 py-3 cursor-pointer" onClick={() => toggleSort("lifetime_value")}>
                 LTV {sortBy === "lifetime_value" ? (sortDir === "desc" ? "↓" : "↑") : ""}
@@ -263,6 +279,15 @@ export function CustomerList({ customers }: { customers: CustomerRow[] }) {
                     </Link>
                   </td>
                   <td className="px-4 py-3">
+                    {c.segment ? (
+                      <Link href={`/segments`} className="text-gray-600 hover:text-blue-600 hover:underline">
+                        {c.segment}
+                      </Link>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
                     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${TIER_COLORS[c.tier]}`}>
                       {TIER_LABELS[c.tier]}
                     </span>
@@ -289,7 +314,7 @@ export function CustomerList({ customers }: { customers: CustomerRow[] }) {
               );
             })}
             {filtered.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-16 text-center">
+              <tr><td colSpan={8} className="px-4 py-16 text-center">
                 <svg className="h-10 w-10 mx-auto text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                 <p className="font-medium text-gray-500">No customers found</p>
                 <p className="text-sm text-gray-400 mt-1">Sync accounts from orders to populate your customer list.</p>
