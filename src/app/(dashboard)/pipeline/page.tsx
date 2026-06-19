@@ -1,7 +1,6 @@
 export const dynamic = "force-dynamic";
 import { sqlite } from "@/lib/db";
 import { PipelineBoard } from "@/modules/sales/components/pipeline-board";
-import { DEAL_STAGES, DEAL_STAGE_LABELS } from "@/modules/sales/schema/pipeline";
 
 interface DealRow {
   id: string;
@@ -9,6 +8,7 @@ interface DealRow {
   company_name: string;
   company_city: string;
   company_state: string;
+  segment: string | null;
   title: string;
   value: number | null;
   stage: string;
@@ -23,9 +23,15 @@ interface DealRow {
 
 async function getDeals() {
   const rows = sqlite.prepare(`
-    SELECT d.*, c.name as company_name, c.city as company_city, c.state as company_state
+    SELECT
+      d.*,
+      c.name as company_name,
+      c.city as company_city,
+      c.state as company_state,
+      COALESCE(s.name, c.segment) as segment
     FROM deals d
     LEFT JOIN companies c ON c.id = d.company_id
+    LEFT JOIN segments s ON s.id = c.segment_id
     ORDER BY d.last_activity_at DESC
   `).all() as DealRow[];
   return rows;
@@ -46,22 +52,10 @@ async function getUsers() {
 export default async function PipelinePage() {
   const [deals, companies, users] = await Promise.all([getDeals(), getCompaniesForSearch(), getUsers()]);
 
-  // Build stage summaries
-  const stageSummaries = DEAL_STAGES.map((stage) => {
-    const stageDeals = deals.filter((d) => d.stage === stage);
-    return {
-      stage,
-      label: DEAL_STAGE_LABELS[stage],
-      count: stageDeals.length,
-      totalValue: stageDeals.reduce((sum, d) => sum + (d.value || 0), 0),
-    };
-  });
-
   return (
     <div className="space-y-4">
       <PipelineBoard
         deals={deals}
-        stageSummaries={stageSummaries}
         companies={companies}
         users={users}
       />
