@@ -71,6 +71,49 @@ export interface PbFolder {
   parent_id?: string | null;
 }
 
+/**
+ * Walk any plausible PB folder response shape and return a {id, name}
+ * record. Handles direct records, single-key wrappers (`folder`,
+ * `data`, `result`), arrays, and flat-with-folder_id envelopes.
+ * Returns null if nothing recognizable surfaces.
+ */
+function extractFolder(raw: unknown): PbFolder | null {
+  if (!raw) return null;
+
+  // Array — take the first element.
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const f = extractFolder(item);
+      if (f) return f;
+    }
+    return null;
+  }
+
+  if (typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+
+  // Direct hit — { id, name, ... }
+  const directId = o.id ?? o.folder_id ?? o.category_id;
+  const directName = o.name ?? o.folder_name ?? o.category_name;
+  if (directId != null) {
+    return {
+      id: String(directId),
+      name: directName != null ? String(directName) : "",
+      description: typeof o.description === "string" ? o.description : undefined,
+    };
+  }
+
+  // Wrapped — try the common envelope keys.
+  for (const key of ["folder", "data", "result", "category", "item"]) {
+    if (key in o) {
+      const f = extractFolder(o[key]);
+      if (f) return f;
+    }
+  }
+
+  return null;
+}
+
 export interface PbCall {
   id: string;
   call_id?: string;
@@ -256,14 +299,34 @@ class PhoneBurnerClient {
 
   // ── Folders ──
   async listFolders(): Promise<PbFolder[]> {
-    const raw = await this.request<{ data?: PbFolder[] } | PbFolder[]>(
+    const raw = await this.request<unknown>(
       "GET",
       "/folders",
       undefined,
       { page_size: 100 },
     );
-    if (Array.isArray(raw)) return raw;
-    return raw.data ?? [];
+
+    // Walk every plausible PB list-response shape: direct array,
+    // { data: [...] } envelope, { folders: [...] } named wrapper,
+    // { items: [...] }, or anything else with a nested array of
+    // folder-shaped records. Extract one PbFolder per entry.
+    function asArray(x: unknown): unknown[] {
+      if (Array.isArray(x)) return x;
+      if (x && typeof x === "object") {
+        const o = x as Record<string, unknown>;
+        for (const key of ["data", "folders", "items", "result", "categories"]) {
+          if (Array.isArray(o[key])) return o[key] as unknown[];
+        }
+      }
+      return [];
+    }
+    const items = asArray(raw);
+    const out: PbFolder[] = [];
+    for (const item of items) {
+      const f = extractFolder(item);
+      if (f) out.push(f);
+    }
+    return out;
   }
 
   async createFolder(opts: {
@@ -293,7 +356,7 @@ class PhoneBurnerClient {
     // Send BOTH `name` and `folder_name` — PB's documented field name
     // varies between v1 and current; sending both is harmless and
     // lets the API pick the one it recognizes.
-    const raw = await this.request<PbFolder | { folder?: PbFolder; data?: PbFolder }>(
+    const raw = await this.request<Record<string, unknown>>(
       "POST",
       "/folders",
       {
@@ -304,9 +367,26 @@ class PhoneBurnerClient {
         owner_id: opts.owner_id,
       },
     );
-    if ("id" in raw && raw.id) return raw as PbFolder;
-    const wrapped = raw as { folder?: PbFolder; data?: PbFolder };
-    return (wrapped.folder ?? wrapped.data) as PbFolder;
+
+    // PB has historically returned the new folder in any of these
+    // shapes — handle all of them so we don't crash on an unexpected
+    // envelope:
+    //   { id, name, ... }                  (flat record)
+    //   { folder: { id, ... } }            (named wrapper)
+    //   { data: { id, ... } }              (generic wrapper)
+    //   { result: { id, ... } }            (rare)
+    //   [{ id, ... }]                      (array with one folder)
+    //   { folder_id: 123, ... }            (flat with explicit folder_id)
+    //   { success: true, folder_id: 123 }  (ack envelope)
+    const folder = extractFolder(raw);
+    if (folder?.id) return folder;
+
+    // Couldn't find an id anywhere — surface the actual response so
+    // the operator can tell us what PB sent and we can teach the
+    // extractor to handle it.
+    throw new Error(
+      `PhoneBurner createFolder returned an unexpected shape — no id found. Response: ${JSON.stringify(raw).slice(0, 500)}`,
+    );
   }
 
   // ── Contacts ──
