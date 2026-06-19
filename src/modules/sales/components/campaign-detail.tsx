@@ -465,13 +465,43 @@ function ChannelsCard({ campaign }: { campaign: Campaign }) {
   const [adding, setAdding] = useState(false);
   const [busyAdd, setBusyAdd] = useState(false);
 
+  // PhoneBurner folder picker. Fetched once when the PB channel is
+  // enabled. Empty selection means "auto-create from campaign name on
+  // first push" (preserves the previous default behavior).
+  const [pbFolders, setPbFolders] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [pbFoldersError, setPbFoldersError] = useState<string | null>(null);
+  const [selectedFolderId, setSelectedFolderId] = useState<string>(
+    campaign.phoneburner_folder_id ?? "",
+  );
+  useMemo(() => {
+    if (!enabled.includes("phoneburner") || pbFolders !== null) return;
+    fetch("/api/v1/integrations/phoneburner/folders")
+      .then(async (r) => {
+        const data = await r.json();
+        if (!r.ok) {
+          setPbFoldersError(data?.error ?? `HTTP ${r.status}`);
+          return;
+        }
+        setPbFolders(data.folders ?? []);
+      })
+      .catch((e) => setPbFoldersError(e instanceof Error ? e.message : String(e)));
+  }, [enabled, pbFolders]);
+
   async function pushToPhoneBurner(dryRun: boolean) {
     setPushingPb(true);
     try {
       const r = await fetch("/api/v1/integrations/phoneburner/push-campaign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ campaignId: campaign.id, dryRun }),
+        body: JSON.stringify({
+          campaignId: campaign.id,
+          dryRun,
+          // Empty string means "let the server auto-create a folder
+          // named after the campaign" — same as before. A real ID
+          // pre-fills campaigns.phoneburner_folder_id so the push
+          // ships into that specific folder.
+          folderId: selectedFolderId || undefined,
+        }),
       });
       const data = await r.json();
       if (!r.ok) {
@@ -543,34 +573,74 @@ function ChannelsCard({ campaign }: { campaign: Campaign }) {
           />
         )}
         {enabled.includes("phoneburner") && (
-          <ChannelRow
-            icon={<Phone className="w-4 h-4" />}
-            label="Calls (PhoneBurner)"
-            connected={!!campaign.phoneburner_folder_id}
-            connectionDetail={campaign.phoneburner_folder_id ? `Folder ${campaign.phoneburner_folder_id.slice(0, 8)}…` : "First push will create folder"}
-            primaryAction={
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => pushToPhoneBurner(true)}
-                  disabled={pushingPb}
-                >
-                  {pushingPb ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : null}
-                  Dry-run
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => pushToPhoneBurner(false)}
-                  disabled={pushingPb}
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  {pushingPb ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1" />}
-                  Push to PhoneBurner
-                </Button>
-              </div>
-            }
-          />
+          <div className="border-b last:border-b-0">
+            <ChannelRow
+              icon={<Phone className="w-4 h-4" />}
+              label="Calls (PhoneBurner)"
+              connected={!!campaign.phoneburner_folder_id || !!selectedFolderId}
+              connectionDetail={
+                selectedFolderId && pbFolders?.length
+                  ? `Folder: ${pbFolders.find((f) => f.id === selectedFolderId)?.name ?? selectedFolderId.slice(0, 12) + "…"}`
+                  : campaign.phoneburner_folder_id
+                    ? `Folder ${campaign.phoneburner_folder_id.slice(0, 8)}…`
+                    : "Will auto-create folder named after the campaign"
+              }
+              primaryAction={
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => pushToPhoneBurner(true)}
+                    disabled={pushingPb}
+                  >
+                    {pushingPb ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : null}
+                    Dry-run
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => pushToPhoneBurner(false)}
+                    disabled={pushingPb}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    {pushingPb ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1" />}
+                    Push to PhoneBurner
+                  </Button>
+                </div>
+              }
+            />
+            {/* Folder picker — show every existing PB folder so the
+                operator can re-use one instead of forcing a
+                createFolder call (which was the source of the 400 in
+                Daniel's first attempt). */}
+            <div className="px-9 pb-2 pt-1 flex items-center gap-2 flex-wrap text-xs">
+              <span className="text-muted-foreground">Push into:</span>
+              {pbFolders === null && !pbFoldersError && (
+                <span className="text-muted-foreground italic">Loading folders…</span>
+              )}
+              {pbFoldersError && (
+                <span className="text-red-600">Folder list failed: {pbFoldersError}</span>
+              )}
+              {pbFolders && (
+                <>
+                  <select
+                    value={selectedFolderId}
+                    onChange={(e) => setSelectedFolderId(e.target.value)}
+                    className="px-2 py-1 border rounded text-xs bg-white dark:bg-gray-800 max-w-xs"
+                  >
+                    <option value="">↳ Auto-create &ldquo;{campaign.name}&rdquo;</option>
+                    {pbFolders.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-muted-foreground">
+                    {pbFolders.length} existing folder{pbFolders.length === 1 ? "" : "s"}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
         )}
         {enabled.includes("direct_mail") && (
           <ChannelRow

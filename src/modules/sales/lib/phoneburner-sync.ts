@@ -405,13 +405,40 @@ export async function pushCampaignToPhoneBurner(
     throw new Error(`Campaign ${campaignId} not found`);
   }
 
-  const folderId = opts?.dryRun
-    ? campaign.phoneburner_folder_id ?? "(dry-run, would create)"
-    : await ensurePbFolder(campaign);
+  // Wrap each setup step in a contextful re-throw so a 400 from PB
+  // tells the operator WHICH step failed — folder create vs owner
+  // discovery vs the per-contact create. Without this, a generic
+  // "PhoneBurner 400" surfaces with no hint of where it came from.
+  let folderId: string;
+  if (opts?.dryRun) {
+    folderId = campaign.phoneburner_folder_id ?? "(dry-run, would create)";
+  } else {
+    try {
+      folderId = await ensurePbFolder(campaign);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(
+        `Folder setup failed for campaign "${campaign.name}". ` +
+          `Either pick an existing folder via the Channels card → Folder dropdown, ` +
+          `or check that the campaign name is < 64 chars and uses ASCII. ` +
+          `Underlying error: ${msg}`,
+      );
+    }
+  }
 
   // owner_id is required on every contact create; resolved once
   // per push and reused. Dry-run skips the API call.
-  const ownerId = opts?.dryRun ? "(dry-run-owner)" : await resolveOwnerId();
+  let ownerId: string;
+  if (opts?.dryRun) {
+    ownerId = "(dry-run-owner)";
+  } else {
+    try {
+      ownerId = await resolveOwnerId();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(`Owner ID discovery failed. ${msg}`);
+    }
+  }
 
   const leads = loadLeadsForCampaign(campaignId);
 

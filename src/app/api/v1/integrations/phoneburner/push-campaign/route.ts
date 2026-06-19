@@ -22,7 +22,7 @@ import { pushCampaignToPhoneBurner } from "@/modules/sales/lib/phoneburner-sync"
  * sales role implicitly has access by virtue of seeing campaigns at all.
  */
 export async function POST(req: NextRequest) {
-  let body: { campaignId?: string; dryRun?: boolean };
+  let body: { campaignId?: string; dryRun?: boolean; folderId?: string };
   try {
     body = await req.json();
   } catch {
@@ -33,6 +33,18 @@ export async function POST(req: NextRequest) {
       { error: "campaignId required" },
       { status: 400 },
     );
+  }
+
+  // If the caller specified a folder, persist it on the campaign row
+  // BEFORE invoking the push so ensurePbFolder() reuses it instead of
+  // trying to create a new one. This bypasses the createFolder API
+  // call entirely — useful when a folder already exists or when
+  // createFolder is the step throwing the 400.
+  if (body.folderId) {
+    const { sqlite } = await import("@/lib/db");
+    sqlite
+      .prepare("UPDATE campaigns SET phoneburner_folder_id = ? WHERE id = ?")
+      .run(body.folderId, body.campaignId);
   }
 
   try {
