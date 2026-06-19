@@ -30,6 +30,7 @@ interface Props {
     name: string;
     type: string;
     status: string;
+    target_segment?: string | null;
     instantly_campaign_id: string | null;
     sent: number;
     replied: number;
@@ -45,20 +46,31 @@ interface Props {
     total_sent: number;
     avg_reply_rate: number;
   };
+  initialSegmentFilter?: string;
 }
 
-export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Props) {
+export function CampaignDashboard({ campaigns: initialCampaigns, summary, initialSegmentFilter = "all" }: Props) {
   const [campaigns, setCampaigns] = useState(initialCampaigns);
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [segmentFilter, setSegmentFilter] = useState<string>(initialSegmentFilter);
   const [syncing, setSyncing] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [lastSyncResult, setLastSyncResult] = useState<{ pushed: { campaigns: number; leads: number }; pulled: { campaigns: number; leads: number; stageUpdates: number }; errors: string[] } | null>(null);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
+  const segmentOptions = Array.from(
+    new Set(
+      campaigns
+        .map((campaign) => campaign.target_segment?.trim())
+        .filter((value): value is string => Boolean(value))
+    )
+  ).sort((a, b) => a.localeCompare(b));
+
   const filtered = campaigns.filter((c) => {
     if (typeFilter !== "all" && c.type !== typeFilter) return false;
     if (statusFilter !== "all" && c.status !== statusFilter) return false;
+    if (segmentFilter !== "all" && (c.target_segment || "").trim() !== segmentFilter) return false;
     return true;
   });
 
@@ -69,7 +81,8 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
       const syncData = await syncRes.json();
       setLastSyncResult(syncData.data);
       setLastSyncTime(new Date().toLocaleString());
-      const res = await fetch("/api/v1/sales/campaigns");
+      const query = segmentFilter !== "all" ? `?segment=${encodeURIComponent(segmentFilter)}` : "";
+      const res = await fetch(`/api/v1/sales/campaigns${query}`);
       const data = await res.json();
       setCampaigns(data.data);
     } finally {
@@ -185,6 +198,19 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
             <SelectItem value="completed">Completed</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={segmentFilter} onValueChange={(v) => v && setSegmentFilter(v)}>
+          <SelectTrigger className="w-[220px]">
+            <SelectValue placeholder="All Segments" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Segments</SelectItem>
+            {segmentOptions.map((segment) => (
+              <SelectItem key={segment} value={segment}>
+                {segment}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Campaign Table */}
@@ -193,6 +219,7 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
           <TableHeader>
             <TableRow>
               <TableHead>Campaign</TableHead>
+              <TableHead>Segment</TableHead>
               <TableHead>Type</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Sent</TableHead>
@@ -218,6 +245,18 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
                     )}
                   </TableCell>
                   <TableCell>
+                    {c.target_segment ? (
+                      <Link
+                        href={`/segments`}
+                        className="text-sm text-blue-600 hover:text-blue-700 hover:underline"
+                      >
+                        {c.target_segment}
+                      </Link>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
                     <Badge className={typeBadge.className} variant="secondary">{typeBadge.label}</Badge>
                   </TableCell>
                   <TableCell>
@@ -238,7 +277,7 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary }: Prop
             })}
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-16">
+                <TableCell colSpan={8} className="text-center py-16">
                   <Mail className="h-10 w-10 mx-auto text-muted-foreground/50 mb-3" />
                   <p className="font-medium text-muted-foreground">No campaigns yet</p>
                   <p className="text-sm text-muted-foreground/70 mt-1">Create your first outreach campaign to start generating leads.</p>

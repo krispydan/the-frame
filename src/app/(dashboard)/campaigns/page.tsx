@@ -70,7 +70,18 @@ async function getCampaigns() {
   return { campaigns: rows, summary };
 }
 
-export default async function CampaignsPage() {
+export default async function CampaignsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ segment?: string }>;
+}) {
+  const params = await searchParams;
   const { campaigns, summary } = await getCampaigns();
-  return <CampaignDashboard campaigns={campaigns} summary={summary} />;
+  return (
+    <CampaignDashboard
+      campaigns={campaigns}
+      summary={summary}
+      initialSegmentFilter={params?.segment || "all"}
+    />
+  );
 }

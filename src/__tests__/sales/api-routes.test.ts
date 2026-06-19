@@ -17,6 +17,7 @@ import { POST as postContact, PATCH as patchContact } from "@/app/api/v1/sales/c
 import { GET as getSmartLists, POST as postSmartList, PUT as putSmartList, DELETE as deleteSmartList } from "@/app/api/v1/sales/smart-lists/route";
 import { GET as getDashboard } from "@/app/api/v1/sales/dashboard/route";
 import { GET as getReviewQueue } from "@/app/api/v1/prospects/review/route";
+import { GET as getSegments, POST as postSegment, PATCH as patchSegment } from "@/app/api/v1/sales/segments/route";
 
 // Helper to create params object matching Next.js dynamic route pattern
 function routeParams(id: string) {
@@ -208,6 +209,84 @@ describe("Sales API Routes", () => {
       const db = getTestDb();
       const row = db.prepare("SELECT tags FROM companies WHERE id = 'c1'").get() as any;
       expect(JSON.parse(row.tags)).toContain("vip");
+    });
+  });
+
+  describe("Segments", () => {
+    beforeEach(() => {
+      seedTestData();
+      seedDeals();
+      seedCampaigns();
+    });
+
+    it("GET returns segment email templates alongside scorecard metrics", async () => {
+      const db = getTestDb();
+      db.prepare(`
+        UPDATE segments
+        SET email_templates = ?, description = ?, icp_profile = ?, outreach_notes = ?
+        WHERE id = 'seg1'
+      `).run(
+        "Subject: New impulse-buy display idea",
+        "High-traffic surf shops with sunglass adjacency.",
+        "Owner-led shops that buy quick-turn accessories.",
+        "Lead with tourist demand and display turns.",
+      );
+
+      const req = createRequest("GET", "/api/v1/sales/segments");
+      const res = await getSegments(req);
+      const { status, data } = await parseResponse<any>(res);
+
+      expect(status).toBe(200);
+      expect(data.summary.segments).toBe(1);
+      expect(data.data[0].name).toBe("Surf Shops");
+      expect(data.data[0].email_templates).toContain("impulse-buy display");
+      expect(data.data[0].campaign_count).toBeGreaterThanOrEqual(1);
+    });
+
+    it("POST persists segment email templates", async () => {
+      const req = createRequest("POST", "/api/v1/sales/segments", {
+        body: {
+          name: "Museum Gift Shops",
+          status: "active",
+          description: "Cultural gift stores with tourist traffic.",
+          icp_profile: "Buys story-rich accessories with educational packaging.",
+          email_templates: "Subject: A museum-floor add-on with strong margins",
+          outreach_notes: "Position as a grab-and-go gift item near checkout.",
+        },
+      });
+
+      const res = await postSegment(req);
+      const { status, data } = await parseResponse<any>(res);
+
+      expect(status).toBe(201);
+      expect(data.data.slug).toBe("museum-gift-shops");
+      expect(data.data.email_templates).toContain("museum-floor add-on");
+    });
+
+    it("PATCH updates segment email templates", async () => {
+      const req = createRequest("PATCH", "/api/v1/sales/segments", {
+        body: {
+          id: "seg1",
+          name: "Surf Shops",
+          status: "paused",
+          description: "Updated segment summary.",
+          icp_profile: "Updated ICP",
+          email_templates: "Subject: Fast-turn beach accessory",
+          outreach_notes: "Updated outreach note.",
+        },
+      });
+
+      const res = await patchSegment(req);
+      const { status, data } = await parseResponse<any>(res);
+
+      expect(status).toBe(200);
+      expect(data.data.status).toBe("paused");
+      expect(data.data.email_templates).toContain("Fast-turn beach accessory");
+
+      const db = getTestDb();
+      const row = db.prepare("SELECT email_templates, status FROM segments WHERE id = 'seg1'").get() as any;
+      expect(row.email_templates).toContain("Fast-turn beach accessory");
+      expect(row.status).toBe("paused");
     });
   });
 
