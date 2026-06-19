@@ -14,9 +14,9 @@ import { ShopifyStatusWidget } from "@/modules/integrations/components/shopify-s
 
 
 interface FocusData {
-  wakingToday: { id: string; title: string; company_name: string; snooze_reason: string; value: number }[];
-  reorderDue: { id: string; title: string; company_name: string; reorder_due_at: string; value: number }[];
-  stale: { id: string; title: string; company_name: string; last_activity_at: string; stage: string; value: number }[];
+  wakingToday: { id: string; title: string; company_name: string; segment: string | null; snooze_reason: string; value: number }[];
+  reorderDue: { id: string; title: string; company_name: string; segment: string | null; reorder_due_at: string; value: number }[];
+  stale: { id: string; title: string; company_name: string; segment: string | null; last_activity_at: string; stage: string; value: number }[];
 }
 
 interface DashboardStats {
@@ -340,6 +340,7 @@ export default function DashboardPage() {
                   {focus.wakingToday.map(d => (
                     <Link key={d.id} href={`/pipeline/${d.id}`} className="block p-2 rounded hover:bg-amber-50 dark:hover:bg-amber-900/10 text-sm">
                       <span className="font-medium">{d.company_name}</span>
+                      {d.segment && <span className="text-xs text-gray-500 ml-2">{d.segment}</span>}
                       {d.snooze_reason && <span className="text-xs text-gray-500 block">{d.snooze_reason}</span>}
                     </Link>
                   ))}
@@ -351,6 +352,7 @@ export default function DashboardPage() {
                   {focus.reorderDue.map(d => (
                     <Link key={d.id} href={`/pipeline/${d.id}`} className="block p-2 rounded hover:bg-teal-50 dark:hover:bg-teal-900/10 text-sm">
                       <span className="font-medium">{d.company_name}</span>
+                      {d.segment && <span className="text-xs text-gray-500 ml-2">{d.segment}</span>}
                       {d.value && <span className="text-xs text-green-600 ml-2">${d.value.toLocaleString()}</span>}
                     </Link>
                   ))}
@@ -362,6 +364,7 @@ export default function DashboardPage() {
                   {focus.stale.map(d => (
                     <Link key={d.id} href={`/pipeline/${d.id}`} className="block p-2 rounded hover:bg-red-50 dark:hover:bg-red-900/10 text-sm">
                       <span className="font-medium">{d.company_name}</span>
+                      {d.segment && <span className="text-xs text-gray-500 ml-2">{d.segment}</span>}
                       <span className="text-xs text-gray-500 block">No activity for 7+ days</span>
                     </Link>
                   ))}
