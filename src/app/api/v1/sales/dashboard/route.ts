@@ -68,6 +68,38 @@ export async function GET() {
     LIMIT 10
   `).all() as Array<{ quantity: number; reorder_point: number; sku: string; color_name: string | null; product_name: string; sku_prefix: string }>;
 
+  const topSegments = sqlite.prepare(`
+    SELECT
+      s.name,
+      (
+        SELECT count(*)
+        FROM companies c
+        WHERE c.segment_id = s.id OR lower(trim(c.segment)) = lower(trim(s.name))
+      ) as prospectCount,
+      (
+        SELECT count(*)
+        FROM deals d
+        JOIN companies c ON c.id = d.company_id
+        WHERE (c.segment_id = s.id OR lower(trim(c.segment)) = lower(trim(s.name)))
+          AND d.stage NOT IN ('order_placed', 'not_interested')
+      ) as activeDealCount,
+      (
+        SELECT coalesce(sum(o.total), 0)
+        FROM orders o
+        JOIN companies c ON c.id = o.company_id
+        WHERE (c.segment_id = s.id OR lower(trim(c.segment)) = lower(trim(s.name)))
+          AND o.status NOT IN ('cancelled', 'returned')
+      ) as revenue
+    FROM segments s
+    WHERE exists (
+      SELECT 1
+      FROM companies c
+      WHERE c.segment_id = s.id OR lower(trim(c.segment)) = lower(trim(s.name))
+    )
+    ORDER BY revenue DESC, prospectCount DESC, s.name ASC
+    LIMIT 5
+  `).all() as Array<{ name: string; prospectCount: number; activeDealCount: number; revenue: number }>;
+
   // Enriched activity feed with entity names
   const recentActivity = sqlite.prepare(`
     SELECT
@@ -110,6 +142,7 @@ export async function GET() {
     inventorySkus: inventoryStats.skuCount,
     inventoryValue,
     revenueByChannel,
+    topSegments,
     unreadNotifications,
     lowStockAlerts,
     recentActivity,

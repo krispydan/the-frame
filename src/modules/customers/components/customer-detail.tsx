@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import { TIER_LABELS, TIER_COLORS, HEALTH_COLORS, type CustomerTier, type HealthStatus } from "@/modules/customers/schema";
@@ -10,6 +10,7 @@ interface AccountData {
   company_name: string;
   company_email: string | null;
   company_phone: string | null;
+  segment: string | null;
   tier: CustomerTier;
   lifetime_value: number;
   total_orders: number;
@@ -119,13 +120,14 @@ export function CustomerDetail({
   churnRisk?: ChurnRiskData | null;
 }) {
   const { setOverride } = useBreadcrumbOverride();
+  const [renderNow] = useState(() => Date.now());
   useEffect(() => {
     if (account.company_name) setOverride(account.company_name);
     return () => setOverride(null);
   }, [account.company_name, setOverride]);
 
   const daysUntilReorder = account.next_reorder_estimate
-    ? Math.ceil((new Date(account.next_reorder_estimate).getTime() - Date.now()) / 86400000)
+    ? Math.ceil((new Date(account.next_reorder_estimate).getTime() - renderNow) / 86400000)
     : null;
 
   const retentionInfo = RETENTION_ACTIONS[account.health_status] || RETENTION_ACTIONS.healthy;
@@ -146,6 +148,11 @@ export function CustomerDetail({
             <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${TIER_COLORS[account.tier]}`}>
               {TIER_LABELS[account.tier]}
             </span>
+            {account.segment && (
+              <Link href="/segments" className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
+                {account.segment}
+              </Link>
+            )}
             <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${HEALTH_COLORS[account.health_status]}`}>
               {retentionInfo.icon} {account.health_score} — {account.health_status.replace("_", " ")}
             </span>
@@ -232,9 +239,10 @@ export function CustomerDetail({
       </div>
 
       {/* Account Details */}
-      {(account.payment_terms || account.discount_rate > 0 || account.notes) && (
+      {(account.segment || account.payment_terms || account.discount_rate > 0 || account.notes) && (
         <div className="rounded-lg border bg-white p-4 space-y-2">
           <h2 className="font-semibold">Account Details</h2>
+          {account.segment && <p className="text-sm"><span className="text-gray-500">Segment:</span> {account.segment}</p>}
           {account.payment_terms && <p className="text-sm"><span className="text-gray-500">Payment Terms:</span> {account.payment_terms}</p>}
           {account.discount_rate > 0 && <p className="text-sm"><span className="text-gray-500">Discount:</span> {account.discount_rate}%</p>}
           {account.notes && <p className="text-sm text-gray-600">{account.notes}</p>}

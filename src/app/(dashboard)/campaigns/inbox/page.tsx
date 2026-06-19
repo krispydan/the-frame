@@ -12,6 +12,7 @@ interface ReplyRow {
   campaign_name: string;
   company_id: string;
   company_name: string;
+  segment: string | null;
   contact_name: string;
   email: string | null;
   status: string;
@@ -39,10 +40,12 @@ async function getReplies() {
       coalesce(cl.dismissed, 0) as dismissed,
       cam.name as campaign_name,
       co.name as company_name,
+      COALESCE(s.name, co.segment) as segment,
       coalesce(ct.first_name || ' ' || ct.last_name, co.name) as contact_name
     FROM campaign_leads cl
     JOIN campaigns cam ON cam.id = cl.campaign_id
     LEFT JOIN companies co ON co.id = cl.company_id
+    LEFT JOIN segments s ON s.id = co.segment_id
     LEFT JOIN contacts ct ON ct.id = cl.contact_id
     WHERE cl.status IN ('replied', 'opened') AND cl.reply_text IS NOT NULL
     ORDER BY cl.replied_at DESC

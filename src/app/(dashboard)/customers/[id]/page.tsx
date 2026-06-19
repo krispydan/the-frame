@@ -5,13 +5,63 @@ import { predictReorder } from "@/modules/customers/lib/reorder-engine";
 import { predictChurn } from "@/modules/customers/agents/churn-predictor";
 import { notFound } from "next/navigation";
 
+interface AccountRow {
+  id: string;
+  company_id: string;
+  company_name: string;
+  company_email: string | null;
+  company_phone: string | null;
+  segment: string | null;
+  tier: string;
+  lifetime_value: number;
+  total_orders: number;
+  avg_order_value: number;
+  health_score: number;
+  health_status: string;
+  first_order_at: string | null;
+  last_order_at: string | null;
+  next_reorder_estimate: string | null;
+  payment_terms: string | null;
+  discount_rate: number;
+  notes: string | null;
+}
+
+interface OrderRow {
+  id: string;
+  order_number: string;
+  channel: string;
+  status: string;
+  total: number;
+  placed_at: string;
+}
+
+interface ActivityRow {
+  id: string;
+  type: string;
+  description: string | null;
+  created_at: string;
+}
+
+interface HealthHistoryRow {
+  score: number;
+  status: string;
+  factors: string | null;
+  calculated_at: string;
+}
+
 async function getAccount(id: string) {
   return sqlite.prepare(`
-    SELECT ca.*, c.name as company_name, c.email as company_email, c.phone as company_phone
+    SELECT
+      ca.*,
+      c.name as company_name,
+      c.email as company_email,
+      c.phone as company_phone,
+      COALESCE(s.name, c.segment) as segment
     FROM customer_accounts ca
     JOIN companies c ON c.id = ca.company_id
+    LEFT JOIN segments s ON s.id = c.segment_id
     WHERE ca.id = ?
-  `).get(id) as any;
+  `).get(id) as AccountRow | undefined;
 }
 
 async function getOrders(companyId: string) {
@@ -21,7 +71,7 @@ async function getOrders(companyId: string) {
     WHERE company_id = ?
     ORDER BY placed_at DESC
     LIMIT 20
-  `).all(companyId) as any[];
+  `).all(companyId) as OrderRow[];
 }
 
 async function getActivities(companyId: string) {
@@ -31,7 +81,7 @@ async function getActivities(companyId: string) {
     WHERE company_id = ?
     ORDER BY created_at DESC
     LIMIT 30
-  `).all(companyId) as any[];
+  `).all(companyId) as ActivityRow[];
 }
 
 async function getHealthHistory(accountId: string) {
@@ -41,7 +91,7 @@ async function getHealthHistory(accountId: string) {
     WHERE customer_account_id = ?
     ORDER BY calculated_at DESC
     LIMIT 12
-  `).all(accountId) as any[];
+  `).all(accountId) as HealthHistoryRow[];
 }
 
 export default async function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {

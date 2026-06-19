@@ -22,7 +22,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   DEAL_STAGES,
   DEAL_STAGE_LABELS,
@@ -35,16 +34,14 @@ import {
   Clock,
   RefreshCw,
   GripVertical,
-  ChevronRight,
   Phone,
   Store,
   Globe,
   ShoppingBag,
   CircleDot,
-  Calendar,
   Filter,
 } from "lucide-react";
-import { formatDistanceToNow, differenceInDays, format } from "date-fns";
+import { formatDistanceToNow, differenceInDays } from "date-fns";
 
 interface Deal {
   id: string;
@@ -52,6 +49,7 @@ interface Deal {
   company_name: string;
   company_city: string;
   company_state: string;
+  segment: string | null;
   title: string;
   value: number | null;
   stage: string;
@@ -64,16 +62,8 @@ interface Deal {
   reorder_due_at: string | null;
 }
 
-interface StageSummary {
-  stage: string;
-  label: string;
-  count: number;
-  totalValue: number;
-}
-
 interface Props {
   deals: Deal[];
-  stageSummaries: StageSummary[];
   companies: { id: string; name: string; city: string; state: string }[];
   users: { id: string; name: string; email: string }[];
 }
@@ -93,6 +83,9 @@ const CHANNEL_COLORS: Record<string, string> = {
   direct: "bg-gray-100 text-gray-700",
   other: "bg-gray-100 text-gray-500",
 };
+
+const SEGMENT_BADGE_CLASS =
+  "text-[10px] px-1.5 py-0 bg-slate-100 text-slate-700";
 
 function formatCurrency(val: number) {
   return new Intl.NumberFormat("en-US", {
@@ -152,6 +145,11 @@ function DealCard({
         </div>
 
         <div className="flex items-center gap-1.5 flex-wrap">
+          {deal.segment && (
+            <Badge variant="secondary" className={SEGMENT_BADGE_CLASS}>
+              {deal.segment}
+            </Badge>
+          )}
           {deal.channel && (
             <Badge
               variant="secondary"
@@ -411,15 +409,28 @@ function ReorderTab({ deals, onOpenDetail, onReengage }: { deals: Deal[]; onOpen
 }
 
 // ── Main Board ──
-export function PipelineBoard({ deals: initialDeals, stageSummaries, companies, users }: Props) {
+export function PipelineBoard({ deals: initialDeals, companies, users }: Props) {
   const router = useRouter();
   const [deals, setDeals] = useState(initialDeals);
   const [activeTab, setActiveTab] = useState<"active" | "snoozed" | "reorder">("active");
   const [ownerFilter, setOwnerFilter] = useState<string>("all");
+  const [segmentFilter, setSegmentFilter] = useState<string>("all");
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const draggingDealId = useRef<string | null>(null);
 
-  const filteredDeals = ownerFilter === "all" ? deals : deals.filter((d) => d.owner_id === ownerFilter);
+  const segmentOptions = Array.from(
+    new Set(
+      deals
+        .map((deal) => deal.segment?.trim())
+        .filter((segment): segment is string => Boolean(segment)),
+    ),
+  ).sort();
+
+  const filteredDeals = deals.filter((deal) => {
+    if (ownerFilter !== "all" && deal.owner_id !== ownerFilter) return false;
+    if (segmentFilter !== "all" && deal.segment !== segmentFilter) return false;
+    return true;
+  });
 
   const refreshDeals = useCallback(async () => {
     const res = await fetch("/api/v1/sales/deals?limit=500");
@@ -513,6 +524,22 @@ export function PipelineBoard({ deals: initialDeals, stageSummaries, companies, 
                 <SelectItem value="all">All Deals</SelectItem>
                 {users.map((u) => (
                   <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {segmentOptions.length > 0 && (
+            <Select value={segmentFilter} onValueChange={(v) => setSegmentFilter(v || "all")}>
+              <SelectTrigger className="w-44">
+                <Filter className="h-3.5 w-3.5 mr-1.5" />
+                <SelectValue placeholder="All Segments" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Segments</SelectItem>
+                {segmentOptions.map((segment) => (
+                  <SelectItem key={segment} value={segment}>
+                    {segment}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>

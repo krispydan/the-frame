@@ -1,7 +1,6 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
-import { eventBus } from "@/modules/core/lib/event-bus";
 import { logger } from "@/modules/core/lib/logger";
 
 export async function GET(request: NextRequest) {
@@ -45,9 +44,15 @@ export async function GET(request: NextRequest) {
   const total = (sqlite.prepare(`SELECT count(*) as c FROM deals d ${where}`).get(...vals) as { c: number }).c;
 
   const rows = sqlite.prepare(`
-    SELECT d.*, c.name as company_name, c.city as company_city, c.state as company_state
+    SELECT
+      d.*,
+      c.name as company_name,
+      c.city as company_city,
+      c.state as company_state,
+      COALESCE(s.name, c.segment) as segment
     FROM deals d
     LEFT JOIN companies c ON c.id = d.company_id
+    LEFT JOIN segments s ON s.id = c.segment_id
     ${where}
     ORDER BY d.last_activity_at DESC
     LIMIT ? OFFSET ?

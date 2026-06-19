@@ -14,9 +14,9 @@ import { ShopifyStatusWidget } from "@/modules/integrations/components/shopify-s
 
 
 interface FocusData {
-  wakingToday: { id: string; title: string; company_name: string; snooze_reason: string; value: number }[];
-  reorderDue: { id: string; title: string; company_name: string; reorder_due_at: string; value: number }[];
-  stale: { id: string; title: string; company_name: string; last_activity_at: string; stage: string; value: number }[];
+  wakingToday: { id: string; title: string; company_name: string; segment: string | null; snooze_reason: string; value: number }[];
+  reorderDue: { id: string; title: string; company_name: string; segment: string | null; reorder_due_at: string; value: number }[];
+  stale: { id: string; title: string; company_name: string; segment: string | null; last_activity_at: string; stage: string; value: number }[];
 }
 
 interface DashboardStats {
@@ -32,6 +32,7 @@ interface DashboardStats {
   inventorySkus: number;
   inventoryValue: number;
   revenueByChannel: Array<{ channel: string; revenue: number; orderCount: number }>;
+  topSegments: Array<{ name: string; prospectCount: number; activeDealCount: number; revenue: number }>;
   unreadNotifications: number;
   lowStockAlerts: Array<{
     quantity: number;
@@ -250,6 +251,41 @@ export default function DashboardPage() {
         </Card>
       )}
 
+      {stats?.topSegments && stats.topSegments.length > 0 && (
+        <Card className="mb-6">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-slate-500" /> Top Segments
+              </CardTitle>
+              <Link href="/segments">
+                <Button variant="ghost" size="sm" className="text-xs">View Segments <ArrowRight className="w-3 h-3 ml-1" /></Button>
+              </Link>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+              {stats.topSegments.map((segment) => (
+                <Link
+                  key={segment.name}
+                  href={`/prospects?segment=${encodeURIComponent(segment.name)}`}
+                  className="block rounded-lg border border-gray-100 bg-gray-50 p-3 transition-shadow hover:shadow-sm dark:border-gray-700 dark:bg-gray-800"
+                >
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">{segment.name}</p>
+                  <p className="mt-2 text-lg font-bold text-gray-900 dark:text-white">${segment.revenue.toLocaleString()}</p>
+                  <div className="mt-1 text-xs text-gray-500">
+                    {segment.prospectCount.toLocaleString()} prospects
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {segment.activeDealCount.toLocaleString()} active deals
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Low Stock Alerts */}
       {stats?.lowStockAlerts && stats.lowStockAlerts.length > 0 && (
         <Card className="mb-6 border-amber-200 dark:border-amber-800">
@@ -304,6 +340,7 @@ export default function DashboardPage() {
                   {focus.wakingToday.map(d => (
                     <Link key={d.id} href={`/pipeline/${d.id}`} className="block p-2 rounded hover:bg-amber-50 dark:hover:bg-amber-900/10 text-sm">
                       <span className="font-medium">{d.company_name}</span>
+                      {d.segment && <span className="text-xs text-gray-500 ml-2">{d.segment}</span>}
                       {d.snooze_reason && <span className="text-xs text-gray-500 block">{d.snooze_reason}</span>}
                     </Link>
                   ))}
@@ -315,6 +352,7 @@ export default function DashboardPage() {
                   {focus.reorderDue.map(d => (
                     <Link key={d.id} href={`/pipeline/${d.id}`} className="block p-2 rounded hover:bg-teal-50 dark:hover:bg-teal-900/10 text-sm">
                       <span className="font-medium">{d.company_name}</span>
+                      {d.segment && <span className="text-xs text-gray-500 ml-2">{d.segment}</span>}
                       {d.value && <span className="text-xs text-green-600 ml-2">${d.value.toLocaleString()}</span>}
                     </Link>
                   ))}
@@ -326,6 +364,7 @@ export default function DashboardPage() {
                   {focus.stale.map(d => (
                     <Link key={d.id} href={`/pipeline/${d.id}`} className="block p-2 rounded hover:bg-red-50 dark:hover:bg-red-900/10 text-sm">
                       <span className="font-medium">{d.company_name}</span>
+                      {d.segment && <span className="text-xs text-gray-500 ml-2">{d.segment}</span>}
                       <span className="text-xs text-gray-500 block">No activity for 7+ days</span>
                     </Link>
                   ))}

@@ -37,6 +37,7 @@ interface LeadRow {
   id: string;
   company_id: string;
   company_name: string;
+  segment: string | null;
   first_name: string | null;
   last_name: string | null;
   email: string | null;
@@ -64,10 +65,12 @@ async function getCampaign(id: string) {
   const leads = sqlite.prepare(`
     SELECT cl.id, cl.company_id, cl.email, cl.status, cl.reply_text, cl.reply_classification,
       cl.sent_at, cl.opened_at, cl.replied_at,
-      co.name as company_name, co.icp_tier, co.icp_score, co.icp_reasoning,
+      co.name as company_name, COALESCE(s.name, co.segment) as segment,
+      co.icp_tier, co.icp_score, co.icp_reasoning,
       ct.first_name, ct.last_name
     FROM campaign_leads cl
     LEFT JOIN companies co ON co.id = cl.company_id
+    LEFT JOIN segments s ON s.id = co.segment_id
     LEFT JOIN contacts ct ON ct.id = cl.contact_id
     WHERE cl.campaign_id = ?
     ORDER BY cl.created_at DESC
