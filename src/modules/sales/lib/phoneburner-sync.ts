@@ -509,9 +509,14 @@ export async function pushCampaignToPhoneBurner(
     try {
       // Lookup-first dedup. If PB already has a contact at this phone,
       // adopt the existing id locally. Skip the create entirely.
-      const existingId = await phoneBurnerClient
-        .searchContactsByPhone(p.payload.phone)
-        .catch(() => null); // search failure is non-fatal — fall through to create
+      // payload.phone is technically optional on PbContactPayload but
+      // buildContactPayload always sets it (the no_phone skip catches
+      // missing phones upstream) — the guard is just for the type.
+      const existingId = p.payload.phone
+        ? await phoneBurnerClient
+            .searchContactsByPhone(p.payload.phone)
+            .catch(() => null) // search failure is non-fatal — fall through to create
+        : null;
       if (existingId) {
         stampStmt.run(existingId, p.lead.lead_id);
         summary.skipped_already_in_pb++;
