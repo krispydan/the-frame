@@ -181,7 +181,7 @@ async function pushCampaigns(): Promise<{ campaigns: number; leads: number; erro
              co.country   as country,
              co.industry  as industry,
              co.category  as category,
-             co.segment   as segment,
+             COALESCE(s.name, co.segment) as segment,
              co.icp_tier  as icp_tier,
              co.icp_score as icp_score,
              co.ecom_platform                as ecom_platform,
@@ -207,6 +207,7 @@ async function pushCampaigns(): Promise<{ campaigns: number; leads: number; erro
              ct.title      as contact_title
       FROM campaign_leads cl
       LEFT JOIN companies co ON co.id = cl.company_id
+      LEFT JOIN segments s ON s.id = co.segment_id
       LEFT JOIN contacts ct ON ct.id = cl.contact_id
       WHERE cl.campaign_id = ? AND cl.instantly_lead_id IS NULL AND cl.email IS NOT NULL
         AND NOT EXISTS (
