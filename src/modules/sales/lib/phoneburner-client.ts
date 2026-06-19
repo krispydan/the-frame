@@ -103,10 +103,34 @@ function extractFolder(raw: unknown): PbFolder | null {
     };
   }
 
-  // Wrapped — try the common envelope keys.
-  for (const key of ["folder", "data", "result", "category", "item"]) {
+  // Wrapped — try the common envelope keys. Include the plural list
+  // keys (`folders`, `items`) because PB's createFolder actually
+  // returns the new record nested under `folders` as a numeric-keyed
+  // pseudo-array — captured 2026-06-19:
+  //   { folders: { "0": { id, folder_id, ... }, total_results, ... } }
+  for (const key of [
+    "folder",
+    "folders",
+    "data",
+    "result",
+    "category",
+    "categories",
+    "item",
+    "items",
+  ]) {
     if (key in o) {
       const f = extractFolder(o[key]);
+      if (f) return f;
+    }
+  }
+
+  // Numeric-keyed pseudo-array — { "0": {...}, "1": {...}, ...meta }.
+  // PB mixes folder records with pagination metadata at the same
+  // level; iterate the integer-keyed entries and return the first
+  // one that resolves to a record with an id.
+  for (const k of Object.keys(o)) {
+    if (/^\d+$/.test(k)) {
+      const f = extractFolder(o[k]);
       if (f) return f;
     }
   }
@@ -314,9 +338,26 @@ class PhoneBurnerClient {
       if (Array.isArray(x)) return x;
       if (x && typeof x === "object") {
         const o = x as Record<string, unknown>;
+        // First try real arrays nested under known list keys.
         for (const key of ["data", "folders", "items", "result", "categories"]) {
           if (Array.isArray(o[key])) return o[key] as unknown[];
+          // PB's actual shape: o.folders is an OBJECT with numeric
+          // string keys ("0", "1") mixed with pagination metadata.
+          const inner = o[key];
+          if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+            const innerO = inner as Record<string, unknown>;
+            const numericKeys = Object.keys(innerO).filter((k) =>
+              /^\d+$/.test(k),
+            );
+            if (numericKeys.length) {
+              return numericKeys.map((k) => innerO[k]);
+            }
+          }
         }
+        // Last resort: the top-level object itself is a numeric-keyed
+        // pseudo-array (rare but seen in some PB list responses).
+        const topNumeric = Object.keys(o).filter((k) => /^\d+$/.test(k));
+        if (topNumeric.length) return topNumeric.map((k) => o[k]);
       }
       return [];
     }
