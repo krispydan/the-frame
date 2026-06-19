@@ -26,6 +26,7 @@ interface Segment {
   slug: string;
   description: string | null;
   icp_profile: string | null;
+  email_templates: string | null;
   outreach_notes: string | null;
   status: "active" | "paused" | "retired";
   prospect_count: number;
@@ -55,6 +56,7 @@ type SegmentFormState = {
   status: Segment["status"];
   description: string;
   icp_profile: string;
+  email_templates: string;
   outreach_notes: string;
 };
 
@@ -64,6 +66,7 @@ const emptyForm: SegmentFormState = {
   status: "active",
   description: "",
   icp_profile: "",
+  email_templates: "",
   outreach_notes: "",
 };
 
@@ -109,6 +112,7 @@ export default function SegmentsPage() {
       status: segment.status,
       description: segment.description || "",
       icp_profile: segment.icp_profile || "",
+      email_templates: segment.email_templates || "",
       outreach_notes: segment.outreach_notes || "",
     });
     setError(null);
@@ -156,6 +160,15 @@ export default function SegmentsPage() {
     return (
       <div className="text-[11px] text-muted-foreground">
         Outreach: {segment.outreach_notes}
+      </div>
+    );
+  }
+
+  function renderEmailTemplate(segment: Segment) {
+    if (!segment.email_templates) return null;
+    return (
+      <div className="text-[11px] text-muted-foreground">
+        Template: {segment.email_templates}
       </div>
     );
   }
@@ -243,6 +256,7 @@ export default function SegmentsPage() {
                           <div className="text-xs text-muted-foreground">
                             {renderSegmentSummary(segment)}
                           </div>
+                          {renderEmailTemplate(segment)}
                           {renderOutreachNote(segment)}
                         </div>
                       </TableCell>
@@ -363,6 +377,17 @@ export default function SegmentsPage() {
                 value={form.icp_profile}
                 onChange={(event) => setForm((prev) => ({ ...prev, icp_profile: event.target.value }))}
                 placeholder="What makes a strong lead here? Store traits, buyer behavior, merchandising fit, price sensitivity..."
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="segment-templates">Email Templates</Label>
+              <Textarea
+                id="segment-templates"
+                rows={4}
+                value={form.email_templates}
+                onChange={(event) => setForm((prev) => ({ ...prev, email_templates: event.target.value }))}
+                placeholder="Core email angle, subject ideas, proof points, or full template draft..."
               />
             </div>
 

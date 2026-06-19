@@ -8,6 +8,7 @@ type SegmentRow = {
   slug: string;
   description: string | null;
   icp_profile: string | null;
+  email_templates: string | null;
   outreach_notes: string | null;
   status: string;
   prospect_count: number;
@@ -28,6 +29,7 @@ export async function GET() {
       s.slug,
       s.description,
       s.icp_profile,
+      s.email_templates,
       s.outreach_notes,
       s.status,
       (
@@ -127,15 +129,16 @@ export async function POST(request: NextRequest) {
   const status = normalizeSegmentStatus(body?.status);
   const description = typeof body?.description === "string" ? body.description.trim() || null : null;
   const icpProfile = typeof body?.icp_profile === "string" ? body.icp_profile.trim() || null : null;
+  const emailTemplates = typeof body?.email_templates === "string" ? body.email_templates.trim() || null : null;
   const outreachNotes = typeof body?.outreach_notes === "string" ? body.outreach_notes.trim() || null : null;
 
   sqlite.prepare(`
-    INSERT INTO segments (id, name, slug, description, icp_profile, outreach_notes, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, name, slug, description, icpProfile, outreachNotes, status, now, now);
+    INSERT INTO segments (id, name, slug, description, icp_profile, email_templates, outreach_notes, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, name, slug, description, icpProfile, emailTemplates, outreachNotes, status, now, now);
 
   const segment = sqlite.prepare(`
-    SELECT id, name, slug, description, icp_profile, outreach_notes, status
+    SELECT id, name, slug, description, icp_profile, email_templates, outreach_notes, status
     FROM segments
     WHERE id = ?
   `).get(id);
@@ -161,20 +164,21 @@ export async function PATCH(request: NextRequest) {
   const status = normalizeSegmentStatus(body?.status);
   const description = typeof body?.description === "string" ? body.description.trim() || null : null;
   const icpProfile = typeof body?.icp_profile === "string" ? body.icp_profile.trim() || null : null;
+  const emailTemplates = typeof body?.email_templates === "string" ? body.email_templates.trim() || null : null;
   const outreachNotes = typeof body?.outreach_notes === "string" ? body.outreach_notes.trim() || null : null;
 
   const result = sqlite.prepare(`
     UPDATE segments
-    SET name = ?, slug = ?, description = ?, icp_profile = ?, outreach_notes = ?, status = ?, updated_at = ?
+    SET name = ?, slug = ?, description = ?, icp_profile = ?, email_templates = ?, outreach_notes = ?, status = ?, updated_at = ?
     WHERE id = ?
-  `).run(name, slug, description, icpProfile, outreachNotes, status, now, id);
+  `).run(name, slug, description, icpProfile, emailTemplates, outreachNotes, status, now, id);
 
   if (result.changes === 0) {
     return NextResponse.json({ error: "segment not found" }, { status: 404 });
   }
 
   const segment = sqlite.prepare(`
-    SELECT id, name, slug, description, icp_profile, outreach_notes, status
+    SELECT id, name, slug, description, icp_profile, email_templates, outreach_notes, status
     FROM segments
     WHERE id = ?
   `).get(id);
