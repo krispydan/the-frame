@@ -476,6 +476,77 @@ class PhoneBurnerClient {
     return await this.request<PbContactResponse>("PUT", `/contacts/${id}`, patch);
   }
 
+  /**
+   * Look up a contact by phone in the connected PhoneBurner account.
+   *
+   * Used to dedup before createContact — Daniel: "we should never
+   * override a contact in phone burner." If a phone already exists in
+   * PB (manual import, prior campaign, etc.) we stamp our local
+   * campaign_leads row with the existing id rather than POSTing a
+   * duplicate.
+   *
+   * Returns the first match's id or null. Tolerates the same
+   * envelope-variation PB uses everywhere else: array, {data:[]},
+   * {contacts:{...numeric-keyed}}, etc. — see extractFolder for the
+   * historical justification.
+   *
+   * The `phone` arg should be the same 10-digit US string we'd send
+   * on create (formatToPbPhone output). PB's documented filter
+   * parameter is `phone_number`; we send both `phone_number` and
+   * `phone` for safety, similar to how createFolder sends both
+   * `name` and `folder_name`.
+   */
+  async searchContactsByPhone(phone: string): Promise<string | null> {
+    if (!phone) return null;
+    const raw = await this.request<Record<string, unknown>>(
+      "GET",
+      "/contacts",
+      undefined,
+      { phone_number: phone, phone, page_size: 5 },
+    );
+
+    // Walk the response for the first id we can find. Reuses the
+    // same logic as folder extraction — PB list responses often
+    // arrive as { contacts: { "0": {...}, total_results, page, ... } }.
+    function walk(o: unknown, depth = 0): string | null {
+      if (depth > 6 || !o || typeof o !== "object") return null;
+      if (Array.isArray(o)) {
+        for (const item of o) {
+          const id = walk(item, depth + 1);
+          if (id) return id;
+        }
+        return null;
+      }
+      const obj = o as Record<string, unknown>;
+      // Direct hit
+      const direct =
+        (typeof obj.id === "string" && obj.id) ||
+        (typeof obj.id === "number" && String(obj.id)) ||
+        (typeof obj.user_id === "string" && obj.user_id) ||
+        (typeof obj.user_id === "number" && String(obj.user_id)) ||
+        (typeof obj.contact_id === "string" && obj.contact_id) ||
+        (typeof obj.contact_id === "number" && String(obj.contact_id));
+      if (direct) {
+        // But only if this object also has a phone (otherwise we
+        // matched some envelope or count field that happens to have
+        // an `id`). PB contact records always include the phone.
+        const hasPhone =
+          typeof obj.phone === "string" ||
+          typeof obj.phone_number === "string" ||
+          typeof obj.cell_phone === "string" ||
+          typeof obj.work_phone === "string";
+        if (hasPhone) return String(direct);
+      }
+      // Recurse — pseudo-array numeric keys included via Object.values.
+      for (const v of Object.values(obj)) {
+        const id = walk(v, depth + 1);
+        if (id) return id;
+      }
+      return null;
+    }
+    return walk(raw);
+  }
+
   // ── Calls (polling source) ──
   /**
    * Fetch recent calls since `since` (ISO timestamp). PB's exact list

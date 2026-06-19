@@ -39,6 +39,12 @@ interface PushSummary {
   skipped_no_phone: number;
   skipped_no_website: number;
   skipped_already_pushed: number;
+  /**
+   * Phone matched an existing PB contact — we stamped the local row
+   * with PB's existing id instead of creating a duplicate. Daniel's
+   * rule: never override an existing PhoneBurner contact.
+   */
+  skipped_already_in_pb: number;
   errors: Array<{ leadId: string; reason: string }>;
 }
 
@@ -454,6 +460,7 @@ export async function pushCampaignToPhoneBurner(
     skipped_no_phone: 0,
     skipped_no_website: 0,
     skipped_already_pushed: 0,
+    skipped_already_in_pb: 0,
     errors: [],
   };
 
@@ -488,11 +495,28 @@ export async function pushCampaignToPhoneBurner(
   }
 
   // Single-contact endpoint — concurrency-limited, retry inside the client.
+  //
+  // CRITICAL: search PhoneBurner BEFORE creating. Per Daniel's
+  // 2026-06-19 directive: "we should never override a contact in
+  // phone burner." If the phone already exists in PB (manual import,
+  // earlier campaign push that wasn't tracked, etc.), stamp the
+  // existing PB id onto our local row and skip — never call
+  // createContact and never overwrite.
   const stampStmt = sqlite.prepare(
     "UPDATE campaign_leads SET phoneburner_contact_id = ? WHERE id = ?",
   );
   await runWithConcurrency(toPush, 5, async (p) => {
     try {
+      // Lookup-first dedup. If PB already has a contact at this phone,
+      // adopt the existing id locally. Skip the create entirely.
+      const existingId = await phoneBurnerClient
+        .searchContactsByPhone(p.payload.phone)
+        .catch(() => null); // search failure is non-fatal — fall through to create
+      if (existingId) {
+        stampStmt.run(existingId, p.lead.lead_id);
+        summary.skipped_already_in_pb++;
+        return;
+      }
       const created = await phoneBurnerClient.createContact(p.payload);
       stampStmt.run(created.id, p.lead.lead_id);
       summary.pushed++;

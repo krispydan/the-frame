@@ -515,11 +515,23 @@ function ChannelsCard({ campaign }: { campaign: Campaign }) {
         toast.error("PhoneBurner push failed", { description: data?.error ?? `HTTP ${r.status}` });
         return;
       }
-      const pushed = data?.summary?.pushed ?? data?.pushed ?? 0;
-      const skipped = data?.summary?.skipped_no_phone ?? 0;
+      const s = data?.summary ?? data ?? {};
+      const pushed = s.pushed ?? 0;
+      const noPhone = s.skipped_no_phone ?? 0;
+      const noWeb = s.skipped_no_website ?? 0;
+      const alreadyPushed = s.skipped_already_pushed ?? 0;
+      const alreadyInPb = s.skipped_already_in_pb ?? 0;
+      const parts: string[] = [];
+      if (alreadyInPb) parts.push(`${alreadyInPb} matched existing PB contact`);
+      if (alreadyPushed) parts.push(`${alreadyPushed} already pushed`);
+      if (noPhone) parts.push(`${noPhone} no phone`);
+      if (noWeb) parts.push(`${noWeb} no website`);
+      const desc = parts.length
+        ? `Skipped: ${parts.join(", ")}${dryRun ? " — no API calls made" : ""}`
+        : dryRun ? "No API calls made" : "All leads processed";
       toast.success(
-        dryRun ? "Dry run complete" : `Pushed ${pushed} contacts to PhoneBurner`,
-        { description: `Skipped ${skipped} (no phone)${dryRun ? " — no API calls made" : ""}` },
+        dryRun ? "Dry run complete" : `Pushed ${pushed} new contacts to PhoneBurner`,
+        { description: desc },
       );
     } catch (e) {
       toast.error("PhoneBurner push failed", { description: e instanceof Error ? e.message : String(e) });
