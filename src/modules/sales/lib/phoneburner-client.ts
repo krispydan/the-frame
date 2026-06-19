@@ -270,14 +270,38 @@ class PhoneBurnerClient {
     folder_name: string;
     description?: string;
     parent_id?: string | null;
+    /**
+     * PB's folder-create endpoint requires owner_id (same as contact
+     * create — verified empirically 2026-06-19 after a 40004 "required
+     * field not set" on this call). Caller must supply it. Null/missing
+     * → PB rejects with 400.
+     */
+    owner_id: string;
   }): Promise<PbFolder> {
+    // Strip non-ASCII from name + description. PB's tenant 2026-06
+    // rejects em-dashes / smart quotes silently with a generic 40004,
+    // so we pre-clean to ASCII before sending.
+    const asciiOnly = (s: string) =>
+      s
+        .replace(/[‐-―]/g, "-")   // various dash chars → hyphen
+        .replace(/[“”]/g, '"')    // smart double quotes
+        .replace(/[‘’]/g, "'")    // smart single quotes
+        .replace(/[^\x20-\x7E]/g, "");      // drop the rest
+    const name = asciiOnly(opts.folder_name).slice(0, 64);
+    const description = asciiOnly(opts.description ?? "Synced from The Frame").slice(0, 250);
+
+    // Send BOTH `name` and `folder_name` — PB's documented field name
+    // varies between v1 and current; sending both is harmless and
+    // lets the API pick the one it recognizes.
     const raw = await this.request<PbFolder | { folder?: PbFolder; data?: PbFolder }>(
       "POST",
       "/folders",
       {
-        folder_name: opts.folder_name,
-        description: opts.description ?? "Synced from The Frame",
+        name,
+        folder_name: name,
+        description,
         parent_id: opts.parent_id ?? null,
+        owner_id: opts.owner_id,
       },
     );
     if ("id" in raw && raw.id) return raw as PbFolder;

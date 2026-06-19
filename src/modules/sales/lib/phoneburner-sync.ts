@@ -113,9 +113,14 @@ async function ensurePbFolder(campaign: CampaignRow): Promise<string> {
   if (match) {
     folderId = match.id;
   } else {
+    // PB's createFolder requires owner_id (verified empirically — was
+    // the source of the 40004 "required field not set" on first push).
+    // Use the same owner we stamp on every contact create.
+    const ownerId = await resolveOwnerId();
     const created = await phoneBurnerClient.createFolder({
       folder_name: campaign.name,
-      description: `Synced from The Frame — campaign ${campaign.id}`,
+      description: `Synced from The Frame - campaign ${campaign.id}`,
+      owner_id: ownerId,
     });
     folderId = created.id;
   }
