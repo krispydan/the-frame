@@ -1257,6 +1257,36 @@ try {
     WHEN NEW.phone IS NOT NULL AND TRIM(NEW.phone) <> ''
     BEGIN ${mirrorBody} END;
   `);
+
+  // ── Phone snapshot parachute ────────────────────────────────────
+  //
+  // Before we drop companies.phone in a follow-up commit, capture the
+  // (company_id, phone) pair for every non-empty legacy row into a
+  // side table. If anything goes wrong with the migration, restore
+  // is one INSERT statement. Idempotent: only inserts rows the
+  // snapshot doesn't already have.
+  //
+  // The snapshot can be dropped 30-90 days after the column drop
+  // once we're confident nothing was lost.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS _legacy_companies_phone_snapshot (
+    company_id TEXT PRIMARY KEY NOT NULL,
+    phone TEXT NOT NULL,
+    captured_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  // Guard against the column having already been dropped — once
+  // companies.phone is gone, this INSERT errors. We tolerate the
+  // failure silently because the snapshot is already populated.
+  try {
+    sqlite.exec(`
+      INSERT OR IGNORE INTO _legacy_companies_phone_snapshot (company_id, phone)
+      SELECT c.id, TRIM(c.phone)
+        FROM companies c
+       WHERE TRIM(COALESCE(c.phone, '')) <> ''
+    `);
+  } catch {
+    /* companies.phone column already dropped — snapshot is final */
+  }
+
   sqlite.exec(`CREATE TABLE IF NOT EXISTS magic_link_tokens (
     id TEXT PRIMARY KEY NOT NULL,
     email TEXT NOT NULL,
