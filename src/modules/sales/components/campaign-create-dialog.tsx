@@ -32,6 +32,14 @@ export function CampaignCreateDialog({ open, onClose }: Props) {
   const [name, setName] = useState("");
   const [type, setType] = useState("email_sequence");
   const [description, setDescription] = useState("");
+  // Delivery channels — multi-select. Defaults to Instantly only to
+  // match the existing UX; user toggles PhoneBurner / Direct Mail
+  // on per campaign.
+  const [channels, setChannels] = useState<string[]>(["instantly"]);
+  const toggleChannel = (c: string) =>
+    setChannels((prev) =>
+      prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c],
+    );
 
   // Step 2
   const [targetType, setTargetType] = useState<"smart_list" | "segment">("smart_list");
@@ -63,7 +71,7 @@ export function CampaignCreateDialog({ open, onClose }: Props) {
   }, [step, smartListId, smartLists]);
 
   const canNext = () => {
-    if (step === 1) return name.trim().length > 0;
+    if (step === 1) return name.trim().length > 0 && channels.length > 0;
     if (step === 2) return targetType === "segment" ? segment.trim().length > 0 : smartListId.length > 0;
     return true;
   };
@@ -83,6 +91,7 @@ export function CampaignCreateDialog({ open, onClose }: Props) {
           variant_a_subject: type === "ab_test" ? variantASubject : undefined,
           variant_b_subject: type === "ab_test" ? variantBSubject : undefined,
           instantly_campaign_id: instantlyCampaignId || undefined,
+          channels,
         }),
       });
       const data = await res.json();
@@ -121,16 +130,49 @@ export function CampaignCreateDialog({ open, onClose }: Props) {
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Q2 Boutique Outreach" />
             </div>
             <div>
-              <Label>Type</Label>
+              <Label>Type <span className="text-muted-foreground text-xs font-normal">(intent — what the campaign IS)</span></Label>
               <Select value={type} onValueChange={(v) => v && setType(v)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="email_sequence">Email Sequence</SelectItem>
-                  <SelectItem value="calling">Calling</SelectItem>
+                  <SelectItem value="email_sequence">Cold Outreach</SelectItem>
                   <SelectItem value="re_engagement">Re-engagement</SelectItem>
                   <SelectItem value="ab_test">A/B Test</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* Multi-channel selector — campaigns can ship through
+                Instantly, PhoneBurner, and Direct Mail in parallel. */}
+            <div>
+              <Label>Channels <span className="text-muted-foreground text-xs font-normal">(how it ships — pick one or more)</span></Label>
+              <div className="grid grid-cols-3 gap-2 mt-1">
+                {[
+                  { key: "instantly", label: "📧 Email (Instantly)", available: true },
+                  { key: "phoneburner", label: "📞 Calls (PhoneBurner)", available: true },
+                  { key: "direct_mail", label: "✉️ Direct Mail", available: false },
+                ].map((c) => {
+                  const on = channels.includes(c.key);
+                  return (
+                    <button
+                      key={c.key}
+                      type="button"
+                      onClick={() => c.available && toggleChannel(c.key)}
+                      disabled={!c.available}
+                      className={`px-3 py-2 rounded-md border text-xs font-medium text-left transition ${
+                        !c.available
+                          ? "bg-gray-50 text-gray-400 cursor-not-allowed border-dashed"
+                          : on
+                            ? "bg-blue-50 border-blue-300 text-blue-800 dark:bg-blue-950 dark:border-blue-700 dark:text-blue-200"
+                            : "bg-white dark:bg-gray-800 border-gray-300 hover:bg-gray-50 text-gray-700"
+                      }`}
+                      title={c.available ? undefined : "Vendor not wired up yet"}
+                    >
+                      {on && c.available && <span className="mr-1">✓</span>}
+                      {c.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             {type === "ab_test" && (
               <div className="space-y-2">
@@ -199,6 +241,14 @@ export function CampaignCreateDialog({ open, onClose }: Props) {
                 <span className="font-medium">{name}</span>
                 <span className="text-muted-foreground">Type:</span>
                 <Badge variant="secondary">{type.replace("_", " ")}</Badge>
+                <span className="text-muted-foreground">Channels:</span>
+                <span className="flex flex-wrap gap-1">
+                  {channels.map((c) => (
+                    <Badge key={c} variant="outline" className="text-xs">
+                      {c === "instantly" ? "Email" : c === "phoneburner" ? "Calls" : "Mail"}
+                    </Badge>
+                  ))}
+                </span>
                 <span className="text-muted-foreground">Target:</span>
                 <span>{targetType === "smart_list" ? smartLists.find((l) => l.id === smartListId)?.name : "Manual segment"}</span>
                 <span className="text-muted-foreground">Contacts:</span>

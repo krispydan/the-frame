@@ -44,6 +44,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
+  // channels[] is special-cased: validated against the known set and
+  // JSON-encoded on the way to SQLite. Used by the campaign detail
+  // page's "+ Add channel" flow (e.g. adding PhoneBurner to an
+  // already-running Instantly campaign).
+  if (Array.isArray(body.channels)) {
+    const VALID = new Set(["instantly", "phoneburner", "direct_mail"]);
+    const cleaned = body.channels.filter((c: unknown) => typeof c === "string" && VALID.has(c));
+    if (cleaned.length > 0) {
+      sets.push("channels = ?");
+      vals.push(JSON.stringify(cleaned));
+    }
+  }
+
   if (sets.length === 0) return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   sets.push("updated_at = datetime('now')");
   vals.push(id);

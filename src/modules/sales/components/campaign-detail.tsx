@@ -13,8 +13,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ArrowLeft, Send, Eye, MessageSquare, AlertTriangle, Trophy, Zap, ExternalLink, Sparkles, ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowLeft, Send, Eye, MessageSquare, AlertTriangle, Trophy, Zap, ExternalLink, Sparkles, ChevronDown, ChevronUp, Mail, Phone, Inbox, Loader2 } from "lucide-react";
 import Link from "next/link";
+import { toast } from "sonner";
 
 interface Lead {
   id: string;
@@ -41,6 +42,8 @@ interface Campaign {
   status: string;
   description: string | null;
   instantly_campaign_id: string | null;
+  phoneburner_folder_id?: string | null;
+  channels?: string | null;
   variant_a_subject: string | null;
   variant_b_subject: string | null;
   sent: number;
@@ -244,6 +247,10 @@ export function CampaignDetail({ campaign }: { campaign: Campaign }) {
           <p className="text-muted-foreground">{campaign.description}</p>
         )}
 
+        {/* Multi-channel delivery card — each channel shows its own
+            status + push/configure controls. */}
+        <ChannelsCard campaign={campaign} />
+
         {/* ICP Classification Result Banner */}
         {icpResult && (
           <Card className="border-green-200 bg-green-50">
@@ -429,5 +436,210 @@ function LeadTable({ leads, icpFilter, sortBy }: { leads: Lead[]; icpFilter: str
         </TableBody>
       </Table>
     </Card>
+  );
+}
+
+/**
+ * Multi-channel delivery card. Shows one row per channel the campaign
+ * ships through (Email/Calls/Mail). Each row has:
+ *   - a label + icon
+ *   - the per-channel external ID once set (Instantly campaign id,
+ *     PB folder id) — meaning "wired up successfully"
+ *   - a primary action: Push to that channel, or Open the external
+ *     vendor UI if already configured
+ *   - a "+ Add channel" affordance below the list for adding a new
+ *     channel to an existing campaign
+ */
+function ChannelsCard({ campaign }: { campaign: Campaign }) {
+  const enabled: string[] = useMemo(() => {
+    if (!campaign.channels) return ["instantly"];
+    try {
+      const parsed = JSON.parse(campaign.channels);
+      return Array.isArray(parsed) ? parsed : ["instantly"];
+    } catch {
+      return ["instantly"];
+    }
+  }, [campaign.channels]);
+
+  const [pushingPb, setPushingPb] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [busyAdd, setBusyAdd] = useState(false);
+
+  async function pushToPhoneBurner(dryRun: boolean) {
+    setPushingPb(true);
+    try {
+      const r = await fetch("/api/v1/integrations/phoneburner/push-campaign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaignId: campaign.id, dryRun }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        toast.error("PhoneBurner push failed", { description: data?.error ?? `HTTP ${r.status}` });
+        return;
+      }
+      const pushed = data?.summary?.pushed ?? data?.pushed ?? 0;
+      const skipped = data?.summary?.skipped_no_phone ?? 0;
+      toast.success(
+        dryRun ? "Dry run complete" : `Pushed ${pushed} contacts to PhoneBurner`,
+        { description: `Skipped ${skipped} (no phone)${dryRun ? " — no API calls made" : ""}` },
+      );
+    } catch (e) {
+      toast.error("PhoneBurner push failed", { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setPushingPb(false);
+    }
+  }
+
+  async function addChannel(c: string) {
+    setBusyAdd(true);
+    try {
+      const next = Array.from(new Set([...enabled, c]));
+      const r = await fetch(`/api/v1/sales/campaigns/${campaign.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channels: next }),
+      });
+      if (!r.ok) {
+        toast.error("Failed to add channel");
+        return;
+      }
+      toast.success(`Added ${c === "instantly" ? "Email" : c === "phoneburner" ? "Calls" : "Mail"} channel`);
+      // Refresh so the new channel row renders.
+      window.location.reload();
+    } finally {
+      setBusyAdd(false);
+      setAdding(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Delivery Channels</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {enabled.includes("instantly") && (
+          <ChannelRow
+            icon={<Mail className="w-4 h-4" />}
+            label="Email (Instantly)"
+            connected={!!campaign.instantly_campaign_id}
+            connectionDetail={campaign.instantly_campaign_id ? `Campaign ${campaign.instantly_campaign_id.slice(0, 8)}…` : "Not linked yet"}
+            primaryAction={
+              campaign.instantly_campaign_id ? (
+                <a
+                  href={`https://app.instantly.ai/app/campaign/${campaign.instantly_campaign_id}/analytics`}
+                  target="_blank"
+                  rel="noopener"
+                >
+                  <Button variant="outline" size="sm">
+                    <ExternalLink className="w-3.5 h-3.5 mr-1" /> Open in Instantly
+                  </Button>
+                </a>
+              ) : (
+                <span className="text-xs text-muted-foreground">Paste an Instantly campaign ID via Edit, then push from /prospects.</span>
+              )
+            }
+          />
+        )}
+        {enabled.includes("phoneburner") && (
+          <ChannelRow
+            icon={<Phone className="w-4 h-4" />}
+            label="Calls (PhoneBurner)"
+            connected={!!campaign.phoneburner_folder_id}
+            connectionDetail={campaign.phoneburner_folder_id ? `Folder ${campaign.phoneburner_folder_id.slice(0, 8)}…` : "First push will create folder"}
+            primaryAction={
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => pushToPhoneBurner(true)}
+                  disabled={pushingPb}
+                >
+                  {pushingPb ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : null}
+                  Dry-run
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => pushToPhoneBurner(false)}
+                  disabled={pushingPb}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {pushingPb ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1" />}
+                  Push to PhoneBurner
+                </Button>
+              </div>
+            }
+          />
+        )}
+        {enabled.includes("direct_mail") && (
+          <ChannelRow
+            icon={<Inbox className="w-4 h-4" />}
+            label="Direct Mail"
+            connected={false}
+            connectionDetail="Vendor not configured"
+            primaryAction={
+              <span className="text-xs text-muted-foreground">Pick a vendor (Postalytics / Lob / Stannp) and we'll wire it up.</span>
+            }
+          />
+        )}
+
+        {/* + Add channel for campaigns missing one or more channels */}
+        {enabled.length < 3 && (
+          <div className="pt-2 border-t mt-2">
+            {!adding ? (
+              <Button variant="ghost" size="sm" onClick={() => setAdding(true)}>
+                + Add channel
+              </Button>
+            ) : (
+              <div className="flex gap-2 items-center">
+                <span className="text-xs text-muted-foreground">Add:</span>
+                {!enabled.includes("instantly") && (
+                  <Button variant="outline" size="sm" disabled={busyAdd} onClick={() => addChannel("instantly")}>Email</Button>
+                )}
+                {!enabled.includes("phoneburner") && (
+                  <Button variant="outline" size="sm" disabled={busyAdd} onClick={() => addChannel("phoneburner")}>Calls</Button>
+                )}
+                {!enabled.includes("direct_mail") && (
+                  <Button variant="outline" size="sm" disabled={busyAdd} onClick={() => addChannel("direct_mail")}>Mail</Button>
+                )}
+                <Button variant="ghost" size="sm" onClick={() => setAdding(false)}>Cancel</Button>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ChannelRow({
+  icon,
+  label,
+  connected,
+  connectionDetail,
+  primaryAction,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  connected: boolean;
+  connectionDetail: string;
+  primaryAction: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2 border-b last:border-b-0">
+      <div className="flex items-center gap-2 min-w-0">
+        <div className={`w-7 h-7 rounded-full flex items-center justify-center ${connected ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+          {icon}
+        </div>
+        <div className="min-w-0">
+          <div className="text-sm font-medium truncate">{label}</div>
+          <div className="text-xs text-muted-foreground truncate">
+            {connected ? <span className="text-green-600 font-medium">●</span> : <span>○</span>} {connectionDetail}
+          </div>
+        </div>
+      </div>
+      <div className="shrink-0">{primaryAction}</div>
+    </div>
   );
 }

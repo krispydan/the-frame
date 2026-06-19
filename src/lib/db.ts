@@ -598,6 +598,22 @@ try {
 // idempotency). campaign_leads carries denormalized last-call
 // state for fast prospect-page rendering.
 try { sqlite.exec("ALTER TABLE campaigns ADD COLUMN phoneburner_folder_id TEXT"); } catch { /* exists */ }
+// Multi-channel campaigns — channels[] replaces the single-channel
+// `type` field for delivery routing. type stays as the campaign's
+// INTENT (cold_outreach vs ab_test). channels lists actual delivery
+// routes. JSON-encoded array of strings, e.g. '["instantly","phoneburner"]'.
+try { sqlite.exec("ALTER TABLE campaigns ADD COLUMN channels TEXT NOT NULL DEFAULT '[\"instantly\"]'"); } catch { /* exists */ }
+// Backfill: derive channels from existing type for pre-2026-06-19 rows.
+// Only fires on rows where channels is still the default — explicit
+// edits stick.
+try {
+  sqlite.exec(`
+    UPDATE campaigns
+       SET channels = '["phoneburner"]'
+     WHERE type = 'calling'
+       AND channels = '["instantly"]'
+  `);
+} catch { /* table empty or column missing on legacy db */ }
 try { sqlite.exec("ALTER TABLE campaign_leads ADD COLUMN phoneburner_contact_id TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE campaign_leads ADD COLUMN last_called_at TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE campaign_leads ADD COLUMN last_call_disposition TEXT"); } catch { /* exists */ }

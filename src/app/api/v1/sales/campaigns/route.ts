@@ -56,14 +56,29 @@ export async function POST(request: NextRequest) {
 
   if (!name) return NextResponse.json({ error: "name is required" }, { status: 400 });
 
+  // channels[] is the multi-select delivery routing. Default to
+  // ["instantly"] for back-compat; derive from legacy `type` if the
+  // caller is on the old single-channel form.
+  const VALID_CHANNELS = new Set(["instantly", "phoneburner", "direct_mail"]);
+  let channels: string[] = Array.isArray(body.channels)
+    ? body.channels.filter((c: unknown) => typeof c === "string" && VALID_CHANNELS.has(c))
+    : [];
+  if (channels.length === 0) {
+    channels = type === "calling" ? ["phoneburner"] : ["instantly"];
+  }
+
   const id = crypto.randomUUID();
   sqlite.prepare(`
-    INSERT INTO campaigns (id, name, type, description, target_segment, target_smart_list_id, variant_a_subject, variant_b_subject, instantly_campaign_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, name, type || "email_sequence", description, target_segment, target_smart_list_id, variant_a_subject, variant_b_subject, body.instantly_campaign_id || null);
+    INSERT INTO campaigns (id, name, type, description, target_segment, target_smart_list_id, variant_a_subject, variant_b_subject, instantly_campaign_id, channels)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id, name, type || "email_sequence", description, target_segment, target_smart_list_id,
+    variant_a_subject, variant_b_subject, body.instantly_campaign_id || null,
+    JSON.stringify(channels),
+  );
 
   const campaign = sqlite.prepare("SELECT * FROM campaigns WHERE id = ?").get(id);
-  logger.logEvent("campaign_created", "sales", { id, name });
+  logger.logEvent("campaign_created", "sales", { id, name, channels });
 
   return NextResponse.json({ data: campaign }, { status: 201 });
 }

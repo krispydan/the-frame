@@ -22,6 +22,42 @@ export const CAMPAIGN_TYPE_LABELS: Record<CampaignType, string> = {
   ab_test: "A/B Test",
 };
 
+/**
+ * Delivery channels a campaign can ship through. Multi-select per
+ * campaign — a single Brand Carriers v1 cohort fans out to Instantly +
+ * PhoneBurner + Direct Mail in parallel rather than living as three
+ * separate rows with overlapping membership.
+ *
+ * `type` above is kept as the campaign's INTENT (cold outreach vs
+ * A/B test vs re-engagement). `channels` is the orthogonal "how does
+ * it ship" axis.
+ *
+ * Backfill mapping for pre-2026-06-19 rows (done in src/lib/db.ts on
+ * boot): email_sequence/re_engagement/ab_test → ["instantly"],
+ * calling → ["phoneburner"].
+ */
+export const CAMPAIGN_CHANNELS = ["instantly", "phoneburner", "direct_mail"] as const;
+export type CampaignChannel = (typeof CAMPAIGN_CHANNELS)[number];
+
+export const CAMPAIGN_CHANNEL_LABELS: Record<CampaignChannel, string> = {
+  instantly: "Instantly (Email)",
+  phoneburner: "PhoneBurner (Calls)",
+  direct_mail: "Direct Mail",
+};
+
+export const CAMPAIGN_CHANNEL_SHORT_LABELS: Record<CampaignChannel, string> = {
+  instantly: "Email",
+  phoneburner: "Calls",
+  direct_mail: "Mail",
+};
+
+/** Whether the push pipeline for this channel is wired up yet. */
+export const CAMPAIGN_CHANNEL_IMPLEMENTED: Record<CampaignChannel, boolean> = {
+  instantly: true,
+  phoneburner: true,
+  direct_mail: false, // schema-supported; vendor not picked yet
+};
+
 export const CAMPAIGN_STATUS_COLORS: Record<CampaignStatus, string> = {
   draft: "bg-gray-100 text-gray-800",
   active: "bg-green-100 text-green-800",
@@ -38,6 +74,15 @@ export const campaigns = sqliteTable("campaigns", {
   type: text("type", { enum: CAMPAIGN_TYPES }).notNull().default("email_sequence"),
   status: text("status", { enum: CAMPAIGN_STATUSES }).notNull().default("draft"),
   description: text("description"),
+  /**
+   * Delivery channels this campaign ships through. JSON-encoded array
+   * of CampaignChannel values, e.g. `["instantly","phoneburner"]`.
+   * Multi-select per campaign — one Brand Carriers cohort fans out to
+   * email + calls + (eventually) direct mail simultaneously.
+   * Defaults to ["instantly"] for back-compat with the old single-channel
+   * model; backfilled from `type` for pre-existing rows in src/lib/db.ts.
+   */
+  channels: text("channels").notNull().default('["instantly"]'),
   instantlyCampaignId: text("instantly_campaign_id"),
   /** PhoneBurner folder ID assigned to this campaign. Set on first
    *  push. Mirrors instantlyCampaignId. */
