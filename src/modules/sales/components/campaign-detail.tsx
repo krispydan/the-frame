@@ -21,6 +21,7 @@ interface Lead {
   id: string;
   company_id: string;
   company_name: string;
+  segment: string | null;
   first_name: string | null;
   last_name: string | null;
   email: string | null;
@@ -42,6 +43,7 @@ interface Campaign {
   status: string;
   description: string | null;
   instantly_campaign_id: string | null;
+  target_segment?: string | null;
   phoneburner_folder_id?: string | null;
   channels?: string | null;
   variant_a_subject: string | null;
@@ -89,6 +91,8 @@ const ICP_COLORS: Record<string, string> = {
   D: "bg-red-500 text-white",
   F: "bg-gray-500 text-white",
 };
+
+const TIER_ORDER: Record<string, number> = { A: 1, B: 2, C: 3, D: 4, F: 5 };
 
 function pct(n: number, d: number) {
   return d > 0 ? ((n / d) * 100).toFixed(1) : "0.0";
@@ -217,6 +221,9 @@ export function CampaignDetail({ campaign }: { campaign: Campaign }) {
                 <Badge className={campaign.status === "active" ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"}>
                   {campaign.status}
                 </Badge>
+                {campaign.target_segment && (
+                  <Badge variant="outline">{campaign.target_segment}</Badge>
+                )}
                 {campaign.instantly_campaign_id && (
                   <Badge variant="outline"><Zap className="mr-1 h-3 w-3" /> Instantly</Badge>
                 )}
@@ -330,17 +337,15 @@ export function CampaignDetail({ campaign }: { campaign: Campaign }) {
 }
 
 function LeadTable({ leads, icpFilter, sortBy }: { leads: Lead[]; icpFilter: string; sortBy: string }) {
-  const tierOrder: Record<string, number> = { A: 1, B: 2, C: 3, D: 4, F: 5 };
-
   const processed = useMemo(() => {
     let result = [...leads];
     if (icpFilter !== "all") {
       result = result.filter((l) => l.icp_tier === icpFilter);
     }
     if (sortBy === "icp_desc") {
-      result.sort((a, b) => (tierOrder[a.icp_tier || "F"] || 5) - (tierOrder[b.icp_tier || "F"] || 5));
+      result.sort((a, b) => (TIER_ORDER[a.icp_tier || "F"] || 5) - (TIER_ORDER[b.icp_tier || "F"] || 5));
     } else if (sortBy === "icp_asc") {
-      result.sort((a, b) => (tierOrder[b.icp_tier || "F"] || 5) - (tierOrder[a.icp_tier || "F"] || 5));
+      result.sort((a, b) => (TIER_ORDER[b.icp_tier || "F"] || 5) - (TIER_ORDER[a.icp_tier || "F"] || 5));
     }
     return result;
   }, [leads, icpFilter, sortBy]);
@@ -354,6 +359,7 @@ function LeadTable({ leads, icpFilter, sortBy }: { leads: Lead[]; icpFilter: str
           <TableRow>
             <TableHead>Contact</TableHead>
             <TableHead>Company</TableHead>
+            <TableHead>Segment</TableHead>
             <TableHead>ICP</TableHead>
             <TableHead>Email</TableHead>
             <TableHead>Status</TableHead>
@@ -369,6 +375,7 @@ function LeadTable({ leads, icpFilter, sortBy }: { leads: Lead[]; icpFilter: str
                   {[l.first_name, l.last_name].filter(Boolean).join(" ") || "—"}
                 </TableCell>
                 <TableCell>{l.company_name}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">{l.segment || "—"}</TableCell>
                 <TableCell>
                   {l.icp_tier ? (
                     <div className="flex items-center gap-1">
@@ -415,7 +422,7 @@ function LeadTable({ leads, icpFilter, sortBy }: { leads: Lead[]; icpFilter: str
               </TableRow>
               {expandedReasoning === l.id && l.icp_reasoning && (
                 <TableRow key={`${l.id}-reasoning`}>
-                  <TableCell colSpan={7} className="bg-muted/50 py-2 px-4">
+                  <TableCell colSpan={8} className="bg-muted/50 py-2 px-4">
                     <div className="text-sm">
                       <span className="font-medium">ICP Reasoning:</span>{" "}
                       <span className="text-muted-foreground">{l.icp_reasoning}</span>
@@ -428,7 +435,7 @@ function LeadTable({ leads, icpFilter, sortBy }: { leads: Lead[]; icpFilter: str
           ))}
           {processed.length === 0 && (
             <TableRow>
-              <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+              <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
                 No leads found
               </TableCell>
             </TableRow>
@@ -579,7 +586,7 @@ function ChannelsCard({ campaign }: { campaign: Campaign }) {
             connected={false}
             connectionDetail="Vendor not configured"
             primaryAction={
-              <span className="text-xs text-muted-foreground">Pick a vendor (Postalytics / Lob / Stannp) and we'll wire it up.</span>
+              <span className="text-xs text-muted-foreground">Pick a vendor (Postalytics / Lob / Stannp) and we&apos;ll wire it up.</span>
             }
           />
         )}

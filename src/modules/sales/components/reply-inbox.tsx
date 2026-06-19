@@ -13,9 +13,6 @@ import {
 } from "@/components/ui/tooltip";
 import {
   Inbox,
-  ThumbsUp,
-  ThumbsDown,
-  Clock,
   ExternalLink,
   ArrowLeft,
   Star,
@@ -32,6 +29,7 @@ interface Reply {
   campaign_name: string;
   company_id: string;
   company_name: string;
+  segment: string | null;
   contact_name: string;
   email: string | null;
   status: string;
@@ -202,6 +200,7 @@ export function ReplyInbox({ replies: initialReplies, unreadCount }: { replies: 
                     </div>
                     <div className="text-xs text-muted-foreground mb-2">
                       Campaign: <Link href={`/campaigns/${r.campaign_id}`} className="underline">{r.campaign_name}</Link>
+                      {r.segment && ` • ${r.segment}`}
                       {r.replied_at && ` • ${new Date(r.replied_at).toLocaleDateString()}`}
                     </div>
                     <p className="text-sm whitespace-pre-wrap bg-muted/50 rounded p-3">{r.reply_text}</p>
