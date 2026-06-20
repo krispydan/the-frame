@@ -20,11 +20,15 @@ OFFSET=0
 
 while [ $OFFSET -lt $TOTAL_SIZE ]; do
     CHUNK_NUM=$((CHUNK_NUM + 1))
-    # Extract chunk as base64
-    CHUNK_DATA=$(dd if="$DB_PATH" bs=$CHUNK_SIZE skip=$((CHUNK_NUM - 1)) count=1 2>/dev/null | base64)
-    
+    CHUNK_JSON=$(mktemp)
+    # Write chunk payload to a temp JSON file so curl does not hit shell argv limits.
+    dd if="$DB_PATH" bs=$CHUNK_SIZE skip=$((CHUNK_NUM - 1)) count=1 2>/dev/null \
+      | python3 -c "import base64, json, sys; json.dump({'action': 'chunk', 'data': base64.b64encode(sys.stdin.buffer.read()).decode('ascii'), 'chunk': $CHUNK_NUM}, sys.stdout)" \
+      > "$CHUNK_JSON"
+
     RESP=$(curl -s -X POST "$API" -H "x-admin-key: $ADMIN_KEY" -H "Content-Type: application/json" \
-      -d "{\"action\":\"chunk\",\"data\":\"$CHUNK_DATA\",\"chunk\":$CHUNK_NUM}")
+      --data-binary @"$CHUNK_JSON")
+    rm -f "$CHUNK_JSON"
     
     UPLOADED=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('size',0))" 2>/dev/null || echo "?")
     echo "  Chunk $CHUNK_NUM: ${UPLOADED} bytes uploaded"
