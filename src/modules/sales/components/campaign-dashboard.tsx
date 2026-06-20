@@ -262,7 +262,7 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary, initia
                   <TableCell>
                     {c.target_segment ? (
                       <Link
-                        href={`/segments`}
+                        href={`/campaigns?segment=${encodeURIComponent(c.target_segment)}`}
                         className="text-sm text-blue-600 hover:text-blue-700 hover:underline"
                       >
                         {c.target_segment}

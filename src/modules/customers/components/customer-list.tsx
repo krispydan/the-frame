@@ -305,7 +305,10 @@ export function CustomerList({ customers }: { customers: CustomerRow[] }) {
                   </td>
                   <td className="px-4 py-3">
                     {c.segment ? (
-                      <Link href={`/segments`} className="text-gray-600 hover:text-blue-600 hover:underline">
+                      <Link
+                        href={`/customers?segment=${encodeURIComponent(c.segment)}`}
+                        className="text-gray-600 hover:text-blue-600 hover:underline"
+                      >
                         {c.segment}
                       </Link>
                     ) : (
