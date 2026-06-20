@@ -17,6 +17,12 @@ interface SmartList {
   result_count: number;
 }
 
+interface SegmentOption {
+  id: string;
+  name: string;
+  status: string;
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -27,6 +33,7 @@ export function CampaignCreateDialog({ open, onClose }: Props) {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [smartLists, setSmartLists] = useState<SmartList[]>([]);
+  const [segments, setSegments] = useState<SegmentOption[]>([]);
 
   // Step 1
   const [name, setName] = useState("");
@@ -60,6 +67,16 @@ export function CampaignCreateDialog({ open, onClose }: Props) {
     fetch("/api/v1/sales/smart-lists")
       .then((r) => r.json())
       .then((d) => setSmartLists(d.data || []))
+      .catch(() => {});
+
+    fetch("/api/v1/sales/segments")
+      .then((r) => r.json())
+      .then((d) => {
+        const activeSegments = Array.isArray(d.data)
+          ? d.data.filter((segment: SegmentOption) => segment.status !== "retired")
+          : [];
+        setSegments(activeSegments);
+      })
       .catch(() => {});
   }, []);
 
@@ -205,7 +222,7 @@ export function CampaignCreateDialog({ open, onClose }: Props) {
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="smart_list">Smart List</SelectItem>
-                  <SelectItem value="segment">Manual Segment</SelectItem>
+                  <SelectItem value="segment">Segment</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -225,8 +242,17 @@ export function CampaignCreateDialog({ open, onClose }: Props) {
               </div>
             ) : (
               <div>
-                <Label>Segment Filter</Label>
-                <Textarea value={segment} onChange={(e) => setSegment(e.target.value)} placeholder="e.g. State=CA, ICP Tier=A, Has Email" rows={3} />
+                <Label>Select Segment</Label>
+                <Select value={segment} onValueChange={(v) => v && setSegment(v)}>
+                  <SelectTrigger><SelectValue placeholder="Choose a segment..." /></SelectTrigger>
+                  <SelectContent>
+                    {segments.map((segmentOption) => (
+                      <SelectItem key={segmentOption.id} value={segmentOption.name}>
+                        {segmentOption.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
           </div>
@@ -250,7 +276,7 @@ export function CampaignCreateDialog({ open, onClose }: Props) {
                   ))}
                 </span>
                 <span className="text-muted-foreground">Target:</span>
-                <span>{targetType === "smart_list" ? smartLists.find((l) => l.id === smartListId)?.name : "Manual segment"}</span>
+                <span>{targetType === "smart_list" ? smartLists.find((l) => l.id === smartListId)?.name : segment}</span>
                 <span className="text-muted-foreground">Contacts:</span>
                 <span className="font-medium">{previewCount > 0 ? `~${previewCount}` : "TBD"}</span>
               </div>
