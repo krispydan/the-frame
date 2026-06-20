@@ -129,8 +129,13 @@ export async function PATCH(
   const { id } = await params;
   const body = await request.json();
 
+  // Note: `phone` is intentionally NOT in allowedFields. company_phones
+  // is the canonical store (see commit history around 2026-06-19);
+  // phone edits route through the helper below so they land in the
+  // right table. Once companies.phone is dropped, this also prevents
+  // the UPDATE from erroring.
   const allowedFields: Record<string, string> = {
-    name: "name", email: "email", phone: "phone", website: "website",
+    name: "name", email: "email", website: "website",
     address: "address", city: "city", state: "state", zip: "zip",
     owner_id: "owner_id", notes: "notes",
     icp_score: "icp_score", icp_tier: "icp_tier", icp_reasoning: "icp_reasoning",
@@ -144,6 +149,38 @@ export async function PATCH(
     // get forward-progression enforcement AND fan-out to Instantly +
     // PhoneBurner.
   };
+
+  // ── phone: route through company_phones helper ──
+  // Keeps the edit-form UX (user types in the Phone input, hits
+  // Save) but writes to the canonical store. The reverse-mirror
+  // trigger from commit 94abd38 used to handle this transparently;
+  // once the column is dropped (Phase 3) this explicit path is the
+  // only way phone edits land.
+  let phoneHandled = false;
+  if (typeof body.phone === "string") {
+    phoneHandled = true;
+    const { addCompanyPhone } = await import("@/modules/sales/lib/company-phones");
+    addCompanyPhone(id, body.phone, "ui");
+    // Log to change_logs to match the audit pattern used by other
+    // fields. Old value is fetched from company_phones for fidelity.
+    const old = sqlite
+      .prepare(
+        `SELECT phone FROM company_phones WHERE company_id = ?
+          ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
+      )
+      .get(id) as { phone: string | null } | undefined;
+    sqlite
+      .prepare(
+        `INSERT INTO change_logs (id, entity_type, entity_id, field, old_value, new_value, source)
+         VALUES (?, 'company', ?, 'phone', ?, ?, 'ui')`,
+      )
+      .run(
+        crypto.randomUUID(),
+        id,
+        old?.phone ?? "",
+        String(body.phone ?? ""),
+      );
+  }
 
   // ── status: special path through progressCompanyStatus ──
   let statusProgressionResult:
@@ -201,10 +238,12 @@ export async function PATCH(
   // A status-only PATCH is valid — it goes through the special
   // progressCompanyStatus path above. Only return 400 when neither
   // status nor any other field was supplied.
-  if (sets.length === 0 && !statusProgressionResult) {
+  if (sets.length === 0 && !statusProgressionResult && !phoneHandled) {
     return NextResponse.json({ error: "No valid fields" }, { status: 400 });
   }
-  // Status-only patch — short-circuit before the UPDATE/segment block.
+  // Status-only / phone-only patch — short-circuit before the
+  // UPDATE/segment block. Both side-effect paths above already wrote
+  // their data and logged change_logs entries.
   if (sets.length === 0) {
     sqlite
       .prepare(
