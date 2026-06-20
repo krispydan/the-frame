@@ -44,6 +44,37 @@ export async function GET(
     ORDER BY timestamp DESC LIMIT 50
   `).all(id) as Record<string, unknown>[];
 
+  // Campaigns this prospect appears in. One row per (company,
+  // campaign) pair via campaign_leads. We surface per-channel push
+  // status so the prospect-page sidebar can show "✓ in Instantly /
+  // ✓ in PhoneBurner" badges without a second round-trip.
+  //
+  // `channels` on the campaign is JSON; the UI parses it. `pushed_to_*`
+  // are booleans derived from the stamp columns on campaign_leads.
+  const campaigns = sqlite.prepare(`
+    SELECT
+      cl.id                    AS lead_id,
+      cl.campaign_id           AS campaign_id,
+      cl.status                AS lead_status,
+      cl.sent_at               AS sent_at,
+      cl.replied_at            AS replied_at,
+      cl.last_called_at        AS last_called_at,
+      cl.call_count            AS call_count,
+      cl.last_call_disposition AS last_call_disposition,
+      cl.dismissed             AS dismissed,
+      cl.created_at            AS added_at,
+      (cl.instantly_lead_id IS NOT NULL)        AS pushed_to_instantly,
+      (cl.phoneburner_contact_id IS NOT NULL)   AS pushed_to_phoneburner,
+      c.name                   AS campaign_name,
+      c.type                   AS campaign_type,
+      c.status                 AS campaign_status,
+      c.channels               AS campaign_channels
+    FROM campaign_leads cl
+    JOIN campaigns c ON c.id = cl.campaign_id
+    WHERE cl.company_id = ?
+    ORDER BY cl.created_at DESC
+  `).all(id) as Array<Record<string, unknown>>;
+
   return NextResponse.json({
     company: {
       ...company,
@@ -53,6 +84,30 @@ export async function GET(
     contacts: contactRows.map(c => ({
       ...c,
       is_primary: Boolean(c.is_primary),
+    })),
+    campaigns: campaigns.map((row) => ({
+      lead_id: row.lead_id,
+      campaign_id: row.campaign_id,
+      campaign_name: row.campaign_name,
+      campaign_type: row.campaign_type,
+      campaign_status: row.campaign_status,
+      channels: (() => {
+        try {
+          return JSON.parse(String(row.campaign_channels ?? "[]"));
+        } catch {
+          return [];
+        }
+      })(),
+      lead_status: row.lead_status,
+      added_at: row.added_at,
+      sent_at: row.sent_at,
+      replied_at: row.replied_at,
+      last_called_at: row.last_called_at,
+      call_count: row.call_count ?? 0,
+      last_call_disposition: row.last_call_disposition,
+      dismissed: Boolean(row.dismissed),
+      pushed_to_instantly: Boolean(row.pushed_to_instantly),
+      pushed_to_phoneburner: Boolean(row.pushed_to_phoneburner),
     })),
     activities: [...activities, ...changes.map(c => ({
       id: c.id,

@@ -8,6 +8,7 @@ import {
   ArrowLeft, ArrowRight, Building2, Globe, Phone, Mail, MapPin, Tag, Star,
   Edit, UserPlus, MessageSquare, Clock, ExternalLink, Plus, Save, X,
   Briefcase, Sparkles, Loader2, CheckCircle2, XCircle, AlertCircle, Search, Store, Eye,
+  Send, Megaphone,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -177,6 +178,32 @@ export default function CompanyDetailPage() {
   const [stores, setStores] = useState<Store[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [campaigns, setCampaigns] = useState<Array<{
+    lead_id: string;
+    campaign_id: string;
+    campaign_name: string;
+    campaign_type: string | null;
+    campaign_status: string | null;
+    channels: string[];
+    lead_status: string | null;
+    added_at: string | null;
+    sent_at: string | null;
+    replied_at: string | null;
+    last_called_at: string | null;
+    call_count: number;
+    last_call_disposition: string | null;
+    dismissed: boolean;
+    pushed_to_instantly: boolean;
+    pushed_to_phoneburner: boolean;
+  }>>([]);
+  const [campaignPickerOpen, setCampaignPickerOpen] = useState(false);
+  const [availableCampaigns, setAvailableCampaigns] = useState<Array<{
+    id: string;
+    name: string;
+    status: string;
+    channels: string[];
+  }>>([]);
+  const [addingToCampaignId, setAddingToCampaignId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [editFields, setEditFields] = useState<Record<string, unknown>>({});
@@ -311,6 +338,7 @@ export default function CompanyDetailPage() {
         setStores(data.stores || []);
         setContacts(data.contacts || []);
         setActivities(data.activities || []);
+        setCampaigns(data.campaigns || []);
         setLoading(false);
         if (data.company?.name) setOverride(data.company.name);
       })
@@ -1600,6 +1628,202 @@ export default function CompanyDetailPage() {
                   );
                 })()}
               />
+            </CardContent>
+          </Card>
+
+          {/* Campaigns — membership + per-channel push state. */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Megaphone className="w-4 h-4 text-blue-500" /> Campaigns
+                  {campaigns.length > 0 && (
+                    <Badge variant="secondary" className="ml-1">{campaigns.length}</Badge>
+                  )}
+                </CardTitle>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={async () => {
+                    setCampaignPickerOpen(true);
+                    // Lazy-load active campaigns the first time the picker opens.
+                    if (availableCampaigns.length === 0) {
+                      try {
+                        const r = await fetch(`/api/v1/sales/campaigns?status=active&limit=100`);
+                        const d = await r.json();
+                        const items: Array<{ id: string; name: string; status: string; channels: string[] }> =
+                          (d.campaigns ?? d.items ?? d ?? []).map((c: { id: string; name: string; status: string; channels?: string | string[] }) => ({
+                            id: c.id,
+                            name: c.name,
+                            status: c.status,
+                            channels: Array.isArray(c.channels)
+                              ? c.channels
+                              : (() => {
+                                  try { return JSON.parse(String(c.channels ?? "[]")); }
+                                  catch { return []; }
+                                })(),
+                          }));
+                        setAvailableCampaigns(items);
+                      } catch {
+                        toast.error("Failed to load campaigns");
+                      }
+                    }
+                  }}
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1" /> Add
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {campaigns.length === 0 ? (
+                <p className="text-xs text-gray-500 dark:text-gray-400 py-2">
+                  Not in any campaign yet. Click <strong>Add</strong> to enroll this prospect.
+                </p>
+              ) : (
+                <div className="space-y-2.5">
+                  {campaigns.filter(c => !c.dismissed).map((c) => (
+                    <div
+                      key={c.lead_id}
+                      className="border rounded-md p-2.5 text-sm bg-white dark:bg-gray-900"
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <Link
+                          href={`/campaigns/${c.campaign_id}`}
+                          className="font-medium text-blue-600 dark:text-blue-400 hover:underline truncate"
+                        >
+                          {c.campaign_name}
+                        </Link>
+                        <Badge variant="outline" className="text-[10px] uppercase shrink-0">
+                          {c.lead_status ?? "queued"}
+                        </Badge>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                        {/* Instantly chip — present only if the campaign uses it */}
+                        {c.channels.includes("instantly") && (
+                          <span
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded ${
+                              c.pushed_to_instantly
+                                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                                : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+                            }`}
+                            title={c.pushed_to_instantly ? "Pushed to Instantly" : "Not yet pushed to Instantly"}
+                          >
+                            {c.pushed_to_instantly ? <CheckCircle2 className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                            Instantly
+                          </span>
+                        )}
+                        {/* PhoneBurner chip */}
+                        {c.channels.includes("phoneburner") && (
+                          <span
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded ${
+                              c.pushed_to_phoneburner
+                                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                                : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+                            }`}
+                            title={c.pushed_to_phoneburner ? "Pushed to PhoneBurner" : "Not yet pushed to PhoneBurner"}
+                          >
+                            {c.pushed_to_phoneburner ? <CheckCircle2 className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                            PhoneBurner
+                          </span>
+                        )}
+                        {/* Direct mail chip — placeholder, no push tracking yet */}
+                        {c.channels.includes("direct_mail") && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                            <Send className="w-3 h-3" /> Mail
+                          </span>
+                        )}
+                      </div>
+                      {/* Per-channel activity timestamps */}
+                      {(c.sent_at || c.replied_at || c.last_called_at) && (
+                        <div className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400 space-x-2">
+                          {c.sent_at && <span>📧 sent {new Date(c.sent_at).toLocaleDateString()}</span>}
+                          {c.replied_at && <span className="text-blue-600">📨 replied {new Date(c.replied_at).toLocaleDateString()}</span>}
+                          {c.last_called_at && (
+                            <span>📞 called {new Date(c.last_called_at).toLocaleDateString()}
+                              {c.call_count > 1 && <span> ({c.call_count}×)</span>}
+                              {c.last_call_disposition && <span> — {c.last_call_disposition}</span>}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Picker — shown when "Add" is clicked */}
+              {campaignPickerOpen && (
+                <div className="mt-3 border-t pt-3 space-y-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Choose a campaign</span>
+                    <button
+                      onClick={() => setCampaignPickerOpen(false)}
+                      className="text-xs text-gray-500 hover:text-gray-700"
+                    >Close</button>
+                  </div>
+                  {availableCampaigns.length === 0 ? (
+                    <p className="text-xs text-gray-500 py-2">Loading campaigns…</p>
+                  ) : (() => {
+                    const memberIds = new Set(campaigns.filter(c => !c.dismissed).map(c => c.campaign_id));
+                    const choices = availableCampaigns.filter(ac => !memberIds.has(ac.id));
+                    if (choices.length === 0) {
+                      return <p className="text-xs text-gray-500 py-2">This prospect is already in every active campaign.</p>;
+                    }
+                    return (
+                      <div className="space-y-1 max-h-64 overflow-y-auto">
+                        {choices.map((ac) => (
+                          <button
+                            key={ac.id}
+                            disabled={addingToCampaignId === ac.id}
+                            onClick={async () => {
+                              setAddingToCampaignId(ac.id);
+                              try {
+                                const r = await fetch(`/api/v1/sales/prospects/${id}/add-to-campaign`, {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ campaignId: ac.id }),
+                                });
+                                const d = await r.json();
+                                if (!r.ok) {
+                                  toast.error("Failed to add", { description: d?.error ?? `HTTP ${r.status}` });
+                                  return;
+                                }
+                                toast.success(
+                                  d.already_member ? `Already in ${ac.name}` : `Added to ${ac.name}`,
+                                  { description: "Push happens from the campaign page." },
+                                );
+                                // Refresh campaigns list without full reload
+                                const re = await (await fetch(`/api/v1/sales/prospects/${id}`)).json();
+                                setCampaigns(re.campaigns || []);
+                                setCampaignPickerOpen(false);
+                              } catch (e) {
+                                toast.error("Failed to add", { description: e instanceof Error ? e.message : String(e) });
+                              } finally {
+                                setAddingToCampaignId(null);
+                              }
+                            }}
+                            className="w-full text-left text-sm px-2.5 py-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-between gap-2 disabled:opacity-50"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-medium truncate">{ac.name}</div>
+                              <div className="text-[11px] text-gray-500 flex gap-1.5">
+                                {ac.channels.map(ch => (
+                                  <span key={ch} className="capitalize">{ch.replace("_", " ")}</span>
+                                ))}
+                              </div>
+                            </div>
+                            {addingToCampaignId === ac.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                            ) : (
+                              <Plus className="w-4 h-4 shrink-0 text-gray-400" />
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
             </CardContent>
           </Card>
 
