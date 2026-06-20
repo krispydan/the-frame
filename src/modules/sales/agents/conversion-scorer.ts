@@ -40,7 +40,11 @@ export function scoreCompany(company: CompanyRow): number {
  * Batch score companies
  */
 export function batchScore(companyIds?: string[]): { scored: number } {
-  let query = `SELECT id, email, phone, website, google_rating, google_review_count, icp_tier, state FROM companies`;
+  let query = `SELECT id, email,
+    (SELECT cp.phone FROM company_phones cp
+       WHERE cp.company_id = companies.id
+       ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
+    website, google_rating, google_review_count, icp_tier, state FROM companies`;
   const params: unknown[] = [];
 
   if (companyIds && companyIds.length > 0) {

@@ -68,7 +68,11 @@ export async function GET(request: NextRequest) {
 
   // Data query - lightweight fields only
   const rows = sqlite.prepare(`
-    SELECT c.id, c.name, c.address, c.city, c.state, c.zip, c.phone, c.email,
+    SELECT c.id, c.name, c.address, c.city, c.state, c.zip,
+           (SELECT cp.phone FROM company_phones cp
+             WHERE cp.company_id = c.id
+             ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
+           c.email,
            c.website, c.domain, c.google_rating, c.google_review_count,
            c.source_type, c.source_query, c.category, COALESCE(s.name, c.segment) as segment, c.status,
            c.source, c.tags

@@ -154,7 +154,11 @@ export async function icpClassifierHandler(input: AgentInput): Promise<AgentOutp
     // Skip rows with icp_manual_override = 1 — the reviewer's tier/score
     // sticks until they explicitly hit "Reclassify".
     const companies = sqlite.prepare(`
-      SELECT id, name, tags, source, type, state, email, phone, google_rating, google_review_count
+      SELECT id, name, tags, source, type, state, email,
+             (SELECT cp.phone FROM company_phones cp
+               WHERE cp.company_id = companies.id
+               ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
+             google_rating, google_review_count
       FROM companies
       WHERE id IN (${placeholders})
         AND COALESCE(icp_manual_override, 0) = 0

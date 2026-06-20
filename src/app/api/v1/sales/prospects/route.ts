@@ -163,9 +163,13 @@ export async function GET(request: NextRequest) {
     }
   }
   if (hasPhone === "true") {
-    whereClauses.push(`c.phone IS NOT NULL AND c.phone != ''`);
+    whereClauses.push(
+      `EXISTS (SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id)`,
+    );
   } else if (hasPhone === "false") {
-    whereClauses.push(`(c.phone IS NULL OR c.phone = '')`);
+    whereClauses.push(
+      `NOT EXISTS (SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id)`,
+    );
   }
 
   const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
@@ -201,7 +205,11 @@ export async function GET(request: NextRequest) {
 
   // Data query
   const rows = sqlite.prepare(`
-    SELECT c.id, c.name, c.city, c.state, c.type, c.source, c.phone, c.email,
+    SELECT c.id, c.name, c.city, c.state, c.type, c.source,
+           (SELECT cp.phone FROM company_phones cp
+             WHERE cp.company_id = c.id
+             ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
+           c.email,
            c.icp_score, c.status, c.tags, c.website, c.domain, c.enrichment_status, COALESCE(s.name, c.segment) as segment, c.category,
            c.industry, c.source_type, c.source_id, c.source_query
     ${fromSQL}

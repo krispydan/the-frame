@@ -8,7 +8,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params;
   const deal = sqlite.prepare(`
     SELECT d.*, c.name as company_name, c.city as company_city, c.state as company_state,
-           c.email as company_email, c.phone as company_phone, c.website as company_website
+           c.email as company_email,
+           (SELECT cp.phone FROM company_phones cp
+             WHERE cp.company_id = c.id
+             ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) as company_phone,
+           c.website as company_website
     FROM deals d
     LEFT JOIN companies c ON c.id = d.company_id
     WHERE d.id = ?

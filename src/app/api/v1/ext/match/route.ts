@@ -13,7 +13,11 @@ export const GET = apiHandler(
     // Match by domain column or by extracting domain from website URL
     const prospect = sqlite
       .prepare(
-        `SELECT id, name, website, domain, phone, email, city, state, status, socials, contact_form_url
+        `SELECT id, name, website, domain,
+                (SELECT cp.phone FROM company_phones cp
+                  WHERE cp.company_id = companies.id
+                  ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
+                email, city, state, status, socials, contact_form_url
          FROM companies
          WHERE domain = ? OR domain = ? OR website LIKE ? OR website LIKE ?
          LIMIT 1`

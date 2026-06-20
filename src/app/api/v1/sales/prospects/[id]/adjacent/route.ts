@@ -74,8 +74,14 @@ export async function GET(
   if (icpMax) { whereClauses.push(`c.icp_score <= ?`); whereParams.push(parseInt(icpMax)); }
   if (hasEmail === "true") whereClauses.push(`c.email IS NOT NULL AND c.email != ''`);
   else if (hasEmail === "false") whereClauses.push(`(c.email IS NULL OR c.email = '')`);
-  if (hasPhone === "true") whereClauses.push(`c.phone IS NOT NULL AND c.phone != ''`);
-  else if (hasPhone === "false") whereClauses.push(`(c.phone IS NULL OR c.phone = '')`);
+  if (hasPhone === "true")
+    whereClauses.push(
+      `EXISTS (SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id)`,
+    );
+  else if (hasPhone === "false")
+    whereClauses.push(
+      `NOT EXISTS (SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id)`,
+    );
 
   // Pipeline walk overrides the normal filter set — only the stage
   // filter applies, joining through the deals table.

@@ -23,7 +23,11 @@ export async function GET(
   // Get linked companies
   const companies = sqlite.prepare(`
     SELECT c.id, c.name, c.status, c.icp_score, c.icp_tier, c.city, c.state,
-           c.email, c.website, c.phone, c.disqualify_reason
+           c.email, c.website,
+           (SELECT cp.phone FROM company_phones cp
+             WHERE cp.company_id = c.id
+             ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
+           c.disqualify_reason
     FROM companies c
     INNER JOIN company_brand_links cbl ON cbl.company_id = c.id
     WHERE cbl.brand_account_id = ?

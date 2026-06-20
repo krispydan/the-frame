@@ -3,6 +3,7 @@
  */
 import { sqlite } from "@/lib/db";
 import { logger } from "@/modules/core/lib/logger";
+import { addCompanyPhone } from "./company-phones";
 
 const OUTSCRAPER_BASE = "https://api.app.outscraper.com";
 
@@ -43,10 +44,10 @@ function getOutscraperApiKey(): string | null {
  */
 export function getCompaniesNeedingEnrichment(limit = 50): { id: string; name: string; city: string; state: string }[] {
   return sqlite.prepare(`
-    SELECT id, name, city, state FROM companies
+    SELECT id, name, city, state FROM companies c
     WHERE (enrichment_status IS NULL OR enrichment_status = 'not_enriched')
-    AND (email IS NULL OR email = '') 
-    AND (phone IS NULL OR phone = '')
+    AND (email IS NULL OR email = '')
+    AND NOT EXISTS (SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id)
     AND (website IS NULL OR website = '')
     LIMIT ?
   `).all(limit) as { id: string; name: string; city: string; state: string }[];
@@ -112,7 +113,11 @@ export async function enrichViaOutscraper(companyId: string): Promise<{ success:
   }
 
   const company = sqlite.prepare(`
-    SELECT id, name, city, state, email, phone, website, domain, 
+    SELECT id, name, city, state, email,
+           (SELECT cp.phone FROM company_phones cp
+             WHERE cp.company_id = companies.id
+             ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
+           website, domain,
            google_rating, google_review_count, google_place_id,
            owner_name, facebook_url, instagram_url, twitter_url, linkedin_url, yelp_url, business_hours
     FROM companies WHERE id = ?
@@ -163,7 +168,12 @@ export async function enrichViaOutscraper(companyId: string): Promise<{ success:
     };
 
     setIfEmpty("email", "email", r.email_1);
-    setIfEmpty("phone", "phone", r.phone);
+    // Phone writes go to company_phones (canonical store) instead of
+    // the legacy companies.phone column. addCompanyPhone is idempotent.
+    if (r.phone) {
+      addCompanyPhone(companyId, String(r.phone), "outscraper");
+      newFields.push("phone");
+    }
     setIfEmpty("website", "website", r.site);
     if (r.site && (!company.domain || company.domain === "")) {
       try {
@@ -200,8 +210,7 @@ export async function enrichViaOutscraper(companyId: string): Promise<{ success:
         newFields.push("email");
       }
       if (scraped.phones.length > 0 && (!company.phone || company.phone === "") && !r.phone) {
-        updates.push("phone = ?");
-        vals.push(scraped.phones[0]);
+        addCompanyPhone(companyId, scraped.phones[0], "web_scrape");
         newFields.push("phone");
       }
       if (scraped.socials.facebook && !r.facebook && (!company.facebook_url || company.facebook_url === "")) {
