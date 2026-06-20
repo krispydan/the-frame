@@ -8,11 +8,26 @@ import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { logger } from "@/modules/core/lib/logger";
 
+function normalizeTargetSegment(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  const match = sqlite.prepare(`
+    SELECT name
+    FROM segments
+    WHERE lower(trim(name)) = lower(trim(?))
+    LIMIT 1
+  `).get(trimmed) as { name: string } | undefined;
+
+  return match?.name ?? trimmed;
+}
+
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const type = params.get("type");
   const status = params.get("status");
-  const segment = params.get("segment");
+  const segment = normalizeTargetSegment(params.get("segment"));
   const page = Math.max(1, parseInt(params.get("page") || "1"));
   const limit = Math.min(100, parseInt(params.get("limit") || "50"));
   const offset = (page - 1) * limit;
@@ -68,11 +83,12 @@ export async function POST(request: NextRequest) {
   }
 
   const id = crypto.randomUUID();
+  const normalizedTargetSegment = normalizeTargetSegment(target_segment);
   sqlite.prepare(`
     INSERT INTO campaigns (id, name, type, description, target_segment, target_smart_list_id, variant_a_subject, variant_b_subject, instantly_campaign_id, channels)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    id, name, type || "email_sequence", description, target_segment, target_smart_list_id,
+    id, name, type || "email_sequence", description, normalizedTargetSegment, target_smart_list_id,
     variant_a_subject, variant_b_subject, body.instantly_campaign_id || null,
     JSON.stringify(channels),
   );

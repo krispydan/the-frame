@@ -71,6 +71,7 @@ interface LeadRowJoined {
   address: string | null;
   description: string | null;
   industry: string | null;
+  segment: string | null;
   icp_tier: string | null;
   icp_score: number | null;
   source_type: string | null;
@@ -153,6 +154,7 @@ function loadLeadsForCampaign(campaignId: string): LeadRowJoined[] {
               co.address         AS address,
               co.description     AS description,
               co.industry        AS industry,
+              COALESCE(s.name, co.segment) AS segment,
               co.icp_tier        AS icp_tier,
               co.icp_score       AS icp_score,
               co.source_type     AS source_type,
@@ -175,6 +177,7 @@ function loadLeadsForCampaign(campaignId: string): LeadRowJoined[] {
               co.yelp_url        AS yelp_url
          FROM campaign_leads cl
          JOIN companies co ON co.id = cl.company_id
+         LEFT JOIN segments s ON s.id = co.segment_id
          LEFT JOIN contacts ct ON ct.id = cl.contact_id
         WHERE cl.campaign_id = ?
           AND COALESCE(cl.dismissed, 0) = 0`,
@@ -254,6 +257,7 @@ function buildContactPayload(opts: {
   if (lead.company_name) noteLines.push(`Account: ${lead.company_name}`);
   if (website) noteLines.push(`Website: ${website}`);
   if (lead.industry) noteLines.push(`Industry: ${lead.industry}`);
+  if (lead.segment) noteLines.push(`Segment: ${lead.segment}`);
   if (lead.icp_tier) {
     noteLines.push(
       `ICP: ${lead.icp_tier}${lead.icp_score != null ? ` (${lead.icp_score})` : ""}`,
@@ -308,6 +312,7 @@ function buildContactPayload(opts: {
     // Auto-created by us (type required on first push):
     { name: "Description", type: "text", value: (lead.description ?? "").slice(0, 500) },
     { name: "Industry", type: "text", value: lead.industry ?? "" },
+    { name: "Segment", type: "text", value: lead.segment ?? "" },
     { name: "ICP Tier", type: "text", value: lead.icp_tier ?? "" },
     {
       name: "ICP Score",

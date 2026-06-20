@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -66,6 +66,12 @@ interface Props {
   deals: Deal[];
   companies: { id: string; name: string; city: string; state: string }[];
   users: { id: string; name: string; email: string }[];
+}
+
+interface SegmentOption {
+  id: string;
+  name: string;
+  status: string;
 }
 
 const CHANNEL_ICONS: Record<string, React.ReactNode> = {
@@ -412,19 +418,28 @@ function ReorderTab({ deals, onOpenDetail, onReengage }: { deals: Deal[]; onOpen
 export function PipelineBoard({ deals: initialDeals, companies, users }: Props) {
   const router = useRouter();
   const [deals, setDeals] = useState(initialDeals);
+  const [segments, setSegments] = useState<SegmentOption[]>([]);
   const [activeTab, setActiveTab] = useState<"active" | "snoozed" | "reorder">("active");
   const [ownerFilter, setOwnerFilter] = useState<string>("all");
   const [segmentFilter, setSegmentFilter] = useState<string>("all");
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const draggingDealId = useRef<string | null>(null);
 
-  const segmentOptions = Array.from(
-    new Set(
-      deals
-        .map((deal) => deal.segment?.trim())
-        .filter((segment): segment is string => Boolean(segment)),
-    ),
-  ).sort();
+  useEffect(() => {
+    fetch("/api/v1/sales/segments")
+      .then((r) => r.json())
+      .then((d) => {
+        const activeSegments = Array.isArray(d.data)
+          ? d.data
+              .filter((segment: SegmentOption) => segment.status !== "retired")
+              .sort((a: SegmentOption, b: SegmentOption) => a.name.localeCompare(b.name))
+          : [];
+        setSegments(activeSegments);
+      })
+      .catch(() => {});
+  }, []);
+
+  const segmentOptions = segments.map((segment) => segment.name);
 
   const filteredDeals = deals.filter((deal) => {
     if (ownerFilter !== "all" && deal.owner_id !== ownerFilter) return false;
