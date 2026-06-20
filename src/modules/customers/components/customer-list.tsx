@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import Link from "next/link";
 import {
   CUSTOMER_TIERS,
@@ -28,6 +28,12 @@ interface CustomerRow {
   first_order_at: string | null;
 }
 
+interface SegmentOption {
+  id: string;
+  name: string;
+  status: string;
+}
+
 type SortField = "lifetime_value" | "health_score" | "last_order_at" | "total_orders" | "days_until_reorder";
 
 function daysUntilReorder(est: string | null): number | null {
@@ -36,6 +42,7 @@ function daysUntilReorder(est: string | null): number | null {
 }
 
 export function CustomerList({ customers }: { customers: CustomerRow[] }) {
+  const [segments, setSegments] = useState<SegmentOption[]>([]);
   const [tierFilter, setTierFilter] = useState<CustomerTier | "all">("all");
   const [healthFilter, setHealthFilter] = useState<HealthStatus | "all">("all");
   const [segmentFilter, setSegmentFilter] = useState<string>("all");
@@ -93,10 +100,21 @@ export function CustomerList({ customers }: { customers: CustomerRow[] }) {
     }
   }, []);
 
-  const segmentOptions = useMemo(
-    () => Array.from(new Set(customers.map((c) => c.segment?.trim()).filter((segment): segment is string => Boolean(segment)))).sort(),
-    [customers],
-  );
+  useEffect(() => {
+    fetch("/api/v1/sales/segments")
+      .then((r) => r.json())
+      .then((d) => {
+        const activeSegments = Array.isArray(d.data)
+          ? d.data
+              .filter((segment: SegmentOption) => segment.status !== "retired")
+              .sort((a: SegmentOption, b: SegmentOption) => a.name.localeCompare(b.name))
+          : [];
+        setSegments(activeSegments);
+      })
+      .catch(() => {});
+  }, []);
+
+  const segmentOptions = segments.map((segment) => segment.name);
 
   const filtered = useMemo(() => {
     let list = customers;
