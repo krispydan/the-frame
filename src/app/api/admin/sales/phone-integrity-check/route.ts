@@ -128,9 +128,16 @@ export async function GET() {
   // legacy values may or may not include it.
   const normalize = (col: string) => {
     const stripped = `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${col},'-',''),' ',''),'(',''),')',''),'+',''),'.',''),CHAR(9),'')`;
-    // SUBSTR(s, -10) returns the rightmost 10 characters; if the
-    // string is shorter, returns the whole string.
-    return `SUBSTR(${stripped}, -10)`;
+    // Verified 2026-06-19: SUBSTR(s, -10) does NOT reliably return
+    // the rightmost 10 chars in SQLite — when abs(Y) equals or
+    // exceeds the string length the result was empty on prod. Use
+    // explicit "drop leading 1 if 11 digits" instead, which is what
+    // we actually want for US country-code drift.
+    return `CASE
+      WHEN LENGTH(${stripped}) = 11 AND SUBSTR(${stripped}, 1, 1) = '1'
+      THEN SUBSTR(${stripped}, 2)
+      ELSE ${stripped}
+    END`;
   };
 
   const mismatchRows = sqlite

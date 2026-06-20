@@ -1325,11 +1325,20 @@ try {
     ).n;
 
     // (B) Value mismatch — legacy phone's last-10-digits doesn't
-    // appear in any company_phones row for the same company. The
-    // SUBSTR(...,-10) trick collapses "+1 ..." variants to match
-    // bare 10-digit canonicals (see /api/admin/sales/phone-integrity-check).
-    const normalize = (col: string) =>
-      `SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${col},'-',''),' ',''),'(',''),')',''),'+',''),'.',''),CHAR(9),''), -10)`;
+    // appear in any company_phones row for the same company.
+    // Verified 2026-06-19: SUBSTR(s, -10) was broken in SQLite when
+    // the input was exactly 11 chars (it returned empty), producing
+    // 2,778 false-positive mismatches on prod. Use explicit
+    // "drop leading 1 if 11 digits" instead — same intent, no
+    // negative-index footgun.
+    const normalize = (col: string) => {
+      const stripped = `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${col},'-',''),' ',''),'(',''),')',''),'+',''),'.',''),CHAR(9),'')`;
+      return `CASE
+        WHEN LENGTH(${stripped}) = 11 AND SUBSTR(${stripped}, 1, 1) = '1'
+        THEN SUBSTR(${stripped}, 2)
+        ELSE ${stripped}
+      END`;
+    };
     const mismatch = (
       sqlite
         .prepare(
