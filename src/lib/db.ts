@@ -1287,6 +1287,99 @@ try {
     /* companies.phone column already dropped — snapshot is final */
   }
 
+  // ── Phase 3: integrity-guarded drop of companies.phone ─────────
+  //
+  // The "one source of truth" finale. Reads and writes all route
+  // through company_phones now (see prior refactor commits); the
+  // column is purely a trigger-maintained cache. Time to drop it.
+  //
+  // SAFETY: we do NOT drop blindly. The drop only runs if the same
+  // integrity-check logic from /api/admin/sales/phone-integrity-check
+  // returns zero orphans (legacy_only_count) AND zero value
+  // mismatches (value_mismatch_count, with +1 country-code drift
+  // ignored — see e8e673e). If either is non-zero, the boot logs
+  // loudly and skips the drop — column stays, triggers stay,
+  // human investigates the snapshot table.
+  //
+  // After a successful drop we also clean up the now-unused
+  // triggers (both cache-refresh and reverse-mirror) since there's
+  // nothing left to cache or mirror.
+  const cols = sqlite
+    .prepare("PRAGMA table_info(companies)")
+    .all() as Array<{ name: string }>;
+  const hasLegacyPhoneCol = cols.some((c) => c.name === "phone");
+
+  if (hasLegacyPhoneCol) {
+    // (A) Legacy-only — phones in companies.phone but no row in
+    // company_phones. Should be 0 after the boot backfill above.
+    const legacyOnly = (
+      sqlite
+        .prepare(
+          `SELECT COUNT(*) AS n FROM companies c
+            WHERE TRIM(COALESCE(c.phone, '')) <> ''
+              AND NOT EXISTS (
+                SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id
+              )`,
+        )
+        .get() as { n: number }
+    ).n;
+
+    // (B) Value mismatch — legacy phone's last-10-digits doesn't
+    // appear in any company_phones row for the same company. The
+    // SUBSTR(...,-10) trick collapses "+1 ..." variants to match
+    // bare 10-digit canonicals (see /api/admin/sales/phone-integrity-check).
+    const normalize = (col: string) =>
+      `SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${col},'-',''),' ',''),'(',''),')',''),'+',''),'.',''),CHAR(9),''), -10)`;
+    const mismatch = (
+      sqlite
+        .prepare(
+          `SELECT COUNT(*) AS n FROM (
+             SELECT c.id FROM companies c
+              WHERE TRIM(COALESCE(c.phone, '')) <> ''
+                AND EXISTS (SELECT 1 FROM company_phones cp2 WHERE cp2.company_id = c.id)
+                AND NOT EXISTS (
+                  SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id AND cp.phone = c.phone
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id
+                    AND ${normalize("cp.phone")} = ${normalize("c.phone")}
+                )
+           )`,
+        )
+        .get() as { n: number }
+    ).n;
+
+    if (legacyOnly === 0 && mismatch === 0) {
+      try {
+        // Drop the triggers first — once the column is gone the
+        // reverse-mirror triggers can't reference it, and the
+        // cache-refresh triggers have nothing to refresh.
+        sqlite.exec(`DROP TRIGGER IF EXISTS trg_company_phones_after_insert`);
+        sqlite.exec(`DROP TRIGGER IF EXISTS trg_company_phones_after_update`);
+        sqlite.exec(`DROP TRIGGER IF EXISTS trg_company_phones_after_delete`);
+        sqlite.exec(`DROP TRIGGER IF EXISTS trg_companies_phone_insert_mirror`);
+        sqlite.exec(`DROP TRIGGER IF EXISTS trg_companies_phone_update_mirror`);
+        // The actual drop. Snapshot table preserved for 30-90 days.
+        sqlite.exec(`ALTER TABLE companies DROP COLUMN phone`);
+        console.log(
+          "[db] companies.phone dropped — company_phones is now the sole source of truth. Snapshot retained in _legacy_companies_phone_snapshot.",
+        );
+      } catch (e) {
+        console.error(
+          "[db] companies.phone drop failed despite passing integrity check:",
+          e,
+        );
+      }
+    } else {
+      console.warn(
+        `[db] SKIPPING companies.phone drop — drift detected: ` +
+          `legacy_only=${legacyOnly}, value_mismatch=${mismatch}. ` +
+          `Run GET /api/admin/sales/phone-integrity-check for samples. ` +
+          `Snapshot is intact in _legacy_companies_phone_snapshot.`,
+      );
+    }
+  }
+
   sqlite.exec(`CREATE TABLE IF NOT EXISTS magic_link_tokens (
     id TEXT PRIMARY KEY NOT NULL,
     email TEXT NOT NULL,

@@ -29,7 +29,9 @@ export const companies = sqliteTable("companies", {
   type: text("type", { enum: ["independent", "chain", "online", "department_store", "boutique", "other"] }),
   website: text("website"),
   domain: text("domain"), // normalized domain per CTO review
-  phone: text("phone"),
+  // companies.phone was dropped 2026-06-19 — company_phones is now
+  // the canonical store. See /api/admin/sales/phone-integrity-check
+  // and the boot-block drop logic in src/lib/db.ts.
   email: text("email"),
   address: text("address"),
   city: text("city"),
