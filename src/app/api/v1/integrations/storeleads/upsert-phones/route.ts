@@ -27,9 +27,12 @@ const MAX_ITEMS = 10000;
  *   per row.
  * - First phone for a (company_id) where no row currently has
  *   is_primary=1 → that one gets marked is_primary=1.
- * - companies.phone gets COALESCE-filled from phones[0] so the
- *   legacy single-phone UI continues to work.
  * - source defaults to 'storeleads' if omitted.
+ *
+ * Pre-migration the route also wrote companies.phone as a legacy
+ * cache; that's now handled by the boot-time cache-refresh triggers
+ * (and the column itself is going away), so this route only writes
+ * the canonical store.
  *
  * Returns counts so the script can summarise.
  */
@@ -56,16 +59,9 @@ export async function POST(req: NextRequest) {
   const hasPrimaryQ = sqlite.prepare(
     `SELECT 1 AS x FROM company_phones WHERE company_id = ? AND is_primary = 1 LIMIT 1`,
   );
-  const fillCompaniesPhone = sqlite.prepare(
-    `UPDATE companies
-        SET phone = COALESCE(phone, ?), updated_at = datetime('now')
-      WHERE id = ?`,
-  );
-
   let totalPhonesIn = 0;
   let phoneRowsInserted = 0;
   let primariesAssigned = 0;
-  let companiesPhoneFilled = 0;
   let itemsProcessed = 0;
   const skipped: Array<{ company_id: string; reason: string }> = [];
 
@@ -107,15 +103,6 @@ export async function POST(req: NextRequest) {
         if (r.changes > 0) primariesAssigned++;
       }
 
-      // Legacy single-phone field: fill if it's NULL, never clobber.
-      const r2 = fillCompaniesPhone.run(phones[0], it.company_id);
-      if (r2.changes > 0) {
-        // changes > 0 just means the UPDATE matched; the COALESCE
-        // means the value may not have changed. Check after-state
-        // would be more accurate but the cost isn't worth it for a
-        // stats line.
-        companiesPhoneFilled++;
-      }
       itemsProcessed++;
     }
   });
@@ -128,8 +115,6 @@ export async function POST(req: NextRequest) {
     phoneRowsInserted,            // genuinely new rows in company_phones
     duplicatesSkipped: totalPhonesIn - phoneRowsInserted,
     primariesAssigned,             // companies that just got their first is_primary row
-    companiesPhoneFilled,          // companies whose UPDATE matched (note: not
-                                   // necessarily changed — COALESCE may have left it alone)
     skipped: skipped.slice(0, 10),
   });
 }

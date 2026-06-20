@@ -33,22 +33,34 @@ export async function POST(req: NextRequest) {
 
   const limit = Math.max(1, Math.min(50000, body.limit ?? 5000));
 
-  // The bad rows: phone contains any of the four common separators.
-  // Using GLOB instead of LIKE for cheap multi-char matching.
+  // The bad rows: any company_phones row whose phone field contains
+  // one of the four common separators that the storeleads import
+  // sometimes wrote verbatim ("555-1234; 555-5678"). One row → split
+  // into N clean rows.
+  //
+  // Post-drop of companies.phone we read directly from the canonical
+  // store. Each row identified by its OWN id (phone_row_id), not the
+  // company id, since a single company can have multiple corrupted
+  // rows.
   const candidates = sqlite.prepare(
-    `SELECT id, phone
-       FROM companies
-      WHERE phone IS NOT NULL
-        AND (phone LIKE '%:%'
-          OR phone LIKE '%;%'
-          OR phone LIKE '%|%'
+    `SELECT cp.id AS phone_row_id, cp.company_id AS id, cp.phone, cp.is_primary
+       FROM company_phones cp
+      WHERE cp.phone IS NOT NULL
+        AND (cp.phone LIKE '%:%'
+          OR cp.phone LIKE '%;%'
+          OR cp.phone LIKE '%|%'
           -- Comma is more delicate: many real phones are written
           -- "(555) 123-4567, ext 100" or as a list. We split on
           -- comma in firstOf too, so be consistent and clean it
           -- here as well.
-          OR phone LIKE '%,%')
+          OR cp.phone LIKE '%,%')
       LIMIT ?`,
-  ).all(limit) as Array<{ id: string; phone: string }>;
+  ).all(limit) as Array<{
+    phone_row_id: string;
+    id: string;
+    phone: string;
+    is_primary: number;
+  }>;
 
   if (candidates.length === 0) {
     return NextResponse.json({
@@ -66,21 +78,16 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const updatePrimary = sqlite.prepare(
-    `UPDATE companies SET phone = ?, updated_at = datetime('now') WHERE id = ?`,
+  // Delete the corrupted source row; insert one clean row per split
+  // part. Preserves is_primary on the first part if the source row
+  // was primary.
+  const deleteCorrupt = sqlite.prepare(
+    `DELETE FROM company_phones WHERE id = ?`,
   );
   const insertPhone = sqlite.prepare(
     `INSERT OR IGNORE INTO company_phones
        (id, company_id, phone, source, is_primary, created_at, updated_at)
-     VALUES (?, ?, ?, 'storeleads', 0, datetime('now'), datetime('now'))`,
-  );
-  const hasPrimaryQ = sqlite.prepare(
-    `SELECT 1 AS x FROM company_phones
-       WHERE company_id = ? AND is_primary = 1 LIMIT 1`,
-  );
-  const markPrimary = sqlite.prepare(
-    `UPDATE company_phones SET is_primary = 1, updated_at = datetime('now')
-       WHERE company_id = ? AND phone = ?`,
+     VALUES (?, ?, ?, 'storeleads', ?, datetime('now'), datetime('now'))`,
   );
 
   let fixed = 0;
@@ -99,18 +106,16 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      // Keep the first part as the displayed primary. Every part
-      // (including the first) lands in company_phones for the
-      // dialer flow.
-      updatePrimary.run(parts[0], c.id);
+      // Drop the corrupted row, then re-insert each clean part. The
+      // first part keeps the is_primary flag from the source row;
+      // the rest are non-primary alternates.
+      deleteCorrupt.run(c.phone_row_id);
       fixed++;
 
-      for (const p of parts) {
-        const r = insertPhone.run(crypto.randomUUID(), c.id, p);
+      for (let i = 0; i < parts.length; i++) {
+        const isPrimary = i === 0 ? (c.is_primary ?? 1) : 0;
+        const r = insertPhone.run(crypto.randomUUID(), c.id, parts[i], isPrimary);
         if (r.changes > 0) phonesRecovered++;
-      }
-      if (!hasPrimaryQ.get(c.id)) {
-        markPrimary.run(c.id, parts[0]);
       }
 
       if (sampleOut.length < 10) {

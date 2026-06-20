@@ -85,7 +85,8 @@ export async function POST() {
     const storeIds: string[] = [];
     const contactIds: string[] = [];
 
-    const insertCompany = sqlite.prepare(`INSERT INTO companies (id, name, type, website, phone, email, city, state, zip, country, status, source, icp_tier, icp_score, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const insertCompany = sqlite.prepare(`INSERT INTO companies (id, name, type, website, email, city, state, zip, country, status, source, icp_tier, icp_score, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const insertCompanyPhone = sqlite.prepare(`INSERT OR IGNORE INTO company_phones (id, company_id, phone, source, is_primary, created_at, updated_at) VALUES (?, ?, ?, 'seed', 1, ?, ?)`);
     const insertStore = sqlite.prepare(`INSERT INTO stores (id, company_id, name, is_primary, city, state, zip, phone, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const insertContact = sqlite.prepare(`INSERT INTO contacts (id, store_id, company_id, first_name, last_name, title, email, phone, is_primary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 
@@ -98,13 +99,14 @@ export async function POST() {
         const type = companyTypes[i % companyTypes.length];
         const tier = icpTiers[Math.min(Math.floor(i / 12), 3)];
         const slug = companyNames[i].toLowerCase().replace(/[^a-z0-9]+/g, '');
+        const companyPhone = `(${310 + i}) 555-${String(1000 + i).slice(-4)}`;
         insertCompany.run(
           cId, companyNames[i], type, `https://${slug}.com`,
-          `(${310 + i}) 555-${String(1000 + i).slice(-4)}`,
           `info@${slug}.com`, city, st, String(90000 + i * 111),
           'US', statuses[i % statuses.length], sources[i % sources.length],
           tier, 90 - i, JSON.stringify([type]), daysAgo(i * 3), now
         );
+        insertCompanyPhone.run(uid(), cId, companyPhone, daysAgo(i * 3), now);
 
         // Store
         const sId = uid();

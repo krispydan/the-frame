@@ -126,8 +126,8 @@ export const POST = apiHandler(
 
       sqlite
         .prepare(
-          `INSERT INTO companies (id, name, domain, website, email, phone, address, city, state, zip, socials, contact_form_url, notes, status, source, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', 'chrome_extension', ?, ?)`
+          `INSERT INTO companies (id, name, domain, website, email, address, city, state, zip, socials, contact_form_url, notes, status, source, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', 'chrome_extension', ?, ?)`
         )
         .run(
           id,
@@ -135,7 +135,6 @@ export const POST = apiHandler(
           domain,
           body.website || null,
           body.email || null,
-          body.phone || null,
           body.address || null,
           body.city || null,
           body.state || null,
@@ -146,6 +145,15 @@ export const POST = apiHandler(
           now,
           now
         );
+      // Phone is stored in company_phones (canonical), not on the
+      // companies row. Idempotent — duplicate (company_id, phone) is
+      // silently skipped by the unique index.
+      if (body.phone) {
+        const { addCompanyPhone } = await import(
+          "@/modules/sales/lib/company-phones"
+        );
+        addCompanyPhone(id, body.phone, "chrome_ext");
+      }
 
       return NextResponse.json({
         prospect: { id, name: body.business_name || domain, domain, status: "new" },

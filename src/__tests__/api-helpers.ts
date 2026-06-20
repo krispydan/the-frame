@@ -51,13 +51,19 @@ export function seedTestData() {
 
   db.prepare(`INSERT INTO segments (id, name, slug, status) VALUES ('seg1', 'Surf Shops', 'surf-shops', 'active')`).run();
 
-  // Companies
-  db.prepare(`INSERT INTO companies (id, name, state, status, email, phone, icp_score, icp_tier, source, source_type, type, domain, segment_id, industry)
-    VALUES ('c1', 'Sunny Shades', 'CA', 'qualified', 'info@sunny.com', '555-0001', 85, 'A', 'google', 'maps', 'boutique', 'sunny.com', 'seg1', 'surf')`).run();
-  db.prepare(`INSERT INTO companies (id, name, state, status, email, phone, icp_score, icp_tier, source, source_type, type, domain, segment, industry)
-    VALUES ('c2', 'Cool Frames', 'NY', 'new', NULL, '555-0002', 45, 'C', 'faire', 'marketplace', 'chain', 'coolframes.com', 'Museum Gift Shops', 'gift')`).run();
+  // Companies — phone now lives in company_phones (canonical store),
+  // not on the companies row. Tests that needed has_phone semantics
+  // get a row in company_phones below.
+  db.prepare(`INSERT INTO companies (id, name, state, status, email, icp_score, icp_tier, source, source_type, type, domain, segment_id, industry)
+    VALUES ('c1', 'Sunny Shades', 'CA', 'qualified', 'info@sunny.com', 85, 'A', 'google', 'maps', 'boutique', 'sunny.com', 'seg1', 'surf')`).run();
+  db.prepare(`INSERT INTO companies (id, name, state, status, email, icp_score, icp_tier, source, source_type, type, domain, segment, industry)
+    VALUES ('c2', 'Cool Frames', 'NY', 'new', NULL, 45, 'C', 'faire', 'marketplace', 'chain', 'coolframes.com', 'Museum Gift Shops', 'gift')`).run();
   db.prepare(`INSERT INTO companies (id, name, state, status, email, icp_score, icp_tier, source_type)
     VALUES ('c3', 'Beach Eyewear', 'FL', 'contacted', 'hello@beach.com', 72, 'B', 'maps')`).run();
+  db.prepare(`INSERT INTO company_phones (id, company_id, phone, source, is_primary)
+    VALUES ('cp1', 'c1', '555-0001', 'seed', 1)`).run();
+  db.prepare(`INSERT INTO company_phones (id, company_id, phone, source, is_primary)
+    VALUES ('cp2', 'c2', '555-0002', 'seed', 1)`).run();
 
   // FTS
   try {
