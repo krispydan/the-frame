@@ -222,7 +222,9 @@ export function CampaignDetail({ campaign }: { campaign: Campaign }) {
                   {campaign.status}
                 </Badge>
                 {campaign.target_segment && (
-                  <Badge variant="outline">{campaign.target_segment}</Badge>
+                  <Link href={`/campaigns?segment=${encodeURIComponent(campaign.target_segment)}`}>
+                    <Badge variant="outline">{campaign.target_segment}</Badge>
+                  </Link>
                 )}
                 {campaign.instantly_campaign_id && (
                   <Badge variant="outline"><Zap className="mr-1 h-3 w-3" /> Instantly</Badge>
