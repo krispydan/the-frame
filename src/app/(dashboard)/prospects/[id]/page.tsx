@@ -1884,7 +1884,13 @@ export default function CompanyDetailPage() {
                 )}
                 {company.segment && (
                   <p className="text-xs text-gray-600 dark:text-gray-400">
-                    <span className="text-gray-400">Segment:</span> {company.segment}
+                    <span className="text-gray-400">Segment:</span>{" "}
+                    <Link
+                      href={`/prospects?segment=${encodeURIComponent(company.segment)}`}
+                      className="text-blue-600 hover:underline dark:text-blue-400"
+                    >
+                      {company.segment}
+                    </Link>
                   </p>
                 )}
               </CardContent>
