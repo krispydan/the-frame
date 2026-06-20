@@ -64,16 +64,50 @@ export async function GET() {
     };
   });
 
-  // Get segments with counts
-  const segments = sqlite.prepare(`
+  // Segment filters should come from the structured segment catalog, not
+  // only from whatever happens to be present on current company rows.
+  // We still preserve counted legacy values so older uncataloged data
+  // remains filterable until it gets normalized into segments.
+  const segmentCounts = sqlite.prepare(`
     SELECT COALESCE(s.name, c.segment) as segment, count(*) as count
     FROM companies c
     LEFT JOIN segments s ON s.id = c.segment_id
     WHERE COALESCE(s.name, c.segment) IS NOT NULL
       AND COALESCE(s.name, c.segment) != ''
     GROUP BY COALESCE(s.name, c.segment)
-    ORDER BY count DESC, segment ASC
   `).all() as { segment: string; count: number }[];
+
+  const catalogSegments = sqlite.prepare(`
+    SELECT name as segment, status
+    FROM segments
+    WHERE name IS NOT NULL
+      AND trim(name) != ''
+  `).all() as { segment: string; status: string }[];
+
+  const segmentCountMap = new Map(
+    segmentCounts.map((row) => [row.segment.trim(), row.count]),
+  );
+
+  const segments = [
+    ...catalogSegments
+      .filter((row) => row.status !== "retired" || (segmentCountMap.get(row.segment.trim()) || 0) > 0)
+      .map((row) => ({
+        segment: row.segment.trim(),
+        count: segmentCountMap.get(row.segment.trim()) || 0,
+      })),
+    ...segmentCounts
+      .filter((row) => {
+        const normalized = row.segment.trim().toLowerCase();
+        return !catalogSegments.some((segment) => segment.segment.trim().toLowerCase() === normalized);
+      })
+      .map((row) => ({
+        segment: row.segment.trim(),
+        count: row.count,
+      })),
+  ].sort((a, b) => {
+    if (b.count !== a.count) return b.count - a.count;
+    return a.segment.localeCompare(b.segment);
+  });
 
   // Products carried (formerly mislabeled as "category") — what eyewear
   // categories the prospect already merchandises.
