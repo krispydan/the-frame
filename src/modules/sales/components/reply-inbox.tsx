@@ -200,7 +200,14 @@ export function ReplyInbox({ replies: initialReplies, unreadCount }: { replies: 
                     </div>
                     <div className="text-xs text-muted-foreground mb-2">
                       Campaign: <Link href={`/campaigns/${r.campaign_id}`} className="underline">{r.campaign_name}</Link>
-                      {r.segment && ` • ${r.segment}`}
+                      {r.segment && (
+                        <>
+                          {" • "}
+                          <Link href={`/prospects?segment=${encodeURIComponent(r.segment)}`} className="underline">
+                            {r.segment}
+                          </Link>
+                        </>
+                      )}
                       {r.replied_at && ` • ${new Date(r.replied_at).toLocaleDateString()}`}
                     </div>
                     <p className="text-sm whitespace-pre-wrap bg-muted/50 rounded p-3">{r.reply_text}</p>
