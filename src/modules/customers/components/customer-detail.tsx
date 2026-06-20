@@ -149,7 +149,10 @@ export function CustomerDetail({
               {TIER_LABELS[account.tier]}
             </span>
             {account.segment && (
-              <Link href="/segments" className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
+              <Link
+                href={`/customers?segment=${encodeURIComponent(account.segment)}`}
+                className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 hover:bg-slate-200"
+              >
                 {account.segment}
               </Link>
             )}

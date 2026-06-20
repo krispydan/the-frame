@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   CUSTOMER_TIERS,
@@ -42,10 +43,12 @@ function daysUntilReorder(est: string | null): number | null {
 }
 
 export function CustomerList({ customers }: { customers: CustomerRow[] }) {
+  const searchParams = useSearchParams();
+  const initialSegmentFilter = searchParams.get("segment") || "all";
   const [segments, setSegments] = useState<SegmentOption[]>([]);
   const [tierFilter, setTierFilter] = useState<CustomerTier | "all">("all");
   const [healthFilter, setHealthFilter] = useState<HealthStatus | "all">("all");
-  const [segmentFilter, setSegmentFilter] = useState<string>("all");
+  const [segmentFilter, setSegmentFilter] = useState<string>(initialSegmentFilter);
   const [sortBy, setSortBy] = useState<SortField>("lifetime_value");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [search, setSearch] = useState("");
@@ -113,6 +116,10 @@ export function CustomerList({ customers }: { customers: CustomerRow[] }) {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    setSegmentFilter(initialSegmentFilter);
+  }, [initialSegmentFilter]);
 
   const segmentOptions = segments.map((segment) => segment.name);
 
