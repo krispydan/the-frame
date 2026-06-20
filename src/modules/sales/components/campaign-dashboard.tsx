@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,6 +57,8 @@ interface SegmentOption {
 }
 
 export function CampaignDashboard({ campaigns: initialCampaigns, summary, initialSegmentFilter = "all" }: Props) {
+  const pathname = usePathname();
+  const router = useRouter();
   const [campaigns, setCampaigns] = useState(initialCampaigns);
   const [segments, setSegments] = useState<SegmentOption[]>([]);
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -79,6 +82,21 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary, initia
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (segmentFilter !== "all") {
+      params.set("segment", segmentFilter);
+    } else {
+      params.delete("segment");
+    }
+    const query = params.toString();
+    const nextUrl = query ? `${pathname}?${query}` : pathname;
+    const currentUrl = `${window.location.pathname}${window.location.search}`;
+    if (nextUrl !== currentUrl) {
+      router.replace(nextUrl);
+    }
+  }, [pathname, router, segmentFilter]);
 
   const segmentOptions = segments.map((segment) => segment.name);
 
