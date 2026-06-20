@@ -115,10 +115,23 @@ export async function GET() {
   // digits-only). Catches "phone migrated but in a different
   // format" cases that could lose data on drop.
   //
-  // The normalization strips every non-digit character so
-  // "+1 (715) 209-4057" matches "7152094057" matches "1-715-209-4057".
-  const normalize = (col: string) =>
-    `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${col},'-',''),' ',''),'(',''),')',''),'+',''),'.',''),CHAR(9),'')`;
+  // Normalization: strip every non-digit character, then take the
+  // last 10 chars so a "+1 ..." prefix on one side matches a bare
+  // 10-digit number on the other. Examples that all collapse to
+  // the same key:
+  //   "+1 (715) 209-4057"  →  "17152094057"  →  "7152094057"
+  //   "7152094057"         →  "7152094057"   →  "7152094057"
+  //   "1-715-209-4057"     →  "17152094057"  →  "7152094057"
+  //   "715.209.4057"       →  "7152094057"   →  "7152094057"
+  // The last-10 step handles the "+1" / "1" country-code drift —
+  // the canonical store always strips it (per formatToPbPhone) but
+  // legacy values may or may not include it.
+  const normalize = (col: string) => {
+    const stripped = `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${col},'-',''),' ',''),'(',''),')',''),'+',''),'.',''),CHAR(9),'')`;
+    // SUBSTR(s, -10) returns the rightmost 10 characters; if the
+    // string is shorter, returns the whole string.
+    return `SUBSTR(${stripped}, -10)`;
+  };
 
   const mismatchRows = sqlite
     .prepare(
