@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -428,6 +428,7 @@ export function PipelineBoard({
   users,
   initialSegmentFilter = "all",
 }: Props) {
+  const pathname = usePathname();
   const router = useRouter();
   const [deals, setDeals] = useState(initialDeals);
   const [segments, setSegments] = useState<SegmentOption[]>([]);
@@ -450,6 +451,21 @@ export function PipelineBoard({
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (segmentFilter !== "all") {
+      params.set("segment", segmentFilter);
+    } else {
+      params.delete("segment");
+    }
+    const query = params.toString();
+    const nextUrl = query ? `${pathname}?${query}` : pathname;
+    const currentUrl = `${window.location.pathname}${window.location.search}`;
+    if (nextUrl !== currentUrl) {
+      router.replace(nextUrl);
+    }
+  }, [pathname, router, segmentFilter]);
 
   const segmentOptions = segments.map((segment) => segment.name);
 
