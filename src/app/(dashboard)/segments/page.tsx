@@ -265,17 +265,45 @@ export default function SegmentsPage() {
                           {segment.status}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right">{segment.prospect_count.toLocaleString()}</TableCell>
+                      <TableCell className="text-right">
+                        <Link
+                          href={`/prospects?segment=${encodeURIComponent(segment.name)}`}
+                          className="hover:underline"
+                        >
+                          {segment.prospect_count.toLocaleString()}
+                        </Link>
+                      </TableCell>
                       <TableCell className="text-right">{segment.qualified_count.toLocaleString()}</TableCell>
                       <TableCell className="text-right">
-                        <div>{segment.customer_count.toLocaleString()}</div>
+                        <div>
+                          <Link
+                            href={`/customers?segment=${encodeURIComponent(segment.name)}`}
+                            className="hover:underline"
+                          >
+                            {segment.customer_count.toLocaleString()}
+                          </Link>
+                        </div>
                         <div className="text-xs text-muted-foreground">{conversionRate.toFixed(1)}% conv.</div>
                       </TableCell>
                       <TableCell className="text-right">
-                        <div>{segment.active_deals.toLocaleString()}</div>
+                        <div>
+                          <Link
+                            href={`/pipeline?segment=${encodeURIComponent(segment.name)}`}
+                            className="hover:underline"
+                          >
+                            {segment.active_deals.toLocaleString()}
+                          </Link>
+                        </div>
                         <div className="text-xs text-muted-foreground">${segment.pipeline_value.toLocaleString()}</div>
                       </TableCell>
-                      <TableCell className="text-right">{segment.campaign_count.toLocaleString()}</TableCell>
+                      <TableCell className="text-right">
+                        <Link
+                          href={`/campaigns?segment=${encodeURIComponent(segment.name)}`}
+                          className="hover:underline"
+                        >
+                          {segment.campaign_count.toLocaleString()}
+                        </Link>
+                      </TableCell>
                       <TableCell className="text-right">{segment.order_count.toLocaleString()}</TableCell>
                       <TableCell className="text-right">
                         <div>${segment.revenue.toLocaleString()}</div>
