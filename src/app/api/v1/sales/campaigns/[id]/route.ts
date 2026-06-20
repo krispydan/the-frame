@@ -6,6 +6,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { logger } from "@/modules/core/lib/logger";
 
+function normalizeTargetSegment(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  const match = sqlite.prepare(`
+    SELECT name
+    FROM segments
+    WHERE lower(trim(name)) = lower(trim(?))
+    LIMIT 1
+  `).get(trimmed) as { name: string } | undefined;
+
+  return match?.name ?? trimmed;
+}
+
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const campaign = sqlite.prepare(`
@@ -40,7 +55,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   for (const key of allowed) {
     if (key in body) {
       sets.push(`${key} = ?`);
-      vals.push(body[key]);
+      vals.push(key === "target_segment" ? normalizeTargetSegment(body[key]) : body[key]);
     }
   }
 
