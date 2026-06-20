@@ -245,7 +245,14 @@ export function CustomerDetail({
       {(account.segment || account.payment_terms || account.discount_rate > 0 || account.notes) && (
         <div className="rounded-lg border bg-white p-4 space-y-2">
           <h2 className="font-semibold">Account Details</h2>
-          {account.segment && <p className="text-sm"><span className="text-gray-500">Segment:</span> {account.segment}</p>}
+          {account.segment && (
+            <p className="text-sm">
+              <span className="text-gray-500">Segment:</span>{" "}
+              <Link href={`/customers?segment=${encodeURIComponent(account.segment)}`} className="hover:text-blue-600 hover:underline">
+                {account.segment}
+              </Link>
+            </p>
+          )}
           {account.payment_terms && <p className="text-sm"><span className="text-gray-500">Payment Terms:</span> {account.payment_terms}</p>}
           {account.discount_rate > 0 && <p className="text-sm"><span className="text-gray-500">Discount:</span> {account.discount_rate}%</p>}
           {account.notes && <p className="text-sm text-gray-600">{account.notes}</p>}

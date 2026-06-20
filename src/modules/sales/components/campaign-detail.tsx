@@ -402,7 +402,18 @@ function LeadTable({ leads, icpFilter, sortBy }: { leads: Lead[]; icpFilter: str
                     l.company_name
                   )}
                 </TableCell>
-                <TableCell className="text-sm text-muted-foreground">{l.segment || "—"}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">
+                  {l.segment ? (
+                    <Link
+                      href={`/prospects?segment=${encodeURIComponent(l.segment)}`}
+                      className="hover:text-blue-600 hover:underline"
+                    >
+                      {l.segment}
+                    </Link>
+                  ) : (
+                    "—"
+                  )}
+                </TableCell>
                 <TableCell>
                   {l.icp_tier ? (
                     <div className="flex items-center gap-1">
