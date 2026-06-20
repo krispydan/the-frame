@@ -77,13 +77,21 @@ mcpRegistry.register(
     if (args.icp_max != null) { clauses.push("c.icp_score <= ?"); params.push(args.icp_max); }
     if (args.has_email === "true") clauses.push("c.email IS NOT NULL AND c.email != ''");
     else if (args.has_email === "false") clauses.push("(c.email IS NULL OR c.email = '')");
-    if (args.has_phone === "true") clauses.push("c.phone IS NOT NULL AND c.phone != ''");
-    else if (args.has_phone === "false") clauses.push("(c.phone IS NULL OR c.phone = '')");
+    // company_phones is the canonical store — has_phone tests
+    // existence there, not the deprecated companies.phone cache.
+    if (args.has_phone === "true")
+      clauses.push("EXISTS (SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id)");
+    else if (args.has_phone === "false")
+      clauses.push("NOT EXISTS (SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id)");
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
     const total = (sqlite.prepare(`SELECT count(*) as c FROM companies c ${where}`).get(...params) as { c: number }).c;
     const rows = sqlite.prepare(`
-      SELECT c.id, c.name, c.city, c.state, c.type, c.source, c.phone, c.email, c.icp_score, c.icp_tier, c.status, c.tags
+      SELECT c.id, c.name, c.city, c.state, c.type, c.source,
+             (SELECT cp.phone FROM company_phones cp
+               WHERE cp.company_id = c.id
+               ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
+             c.email, c.icp_score, c.icp_tier, c.status, c.tags
       FROM companies c ${where} ORDER BY ${sortCol} ${sortOrder} NULLS LAST LIMIT ? OFFSET ?
     `).all(...params, limit, offset) as Record<string, unknown>[];
 

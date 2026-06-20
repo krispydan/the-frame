@@ -55,7 +55,10 @@ async function getAccount(id: string) {
       ca.*,
       c.name as company_name,
       c.email as company_email,
-      c.phone as company_phone,
+      (SELECT cp.phone FROM company_phones cp
+        WHERE cp.company_id = c.id
+        ORDER BY cp.is_primary DESC, cp.created_at ASC
+        LIMIT 1) as company_phone,
       COALESCE(s.name, c.segment) as segment
     FROM customer_accounts ca
     JOIN companies c ON c.id = ca.company_id
