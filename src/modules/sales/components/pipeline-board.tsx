@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -66,6 +67,7 @@ interface Props {
   deals: Deal[];
   companies: { id: string; name: string; city: string; state: string }[];
   users: { id: string; name: string; email: string }[];
+  initialSegmentFilter?: string;
 }
 
 interface SegmentOption {
@@ -152,9 +154,14 @@ function DealCard({
 
         <div className="flex items-center gap-1.5 flex-wrap">
           {deal.segment && (
-            <Badge variant="secondary" className={SEGMENT_BADGE_CLASS}>
-              {deal.segment}
-            </Badge>
+            <Link
+              href={`/pipeline?segment=${encodeURIComponent(deal.segment)}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Badge variant="secondary" className={`${SEGMENT_BADGE_CLASS} hover:underline`}>
+                {deal.segment}
+              </Badge>
+            </Link>
           )}
           {deal.channel && (
             <Badge
@@ -415,13 +422,18 @@ function ReorderTab({ deals, onOpenDetail, onReengage }: { deals: Deal[]; onOpen
 }
 
 // ── Main Board ──
-export function PipelineBoard({ deals: initialDeals, companies, users }: Props) {
+export function PipelineBoard({
+  deals: initialDeals,
+  companies,
+  users,
+  initialSegmentFilter = "all",
+}: Props) {
   const router = useRouter();
   const [deals, setDeals] = useState(initialDeals);
   const [segments, setSegments] = useState<SegmentOption[]>([]);
   const [activeTab, setActiveTab] = useState<"active" | "snoozed" | "reorder">("active");
   const [ownerFilter, setOwnerFilter] = useState<string>("all");
-  const [segmentFilter, setSegmentFilter] = useState<string>("all");
+  const [segmentFilter, setSegmentFilter] = useState<string>(initialSegmentFilter || "all");
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const draggingDealId = useRef<string | null>(null);
 

@@ -49,7 +49,12 @@ async function getUsers() {
   return rows as { id: string; name: string; email: string }[];
 }
 
-export default async function PipelinePage() {
+export default async function PipelinePage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ segment?: string }>;
+}) {
+  const params = searchParams ? await searchParams : undefined;
   const [deals, companies, users] = await Promise.all([getDeals(), getCompaniesForSearch(), getUsers()]);
 
   return (
@@ -58,6 +63,7 @@ export default async function PipelinePage() {
         deals={deals}
         companies={companies}
         users={users}
+        initialSegmentFilter={params?.segment || "all"}
       />
     </div>
   );
