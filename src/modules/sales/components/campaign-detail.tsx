@@ -372,9 +372,34 @@ function LeadTable({ leads, icpFilter, sortBy }: { leads: Lead[]; icpFilter: str
             <>
               <TableRow key={l.id}>
                 <TableCell className="font-medium">
-                  {[l.first_name, l.last_name].filter(Boolean).join(" ") || "—"}
+                  {l.company_id ? (
+                    <Link
+                      href={`/prospects/${l.company_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:text-blue-600 hover:underline"
+                    >
+                      {[l.first_name, l.last_name].filter(Boolean).join(" ") || "—"}
+                    </Link>
+                  ) : (
+                    [l.first_name, l.last_name].filter(Boolean).join(" ") || "—"
+                  )}
                 </TableCell>
-                <TableCell>{l.company_name}</TableCell>
+                <TableCell>
+                  {l.company_id ? (
+                    <Link
+                      href={`/prospects/${l.company_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium hover:text-blue-600 hover:underline inline-flex items-center gap-1"
+                    >
+                      {l.company_name}
+                      <ExternalLink className="h-3 w-3 opacity-50" />
+                    </Link>
+                  ) : (
+                    l.company_name
+                  )}
+                </TableCell>
                 <TableCell className="text-sm text-muted-foreground">{l.segment || "—"}</TableCell>
                 <TableCell>
                   {l.icp_tier ? (
