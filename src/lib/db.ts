@@ -260,6 +260,20 @@ try { sqlite.exec("CREATE INDEX idx_companies_top_brand ON companies (top_brand)
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN primary_competitor_brand TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_primary_competitor ON companies (primary_competitor_brand)"); } catch { /* exists */ }
 
+// AJM legacy import (2026-06-19): historical AJ Morgan customer data
+// for the wholesale reactivation campaign. The cohort numbers (spend,
+// orders, dates) drive priority tiering in smart lists and Christina's
+// call order. AJM status retained as-is to distinguish recent-Inactive
+// (winnable) from stale-Inactive (skipped at import).
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN ajm_total_spend REAL"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN ajm_total_orders INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN ajm_first_order TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN ajm_last_order TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN ajm_status TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN ajm_category TEXT"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_companies_ajm_spend ON companies (ajm_total_spend)"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_companies_ajm_last_order ON companies (ajm_last_order)"); } catch { /* exists */ }
+
 // Image upload system: new columns on catalog_images
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN url TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN file_size INTEGER"); } catch { /* exists */ }
