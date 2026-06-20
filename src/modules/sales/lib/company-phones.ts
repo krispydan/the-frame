@@ -7,15 +7,27 @@
  */
 
 import { sqlite } from "@/lib/db";
+import type { Statement } from "better-sqlite3";
 
-const insertStmt = sqlite.prepare(
-  `INSERT OR IGNORE INTO company_phones
-    (id, company_id, phone, source, is_primary, created_at, updated_at)
-   VALUES (
-    lower(hex(randomblob(16))), ?, ?, ?, 1,
-    datetime('now'), datetime('now')
-   )`,
-);
+// Lazy prepare — top-level `sqlite.prepare(...)` runs at module load,
+// which during Next.js build-phase page-data collection executes
+// against an empty in-memory DB (no tables yet) and crashes the build
+// with "no such table: company_phones". Defer until first call so the
+// real DB is initialized first.
+let insertStmt: Statement | null = null;
+function getInsertStmt(): Statement {
+  if (!insertStmt) {
+    insertStmt = sqlite.prepare(
+      `INSERT OR IGNORE INTO company_phones
+        (id, company_id, phone, source, is_primary, created_at, updated_at)
+       VALUES (
+        lower(hex(randomblob(16))), ?, ?, ?, 1,
+        datetime('now'), datetime('now')
+       )`,
+    );
+  }
+  return insertStmt;
+}
 
 /**
  * Add a phone for a company. Idempotent — duplicate (company_id, phone)
@@ -41,5 +53,5 @@ export function addCompanyPhone(
   if (!companyId) return;
   const trimmed = (phone ?? "").trim();
   if (!trimmed) return;
-  insertStmt.run(companyId, trimmed, source);
+  getInsertStmt().run(companyId, trimmed, source);
 }
