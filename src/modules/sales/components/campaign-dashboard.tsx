@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Mail, Send, Eye, MessageSquare, Zap, Plus, RefreshCw, Inbox } from "lucide-react";
+import { Mail, Send, MessageSquare, Zap, Plus, RefreshCw, Inbox } from "lucide-react";
 import { CampaignCreateDialog } from "./campaign-create-dialog";
 
 const TYPE_BADGES: Record<string, { label: string; className: string }> = {
@@ -49,8 +49,15 @@ interface Props {
   initialSegmentFilter?: string;
 }
 
+interface SegmentOption {
+  id: string;
+  name: string;
+  status: string;
+}
+
 export function CampaignDashboard({ campaigns: initialCampaigns, summary, initialSegmentFilter = "all" }: Props) {
   const [campaigns, setCampaigns] = useState(initialCampaigns);
+  const [segments, setSegments] = useState<SegmentOption[]>([]);
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [segmentFilter, setSegmentFilter] = useState<string>(initialSegmentFilter);
@@ -59,13 +66,21 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary, initia
   const [lastSyncResult, setLastSyncResult] = useState<{ pushed: { campaigns: number; leads: number }; pulled: { campaigns: number; leads: number; stageUpdates: number }; errors: string[] } | null>(null);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
-  const segmentOptions = Array.from(
-    new Set(
-      campaigns
-        .map((campaign) => campaign.target_segment?.trim())
-        .filter((value): value is string => Boolean(value))
-    )
-  ).sort((a, b) => a.localeCompare(b));
+  useEffect(() => {
+    fetch("/api/v1/sales/segments")
+      .then((r) => r.json())
+      .then((d) => {
+        const activeSegments = Array.isArray(d.data)
+          ? d.data
+              .filter((segment: SegmentOption) => segment.status !== "retired")
+              .sort((a: SegmentOption, b: SegmentOption) => a.name.localeCompare(b.name))
+          : [];
+        setSegments(activeSegments);
+      })
+      .catch(() => {});
+  }, []);
+
+  const segmentOptions = segments.map((segment) => segment.name);
 
   const filtered = campaigns.filter((c) => {
     if (typeFilter !== "all" && c.type !== typeFilter) return false;
