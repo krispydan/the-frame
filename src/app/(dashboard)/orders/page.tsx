@@ -321,7 +321,14 @@ function OrdersPage() {
               </td></tr>
             ) : (
               orders.map((o) => (
-                <tr key={o.id} onClick={() => router.push(`/orders/${o.id}`)} className="hover:bg-muted/30 cursor-pointer">
+                <tr
+                  key={o.id}
+                  onClick={() => {
+                    const query = searchParams.toString();
+                    router.push(query ? `/orders/${o.id}?${query}` : `/orders/${o.id}`);
+                  }}
+                  className="hover:bg-muted/30 cursor-pointer"
+                >
                   <td className="px-4 py-3 font-medium">{o.orderNumber}</td>
                   <td className="px-4 py-3 text-muted-foreground">{o.companyName || "—"}</td>
                   <td className="px-4 py-3"><ChannelBadge channel={o.channel} /></td>

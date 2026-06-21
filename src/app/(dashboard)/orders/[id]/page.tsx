@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import {
   ArrowLeft,
@@ -239,6 +239,7 @@ function KpiTile({
 
 export default function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { setOverride } = useBreadcrumbOverride();
   const [orderId, setOrderId] = useState<string | null>(null);
   const [order, setOrder] = useState<OrderDetail | null>(null);
@@ -250,6 +251,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   const [returnReason, setReturnReason] = useState("");
   const [returnItems, setReturnItems] = useState<Record<string, number>>({});
   const [submittingReturn, setSubmittingReturn] = useState(false);
+  const backHref = searchParams.toString() ? `/orders?${searchParams.toString()}` : "/orders";
 
   // Unwrap params
   useEffect(() => {
@@ -316,7 +318,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   if (error || !order) {
     return (
       <div className="p-6 max-w-7xl mx-auto">
-        <button onClick={() => router.push("/orders")} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-4">
+        <button onClick={() => router.push(backHref)} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back to Orders
         </button>
         <div className="text-center py-12">
@@ -338,7 +340,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       {/* Back nav */}
-      <button onClick={() => router.push("/orders")} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+      <button onClick={() => router.push(backHref)} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-4 w-4" /> Back to Orders
       </button>
 
