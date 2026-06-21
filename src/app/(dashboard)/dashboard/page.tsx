@@ -353,8 +353,10 @@ export default function DashboardPage() {
                 <div>
                   <h4 className="text-sm font-medium text-amber-700 mb-2">⏰ Waking Today ({focus.wakingToday.length})</h4>
                   {focus.wakingToday.map(d => (
-                    <Link key={d.id} href={`/pipeline/${d.id}`} className="block p-2 rounded hover:bg-amber-50 dark:hover:bg-amber-900/10 text-sm">
-                      <span className="font-medium">{d.company_name}</span>
+                    <div key={d.id} className="rounded p-2 hover:bg-amber-50 dark:hover:bg-amber-900/10 text-sm">
+                      <Link href={`/pipeline/${d.id}`} className="font-medium hover:underline">
+                        {d.company_name}
+                      </Link>
                       {d.segment && (
                         <span className="ml-2">
                           <Link
@@ -366,7 +368,7 @@ export default function DashboardPage() {
                         </span>
                       )}
                       {d.snooze_reason && <span className="text-xs text-gray-500 block">{d.snooze_reason}</span>}
-                    </Link>
+                    </div>
                   ))}
                 </div>
               )}
@@ -374,8 +376,10 @@ export default function DashboardPage() {
                 <div>
                   <h4 className="text-sm font-medium text-teal-700 mb-2">🔄 Reorder Due ({focus.reorderDue.length})</h4>
                   {focus.reorderDue.map(d => (
-                    <Link key={d.id} href={`/pipeline/${d.id}`} className="block p-2 rounded hover:bg-teal-50 dark:hover:bg-teal-900/10 text-sm">
-                      <span className="font-medium">{d.company_name}</span>
+                    <div key={d.id} className="rounded p-2 hover:bg-teal-50 dark:hover:bg-teal-900/10 text-sm">
+                      <Link href={`/pipeline/${d.id}`} className="font-medium hover:underline">
+                        {d.company_name}
+                      </Link>
                       {d.segment && (
                         <span className="ml-2">
                           <Link
@@ -387,7 +391,7 @@ export default function DashboardPage() {
                         </span>
                       )}
                       {d.value && <span className="text-xs text-green-600 ml-2">${d.value.toLocaleString()}</span>}
-                    </Link>
+                    </div>
                   ))}
                 </div>
               )}
@@ -395,8 +399,10 @@ export default function DashboardPage() {
                 <div>
                   <h4 className="text-sm font-medium text-red-700 mb-2">💤 Needs Attention ({focus.stale.length})</h4>
                   {focus.stale.map(d => (
-                    <Link key={d.id} href={`/pipeline/${d.id}`} className="block p-2 rounded hover:bg-red-50 dark:hover:bg-red-900/10 text-sm">
-                      <span className="font-medium">{d.company_name}</span>
+                    <div key={d.id} className="rounded p-2 hover:bg-red-50 dark:hover:bg-red-900/10 text-sm">
+                      <Link href={`/pipeline/${d.id}`} className="font-medium hover:underline">
+                        {d.company_name}
+                      </Link>
                       {d.segment && (
                         <span className="ml-2">
                           <Link
@@ -408,7 +414,7 @@ export default function DashboardPage() {
                         </span>
                       )}
                       <span className="text-xs text-gray-500 block">No activity for 7+ days</span>
-                    </Link>
+                    </div>
                   ))}
                 </div>
               )}
