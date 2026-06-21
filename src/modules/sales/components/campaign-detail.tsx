@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/tooltip";
 import { ArrowLeft, Send, Eye, MessageSquare, AlertTriangle, Trophy, Zap, ExternalLink, Sparkles, ChevronDown, ChevronUp, Mail, Phone, Inbox, Loader2 } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
 interface Lead {
@@ -169,11 +170,13 @@ function ABTestSection({ campaign }: { campaign: Campaign }) {
 }
 
 export function CampaignDetail({ campaign }: { campaign: Campaign }) {
+  const searchParams = useSearchParams();
   const [classifyingIcp, setClassifyingIcp] = useState(false);
   const [icpResult, setIcpResult] = useState<{ processed: number; summary?: Record<string, number> } | null>(null);
   const [leads, setLeads] = useState(campaign.leads);
   const [icpFilter, setIcpFilter] = useState("all");
   const [sortBy, setSortBy] = useState<"default" | "icp_asc" | "icp_desc">("default");
+  const backHref = searchParams.toString() ? `/campaigns?${searchParams.toString()}` : "/campaigns";
 
   const handleClassifyIcp = async () => {
     setClassifyingIcp(true);
@@ -211,7 +214,7 @@ export function CampaignDetail({ campaign }: { campaign: Campaign }) {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Link href="/campaigns">
+            <Link href={backHref}>
               <Button variant="ghost" size="icon"><ArrowLeft className="h-4 w-4" /></Button>
             </Link>
             <div>

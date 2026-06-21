@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,6 +59,7 @@ interface SegmentOption {
 export function CampaignDashboard({ campaigns: initialCampaigns, summary, initialSegmentFilter = "all" }: Props) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [campaigns, setCampaigns] = useState(initialCampaigns);
   const [segments, setSegments] = useState<SegmentOption[]>([]);
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -99,6 +100,7 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary, initia
   }, [pathname, router, segmentFilter]);
 
   const segmentOptions = segments.map((segment) => segment.name);
+  const detailQuery = searchParams.toString();
 
   const filtered = campaigns.filter((c) => {
     if (typeFilter !== "all" && c.type !== typeFilter) return false;
@@ -268,7 +270,7 @@ export function CampaignDashboard({ campaigns: initialCampaigns, summary, initia
               return (
                 <TableRow key={c.id} className="cursor-pointer hover:bg-muted/50">
                   <TableCell>
-                    <Link href={`/campaigns/${c.id}`} className="font-medium hover:underline">
+                    <Link href={detailQuery ? `/campaigns/${c.id}?${detailQuery}` : `/campaigns/${c.id}`} className="font-medium hover:underline">
                       {c.name}
                     </Link>
                     {c.instantly_campaign_id && (
