@@ -139,6 +139,8 @@ export function CustomerList({ customers }: { customers: CustomerRow[] }) {
     }
   }, [pathname, router, segmentFilter]);
 
+  const detailQuery = searchParams.toString();
+
   const segmentOptions = segments.map((segment) => segment.name);
 
   const filtered = useMemo(() => {
@@ -317,7 +319,10 @@ export function CustomerList({ customers }: { customers: CustomerRow[] }) {
               return (
                 <tr key={c.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">
-                    <Link href={`/customers/${c.id}`} className="font-medium text-blue-600 hover:underline">
+                    <Link
+                      href={detailQuery ? `/customers/${c.id}?${detailQuery}` : `/customers/${c.id}`}
+                      className="font-medium text-blue-600 hover:underline"
+                    >
                       {c.company_name}
                     </Link>
                   </td>

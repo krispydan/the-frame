@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import { TIER_LABELS, TIER_COLORS, HEALTH_COLORS, type CustomerTier, type HealthStatus } from "@/modules/customers/schema";
 
@@ -120,6 +121,7 @@ export function CustomerDetail({
   churnRisk?: ChurnRiskData | null;
 }) {
   const { setOverride } = useBreadcrumbOverride();
+  const searchParams = useSearchParams();
   const [renderNow] = useState(() => Date.now());
   useEffect(() => {
     if (account.company_name) setOverride(account.company_name);
@@ -129,6 +131,7 @@ export function CustomerDetail({
   const daysUntilReorder = account.next_reorder_estimate
     ? Math.ceil((new Date(account.next_reorder_estimate).getTime() - renderNow) / 86400000)
     : null;
+  const backHref = searchParams.toString() ? `/customers?${searchParams.toString()}` : "/customers";
 
   const retentionInfo = RETENTION_ACTIONS[account.health_status] || RETENTION_ACTIONS.healthy;
   const isAtRisk = account.health_status !== "healthy";
@@ -139,7 +142,7 @@ export function CustomerDetail({
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-3">
-            <Link href="/customers" className="text-gray-400 hover:text-gray-600">
+            <Link href={backHref} className="text-gray-400 hover:text-gray-600">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
             </Link>
             <h1 className="text-2xl font-bold">{account.company_name}</h1>
