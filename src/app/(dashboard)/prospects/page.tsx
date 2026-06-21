@@ -1312,9 +1312,12 @@ function ProspectsPage() {
                         </span>
                       )}
                       {drawerData.company.segment && (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400">
+                        <Link
+                          href={`/prospects?segment=${encodeURIComponent(String(drawerData.company.segment))}`}
+                          className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 hover:underline"
+                        >
                           {String(drawerData.company.segment)}
-                        </span>
+                        </Link>
                       )}
                     </div>
                   )}
