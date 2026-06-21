@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import {
   Globe, Phone, Mail, MapPin, Star, Search, ExternalLink,
@@ -61,6 +61,7 @@ interface PendingUpdate {
 }
 
 function ReviewQueueInner() {
+  const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
   // toast from sonner is used directly
@@ -158,6 +159,35 @@ function ReviewQueueInner() {
   useEffect(() => {
     fetchProspects(0, false);
   }, [fetchProspects]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+
+    if (sourceType !== "all") params.set("source_type", sourceType);
+    else params.delete("source_type");
+
+    if (stateFilter !== "all") params.set("state", stateFilter);
+    else params.delete("state");
+
+    if (categoryFilter !== "all") params.set("category", categoryFilter);
+    else params.delete("category");
+
+    if (statusFilter !== "new") params.set("status", statusFilter);
+    else params.delete("status");
+
+    if (sortBy !== "random") params.set("sort", sortBy);
+    else params.delete("sort");
+
+    if (segmentFilter !== "all") params.set("segment", segmentFilter);
+    else params.delete("segment");
+
+    const query = params.toString();
+    const nextUrl = query ? `${pathname}?${query}` : pathname;
+    const currentUrl = `${window.location.pathname}${window.location.search}`;
+    if (nextUrl !== currentUrl) {
+      router.replace(nextUrl);
+    }
+  }, [pathname, router, sourceType, stateFilter, categoryFilter, statusFilter, sortBy, segmentFilter]);
 
   // Flush pending updates
   const flushUpdates = useCallback(async () => {
