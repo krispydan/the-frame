@@ -270,7 +270,12 @@ export default function DashboardPage() {
                   key={segment.name}
                   className="rounded-lg border border-gray-100 bg-gray-50 p-3 transition-shadow hover:shadow-sm dark:border-gray-700 dark:bg-gray-800"
                 >
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">{segment.name}</p>
+                  <Link
+                    href={`/prospects?segment=${encodeURIComponent(segment.name)}`}
+                    className="text-sm font-medium text-gray-900 hover:underline dark:text-white"
+                  >
+                    {segment.name}
+                  </Link>
                   <Link
                     href={`/orders?segment=${encodeURIComponent(segment.name)}`}
                     className="mt-2 block text-lg font-bold text-gray-900 hover:underline dark:text-white"
