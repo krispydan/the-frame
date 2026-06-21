@@ -293,15 +293,13 @@ export default function SegmentsPage() {
                         <div className="text-xs text-muted-foreground">{conversionRate.toFixed(1)}% conv.</div>
                       </TableCell>
                       <TableCell className="text-right">
-                        <div>
-                          <Link
-                            href={`/pipeline?segment=${encodeURIComponent(segment.name)}`}
-                            className="hover:underline"
-                          >
-                            {segment.active_deals.toLocaleString()}
-                          </Link>
-                        </div>
-                        <div className="text-xs text-muted-foreground">${segment.pipeline_value.toLocaleString()}</div>
+                        <Link
+                          href={`/pipeline?segment=${encodeURIComponent(segment.name)}`}
+                          className="inline-block hover:underline"
+                        >
+                          <div>{segment.active_deals.toLocaleString()}</div>
+                          <div className="text-xs text-muted-foreground">${segment.pipeline_value.toLocaleString()}</div>
+                        </Link>
                       </TableCell>
                       <TableCell className="text-right">
                         <Link
