@@ -266,20 +266,30 @@ export default function DashboardPage() {
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
               {stats.topSegments.map((segment) => (
-                <Link
+                <div
                   key={segment.name}
-                  href={`/prospects?segment=${encodeURIComponent(segment.name)}`}
-                  className="block rounded-lg border border-gray-100 bg-gray-50 p-3 transition-shadow hover:shadow-sm dark:border-gray-700 dark:bg-gray-800"
+                  className="rounded-lg border border-gray-100 bg-gray-50 p-3 transition-shadow hover:shadow-sm dark:border-gray-700 dark:bg-gray-800"
                 >
                   <p className="text-sm font-medium text-gray-900 dark:text-white">{segment.name}</p>
-                  <p className="mt-2 text-lg font-bold text-gray-900 dark:text-white">${segment.revenue.toLocaleString()}</p>
-                  <div className="mt-1 text-xs text-gray-500">
+                  <Link
+                    href={`/orders?segment=${encodeURIComponent(segment.name)}`}
+                    className="mt-2 block text-lg font-bold text-gray-900 hover:underline dark:text-white"
+                  >
+                    ${segment.revenue.toLocaleString()}
+                  </Link>
+                  <Link
+                    href={`/prospects?segment=${encodeURIComponent(segment.name)}`}
+                    className="mt-1 block text-xs text-gray-500 hover:underline"
+                  >
                     {segment.prospectCount.toLocaleString()} prospects
-                  </div>
-                  <div className="text-xs text-gray-500">
+                  </Link>
+                  <Link
+                    href={`/pipeline?segment=${encodeURIComponent(segment.name)}`}
+                    className="block text-xs text-gray-500 hover:underline"
+                  >
                     {segment.activeDealCount.toLocaleString()} active deals
-                  </div>
-                </Link>
+                  </Link>
+                </div>
               ))}
             </div>
           </CardContent>
