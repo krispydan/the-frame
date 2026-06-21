@@ -273,7 +273,14 @@ export default function SegmentsPage() {
                           {segment.prospect_count.toLocaleString()}
                         </Link>
                       </TableCell>
-                      <TableCell className="text-right">{segment.qualified_count.toLocaleString()}</TableCell>
+                      <TableCell className="text-right">
+                        <Link
+                          href={`/prospects?segment=${encodeURIComponent(segment.name)}&status=qualified`}
+                          className="hover:underline"
+                        >
+                          {segment.qualified_count.toLocaleString()}
+                        </Link>
+                      </TableCell>
                       <TableCell className="text-right">
                         <div>
                           <Link
