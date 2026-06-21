@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
   const search = url.searchParams.get("search") || "";
   const channel = url.searchParams.get("channel");
   const status = url.searchParams.get("status");
+  const segment = url.searchParams.get("segment");
   const dateFrom = url.searchParams.get("date_from");
   const dateTo = url.searchParams.get("date_to");
   const sort = url.searchParams.get("sort") || "placed_at";
@@ -24,6 +25,17 @@ export async function GET(req: NextRequest) {
   const conditions: ReturnType<typeof eq>[] = [];
   if (channel) conditions.push(eq(orders.channel, channel as any));
   if (status) conditions.push(eq(orders.status, status as any));
+  if (segment) {
+    conditions.push(
+      sql`EXISTS (
+        SELECT 1
+        FROM companies c
+        LEFT JOIN segments s ON s.id = c.segment_id
+        WHERE c.id = ${orders.companyId}
+          AND COALESCE(s.name, c.segment) = ${segment}
+      )`
+    );
+  }
   if (dateFrom) conditions.push(gte(orders.placedAt, dateFrom));
   if (dateTo) conditions.push(lte(orders.placedAt, dateTo));
   if (search) {

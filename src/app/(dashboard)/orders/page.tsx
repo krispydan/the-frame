@@ -150,6 +150,7 @@ function OrdersPage() {
   const search = searchParams.get("search") || "";
   const channelFilter = searchParams.get("channel") || "";
   const statusFilter = searchParams.get("status") || "";
+  const segmentFilter = searchParams.get("segment") || "";
   const dateFrom = searchParams.get("date_from") || "";
   const dateTo = searchParams.get("date_to") || "";
 
@@ -161,6 +162,7 @@ function OrdersPage() {
     if (search) params.set("search", search);
     if (channelFilter) params.set("channel", channelFilter);
     if (statusFilter) params.set("status", statusFilter);
+    if (segmentFilter) params.set("segment", segmentFilter);
     if (dateFrom) params.set("date_from", dateFrom);
     if (dateTo) params.set("date_to", dateTo);
 
@@ -170,7 +172,7 @@ function OrdersPage() {
     setTotal(data.total || 0);
     setTotalPages(data.totalPages || 0);
     setLoading(false);
-  }, [page, search, channelFilter, statusFilter, dateFrom, dateTo]);
+  }, [page, search, channelFilter, statusFilter, segmentFilter, dateFrom, dateTo]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
@@ -267,6 +269,12 @@ function OrdersPage() {
       {/* Filter Bar */}
       {showFilters && (
         <div className="flex flex-wrap items-center gap-3 p-3 bg-muted/50 rounded-lg">
+          {segmentFilter && (
+            <div className="inline-flex items-center gap-2 rounded border bg-background px-3 py-1.5 text-sm">
+              <span className="text-muted-foreground">Segment:</span>
+              <span className="font-medium">{segmentFilter}</span>
+            </div>
+          )}
           <select value={channelFilter} onChange={(e) => updateParams({ channel: e.target.value })} className="px-3 py-1.5 border rounded text-sm">
             <option value="">All Channels</option>
             {Object.entries(channelConfig).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
@@ -277,8 +285,8 @@ function OrdersPage() {
           </select>
           <input type="date" value={dateFrom} onChange={(e) => updateParams({ date_from: e.target.value })} className="px-3 py-1.5 border rounded text-sm" placeholder="From" />
           <input type="date" value={dateTo} onChange={(e) => updateParams({ date_to: e.target.value })} className="px-3 py-1.5 border rounded text-sm" placeholder="To" />
-          {(channelFilter || statusFilter || dateFrom || dateTo) && (
-            <button onClick={() => updateParams({ channel: "", status: "", date_from: "", date_to: "" })} className="text-sm text-muted-foreground hover:text-foreground">
+          {(channelFilter || statusFilter || segmentFilter || dateFrom || dateTo) && (
+            <button onClick={() => updateParams({ channel: "", status: "", segment: "", date_from: "", date_to: "" })} className="text-sm text-muted-foreground hover:text-foreground">
               <X className="h-4 w-4" />
             </button>
           )}

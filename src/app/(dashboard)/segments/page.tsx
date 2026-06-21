@@ -304,7 +304,14 @@ export default function SegmentsPage() {
                           {segment.campaign_count.toLocaleString()}
                         </Link>
                       </TableCell>
-                      <TableCell className="text-right">{segment.order_count.toLocaleString()}</TableCell>
+                      <TableCell className="text-right">
+                        <Link
+                          href={`/orders?segment=${encodeURIComponent(segment.name)}`}
+                          className="hover:underline"
+                        >
+                          {segment.order_count.toLocaleString()}
+                        </Link>
+                      </TableCell>
                       <TableCell className="text-right">
                         <div>${segment.revenue.toLocaleString()}</div>
                         <div className="text-xs text-muted-foreground">${averageOrderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })} AOV</div>
