@@ -282,15 +282,13 @@ export default function SegmentsPage() {
                         </Link>
                       </TableCell>
                       <TableCell className="text-right">
-                        <div>
-                          <Link
-                            href={`/customers?segment=${encodeURIComponent(segment.name)}`}
-                            className="hover:underline"
-                          >
-                            {segment.customer_count.toLocaleString()}
-                          </Link>
-                        </div>
-                        <div className="text-xs text-muted-foreground">{conversionRate.toFixed(1)}% conv.</div>
+                        <Link
+                          href={`/customers?segment=${encodeURIComponent(segment.name)}`}
+                          className="inline-block hover:underline"
+                        >
+                          <div>{segment.customer_count.toLocaleString()}</div>
+                          <div className="text-xs text-muted-foreground">{conversionRate.toFixed(1)}% conv.</div>
+                        </Link>
                       </TableCell>
                       <TableCell className="text-right">
                         <Link
