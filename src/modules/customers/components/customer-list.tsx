@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   CUSTOMER_TIERS,
@@ -43,6 +43,8 @@ function daysUntilReorder(est: string | null): number | null {
 }
 
 export function CustomerList({ customers }: { customers: CustomerRow[] }) {
+  const pathname = usePathname();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const initialSegmentFilter = searchParams.get("segment") || "all";
   const [segments, setSegments] = useState<SegmentOption[]>([]);
@@ -120,6 +122,22 @@ export function CustomerList({ customers }: { customers: CustomerRow[] }) {
   useEffect(() => {
     setSegmentFilter(initialSegmentFilter);
   }, [initialSegmentFilter]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (segmentFilter !== "all") {
+      params.set("segment", segmentFilter);
+    } else {
+      params.delete("segment");
+    }
+
+    const query = params.toString();
+    const nextUrl = query ? `${pathname}?${query}` : pathname;
+    const currentUrl = `${window.location.pathname}${window.location.search}`;
+    if (nextUrl !== currentUrl) {
+      router.replace(nextUrl);
+    }
+  }, [pathname, router, segmentFilter]);
 
   const segmentOptions = segments.map((segment) => segment.name);
 
