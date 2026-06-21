@@ -454,7 +454,7 @@ export default function CompanyDetailPage() {
     <div className="p-6 text-center py-16">
       <AlertCircle className="h-10 w-10 mx-auto text-muted-foreground/50 mb-3" />
       <p className="font-medium text-muted-foreground">Company not found</p>
-      <Link href="/prospects" className="mt-4 inline-flex items-center gap-2 text-sm text-primary hover:underline">
+      <Link href={`/prospects${searchParams.toString() ? `?${searchParams.toString()}` : ""}`} className="mt-4 inline-flex items-center gap-2 text-sm text-primary hover:underline">
         <ArrowLeft className="h-4 w-4" /> Back to Prospects
       </Link>
     </div>
@@ -535,7 +535,7 @@ export default function CompanyDetailPage() {
 
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
-        <Link href="/prospects" className="flex items-center gap-1 hover:text-gray-700">
+        <Link href={`/prospects${navSuffix}`} className="flex items-center gap-1 hover:text-gray-700">
           <ArrowLeft className="w-4 h-4" /> Prospects
         </Link>
         <span>/</span>
