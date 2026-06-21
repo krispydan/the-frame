@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db, sqlite } from "@/lib/db";
 import { orders, orderItems, returns } from "@/modules/orders/schema";
-import { companies, contacts } from "@/modules/sales/schema";
+import { companies, contacts, segments } from "@/modules/sales/schema";
 import { skus as catalogSkus } from "@/modules/catalog/schema";
 import { activityFeed } from "@/modules/core/schema";
 import { shopifyShops } from "@/modules/integrations/schema/shopify";
@@ -67,6 +67,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const contact = order.contactId
     ? db.select().from(contacts).where(eq(contacts.id, order.contactId)).get()
     : null;
+  const companySegment = company?.segmentId
+    ? db.select({ name: segments.name }).from(segments).where(eq(segments.id, company.segmentId)).get()?.name ?? null
+    : null;
 
   // Activity timeline
   const timeline = db
@@ -120,7 +123,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   return NextResponse.json({
     ...order,
-    company,
+    company: company ? { ...company, segment: companySegment || company.segment || null } : null,
     contact,
     items: itemsWithProfit,
     returns: orderReturns,

@@ -4,7 +4,6 @@ import { Suspense, useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ListFilter,
-  Plus,
   Search,
   ChevronLeft,
   ChevronRight,
@@ -14,7 +13,6 @@ import {
   Truck,
   CheckCircle2,
   XCircle,
-  ArrowUpDown,
   RefreshCw,
 } from "lucide-react";
 // CreateOrderDialog removed — orders are created in Shopify/Faire and synced here
@@ -26,6 +24,7 @@ interface Order {
   orderNumber: string;
   companyId: string | null;
   companyName: string | null;
+  segment: string | null;
   channel: string;
   status: string;
   subtotal: number;
@@ -55,7 +54,7 @@ interface OrderDetail {
   placedAt: string;
   shippedAt: string | null;
   deliveredAt: string | null;
-  company: { id: string; name: string } | null;
+  company: { id: string; name: string; segment?: string | null } | null;
   contact: { id: string; name: string; email: string } | null;
   items: Array<{
     id: string;
@@ -141,7 +140,6 @@ function OrdersPage() {
   const [loading, setLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<OrderDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
   // showCreateDialog removed — orders are created in Shopify only (Faire orders sync via Faire's Shopify channel)
   const [syncingShopify, setSyncingShopify] = useState(false);
 
@@ -186,11 +184,9 @@ function OrdersPage() {
   };
 
   const openDetail = async (id: string) => {
-    setDetailLoading(true);
     const res = await fetch(`/api/v1/orders/${id}`);
     const data = await res.json();
     setSelectedOrder(data);
-    setDetailLoading(false);
   };
 
   const updateOrderStatus = async (id: string, status: string, extra?: Record<string, string>) => {
@@ -232,7 +228,7 @@ function OrdersPage() {
                 } else {
                   alert(`Shopify sync error: ${data.error || "Unknown error"}`);
                 }
-              } catch (e) {
+              } catch {
                 alert("Shopify sync failed");
               } finally {
                 setSyncingShopify(false);
@@ -317,7 +313,7 @@ function OrdersPage() {
               <tr><td colSpan={7} className="px-4 py-16 text-center">
                 <ShoppingCart className="h-10 w-10 mx-auto text-muted-foreground/50 mb-3" />
                 <p className="font-medium text-muted-foreground">No orders yet</p>
-                <p className="text-sm text-muted-foreground/70 mt-1">Click "Sync Shopify" above to pull orders from your DTC and wholesale stores. Faire orders flow through Shopify automatically.</p>
+                <p className="text-sm text-muted-foreground/70 mt-1">Click &quot;Sync Shopify&quot; above to pull orders from your DTC and wholesale stores. Faire orders flow through Shopify automatically.</p>
               </td></tr>
             ) : (
               orders.map((o) => (
@@ -330,7 +326,23 @@ function OrdersPage() {
                   className="hover:bg-muted/30 cursor-pointer"
                 >
                   <td className="px-4 py-3 font-medium">{o.orderNumber}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{o.companyName || "—"}</td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    <div className="min-w-0">
+                      <div className="truncate">{o.companyName || "—"}</div>
+                      {o.segment && (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            updateParams({ segment: o.segment });
+                          }}
+                          className="mt-1 inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-xs font-medium text-foreground hover:bg-muted"
+                        >
+                          <span className="truncate">{o.segment}</span>
+                        </button>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-4 py-3"><ChannelBadge channel={o.channel} /></td>
                   <td className="px-4 py-3 text-center">{o.itemCount}</td>
                   <td className="px-4 py-3 text-right font-medium">${o.total.toFixed(2)}</td>

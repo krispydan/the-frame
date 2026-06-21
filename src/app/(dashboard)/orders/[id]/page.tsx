@@ -23,6 +23,7 @@ import {
   AlertTriangle,
   StickyNote,
   RefreshCw,
+  Layers3,
 } from "lucide-react";
 
 // ── Types ──
@@ -77,7 +78,7 @@ interface OrderDetail {
   placedAt: string;
   shippedAt: string | null;
   deliveredAt: string | null;
-  company: { id: string; name: string } | null;
+  company: { id: string; name: string; segment?: string | null } | null;
   contact: { id: string; name: string; email: string } | null;
   profit: {
     itemsRevenue: number;
@@ -842,6 +843,20 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                   <p className="font-medium truncate">{order.contact?.email || "—"}</p>
                 </div>
               </div>
+              {order.company?.segment && (
+                <div className="flex items-start gap-2">
+                  <Layers3 className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">Segment</p>
+                    <Link
+                      href={`/orders?segment=${encodeURIComponent(order.company.segment)}`}
+                      className="font-medium hover:text-blue-600 hover:underline"
+                    >
+                      {order.company.segment}
+                    </Link>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

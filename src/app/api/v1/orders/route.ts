@@ -2,11 +2,11 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { orders, orderItems } from "@/modules/orders/schema";
-import { companies } from "@/modules/sales/schema";
+import { companies, segments } from "@/modules/sales/schema";
 // createManualOrder removed — orders originate in Shopify and sync via
 // /api/v1/orders/shopify-sync or webhooks. Manual creation produced orphan
 // records that didn't exist in Shopify.
-import { desc, eq, and, like, sql, gte, lte } from "drizzle-orm";
+import { desc, eq, and, sql, gte, lte } from "drizzle-orm";
 
 // GET /api/v1/orders — list orders with filters
 export async function GET(req: NextRequest) {
@@ -23,8 +23,8 @@ export async function GET(req: NextRequest) {
   const order = url.searchParams.get("order") || "desc";
 
   const conditions: ReturnType<typeof eq>[] = [];
-  if (channel) conditions.push(eq(orders.channel, channel as any));
-  if (status) conditions.push(eq(orders.status, status as any));
+  if (channel) conditions.push(eq(orders.channel, channel as never));
+  if (status) conditions.push(eq(orders.status, status as never));
   if (segment) {
     conditions.push(
       sql`EXISTS (
@@ -49,8 +49,6 @@ export async function GET(req: NextRequest) {
   const total = db.select({ count: sql<number>`count(*)` }).from(orders).where(where).get()?.count || 0;
 
   const sortCol = sort === "total" ? orders.total : sort === "order_number" ? orders.orderNumber : orders.placedAt;
-  const orderDir = order === "asc" ? sql`ASC` : sql`DESC`;
-
   const data = db
     .select()
     .from(orders)
@@ -63,7 +61,18 @@ export async function GET(req: NextRequest) {
   // Enrich with company name and item count
   const enriched = data.map((o) => {
     const company = o.companyId
-      ? db.select({ name: companies.name }).from(companies).where(eq(companies.id, o.companyId)).get()
+      ? db
+          .select({
+            name: companies.name,
+            legacySegment: companies.segment,
+            segmentId: companies.segmentId,
+          })
+          .from(companies)
+          .where(eq(companies.id, o.companyId))
+          .get()
+      : null;
+    const resolvedSegment = company?.segmentId
+      ? db.select({ name: segments.name }).from(segments).where(eq(segments.id, company.segmentId)).get()?.name ?? null
       : null;
     const itemCount = db
       .select({ count: sql<number>`count(*)` })
@@ -74,6 +83,7 @@ export async function GET(req: NextRequest) {
     return {
       ...o,
       companyName: company?.name || null,
+      segment: resolvedSegment || company?.legacySegment || null,
       itemCount,
     };
   });
