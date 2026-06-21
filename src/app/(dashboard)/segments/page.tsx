@@ -320,8 +320,13 @@ export default function SegmentsPage() {
                         </Link>
                       </TableCell>
                       <TableCell className="text-right">
-                        <div>${segment.revenue.toLocaleString()}</div>
-                        <div className="text-xs text-muted-foreground">${averageOrderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })} AOV</div>
+                        <Link
+                          href={`/orders?segment=${encodeURIComponent(segment.name)}`}
+                          className="inline-block hover:underline"
+                        >
+                          <div>${segment.revenue.toLocaleString()}</div>
+                          <div className="text-xs text-muted-foreground">${averageOrderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })} AOV</div>
+                        </Link>
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-3">
