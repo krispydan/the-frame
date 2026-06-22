@@ -270,6 +270,7 @@ export default function DashboardPage() {
                 const qualificationRate = segment.prospectCount > 0 ? (segment.qualifiedCount / segment.prospectCount) * 100 : 0;
                 const conversionRate = segment.prospectCount > 0 ? (segment.customerCount / segment.prospectCount) * 100 : 0;
                 const pipelinePerCampaign = segment.campaignCount > 0 ? segment.pipelineValue / segment.campaignCount : 0;
+                const averageDealSize = segment.activeDealCount > 0 ? segment.pipelineValue / segment.activeDealCount : 0;
 
                 return (
                   <div
@@ -326,7 +327,7 @@ export default function DashboardPage() {
                       className="block text-xs text-gray-500 hover:underline"
                     >
                       <div>{segment.activeDealCount.toLocaleString()} active deals</div>
-                      <div>${segment.pipelineValue.toLocaleString()} pipeline</div>
+                      <div>${segment.pipelineValue.toLocaleString()} pipeline • ${averageDealSize.toLocaleString(undefined, { maximumFractionDigits: 0 })} avg deal</div>
                     </Link>
                   </div>
                 );
