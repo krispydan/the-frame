@@ -15,10 +15,13 @@ Each Faire order with a `payment_initiated_at` and a positive `total_payout` pro
 | 2 | Debit  | `commissionAccount` | `+commission` | Faire commission — order {displayId} (only if > 0; Faire Direct = 0) |
 | 3 | Debit  | `receivablesHoldingAccount` (1100) | `+totalPayout` | Receivables holding (net payout) — order {displayId} — swept to bank via BankTransaction |
 | 4 | Credit | `deferredRevenueAccount` (2050) | `-netOrderTotal` | Deferred revenue (gross sales) — order {displayId} (recognized at shipment) |
+| 5 | (opt) Debit/Credit | `shippingLabelsAccount` (5460) | `-delta` | Faire payout adjustment — only when delta ≠ 0 (~5% of orders). Review at month-end. |
 
-**Balance check:** `paymentFee + commission + totalPayout - netOrderTotal = 0`
+**Balance check:** `paymentFee + commission + totalPayout - netOrderTotal + (-delta) = 0`
 
-This works because Faire's `totalPayout = netOrderTotal - paymentFee - commission`.
+For most orders, `totalPayout = netOrderTotal - paymentFee - commission` so `delta = 0` and line 5 is omitted.
+
+For ~5% of orders Faire's actual wire differs from this formula by ±$1-$60 with no field in `/external-api/v2/orders/{id}` accounting for the difference (audited exhaustively 2026-06-22: `commission`, `shipping_subsidy`, `damaged_and_missing_items`, `payout_protection_fee`, `net_tax`, `brand_discounts`, customer-paid shipping — all empty or already accounted for). Line 5 absorbs the mismatch into `shippingLabelsAccount` since most adjustments appear shipping-related; the bookkeeper recategorizes at close if needed.
 
 ### 2. BankTransaction (sweep from receivables to bank clearing)
 

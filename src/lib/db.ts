@@ -1168,13 +1168,18 @@ try {
   // caused the Brand Carriers v1 PhoneBurner push to skip 349 leads
   // whose phones lived only in the legacy column.
   //
-  // The resolution:
-  //   1. company_phones is the canonical store. All new writes go here.
-  //   2. companies.phone becomes a read-only DENORMALIZED CACHE of the
-  //      primary phone, maintained by triggers so legacy reads keep
-  //      working without a 14-file refactor.
-  //   3. Below: one-time backfill + triggers that keep the cache in
-  //      sync. Both idempotent — safe to run on every boot.
+  // POST-DROP STATE: companies.phone was dropped 2026-06-19 in the
+  // Phase 4 boot block below. After that, the backfill + triggers
+  // here would reference a non-existent column and the whole boot
+  // block would throw "no such column: c.phone". Guard everything
+  // phone-related by checking whether the column still exists, so
+  // a re-boot after the drop is a no-op.
+  const phoneColCheck = sqlite
+    .prepare("PRAGMA table_info(companies)")
+    .all() as Array<{ name: string }>;
+  const phoneColExists = phoneColCheck.some((c) => c.name === "phone");
+
+  if (phoneColExists) {
 
   // Backfill: any company with a legacy phone but no row in
   // company_phones gets one inserted as primary. INSERT OR IGNORE
@@ -1301,6 +1306,8 @@ try {
     /* companies.phone column already dropped — snapshot is final */
   }
 
+  } // end if (phoneColExists)
+
   // ── Phase 3: integrity-guarded drop of companies.phone ─────────
   //
   // The "one source of truth" finale. Reads and writes all route
@@ -1416,6 +1423,18 @@ try {
   // 0 case mismatches, 92 multi-email-string legacy values. The
   // last 92 are handled as-is during backfill (one contact row each
   // with the joined string) and cleaned by a follow-up admin endpoint.
+  //
+  // POST-DROP STATE: same guard as the phone block above. Once
+  // companies.email is dropped (Phase 4), these statements reference
+  // a non-existent column and the boot block throws "no such column:
+  // c.email". Guard the snapshot + backfill + triggers so re-boot
+  // after the drop is a no-op.
+  const emailColCheck = sqlite
+    .prepare("PRAGMA table_info(companies)")
+    .all() as Array<{ name: string }>;
+  const emailColExists = emailColCheck.some((c) => c.name === "email");
+
+  if (emailColExists) {
 
   // ── Email snapshot parachute ────────────────────────────────────
   sqlite.exec(`CREATE TABLE IF NOT EXISTS _legacy_companies_email_snapshot (
@@ -1569,6 +1588,8 @@ try {
     WHEN NEW.email IS NOT NULL AND TRIM(NEW.email) <> ''
     BEGIN ${emailMirrorBody} END;
   `);
+
+  } // end if (emailColExists)
 
   // ── Phase 4: integrity-guarded drop of companies.email ─────────
   //
