@@ -32,7 +32,7 @@ interface DashboardStats {
   inventorySkus: number;
   inventoryValue: number;
   revenueByChannel: Array<{ channel: string; revenue: number; orderCount: number }>;
-  topSegments: Array<{ name: string; prospectCount: number; qualifiedCount: number; customerCount: number; activeDealCount: number; pipelineValue: number; revenue: number; orderCount: number }>;
+  topSegments: Array<{ name: string; prospectCount: number; qualifiedCount: number; customerCount: number; campaignCount: number; activeDealCount: number; pipelineValue: number; revenue: number; orderCount: number }>;
   unreadNotifications: number;
   lowStockAlerts: Array<{
     quantity: number;
@@ -308,6 +308,12 @@ export default function DashboardPage() {
                       className="block text-xs text-gray-500 hover:underline"
                     >
                       {segment.customerCount.toLocaleString()} customers
+                    </Link>
+                    <Link
+                      href={`/campaigns?segment=${encodeURIComponent(segment.name)}`}
+                      className="block text-xs text-gray-500 hover:underline"
+                    >
+                      {segment.campaignCount.toLocaleString()} campaigns
                     </Link>
                     <Link
                       href={`/pipeline?segment=${encodeURIComponent(segment.name)}`}

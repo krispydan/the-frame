@@ -90,6 +90,11 @@ export async function GET() {
       ) as customerCount,
       (
         SELECT count(*)
+        FROM campaigns cp
+        WHERE lower(trim(cp.target_segment)) = lower(trim(s.name))
+      ) as campaignCount,
+      (
+        SELECT count(*)
         FROM deals d
         JOIN companies c ON c.id = d.company_id
         WHERE (c.segment_id = s.id OR lower(trim(c.segment)) = lower(trim(s.name)))
@@ -124,7 +129,7 @@ export async function GET() {
     )
     ORDER BY revenue DESC, prospectCount DESC, s.name ASC
     LIMIT 5
-  `).all() as Array<{ name: string; prospectCount: number; qualifiedCount: number; customerCount: number; activeDealCount: number; pipelineValue: number; revenue: number; orderCount: number }>;
+  `).all() as Array<{ name: string; prospectCount: number; qualifiedCount: number; customerCount: number; campaignCount: number; activeDealCount: number; pipelineValue: number; revenue: number; orderCount: number }>;
 
   // Enriched activity feed with entity names
   const recentActivity = sqlite.prepare(`
