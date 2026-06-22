@@ -268,6 +268,7 @@ export default function DashboardPage() {
               {stats.topSegments.map((segment) => {
                 const averageOrderValue = segment.orderCount > 0 ? segment.revenue / segment.orderCount : 0;
                 const conversionRate = segment.prospectCount > 0 ? (segment.customerCount / segment.prospectCount) * 100 : 0;
+                const pipelinePerCampaign = segment.campaignCount > 0 ? segment.pipelineValue / segment.campaignCount : 0;
 
                 return (
                   <div
@@ -315,7 +316,8 @@ export default function DashboardPage() {
                       href={`/campaigns?segment=${encodeURIComponent(segment.name)}`}
                       className="block text-xs text-gray-500 hover:underline"
                     >
-                      {segment.campaignCount.toLocaleString()} campaigns
+                      <div>{segment.campaignCount.toLocaleString()} campaigns</div>
+                      <div>${pipelinePerCampaign.toLocaleString(undefined, { maximumFractionDigits: 0 })} pipeline/campaign</div>
                     </Link>
                     <Link
                       href={`/pipeline?segment=${encodeURIComponent(segment.name)}`}
