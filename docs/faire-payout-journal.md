@@ -15,13 +15,27 @@ Each Faire order with a `payment_initiated_at` and a positive `total_payout` pro
 | 2 | Debit  | `commissionAccount` | `+commission` | Faire commission — order {displayId} (only if > 0; Faire Direct = 0) |
 | 3 | Debit  | `receivablesHoldingAccount` (1100) | `+totalPayout` | Receivables holding (net payout) — order {displayId} — swept to bank via BankTransaction |
 | 4 | Credit | `deferredRevenueAccount` (2050) | `-netOrderTotal` | Deferred revenue (gross sales) — order {displayId} (recognized at shipment) |
-| 5 | (opt) Debit/Credit | `shippingLabelsAccount` (5460) | `-delta` | Faire payout adjustment — only when delta ≠ 0 (~5% of orders). Review at month-end. |
+| 5 | (opt) Debit/Credit | account varies (see below) | `-delta` | Faire payout adjustment — only when delta ≠ 0 (~5% of orders). |
 
 **Balance check:** `paymentFee + commission + totalPayout - netOrderTotal + (-delta) = 0`
 
 For most orders, `totalPayout = netOrderTotal - paymentFee - commission` so `delta = 0` and line 5 is omitted.
 
-For ~5% of orders Faire's actual wire differs from this formula by ±$1-$60 with no field in `/external-api/v2/orders/{id}` accounting for the difference (audited exhaustively 2026-06-22: `commission`, `shipping_subsidy`, `damaged_and_missing_items`, `payout_protection_fee`, `net_tax`, `brand_discounts`, customer-paid shipping — all empty or already accounted for). Line 5 absorbs the mismatch into `shippingLabelsAccount` since most adjustments appear shipping-related; the bookkeeper recategorizes at close if needed.
+For ~5% of orders Faire's actual wire differs from this formula by ±$1-$60 with no matching field in `/external-api/v2/orders/{id}` (audited exhaustively 2026-06-22). Faire's payout-details UI shows buyer-paid shipping as a "Shipping" line that flows through to the maker — confirmed via UI on order `AS8JJQWP5X` ($18 buyer shipping → +$18 delta) — but the field isn't exposed in the order API.
+
+### Where the delta routes
+
+Line 5 picks the best account based on the sign of `delta`, falling back to `shippingLabelsAccount` (5460) if the more specific account isn't mapped:
+
+| `delta` sign | First-choice account | Fallback | What it likely represents |
+|---|---|---|---|
+| **Positive** (Faire paid MORE) | **4060 Shipping Income** (`shipping_income`) | 5460 | Buyer-paid shipping passthrough, Faire shipping overpayment / subsidy |
+| **Negative** (Faire paid LESS) | **5900 Inventory Adjustments & Shrinkage** (`inventory_adjustments`) | 5460 | Damaged/missing items deducted, hidden Faire fee |
+
+To enable the better categorization, add these two mappings under **Settings → Integrations → Xero** with the category keys `shipping_income` and `inventory_adjustments`. Until they're configured, all deltas go to 5460 and the bookkeeper recategorizes at month-end in one batch journal.
+
+The description line of every adjustment includes the delta amount and a hint, e.g.:
+> "Faire payout adjustment — order AS8JJQWP5X (Faire paid +18.00 vs computed; likely buyer-paid shipping or Faire overpayment). Review at month-end."
 
 ### 2. BankTransaction (sweep from receivables to bank clearing)
 

@@ -67,6 +67,14 @@ interface ChannelXeroConfig {
   paymentFeeAccount: string;
   commissionAccount: string;
   shippingLabelsAccount: string;
+  /** Optional: 4060 Shipping Income. When configured, positive
+   *  delta adjustments (buyer-paid shipping passthrough, Faire
+   *  shipping overpayments) route here instead of 5460. */
+  shippingIncomeAccount: string | null;
+  /** Optional: 5900 Inventory Adjustments & Shrinkage. When
+   *  configured, negative delta adjustments (damaged/missing
+   *  items deducted from payout) route here instead of 5460. */
+  inventoryAdjustmentsAccount: string | null;
   bankClearingAccount: string;     // 101x (BANK type)
   deferredRevenueAccount: string;  // 2050 (shared)
   receivablesHoldingAccount: string; // 1100 (shared)
@@ -253,10 +261,28 @@ async function processFairePayout(opts: {
   const expected = summary.netOrderTotal - summary.commission - summary.paymentFee;
   const delta = Math.round((summary.totalPayout - expected) * 100) / 100;
   if (Math.abs(delta) >= 0.01) {
+    // Pick the best account based on direction:
+    //   delta > 0  → income (buyer-paid shipping passthrough,
+    //                 Faire shipping overpayment) → 4060 Shipping Income
+    //   delta < 0  → expense/loss (damaged-items deduction,
+    //                 hidden fee) → 5900 Inventory Adjustments
+    //
+    // Falls back to shippingLabelsAccount (5460) when the more
+    // specific account isn't configured — preserves the original
+    // delta-absorbing behavior so the journal still balances.
+    let adjustmentAccount = cfg.shippingLabelsAccount;
+    let labelHint = "shipping/labels (fallback)";
+    if (delta > 0 && cfg.shippingIncomeAccount) {
+      adjustmentAccount = cfg.shippingIncomeAccount;
+      labelHint = "buyer-paid shipping or Faire overpayment";
+    } else if (delta < 0 && cfg.inventoryAdjustmentsAccount) {
+      adjustmentAccount = cfg.inventoryAdjustmentsAccount;
+      labelHint = "damaged/missing items or Faire deduction";
+    }
     lines.push({
       LineAmount: -delta, // positive delta → credit, negative → debit
-      AccountCode: cfg.shippingLabelsAccount,
-      Description: `Faire payout adjustment — order ${summary.displayId} (Faire paid ${delta > 0 ? "+" : ""}${delta.toFixed(2)} vs computed). Review at month-end.`,
+      AccountCode: adjustmentAccount,
+      Description: `Faire payout adjustment — order ${summary.displayId} (Faire paid ${delta > 0 ? "+" : ""}${delta.toFixed(2)} vs computed; likely ${labelHint}). Review at month-end.`,
       Tracking: tracking,
     });
   }
@@ -427,12 +453,24 @@ async function loadFaireConfig(): Promise<ChannelXeroConfig> {
     ["receivables_holding","receivablesHoldingAccount"],
   ] as const;
 
+  // Optional mappings — when configured, the journal builder uses
+  // these for better categorization of unexplained payout deltas.
+  // Missing ones fall back to shippingLabelsAccount.
+  const optional = [
+    ["shipping_income",        "shippingIncomeAccount"],         // 4060
+    ["inventory_adjustments",  "inventoryAdjustmentsAccount"],   // 5900
+  ] as const;
+
   const cfg: Partial<ChannelXeroConfig> = {};
   const missing: string[] = [];
   for (const [cat, field] of required) {
     const code = byCategory.get(cat);
     if (!code) missing.push(cat);
     else cfg[field] = code;
+  }
+  for (const [cat, field] of optional) {
+    const code = byCategory.get(cat);
+    cfg[field] = code ?? null;
   }
   if (missing.length) {
     throw new Error(
@@ -450,6 +488,8 @@ async function loadFaireConfig(): Promise<ChannelXeroConfig> {
     paymentFeeAccount: cfg.paymentFeeAccount!,
     commissionAccount: cfg.commissionAccount!,
     shippingLabelsAccount: cfg.shippingLabelsAccount!,
+    shippingIncomeAccount: cfg.shippingIncomeAccount ?? null,
+    inventoryAdjustmentsAccount: cfg.inventoryAdjustmentsAccount ?? null,
     bankClearingAccount: cfg.bankClearingAccount!,
     deferredRevenueAccount: cfg.deferredRevenueAccount!,
     receivablesHoldingAccount: cfg.receivablesHoldingAccount!,
