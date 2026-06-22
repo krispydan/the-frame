@@ -95,7 +95,14 @@ export async function GET() {
         JOIN companies c ON c.id = o.company_id
         WHERE (c.segment_id = s.id OR lower(trim(c.segment)) = lower(trim(s.name)))
           AND o.status NOT IN ('cancelled', 'returned')
-      ) as revenue
+      ) as revenue,
+      (
+        SELECT count(*)
+        FROM orders o
+        JOIN companies c ON c.id = o.company_id
+        WHERE (c.segment_id = s.id OR lower(trim(c.segment)) = lower(trim(s.name)))
+          AND o.status NOT IN ('cancelled', 'returned')
+      ) as orderCount
     FROM segments s
     WHERE exists (
       SELECT 1
@@ -104,7 +111,7 @@ export async function GET() {
     )
     ORDER BY revenue DESC, prospectCount DESC, s.name ASC
     LIMIT 5
-  `).all() as Array<{ name: string; prospectCount: number; customerCount: number; activeDealCount: number; revenue: number }>;
+  `).all() as Array<{ name: string; prospectCount: number; customerCount: number; activeDealCount: number; revenue: number; orderCount: number }>;
 
   // Enriched activity feed with entity names
   const recentActivity = sqlite.prepare(`

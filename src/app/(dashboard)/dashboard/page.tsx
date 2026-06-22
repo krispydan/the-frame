@@ -32,7 +32,7 @@ interface DashboardStats {
   inventorySkus: number;
   inventoryValue: number;
   revenueByChannel: Array<{ channel: string; revenue: number; orderCount: number }>;
-  topSegments: Array<{ name: string; prospectCount: number; customerCount: number; activeDealCount: number; revenue: number }>;
+  topSegments: Array<{ name: string; prospectCount: number; customerCount: number; activeDealCount: number; revenue: number; orderCount: number }>;
   unreadNotifications: number;
   lowStockAlerts: Array<{
     quantity: number;
@@ -265,43 +265,53 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
-              {stats.topSegments.map((segment) => (
-                <div
-                  key={segment.name}
-                  className="rounded-lg border border-gray-100 bg-gray-50 p-3 transition-shadow hover:shadow-sm dark:border-gray-700 dark:bg-gray-800"
-                >
-                  <Link
-                    href={`/prospects?segment=${encodeURIComponent(segment.name)}`}
-                    className="text-sm font-medium text-gray-900 hover:underline dark:text-white"
+              {stats.topSegments.map((segment) => {
+                const averageOrderValue = segment.orderCount > 0 ? segment.revenue / segment.orderCount : 0;
+
+                return (
+                  <div
+                    key={segment.name}
+                    className="rounded-lg border border-gray-100 bg-gray-50 p-3 transition-shadow hover:shadow-sm dark:border-gray-700 dark:bg-gray-800"
                   >
-                    {segment.name}
-                  </Link>
-                  <Link
-                    href={`/orders?segment=${encodeURIComponent(segment.name)}`}
-                    className="mt-2 block text-lg font-bold text-gray-900 hover:underline dark:text-white"
-                  >
-                    ${segment.revenue.toLocaleString()}
-                  </Link>
-                  <Link
-                    href={`/prospects?segment=${encodeURIComponent(segment.name)}`}
-                    className="mt-1 block text-xs text-gray-500 hover:underline"
-                  >
-                    {segment.prospectCount.toLocaleString()} prospects
-                  </Link>
-                  <Link
-                    href={`/customers?segment=${encodeURIComponent(segment.name)}`}
-                    className="block text-xs text-gray-500 hover:underline"
-                  >
-                    {segment.customerCount.toLocaleString()} customers
-                  </Link>
-                  <Link
-                    href={`/pipeline?segment=${encodeURIComponent(segment.name)}`}
-                    className="block text-xs text-gray-500 hover:underline"
-                  >
-                    {segment.activeDealCount.toLocaleString()} active deals
-                  </Link>
-                </div>
-              ))}
+                    <Link
+                      href={`/prospects?segment=${encodeURIComponent(segment.name)}`}
+                      className="text-sm font-medium text-gray-900 hover:underline dark:text-white"
+                    >
+                      {segment.name}
+                    </Link>
+                    <Link
+                      href={`/orders?segment=${encodeURIComponent(segment.name)}`}
+                      className="mt-2 block text-lg font-bold text-gray-900 hover:underline dark:text-white"
+                    >
+                      ${segment.revenue.toLocaleString()}
+                    </Link>
+                    <Link
+                      href={`/orders?segment=${encodeURIComponent(segment.name)}`}
+                      className="mt-1 block text-xs text-gray-500 hover:underline"
+                    >
+                      {segment.orderCount.toLocaleString()} orders • ${averageOrderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })} AOV
+                    </Link>
+                    <Link
+                      href={`/prospects?segment=${encodeURIComponent(segment.name)}`}
+                      className="mt-1 block text-xs text-gray-500 hover:underline"
+                    >
+                      {segment.prospectCount.toLocaleString()} prospects
+                    </Link>
+                    <Link
+                      href={`/customers?segment=${encodeURIComponent(segment.name)}`}
+                      className="block text-xs text-gray-500 hover:underline"
+                    >
+                      {segment.customerCount.toLocaleString()} customers
+                    </Link>
+                    <Link
+                      href={`/pipeline?segment=${encodeURIComponent(segment.name)}`}
+                      className="block text-xs text-gray-500 hover:underline"
+                    >
+                      {segment.activeDealCount.toLocaleString()} active deals
+                    </Link>
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
