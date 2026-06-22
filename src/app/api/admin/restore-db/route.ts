@@ -3,6 +3,7 @@ export const maxDuration = 60;
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
+import Database from "better-sqlite3";
 
 // Use /data for Railway, fallback to local
 const DATA_DIR = fs.existsSync("/data") ? "/data" : path.join(process.cwd(), "data");
@@ -37,16 +38,46 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "no upload in progress" }, { status: 400 });
       }
       const size = fs.statSync(TMP_PATH).size;
-      
+
+      // SAFETY: snapshot the existing DB before we overwrite it.
+      // Daniel 2026-06-22: a previous restore-db call wiped campaigns/
+      // campaign_leads/deals because the uploaded file was an older
+      // snapshot — and the WAL got deleted right after, so there was
+      // no recovery from journal. If the restore turns out wrong now,
+      // recovery is one `mv` away.
+      //
+      // We use SQLite's own .backup() instead of a raw fs.copyFile so
+      // the snapshot is a consistent point-in-time view that includes
+      // any data still living in the WAL (a raw copy of the main file
+      // would miss it).
+      let preRestoreBackup: string | null = null;
+      if (fs.existsSync(DB_PATH)) {
+        const ts = new Date().toISOString().replace(/[:.]/g, "-");
+        preRestoreBackup = `${DB_PATH}.pre-restore-${ts}`;
+        const src = new Database(DB_PATH, { readonly: true });
+        try {
+          await src.backup(preRestoreBackup);
+        } finally {
+          src.close();
+        }
+      }
+
       // Remove WAL/SHM
       try { fs.unlinkSync(DB_PATH + "-shm"); } catch {}
       try { fs.unlinkSync(DB_PATH + "-wal"); } catch {}
-      
+
       // Replace
       fs.copyFileSync(TMP_PATH, DB_PATH);
       fs.unlinkSync(TMP_PATH);
-      
-      return NextResponse.json({ status: "complete", size });
+
+      return NextResponse.json({
+        status: "complete",
+        size,
+        pre_restore_backup: preRestoreBackup,
+        message: preRestoreBackup
+          ? `Snapshot of previous DB saved to ${preRestoreBackup}. If this restore is wrong, run: mv ${preRestoreBackup} ${DB_PATH}`
+          : "No pre-existing DB to snapshot (fresh install).",
+      });
     }
 
     if (action === "status") {
