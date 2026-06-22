@@ -1403,6 +1403,173 @@ try {
     }
   }
 
+  // ── Email-storage consolidation (2026-06-19) ───────────────────
+  //
+  // Daniel: "one source of truth for emails." Same pattern as the
+  // phone migration. The contacts table becomes canonical — every
+  // email address lives as a contacts row. companies.email is a
+  // trigger-maintained cache during the transition, dropped in a
+  // follow-up commit when reads are migrated.
+  //
+  // Audit (2026-06-19): 144,958 companies have legacy email, 124,018
+  // of them are orphans (no matching contacts row). 0 duplicates,
+  // 0 case mismatches, 92 multi-email-string legacy values. The
+  // last 92 are handled as-is during backfill (one contact row each
+  // with the joined string) and cleaned by a follow-up admin endpoint.
+
+  // ── Email snapshot parachute ────────────────────────────────────
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS _legacy_companies_email_snapshot (
+    company_id TEXT PRIMARY KEY NOT NULL,
+    email TEXT NOT NULL,
+    captured_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  try {
+    sqlite.exec(`
+      INSERT OR IGNORE INTO _legacy_companies_email_snapshot (company_id, email)
+      SELECT c.id, TRIM(c.email)
+        FROM companies c
+       WHERE TRIM(COALESCE(c.email, '')) <> ''
+    `);
+  } catch {
+    /* companies.email column already dropped — snapshot is final */
+  }
+
+  // ── Backfill companies.email → contacts ─────────────────────────
+  //
+  // For every (company, non-empty email) where no contacts row
+  // already exists with the same lower(email), insert a new contacts
+  // row. Lowercase the email so the migration normalizes the
+  // inconsistent-casing problem at the same time.
+  //
+  // is_primary heuristic: if this company has NO contacts yet, the
+  // backfill row becomes the primary. If contacts already exist,
+  // the backfill is an additional non-primary alternate so we don't
+  // disrupt the user's intended primary.
+  //
+  // Idempotent via the EXISTS-guard — re-runs are no-ops.
+  try {
+    sqlite.exec(`
+      INSERT INTO contacts (
+        id, company_id, store_id, first_name, last_name, title,
+        email, phone, is_primary, source, created_at, updated_at
+      )
+      SELECT
+        lower(hex(randomblob(16))),
+        c.id,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        LOWER(TRIM(c.email)),
+        NULL,
+        CASE
+          WHEN EXISTS (SELECT 1 FROM contacts cx WHERE cx.company_id = c.id)
+          THEN 0 ELSE 1
+        END,
+        'legacy_email_backfill',
+        datetime('now'),
+        datetime('now')
+      FROM companies c
+      WHERE TRIM(COALESCE(c.email, '')) <> ''
+        AND NOT EXISTS (
+          SELECT 1 FROM contacts ct
+          WHERE ct.company_id = c.id
+            AND LOWER(TRIM(ct.email)) = LOWER(TRIM(c.email))
+        )
+    `);
+  } catch (e) {
+    /* companies.email column already dropped or backfill error */
+    console.warn("[db] companies.email backfill skipped:", e);
+  }
+
+  // ── Email cache-refresh triggers ────────────────────────────────
+  //
+  // Keep companies.email synced to the "primary email" of contacts
+  // (is_primary=1 first, then oldest, with non-empty email). When
+  // contacts changes, companies.email reflects the right primary.
+  //
+  // Drop+recreate so any schema change to the body propagates.
+  sqlite.exec(`DROP TRIGGER IF EXISTS trg_contacts_email_after_insert`);
+  sqlite.exec(`DROP TRIGGER IF EXISTS trg_contacts_email_after_update`);
+  sqlite.exec(`DROP TRIGGER IF EXISTS trg_contacts_email_after_delete`);
+
+  const emailRefreshSql = (cidCol: string) => `
+    UPDATE companies
+       SET email = (
+         SELECT LOWER(TRIM(email)) FROM contacts
+          WHERE company_id = ${cidCol}
+            AND TRIM(COALESCE(email, '')) <> ''
+          ORDER BY is_primary DESC, created_at ASC
+          LIMIT 1
+       )
+     WHERE id = ${cidCol};
+  `;
+
+  // Only fire when an email field actually changed to avoid
+  // cascading from unrelated contacts updates.
+  sqlite.exec(`
+    CREATE TRIGGER trg_contacts_email_after_insert
+    AFTER INSERT ON contacts
+    WHEN NEW.email IS NOT NULL AND TRIM(NEW.email) <> ''
+    BEGIN ${emailRefreshSql("NEW.company_id")} END;
+  `);
+  sqlite.exec(`
+    CREATE TRIGGER trg_contacts_email_after_update
+    AFTER UPDATE OF email, is_primary ON contacts
+    BEGIN ${emailRefreshSql("NEW.company_id")} END;
+  `);
+  sqlite.exec(`
+    CREATE TRIGGER trg_contacts_email_after_delete
+    AFTER DELETE ON contacts
+    BEGIN ${emailRefreshSql("OLD.company_id")} END;
+  `);
+
+  // ── Reverse-mirror triggers ─────────────────────────────────────
+  //
+  // Any legacy writer that still writes companies.email (Chrome ext,
+  // Faire/Shopify webhooks, manual SQL) gets the value mirrored into
+  // contacts automatically. INSERT OR IGNORE so duplicates are
+  // dropped naturally.
+  sqlite.exec(`DROP TRIGGER IF EXISTS trg_companies_email_insert_mirror`);
+  sqlite.exec(`DROP TRIGGER IF EXISTS trg_companies_email_update_mirror`);
+
+  const emailMirrorBody = `
+    INSERT INTO contacts (
+      id, company_id, store_id, first_name, last_name, title,
+      email, phone, is_primary, source, created_at, updated_at
+    )
+    SELECT
+      lower(hex(randomblob(16))),
+      NEW.id, NULL, NULL, NULL, NULL,
+      LOWER(TRIM(NEW.email)),
+      NULL,
+      CASE
+        WHEN EXISTS (SELECT 1 FROM contacts cx WHERE cx.company_id = NEW.id)
+        THEN 0 ELSE 1
+      END,
+      'legacy_companies_write',
+      datetime('now'),
+      datetime('now')
+    WHERE NOT EXISTS (
+      SELECT 1 FROM contacts ct
+      WHERE ct.company_id = NEW.id
+        AND LOWER(TRIM(ct.email)) = LOWER(TRIM(NEW.email))
+    );
+  `;
+
+  sqlite.exec(`
+    CREATE TRIGGER trg_companies_email_insert_mirror
+    AFTER INSERT ON companies
+    WHEN NEW.email IS NOT NULL AND TRIM(NEW.email) <> ''
+    BEGIN ${emailMirrorBody} END;
+  `);
+  sqlite.exec(`
+    CREATE TRIGGER trg_companies_email_update_mirror
+    AFTER UPDATE OF email ON companies
+    WHEN NEW.email IS NOT NULL AND TRIM(NEW.email) <> ''
+    BEGIN ${emailMirrorBody} END;
+  `);
+
   sqlite.exec(`CREATE TABLE IF NOT EXISTS magic_link_tokens (
     id TEXT PRIMARY KEY NOT NULL,
     email TEXT NOT NULL,
