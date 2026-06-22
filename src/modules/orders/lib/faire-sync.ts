@@ -1,9 +1,11 @@
-import { db } from "@/lib/db";
+import { db, sqlite } from "@/lib/db";
 import { orders, orderItems } from "@/modules/orders/schema";
 import { companies } from "@/modules/sales/schema";
 import { eq } from "drizzle-orm";
 import { eventBus } from "@/modules/core/lib/event-bus";
 import { ensureCustomerAccount } from "@/modules/customers/lib/account-sync";
+import { addCompanyEmail } from "@/modules/sales/lib/company-emails";
+import { addCompanyPhone } from "@/modules/sales/lib/company-phones";
 
 // ── Faire API Types ──
 
@@ -147,23 +149,38 @@ function findOrCreateRetailerCompany(retailer: FaireRetailer): string {
   const nameMatch = db.select().from(companies).where(eq(companies.name, retailer.name)).get();
   if (nameMatch) return nameMatch.id;
 
-  // Try matching by email
+  // Try matching by email — case-insensitive lookup against contacts
+  // (the canonical email store). Fixes the case-sensitivity bug where
+  // "Jane@X.com" wouldn't match a company whose email was stored as
+  // "jane@x.com" in companies.email.
   if (retailer.email) {
-    const emailMatch = db.select().from(companies).where(eq(companies.email, retailer.email)).get();
+    const emailMatch = sqlite
+      .prepare(
+        `SELECT ct.company_id AS id FROM contacts ct
+          WHERE LOWER(TRIM(ct.email)) = LOWER(TRIM(?))
+          LIMIT 1`,
+      )
+      .get(retailer.email) as { id: string } | undefined;
     if (emailMatch) return emailMatch.id;
   }
 
-  // Create new company from retailer data
+  // Create new company from retailer data — email is no longer on the
+  // companies row; it lands in contacts via addCompanyEmail.
   const newCompany = db.insert(companies).values({
     name: retailer.name,
-    email: retailer.email || null,
-    phone: retailer.phone || null,
     website: retailer.website || null,
     city: retailer.address?.city || null,
     state: retailer.address?.state || null,
     country: retailer.address?.country || null,
     source: "faire",
   }).returning().get();
+
+  if (retailer.email) {
+    addCompanyEmail(newCompany.id, retailer.email, "faire_webhook");
+  }
+  if (retailer.phone) {
+    addCompanyPhone(newCompany.id, retailer.phone, "faire_webhook");
+  }
 
   return newCompany.id;
 }

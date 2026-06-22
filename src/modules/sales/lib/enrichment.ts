@@ -4,6 +4,7 @@
 import { sqlite } from "@/lib/db";
 import { logger } from "@/modules/core/lib/logger";
 import { addCompanyPhone } from "./company-phones";
+import { addCompanyEmail } from "./company-emails";
 
 const OUTSCRAPER_BASE = "https://api.app.outscraper.com";
 
@@ -46,7 +47,7 @@ export function getCompaniesNeedingEnrichment(limit = 50): { id: string; name: s
   return sqlite.prepare(`
     SELECT id, name, city, state FROM companies c
     WHERE (enrichment_status IS NULL OR enrichment_status = 'not_enriched')
-    AND (email IS NULL OR email = '')
+    AND NOT EXISTS (SELECT 1 FROM contacts ct WHERE ct.company_id = c.id AND TRIM(COALESCE(ct.email,'')) <> '')
     AND NOT EXISTS (SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id)
     AND (website IS NULL OR website = '')
     LIMIT ?
@@ -167,9 +168,13 @@ export async function enrichViaOutscraper(companyId: string): Promise<{ success:
       }
     };
 
-    setIfEmpty("email", "email", r.email_1);
-    // Phone writes go to company_phones (canonical store) instead of
-    // the legacy companies.phone column. addCompanyPhone is idempotent.
+    // Email writes go to contacts (canonical store), phone writes go
+    // to company_phones. Both helpers idempotent — duplicate values
+    // are silently skipped.
+    if (r.email_1) {
+      addCompanyEmail(companyId, String(r.email_1), "outscraper");
+      newFields.push("email");
+    }
     if (r.phone) {
       addCompanyPhone(companyId, String(r.phone), "outscraper");
       newFields.push("phone");
@@ -205,8 +210,7 @@ export async function enrichViaOutscraper(companyId: string): Promise<{ success:
     if (!hasEmail && websiteUrl) {
       const scraped = await webScrapeFallback(String(websiteUrl));
       if (scraped.emails.length > 0 && (!company.email || company.email === "")) {
-        updates.push("email = ?");
-        vals.push(scraped.emails[0]);
+        addCompanyEmail(companyId, scraped.emails[0], "web_scrape");
         newFields.push("email");
       }
       if (scraped.phones.length > 0 && (!company.phone || company.phone === "") && !r.phone) {

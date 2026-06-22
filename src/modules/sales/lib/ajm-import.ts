@@ -26,6 +26,7 @@
 import { sqlite } from "@/lib/db";
 import { randomUUID } from "crypto";
 import { dedupeTagsArray } from "./dedupe-tags";
+import { addCompanyEmail } from "./company-emails";
 
 export interface AjmRow {
   name: string;
@@ -122,11 +123,15 @@ function findExistingCompany(row: AjmRow): ExistingMatch | null {
   const nameNorm = normName(row.name);
   const stateNorm = normState(row.state);
 
-  // 1. email exact
+  // 1. email exact — case-insensitive against contacts (canonical).
   if (email) {
     const r = sqlite
       .prepare(
-        "SELECT id, tags, status, email, phone FROM companies WHERE LOWER(email) = ? LIMIT 1",
+        `SELECT c.id, c.tags, c.status, ct.email AS email, NULL AS phone
+           FROM contacts ct
+           JOIN companies c ON c.id = ct.company_id
+          WHERE LOWER(TRIM(ct.email)) = ?
+          LIMIT 1`,
       )
       .get(email) as
       | { id: string; tags: string | null; status: string | null; email: string | null; phone: string | null }
@@ -139,7 +144,14 @@ function findExistingCompany(row: AjmRow): ExistingMatch | null {
   if (domain && !domain.endsWith("@relay.faire.com") && !isPersonalDomain(domain)) {
     const r = sqlite
       .prepare(
-        "SELECT id, tags, status, email, phone FROM companies WHERE LOWER(domain) = ? LIMIT 1",
+        `SELECT c.id, c.tags, c.status,
+                (SELECT ct.email FROM contacts ct
+                  WHERE ct.company_id = c.id
+                    AND TRIM(COALESCE(ct.email, '')) <> ''
+                  ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
+                NULL AS phone
+           FROM companies c
+          WHERE LOWER(c.domain) = ? LIMIT 1`,
       )
       .get(domain) as
       | { id: string; tags: string | null; status: string | null; email: string | null; phone: string | null }
@@ -151,10 +163,16 @@ function findExistingCompany(row: AjmRow): ExistingMatch | null {
   if (nameNorm && nameNorm.length >= 4 && stateNorm) {
     const r = sqlite
       .prepare(
-        `SELECT id, tags, status, email, phone, name, state
-           FROM companies
-          WHERE state = ?
-            AND LOWER(name) LIKE ?
+        `SELECT c.id, c.tags, c.status,
+                (SELECT ct.email FROM contacts ct
+                  WHERE ct.company_id = c.id
+                    AND TRIM(COALESCE(ct.email, '')) <> ''
+                  ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
+                NULL AS phone,
+                c.name, c.state
+           FROM companies c
+          WHERE c.state = ?
+            AND LOWER(c.name) LIKE ?
           LIMIT 5`,
       )
       .all(stateNorm, `%${nameNorm.slice(0, 24)}%`) as Array<{
@@ -255,11 +273,13 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
 
   // Prepared statements (skip in dry-run — still useful for plan but we
   // don't execute them).
+  // Email is no longer on the companies row — written via
+  // addCompanyEmail below. updateExisting + insertNew don't reference
+  // it anymore.
   const updateExisting = sqlite.prepare(
     `UPDATE companies SET
        tags = ?,
        status = COALESCE(NULLIF(?, ''), status),
-       email = COALESCE(email, NULLIF(?, '')),
        address = COALESCE(address, NULLIF(?, '')),
        city = COALESCE(city, NULLIF(?, '')),
        state = COALESCE(state, NULLIF(?, '')),
@@ -276,12 +296,12 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
   );
   const insertNew = sqlite.prepare(
     `INSERT INTO companies (
-       id, name, email, phone, address, city, state, zip, country,
+       id, name, phone, address, city, state, zip, country,
        status, source, source_type, tags,
        ajm_total_spend, ajm_total_orders, ajm_first_order, ajm_last_order,
        ajm_status, ajm_category,
        created_at, updated_at
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
   );
   const insertPhone = sqlite.prepare(
     `INSERT OR IGNORE INTO company_phones
@@ -324,7 +344,6 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
           updateExisting.run(
             mergedTags,
             newStatus,
-            row.email ?? "",
             row.address ?? "",
             row.city ?? "",
             row.state ?? "",
@@ -338,6 +357,10 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
             now,
             existing.id,
           );
+          // Email lands in contacts (canonical), not on companies.
+          if (row.email) {
+            addCompanyEmail(existing.id, row.email, "ajm_import");
+          }
           if (phoneNorm && !phoneExists.get(existing.id, phoneNorm)) {
             insertPhone.run(
               randomUUID(),
@@ -357,7 +380,6 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
           insertNew.run(
             id,
             row.name,
-            row.email ?? null,
             phoneNorm ?? null, // legacy column — trigger mirrors to company_phones
             row.address ?? null,
             row.city ?? null,
@@ -379,6 +401,10 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
           );
           // Phone trigger from db.ts boot block mirrors companies.phone
           // into company_phones automatically — no manual insert needed.
+          // Email goes to contacts (canonical), not on the company row.
+          if (row.email) {
+            addCompanyEmail(id, row.email, "ajm_import");
+          }
 
           // Contact: create one if a name was provided.
           if (row.contact_first_name) {

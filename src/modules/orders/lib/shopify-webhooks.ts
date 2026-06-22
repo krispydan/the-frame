@@ -6,6 +6,7 @@ import { inventory, inventoryMovements } from "@/modules/inventory/schema";
 import { webhookRegistry, verifyShopifyHmac } from "@/modules/core/lib/webhooks";
 import { eventBus } from "@/modules/core/lib/event-bus";
 import { ensureCustomerAccount } from "@/modules/customers/lib/account-sync";
+import { addCompanyEmail } from "@/modules/sales/lib/company-emails";
 import { eq, and } from "drizzle-orm";
 
 // ── Types for Shopify Order Webhook ──
@@ -141,9 +142,16 @@ async function findOrCreateCompany(order: ShopifyOrder, shopDomain?: string): Pr
   const email = order.email || order.customer?.email;
   const companyName = order.customer?.default_address?.company;
 
-  // 1. Exact email match — most specific, always safe.
+  // 1. Email match — case-insensitive against contacts (canonical
+  // email store). Same fix as faire-sync for the case-sensitivity bug.
   if (email) {
-    const emailMatch = db.select().from(companies).where(eq(companies.email, email)).get();
+    const emailMatch = sqlite
+      .prepare(
+        `SELECT ct.company_id AS id FROM contacts ct
+          WHERE LOWER(TRIM(ct.email)) = LOWER(TRIM(?))
+          LIMIT 1`,
+      )
+      .get(email) as { id: string } | undefined;
     if (emailMatch) return emailMatch.id;
   }
 
@@ -176,10 +184,13 @@ async function findOrCreateCompany(order: ShopifyOrder, shopDomain?: string): Pr
     const businessDomain = rawDomain && !FREE_EMAIL_DOMAINS.has(rawDomain) ? rawDomain : null;
     const newCompany = db.insert(companies).values({
       name: companyName || email || "Unknown",
-      email: email || null,
       domain: businessDomain,
       source: "shopify",
     }).returning().get();
+    // Email lands in contacts (canonical), not on the company row.
+    if (email) {
+      addCompanyEmail(newCompany.id, email, "shopify_webhook");
+    }
     return newCompany.id;
   }
 

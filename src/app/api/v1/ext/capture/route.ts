@@ -126,15 +126,14 @@ export const POST = apiHandler(
 
       sqlite
         .prepare(
-          `INSERT INTO companies (id, name, domain, website, email, address, city, state, zip, socials, contact_form_url, notes, status, source, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', 'chrome_extension', ?, ?)`
+          `INSERT INTO companies (id, name, domain, website, address, city, state, zip, socials, contact_form_url, notes, status, source, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', 'chrome_extension', ?, ?)`
         )
         .run(
           id,
           body.business_name || domain || "Unknown",
           domain,
           body.website || null,
-          body.email || null,
           body.address || null,
           body.city || null,
           body.state || null,
@@ -145,14 +144,20 @@ export const POST = apiHandler(
           now,
           now
         );
-      // Phone is stored in company_phones (canonical), not on the
-      // companies row. Idempotent — duplicate (company_id, phone) is
-      // silently skipped by the unique index.
+      // Phone + email land in their canonical stores (company_phones
+      // and contacts), not on the companies row. Both helpers are
+      // idempotent — duplicates silently skipped.
       if (body.phone) {
         const { addCompanyPhone } = await import(
           "@/modules/sales/lib/company-phones"
         );
         addCompanyPhone(id, body.phone, "chrome_ext");
+      }
+      if (body.email) {
+        const { addCompanyEmail } = await import(
+          "@/modules/sales/lib/company-emails"
+        );
+        addCompanyEmail(id, body.email, "chrome_ext");
       }
 
       return NextResponse.json({

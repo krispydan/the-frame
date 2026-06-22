@@ -118,8 +118,8 @@ export async function importProspectsFromCSV(
 
   // Prepare raw statements for max performance
   const insertCompany = sqlite.prepare(`
-    INSERT INTO companies (id, name, type, website, domain, phone, email, city, state, zip, country, source, icp_score, status, tags, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    INSERT INTO companies (id, name, type, website, domain, phone, city, state, zip, country, source, icp_score, status, tags, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
   `);
 
   const insertStore = sqlite.prepare(`
@@ -181,7 +181,7 @@ export async function importProspectsFromCSV(
             website,
             domain,
             phone,
-            email,
+            // email no longer on companies — written to contacts below
             row.city?.trim() || null,
             state || null,
             row.zip?.trim() || null,
