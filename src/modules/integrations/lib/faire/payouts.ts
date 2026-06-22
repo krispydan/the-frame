@@ -150,8 +150,17 @@ export function summarizeFairePayout(order: FaireOrderApiShape): FairePayoutSumm
  * Sanity-check that the breakdown adds up. Returns the delta (should be 0
  * or a tiny rounding artefact). Callers should warn — not fail — on
  * non-zero values, since Faire occasionally has float rounding noise.
+ *
+ * Empirical (2026-06-22 audit of 224 payouts):
+ *   totalPayout = netOrderTotal - commission - paymentFee
+ *
+ * shippingReimbursement (maker_cost on the shipment) is NOT included in
+ * Faire's totalPayout for SHIP_ON_YOUR_OWN orders — Faire keeps that
+ * cost off the per-order payout entirely. If/when Faire ever reimburses
+ * shipping it flows through a different settlement channel; we'll need
+ * to model that separately if we ever see it.
  */
 export function fairePayoutBalanceDelta(p: FairePayoutSummary): number {
-  const expected = p.netOrderTotal - p.commission - p.paymentFee + p.shippingReimbursement;
+  const expected = p.netOrderTotal - p.commission - p.paymentFee;
   return Math.round((p.totalPayout - expected) * 100) / 100;
 }
