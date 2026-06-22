@@ -32,7 +32,9 @@ export const companies = sqliteTable("companies", {
   // companies.phone was dropped 2026-06-19 — company_phones is now
   // the canonical store. See /api/admin/sales/phone-integrity-check
   // and the boot-block drop logic in src/lib/db.ts.
-  email: text("email"),
+  // companies.email was dropped 2026-06-19 — contacts.email is now
+  // the canonical store. See /api/admin/sales/email-integrity-check
+  // and the boot-block drop logic in src/lib/db.ts.
   address: text("address"),
   city: text("city"),
   state: text("state"),

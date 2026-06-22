@@ -1570,6 +1570,67 @@ try {
     BEGIN ${emailMirrorBody} END;
   `);
 
+  // ── Phase 4: integrity-guarded drop of companies.email ─────────
+  //
+  // The "one source of truth" finale for emails. Reads and writes
+  // route through contacts now (Phase 2 + 3 refactor); the column
+  // is purely a trigger-maintained cache. Time to drop it.
+  //
+  // SAFETY: matches the phone Phase 4 pattern. Drop only fires when
+  // (A) every non-empty companies.email has at least one matching
+  // contacts row (case-insensitive). If anything drifts, log loudly
+  // and skip — column stays, triggers stay, snapshot is intact,
+  // human investigates.
+  //
+  // After a successful drop, clean up both trigger sets — nothing
+  // left to cache or mirror.
+  const emailCols = sqlite
+    .prepare("PRAGMA table_info(companies)")
+    .all() as Array<{ name: string }>;
+  const hasLegacyEmailCol = emailCols.some((c) => c.name === "email");
+
+  if (hasLegacyEmailCol) {
+    const emailLegacyOnly = (
+      sqlite
+        .prepare(
+          `SELECT COUNT(*) AS n FROM companies c
+            WHERE TRIM(COALESCE(c.email, '')) <> ''
+              AND NOT EXISTS (
+                SELECT 1 FROM contacts ct
+                WHERE ct.company_id = c.id
+                  AND LOWER(TRIM(ct.email)) = LOWER(TRIM(c.email))
+              )`,
+        )
+        .get() as { n: number }
+    ).n;
+
+    if (emailLegacyOnly === 0) {
+      try {
+        sqlite.exec(`DROP TRIGGER IF EXISTS trg_contacts_email_after_insert`);
+        sqlite.exec(`DROP TRIGGER IF EXISTS trg_contacts_email_after_update`);
+        sqlite.exec(`DROP TRIGGER IF EXISTS trg_contacts_email_after_delete`);
+        sqlite.exec(`DROP TRIGGER IF EXISTS trg_companies_email_insert_mirror`);
+        sqlite.exec(`DROP TRIGGER IF EXISTS trg_companies_email_update_mirror`);
+        sqlite.exec(`ALTER TABLE companies DROP COLUMN email`);
+        console.log(
+          "[db] companies.email dropped — contacts is now the sole source of truth. Snapshot retained in _legacy_companies_email_snapshot.",
+        );
+      } catch (e) {
+        console.error(
+          "[db] companies.email drop failed despite passing integrity check:",
+          e,
+        );
+      }
+    } else {
+      console.warn(
+        `[db] SKIPPING companies.email drop — drift detected: ` +
+          `legacy_only=${emailLegacyOnly}. ` +
+          `Run GET /api/admin/sales/email-integrity-check for samples. ` +
+          `Snapshot is intact in _legacy_companies_email_snapshot.`,
+      );
+    }
+  }
+
   sqlite.exec(`CREATE TABLE IF NOT EXISTS magic_link_tokens (
     id TEXT PRIMARY KEY NOT NULL,
     email TEXT NOT NULL,
