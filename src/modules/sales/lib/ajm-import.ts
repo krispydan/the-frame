@@ -185,7 +185,12 @@ function findExistingCompany(row: AjmRow): ExistingMatch | null {
   if (phone) {
     const r = sqlite
       .prepare(
-        `SELECT c.id, c.tags, c.status, c.email, c.phone
+        `SELECT c.id, c.tags, c.status,
+                (SELECT ct.email FROM contacts ct
+                  WHERE ct.company_id = c.id
+                    AND TRIM(COALESCE(ct.email, '')) <> ''
+                  ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
+                cp.phone
            FROM companies c
            JOIN company_phones cp ON cp.company_id = c.id
           WHERE cp.phone = ?

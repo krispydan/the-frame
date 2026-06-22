@@ -151,7 +151,7 @@ export async function POST(req: NextRequest) {
         ...Array.from(JUNK_DOMAINS));
 
   const where: string[] = [
-    "(c.email IS NULL OR TRIM(c.email) = '')",
+    `NOT EXISTS (SELECT 1 FROM contacts ct WHERE ct.company_id = c.id AND TRIM(COALESCE(ct.email, '')) <> '')`,
     "c.domain IS NOT NULL AND TRIM(c.domain) != ''",
     "c.storeleads_no_email_attempted_at IS NULL",
   ];

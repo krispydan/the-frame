@@ -15,6 +15,21 @@ import { sqlite } from "@/lib/db";
 import { verifyProspectEmails } from "@/modules/sales/lib/neverbounce/verify-prospects";
 import { handleSyncRequest } from "@/modules/sales/lib/instantly-sync";
 
+// Email is canonical in contacts now. SQL fragments centralize the
+// pattern so the heavy verify-and-push queries stay readable.
+const HAS_EMAIL_EXISTS = `EXISTS (
+  SELECT 1 FROM contacts ct
+  WHERE ct.company_id = c.id
+    AND TRIM(COALESCE(ct.email, '')) <> ''
+)`;
+const PRIMARY_EMAIL_SUBQ = `(
+  SELECT ct.email FROM contacts ct
+  WHERE ct.company_id = c.id
+    AND TRIM(COALESCE(ct.email, '')) <> ''
+  ORDER BY ct.is_primary DESC, ct.created_at ASC
+  LIMIT 1
+)`;
+
 /**
  * POST /api/admin/sales/verify-and-push
  *
@@ -92,15 +107,16 @@ export async function POST(req: NextRequest) {
   }
 
   const eligibleQuery = `
-    SELECT c.id, c.email, c.email_verification_status, COALESCE(c.icp_score, -1) AS icp_score
+    SELECT c.id, ${PRIMARY_EMAIL_SUBQ} AS email,
+           c.email_verification_status, COALESCE(c.icp_score, -1) AS icp_score
       FROM companies c
      WHERE c.tags LIKE ?
-       AND c.email IS NOT NULL AND TRIM(c.email) != ''
+       AND ${HAS_EMAIL_EXISTS}
        AND c.status NOT IN ('rejected', 'customer')
        AND NOT EXISTS (SELECT 1 FROM campaign_leads cl
                        WHERE cl.campaign_id = ? AND cl.company_id = c.id)
        AND NOT EXISTS (SELECT 1 FROM campaign_leads cl2
-                       WHERE LOWER(cl2.email) = LOWER(c.email)
+                       WHERE LOWER(cl2.email) = LOWER(${PRIMARY_EMAIL_SUBQ})
                          AND cl2.instantly_lead_id IS NOT NULL)
      ORDER BY icp_score DESC
   `;
@@ -185,14 +201,14 @@ export async function POST(req: NextRequest) {
     ? ""
     : "AND c.email_verification_status IN ('valid','catchall')";
   const verified = sqlite.prepare(
-    `SELECT c.id, c.email FROM companies c
+    `SELECT c.id, ${PRIMARY_EMAIL_SUBQ} AS email FROM companies c
       WHERE c.id IN (${idPh})
         ${verificationGate}
         AND c.status NOT IN ('rejected','customer')
         AND NOT EXISTS (SELECT 1 FROM campaign_leads cl
                         WHERE cl.campaign_id = ? AND cl.company_id = c.id)
         AND NOT EXISTS (SELECT 1 FROM campaign_leads cl2
-                        WHERE LOWER(cl2.email) = LOWER(c.email)
+                        WHERE LOWER(cl2.email) = LOWER(${PRIMARY_EMAIL_SUBQ})
                           AND cl2.instantly_lead_id IS NOT NULL)`,
   ).all(...cohortIds, campaign.id) as Array<{ id: string; email: string }>;
 

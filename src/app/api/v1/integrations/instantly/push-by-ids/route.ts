@@ -7,6 +7,21 @@ import { handleSyncRequest } from "@/modules/sales/lib/instantly-sync";
 
 const MAX_IDS = 5000;
 
+// Email is canonical in contacts now, not on companies. Centralized
+// SQL fragments for readability in the heavy push query below.
+const HAS_EMAIL_EXISTS = `EXISTS (
+  SELECT 1 FROM contacts ct
+  WHERE ct.company_id = c.id
+    AND TRIM(COALESCE(ct.email, '')) <> ''
+)`;
+const PRIMARY_EMAIL_SUBQ = `(
+  SELECT ct.email FROM contacts ct
+  WHERE ct.company_id = c.id
+    AND TRIM(COALESCE(ct.email, '')) <> ''
+  ORDER BY ct.is_primary DESC, ct.created_at ASC
+  LIMIT 1
+)`;
+
 /**
  * POST /api/v1/integrations/instantly/push-by-ids
  *
@@ -52,15 +67,15 @@ export async function POST(req: NextRequest) {
 
   const idPh = ids.map(() => "?").join(",");
   const candidates = sqlite.prepare(
-    `SELECT c.id, c.name, c.email, c.icp_tier
+    `SELECT c.id, c.name, ${PRIMARY_EMAIL_SUBQ} AS email, c.icp_tier
        FROM companies c
       WHERE c.id IN (${idPh})
-        AND c.email IS NOT NULL AND TRIM(c.email) != ''
+        AND ${HAS_EMAIL_EXISTS}
         AND c.email_verification_status IN ('valid','catchall')
         AND NOT EXISTS (SELECT 1 FROM campaign_leads cl
                         WHERE cl.campaign_id = ? AND cl.company_id = c.id)
         AND NOT EXISTS (SELECT 1 FROM campaign_leads cl2
-                        WHERE LOWER(cl2.email) = LOWER(c.email)
+                        WHERE LOWER(cl2.email) = LOWER(${PRIMARY_EMAIL_SUBQ})
                           AND cl2.instantly_lead_id IS NOT NULL)
       ORDER BY COALESCE(c.icp_score, -1) DESC`,
   ).all(...ids, campaign.id) as Array<{

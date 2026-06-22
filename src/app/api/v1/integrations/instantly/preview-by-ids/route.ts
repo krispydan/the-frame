@@ -5,6 +5,22 @@ import { sqlite } from "@/lib/db";
 
 const MAX_IDS = 5000;
 
+// Email is now canonical in contacts, not on companies. These two
+// SQL fragments centralize the access pattern so the heavy preview
+// queries below stay readable.
+const HAS_EMAIL_EXISTS = `EXISTS (
+  SELECT 1 FROM contacts ct
+  WHERE ct.company_id = c.id
+    AND TRIM(COALESCE(ct.email, '')) <> ''
+)`;
+const PRIMARY_EMAIL_SUBQ = `(
+  SELECT ct.email FROM contacts ct
+  WHERE ct.company_id = c.id
+    AND TRIM(COALESCE(ct.email, '')) <> ''
+  ORDER BY ct.is_primary DESC, ct.created_at ASC
+  LIMIT 1
+)`;
+
 /**
  * POST /api/v1/integrations/instantly/preview-by-ids
  *
@@ -53,7 +69,7 @@ export async function POST(req: NextRequest) {
   const eligible = (sqlite.prepare(
     `SELECT COUNT(*) AS c FROM companies c
      ${baseWhere}
-       AND c.email IS NOT NULL AND TRIM(c.email) != ''
+       AND ${HAS_EMAIL_EXISTS}
        AND NOT EXISTS (SELECT 1 FROM campaign_leads cl
                        WHERE cl.campaign_id = ? AND cl.company_id = c.id)`,
   ).get(...ids, body.campaignId) as { c: number }).c;
@@ -61,12 +77,12 @@ export async function POST(req: NextRequest) {
   const pushable = (sqlite.prepare(
     `SELECT COUNT(*) AS c FROM companies c
      ${baseWhere}
-       AND c.email IS NOT NULL AND TRIM(c.email) != ''
+       AND ${HAS_EMAIL_EXISTS}
        AND c.email_verification_status IN ('valid','catchall')
        AND NOT EXISTS (SELECT 1 FROM campaign_leads cl
                        WHERE cl.campaign_id = ? AND cl.company_id = c.id)
        AND NOT EXISTS (SELECT 1 FROM campaign_leads cl2
-                       WHERE LOWER(cl2.email) = LOWER(c.email)
+                       WHERE LOWER(cl2.email) = LOWER(${PRIMARY_EMAIL_SUBQ})
                          AND cl2.instantly_lead_id IS NOT NULL)`,
   ).get(...ids, body.campaignId) as { c: number }).c;
 
@@ -76,12 +92,12 @@ export async function POST(req: NextRequest) {
   const pendingVerification = (sqlite.prepare(
     `SELECT COUNT(*) AS c FROM companies c
      ${baseWhere}
-       AND c.email IS NOT NULL AND TRIM(c.email) != ''
+       AND ${HAS_EMAIL_EXISTS}
        AND (c.email_verification_status IS NULL OR c.email_verification_status = 'error')
        AND NOT EXISTS (SELECT 1 FROM campaign_leads cl
                        WHERE cl.campaign_id = ? AND cl.company_id = c.id)
        AND NOT EXISTS (SELECT 1 FROM campaign_leads cl2
-                       WHERE LOWER(cl2.email) = LOWER(c.email)
+                       WHERE LOWER(cl2.email) = LOWER(${PRIMARY_EMAIL_SUBQ})
                          AND cl2.instantly_lead_id IS NOT NULL)`,
   ).get(...ids, body.campaignId) as { c: number }).c;
 
@@ -95,7 +111,7 @@ export async function POST(req: NextRequest) {
     `SELECT COUNT(*) AS c FROM companies c
      ${baseWhere}
        AND EXISTS (SELECT 1 FROM campaign_leads cl2
-                   WHERE LOWER(cl2.email) = LOWER(c.email)
+                   WHERE LOWER(cl2.email) = LOWER(${PRIMARY_EMAIL_SUBQ})
                      AND cl2.instantly_lead_id IS NOT NULL)`,
   ).get(...ids) as { c: number }).c;
 
@@ -108,16 +124,18 @@ export async function POST(req: NextRequest) {
 
   // Sample 20 push-eligible rows for the operator to spot-check.
   const sample = sqlite.prepare(
-    `SELECT c.id, c.name, c.domain, c.email, c.city, c.state, c.country,
+    `SELECT c.id, c.name, c.domain,
+            ${PRIMARY_EMAIL_SUBQ} AS email,
+            c.city, c.state, c.country,
             c.icp_tier, c.icp_score, c.email_verification_status, c.source_type
        FROM companies c
        ${baseWhere}
-         AND c.email IS NOT NULL AND TRIM(c.email) != ''
+         AND ${HAS_EMAIL_EXISTS}
          AND c.email_verification_status IN ('valid','catchall')
          AND NOT EXISTS (SELECT 1 FROM campaign_leads cl
                          WHERE cl.campaign_id = ? AND cl.company_id = c.id)
          AND NOT EXISTS (SELECT 1 FROM campaign_leads cl2
-                         WHERE LOWER(cl2.email) = LOWER(c.email)
+                         WHERE LOWER(cl2.email) = LOWER(${PRIMARY_EMAIL_SUBQ})
                            AND cl2.instantly_lead_id IS NOT NULL)
       ORDER BY COALESCE(c.icp_score, -1) DESC
       LIMIT 20`,

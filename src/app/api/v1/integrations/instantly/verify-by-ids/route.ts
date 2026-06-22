@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
   const pending = sqlite.prepare(
     `SELECT c.id FROM companies c
       WHERE c.id IN (${idPh})
-        AND c.email IS NOT NULL AND TRIM(c.email) != ''
+        AND EXISTS (SELECT 1 FROM contacts ct WHERE ct.company_id = c.id AND TRIM(COALESCE(ct.email, '')) <> '')
         AND (c.email_verification_status IS NULL OR c.email_verification_status = 'error')
         ${campaignGuard}
       ORDER BY COALESCE(c.icp_score, -1) DESC
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
   const remainingBefore = (sqlite.prepare(
     `SELECT COUNT(*) AS c FROM companies c
       WHERE c.id IN (${idPh})
-        AND c.email IS NOT NULL AND TRIM(c.email) != ''
+        AND EXISTS (SELECT 1 FROM contacts ct WHERE ct.company_id = c.id AND TRIM(COALESCE(ct.email, '')) <> '')
         AND (c.email_verification_status IS NULL OR c.email_verification_status = 'error')
         ${campaignGuard}`,
   ).get(...args) as { c: number }).c;
