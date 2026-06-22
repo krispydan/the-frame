@@ -16,7 +16,7 @@ import { matches, parseCron } from "./expression";
 
 export type RunResult = {
   jobId: string;
-  status: "ok" | "failed" | "skipped";
+  status: "ok" | "failed" | "skipped" | "detached";
   durationMs: number;
   result?: unknown;
   error?: string;
@@ -170,11 +170,39 @@ export async function tick(now: Date = new Date()): Promise<{ ranJobs: RunResult
 
   if (eligible.length === 0) return { ranJobs: [], skipped: 0 };
 
-  // Run in parallel — each handles its own DB writes + lock
-  const results = await Promise.all(eligible.map((j) => runJob(j.id, "tick")));
+  // Split: fast jobs we await inline, long-running jobs we fire and
+  // forget. Cloudflare gives this endpoint ~100s before it 524s, and
+  // jobs that overrun (shiphero-orders-sync taking 117s) generated
+  // cosmetic crash logs even though the Node process completed them
+  // server-side. The in_progress lock inside runJob() prevents the
+  // next tick from re-running an unfinished one, so fire-and-forget
+  // is safe.
+  const awaited = eligible.filter((j) => !j.fireAndForget);
+  const detached = eligible.filter((j) => !!j.fireAndForget);
+
+  // Kick off detached jobs without awaiting. Errors are logged by
+  // runJob() — we don't surface them here because the HTTP response
+  // is already returning.
+  for (const j of detached) {
+    void runJob(j.id, "tick").catch((e) => {
+      console.error(`[cron] detached job ${j.id} threw:`, e);
+    });
+  }
+
+  const results = await Promise.all(awaited.map((j) => runJob(j.id, "tick")));
   const ran = results.filter((r) => r.status !== "skipped");
   const skipped = results.length - ran.length;
-  return { ranJobs: ran, skipped };
+
+  // Surface detached jobs in the response so the cron-service log
+  // sees what was launched (even though we didn't wait for it).
+  const detachedSummary = detached.map((j) => ({
+    jobId: j.id,
+    status: "detached" as const,
+    durationMs: 0,
+    result: { dispatched: true },
+  }));
+
+  return { ranJobs: [...ran, ...detachedSummary], skipped };
 }
 
 /** Read-only view of all jobs + their state, for the UI. */

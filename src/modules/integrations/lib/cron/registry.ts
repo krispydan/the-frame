@@ -46,6 +46,20 @@ export type CronJob = {
    * (enabled). Set to false for jobs that should opt-in.
    */
   defaultEnabled?: boolean;
+  /**
+   * If true, the tick endpoint dispatches this job without awaiting
+   * its promise — useful for handlers that routinely exceed
+   * Cloudflare's 100-second edge timeout (which 524s the HTTP
+   * response but doesn't actually stop the Node process). The
+   * in_progress lock inside runJob() prevents the next tick from
+   * re-running an unfinished detached job, so this is safe.
+   *
+   * Detached jobs show up in the tick response as
+   *   { status: "detached", result: { dispatched: true } }
+   * with durationMs=0. The actual completion is recorded in
+   * cron_job_state.last_run_at when the job finishes.
+   */
+  fireAndForget?: boolean;
 };
 
 export const CRON_JOBS: CronJob[] = [
@@ -148,6 +162,10 @@ export const CRON_JOBS: CronJob[] = [
     description: "Sync ShipHero shipment + tracking updates back to local orders",
     handler: syncShipHeroOrders,
     guard: () => isDuringBusinessHours(),
+    // Routinely runs ~2 min; CF 524s the tick HTTP response while the
+    // Node process keeps going. Dispatch detached so the cron service
+    // sees a clean 200 immediately.
+    fireAndForget: true,
   },
   {
     id: "shiphero-inventory-sync",
