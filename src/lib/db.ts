@@ -1605,52 +1605,20 @@ try {
   //
   // After a successful drop, clean up both trigger sets — nothing
   // left to cache or mirror.
-  const emailCols = sqlite
-    .prepare("PRAGMA table_info(companies)")
-    .all() as Array<{ name: string }>;
-  const hasLegacyEmailCol = emailCols.some((c) => c.name === "email");
-
-  if (hasLegacyEmailCol) {
-    const emailLegacyOnly = (
-      sqlite
-        .prepare(
-          `SELECT COUNT(*) AS n FROM companies c
-            WHERE TRIM(COALESCE(c.email, '')) <> ''
-              AND NOT EXISTS (
-                SELECT 1 FROM contacts ct
-                WHERE ct.company_id = c.id
-                  AND LOWER(TRIM(ct.email)) = LOWER(TRIM(c.email))
-              )`,
-        )
-        .get() as { n: number }
-    ).n;
-
-    if (emailLegacyOnly === 0) {
-      try {
-        sqlite.exec(`DROP TRIGGER IF EXISTS trg_contacts_email_after_insert`);
-        sqlite.exec(`DROP TRIGGER IF EXISTS trg_contacts_email_after_update`);
-        sqlite.exec(`DROP TRIGGER IF EXISTS trg_contacts_email_after_delete`);
-        sqlite.exec(`DROP TRIGGER IF EXISTS trg_companies_email_insert_mirror`);
-        sqlite.exec(`DROP TRIGGER IF EXISTS trg_companies_email_update_mirror`);
-        sqlite.exec(`ALTER TABLE companies DROP COLUMN email`);
-        console.log(
-          "[db] companies.email dropped — contacts is now the sole source of truth. Snapshot retained in _legacy_companies_email_snapshot.",
-        );
-      } catch (e) {
-        console.error(
-          "[db] companies.email drop failed despite passing integrity check:",
-          e,
-        );
-      }
-    } else {
-      console.warn(
-        `[db] SKIPPING companies.email drop — drift detected: ` +
-          `legacy_only=${emailLegacyOnly}. ` +
-          `Run GET /api/admin/sales/email-integrity-check for samples. ` +
-          `Snapshot is intact in _legacy_companies_email_snapshot.`,
-      );
-    }
-  }
+  // NOTE: the boot-block drop was removed 2026-06-22 after it caused
+  // a Railway healthcheck failure. ALTER TABLE DROP COLUMN on the
+  // 144k-row companies table rewrites the table + rebuilds every
+  // index — observed to exceed the 30s healthcheck window and prevent
+  // the deploy from coming up healthy.
+  //
+  // The drop is now triggered on-demand via:
+  //   POST /api/admin/sales/email-drop-column
+  // That endpoint runs the same integrity check + drop and surfaces
+  // any error in the HTTP response, with maxDuration=300 so it has
+  // plenty of time to finish.
+  //
+  // After hitting that endpoint once successfully, the column is gone
+  // and the email Phase 1/2 block above no-ops on subsequent boots.
 
   sqlite.exec(`CREATE TABLE IF NOT EXISTS magic_link_tokens (
     id TEXT PRIMARY KEY NOT NULL,
