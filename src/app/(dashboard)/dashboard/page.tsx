@@ -32,7 +32,7 @@ interface DashboardStats {
   inventorySkus: number;
   inventoryValue: number;
   revenueByChannel: Array<{ channel: string; revenue: number; orderCount: number }>;
-  topSegments: Array<{ name: string; prospectCount: number; customerCount: number; activeDealCount: number; pipelineValue: number; revenue: number; orderCount: number }>;
+  topSegments: Array<{ name: string; prospectCount: number; qualifiedCount: number; customerCount: number; activeDealCount: number; pipelineValue: number; revenue: number; orderCount: number }>;
   unreadNotifications: number;
   lowStockAlerts: Array<{
     quantity: number;
@@ -296,6 +296,12 @@ export default function DashboardPage() {
                       className="mt-1 block text-xs text-gray-500 hover:underline"
                     >
                       {segment.prospectCount.toLocaleString()} prospects
+                    </Link>
+                    <Link
+                      href={`/prospects?segment=${encodeURIComponent(segment.name)}&status=qualified`}
+                      className="block text-xs text-gray-500 hover:underline"
+                    >
+                      {segment.qualifiedCount.toLocaleString()} qualified leads
                     </Link>
                     <Link
                       href={`/customers?segment=${encodeURIComponent(segment.name)}`}
