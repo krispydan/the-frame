@@ -267,6 +267,7 @@ export default function DashboardPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
               {stats.topSegments.map((segment) => {
                 const averageOrderValue = segment.orderCount > 0 ? segment.revenue / segment.orderCount : 0;
+                const conversionRate = segment.prospectCount > 0 ? (segment.customerCount / segment.prospectCount) * 100 : 0;
 
                 return (
                   <div
@@ -307,7 +308,8 @@ export default function DashboardPage() {
                       href={`/customers?segment=${encodeURIComponent(segment.name)}`}
                       className="block text-xs text-gray-500 hover:underline"
                     >
-                      {segment.customerCount.toLocaleString()} customers
+                      <div>{segment.customerCount.toLocaleString()} customers</div>
+                      <div>{conversionRate.toFixed(1)}% conversion</div>
                     </Link>
                     <Link
                       href={`/campaigns?segment=${encodeURIComponent(segment.name)}`}
