@@ -23,7 +23,11 @@ export async function GET(
   // Get linked companies
   const companies = sqlite.prepare(`
     SELECT c.id, c.name, c.status, c.icp_score, c.icp_tier, c.city, c.state,
-           c.email, c.website,
+           (SELECT ct.email FROM contacts ct
+             WHERE ct.company_id = c.id
+               AND TRIM(COALESCE(ct.email, '')) <> ''
+             ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
+           c.website,
            (SELECT cp.phone FROM company_phones cp
              WHERE cp.company_id = c.id
              ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,

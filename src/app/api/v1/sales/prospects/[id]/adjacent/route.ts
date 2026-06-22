@@ -72,8 +72,14 @@ export async function GET(
   }
   if (icpMin) { whereClauses.push(`c.icp_score >= ?`); whereParams.push(parseInt(icpMin)); }
   if (icpMax) { whereClauses.push(`c.icp_score <= ?`); whereParams.push(parseInt(icpMax)); }
-  if (hasEmail === "true") whereClauses.push(`c.email IS NOT NULL AND c.email != ''`);
-  else if (hasEmail === "false") whereClauses.push(`(c.email IS NULL OR c.email = '')`);
+  if (hasEmail === "true")
+    whereClauses.push(
+      `EXISTS (SELECT 1 FROM contacts ct WHERE ct.company_id = c.id AND TRIM(COALESCE(ct.email, '')) <> '')`,
+    );
+  else if (hasEmail === "false")
+    whereClauses.push(
+      `NOT EXISTS (SELECT 1 FROM contacts ct WHERE ct.company_id = c.id AND TRIM(COALESCE(ct.email, '')) <> '')`,
+    );
   if (hasPhone === "true")
     whereClauses.push(
       `EXISTS (SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id)`,

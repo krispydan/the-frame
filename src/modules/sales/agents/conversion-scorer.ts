@@ -40,7 +40,11 @@ export function scoreCompany(company: CompanyRow): number {
  * Batch score companies
  */
 export function batchScore(companyIds?: string[]): { scored: number } {
-  let query = `SELECT id, email,
+  let query = `SELECT id,
+    (SELECT ct.email FROM contacts ct
+       WHERE ct.company_id = companies.id
+         AND TRIM(COALESCE(ct.email, '')) <> ''
+       ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
     (SELECT cp.phone FROM company_phones cp
        WHERE cp.company_id = companies.id
        ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,

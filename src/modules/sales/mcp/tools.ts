@@ -75,8 +75,10 @@ mcpRegistry.register(
     }
     if (args.icp_min != null) { clauses.push("c.icp_score >= ?"); params.push(args.icp_min); }
     if (args.icp_max != null) { clauses.push("c.icp_score <= ?"); params.push(args.icp_max); }
-    if (args.has_email === "true") clauses.push("c.email IS NOT NULL AND c.email != ''");
-    else if (args.has_email === "false") clauses.push("(c.email IS NULL OR c.email = '')");
+    if (args.has_email === "true")
+      clauses.push("EXISTS (SELECT 1 FROM contacts ct WHERE ct.company_id = c.id AND TRIM(COALESCE(ct.email, '')) <> '')");
+    else if (args.has_email === "false")
+      clauses.push("NOT EXISTS (SELECT 1 FROM contacts ct WHERE ct.company_id = c.id AND TRIM(COALESCE(ct.email, '')) <> '')");
     // company_phones is the canonical store — has_phone tests
     // existence there, not the deprecated companies.phone cache.
     if (args.has_phone === "true")
@@ -91,7 +93,11 @@ mcpRegistry.register(
              (SELECT cp.phone FROM company_phones cp
                WHERE cp.company_id = c.id
                ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
-             c.email, c.icp_score, c.icp_tier, c.status, c.tags
+             (SELECT ct.email FROM contacts ct
+               WHERE ct.company_id = c.id
+                 AND TRIM(COALESCE(ct.email, '')) <> ''
+               ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
+             c.icp_score, c.icp_tier, c.status, c.tags
       FROM companies c ${where} ORDER BY ${sortCol} ${sortOrder} NULLS LAST LIMIT ? OFFSET ?
     `).all(...params, limit, offset) as Record<string, unknown>[];
 

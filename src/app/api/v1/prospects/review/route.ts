@@ -72,7 +72,10 @@ export async function GET(request: NextRequest) {
            (SELECT cp.phone FROM company_phones cp
              WHERE cp.company_id = c.id
              ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
-           c.email,
+           (SELECT ct.email FROM contacts ct
+             WHERE ct.company_id = c.id
+               AND TRIM(COALESCE(ct.email, '')) <> ''
+             ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
            c.website, c.domain, c.google_rating, c.google_review_count,
            c.source_type, c.source_query, c.category, COALESCE(s.name, c.segment) as segment, c.status,
            c.source, c.tags

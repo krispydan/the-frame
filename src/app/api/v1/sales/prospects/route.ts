@@ -55,9 +55,18 @@ export async function GET(request: NextRequest) {
   //     email lookups. LIKE is slow on 130K rows (~300ms) but it works.
   //   - Everything else → FTS5 with prefix match.
   let ftsRowIds: number[] | null = null;
+  // Email substring search now hits the contacts table (canonical
+  // email store). EXISTS subquery is roughly 2× the cost of the old
+  // direct-column LIKE on 130K rows (~600ms vs ~300ms) but covers
+  // every email per company instead of just the primary.
+  const emailSearchClause = `EXISTS (
+    SELECT 1 FROM contacts ct
+    WHERE ct.company_id = c.id
+      AND LOWER(ct.email) LIKE ?
+  )`;
   if (search) {
     if (search.includes("@")) {
-      whereClauses.push(`LOWER(c.email) LIKE ?`);
+      whereClauses.push(emailSearchClause);
       whereParams.push(`%${search.toLowerCase()}%`);
     } else {
       try {
@@ -69,14 +78,14 @@ export async function GET(request: NextRequest) {
         // catches partial-email queries like "theebossylook2024" without
         // the @-domain part.
         if (ftsRowIds.length === 0) {
-          whereClauses.push(`(c.name LIKE ? OR LOWER(c.email) LIKE ?)`);
+          whereClauses.push(`(c.name LIKE ? OR ${emailSearchClause})`);
           whereParams.push(`%${search}%`, `%${search.toLowerCase()}%`);
         } else {
           whereClauses.push(`c.rowid IN (${ftsRowIds.join(",")})`);
         }
       } catch {
         // FTS query syntax error (rare) → LIKE on name + email
-        whereClauses.push(`(c.name LIKE ? OR LOWER(c.email) LIKE ?)`);
+        whereClauses.push(`(c.name LIKE ? OR ${emailSearchClause})`);
         whereParams.push(`%${search}%`, `%${search.toLowerCase()}%`);
       }
     }
@@ -131,9 +140,13 @@ export async function GET(request: NextRequest) {
   }
 
   if (hasEmail === "true") {
-    whereClauses.push(`c.email IS NOT NULL AND c.email != ''`);
+    whereClauses.push(
+      `EXISTS (SELECT 1 FROM contacts ct WHERE ct.company_id = c.id AND TRIM(COALESCE(ct.email, '')) <> '')`,
+    );
   } else if (hasEmail === "false") {
-    whereClauses.push(`(c.email IS NULL OR c.email = '')`);
+    whereClauses.push(
+      `NOT EXISTS (SELECT 1 FROM contacts ct WHERE ct.company_id = c.id AND TRIM(COALESCE(ct.email, '')) <> '')`,
+    );
   }
 
   if (sourceTypeFilter.length > 0) {
@@ -209,7 +222,10 @@ export async function GET(request: NextRequest) {
            (SELECT cp.phone FROM company_phones cp
              WHERE cp.company_id = c.id
              ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
-           c.email,
+           (SELECT ct.email FROM contacts ct
+             WHERE ct.company_id = c.id
+               AND TRIM(COALESCE(ct.email, '')) <> ''
+             ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
            c.icp_score, c.status, c.tags, c.website, c.domain, c.enrichment_status, COALESCE(s.name, c.segment) as segment, c.category,
            c.industry, c.source_type, c.source_id, c.source_query
     ${fromSQL}

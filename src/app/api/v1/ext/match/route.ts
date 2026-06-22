@@ -17,7 +17,11 @@ export const GET = apiHandler(
                 (SELECT cp.phone FROM company_phones cp
                   WHERE cp.company_id = companies.id
                   ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
-                email, city, state, status, socials, contact_form_url
+                (SELECT ct.email FROM contacts ct
+                  WHERE ct.company_id = companies.id
+                    AND TRIM(COALESCE(ct.email, '')) <> ''
+                  ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
+                city, state, status, socials, contact_form_url
          FROM companies
          WHERE domain = ? OR domain = ? OR website LIKE ? OR website LIKE ?
          LIMIT 1`

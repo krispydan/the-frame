@@ -6,7 +6,13 @@ export async function GET() {
   const totalProspects = (sqlite.prepare("SELECT count(*) as c FROM companies").get() as { c: number }).c;
 
   const outreachReady = (sqlite.prepare(
-    "SELECT count(*) as c FROM companies WHERE email IS NOT NULL AND email != '' AND status = 'qualified'"
+    `SELECT count(*) as c FROM companies co
+      WHERE co.status = 'qualified'
+        AND EXISTS (
+          SELECT 1 FROM contacts ct
+          WHERE ct.company_id = co.id
+            AND TRIM(COALESCE(ct.email, '')) <> ''
+        )`
   ).get() as { c: number }).c;
 
   const icpABCount = (sqlite.prepare(
