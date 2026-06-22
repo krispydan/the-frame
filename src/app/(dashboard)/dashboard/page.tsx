@@ -267,6 +267,7 @@ export default function DashboardPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
               {stats.topSegments.map((segment) => {
                 const averageOrderValue = segment.orderCount > 0 ? segment.revenue / segment.orderCount : 0;
+                const prospectShare = stats.totalProspects > 0 ? (segment.prospectCount / stats.totalProspects) * 100 : 0;
                 const qualificationRate = segment.prospectCount > 0 ? (segment.qualifiedCount / segment.prospectCount) * 100 : 0;
                 const conversionRate = segment.prospectCount > 0 ? (segment.customerCount / segment.prospectCount) * 100 : 0;
                 const pipelinePerCampaign = segment.campaignCount > 0 ? segment.pipelineValue / segment.campaignCount : 0;
@@ -299,7 +300,8 @@ export default function DashboardPage() {
                       href={`/prospects?segment=${encodeURIComponent(segment.name)}`}
                       className="mt-1 block text-xs text-gray-500 hover:underline"
                     >
-                      {segment.prospectCount.toLocaleString()} prospects
+                      <div>{segment.prospectCount.toLocaleString()} prospects</div>
+                      <div>{prospectShare.toFixed(1)}% of total</div>
                     </Link>
                     <Link
                       href={`/prospects?segment=${encodeURIComponent(segment.name)}&status=qualified`}
