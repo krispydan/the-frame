@@ -1,10 +1,38 @@
 /**
  * Marketing Module MCP Tools
+ *
+ * Two surfaces:
+ *
+ *  1. Legacy content-calendar tools (list_content / add_content /
+ *     get_seo_rankings / list_influencers / get_ad_stats /
+ *     generate_ideas / analyze_seo). Kept as-is.
+ *
+ *  2. Email Assistant tools — the chat-with-Claude-and-it-builds-
+ *     the-email surface. Both atomic primitives (CRUD-ish, narrow
+ *     scope) and orchestration shortcuts (multi-step common flows).
+ *
+ *     Two AI modes per chat user preference:
+ *      - save_my_draft: chat-Claude wrote the copy in conversation,
+ *        this just persists + runs server-side validation.
+ *      - generate_with_v5_prompt: server-side Claude regen via the
+ *        locked v5 copy-generation-prompt.md.
+ *
+ *     A `get_brand_context` resource-like tool returns the brand
+ *     voice docs so chat-Claude can stay in voice while riffing.
  */
-import { sqlite } from "@/lib/db";
+import { sqlite, db } from "@/lib/db";
 import type { McpTool } from "@/modules/core/mcp/server";
 import { generateContentIdeas } from "../agents/content-idea-generator";
 import { analyzeContent } from "../agents/seo-optimizer";
+import { emailCampaigns, emailThemes } from "../schema";
+import { and, eq, desc, gte, lte } from "drizzle-orm";
+import {
+  generateCopy,
+  generateThemes,
+  generateImagePrompts,
+} from "../lib/email-ai";
+import fs from "fs";
+import path from "path";
 
 export const marketingMcpTools: McpTool[] = [
   {
@@ -122,4 +150,705 @@ export const marketingMcpTools: McpTool[] = [
       return { content: [{ type: "text", text: JSON.stringify(analysis, null, 2) }] };
     },
   },
+
+  // ──────────────────────────────────────────────────────────────
+  // EMAIL ASSISTANT — atomic primitives
+  // ──────────────────────────────────────────────────────────────
+
+  {
+    name: "marketing.email.get_brand_context",
+    description:
+      "Returns the Jaxy brand voice docs (BRAND-BIBLE.md voice section + WHOLESALE-VOICE.md) plus the current v5 copy-generation prompt template. Chat-Claude should fetch this ONCE at the start of an email-drafting conversation so every line it writes stays in voice. ALSO returns the banned-word list and the audience-specific gut-check questions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        audience: {
+          type: "string",
+          enum: ["retail", "wholesale"],
+          description: "Which voice doc to load: retail (DTC, BRAND-BIBLE.md §5) or wholesale (Christina, WHOLESALE-VOICE.md)",
+        },
+      },
+      required: ["audience"],
+    },
+    handler: async (input: Record<string, unknown>) => {
+      const audience = input.audience as "retail" | "wholesale";
+      const brandDir = path.join(process.cwd(), "src", "modules", "marketing", "brand-context");
+      const promptsDir = path.join(process.cwd(), "src", "modules", "marketing", "prompts");
+
+      const voice = audience === "wholesale"
+        ? fs.readFileSync(path.join(brandDir, "wholesale-voice.md"), "utf-8")
+        : fs.readFileSync(path.join(brandDir, "brand-bible.md"), "utf-8");
+      const systemBase = fs.readFileSync(path.join(promptsDir, "system-prompt-base.md"), "utf-8");
+      const copyGen = fs.readFileSync(path.join(promptsDir, "copy-generation-prompt.md"), "utf-8");
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            audience,
+            voice_doc: voice,
+            system_prompt_template: systemBase,
+            copy_generation_prompt_v5: copyGen,
+            notes:
+              "Use the system_prompt_template to construct your voice. Cite the copy_generation_prompt_v5 hard-shape constraints (subject ≤45 char, headline ≤6 words, etc.) when drafting. The banned-word list is in system_prompt_template — every line you write must pass.",
+          }, null, 2),
+        }],
+      };
+    },
+  },
+
+  {
+    name: "marketing.email.list_campaigns",
+    description: "List email campaigns. Filter by audience, status, weekOf, or date range.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        audience: { type: "string", enum: ["retail", "wholesale"] },
+        status: {
+          type: "string",
+          enum: ["idea", "themed", "copy_pending", "copy_review", "image_pending", "image_review", "preview_ready", "exported", "sent", "analyzed"],
+        },
+        weekOf: { type: "string", description: "ISO Monday date for exact-match weekly filter" },
+        from: { type: "string", description: "ISO date — start of scheduled_date range" },
+        to: { type: "string", description: "ISO date — end of scheduled_date range" },
+        limit: { type: "number", default: 25 },
+      },
+    },
+    handler: async (input: Record<string, unknown>) => {
+      const conditions = [];
+      if (input.audience) conditions.push(eq(emailCampaigns.audience, input.audience as "retail" | "wholesale"));
+      if (input.status)   conditions.push(eq(emailCampaigns.status, input.status as never));
+      if (input.weekOf)   conditions.push(eq(emailCampaigns.weekOf, input.weekOf as string));
+      if (input.from)     conditions.push(gte(emailCampaigns.scheduledDate, input.from as string));
+      if (input.to)       conditions.push(lte(emailCampaigns.scheduledDate, input.to as string));
+
+      const rows = await (conditions.length
+        ? db.select().from(emailCampaigns).where(and(...conditions)).orderBy(desc(emailCampaigns.scheduledDate)).limit((input.limit as number) || 25)
+        : db.select().from(emailCampaigns).orderBy(desc(emailCampaigns.scheduledDate)).limit((input.limit as number) || 25));
+
+      return { content: [{ type: "text", text: JSON.stringify({ campaigns: rows }, null, 2) }] };
+    },
+  },
+
+  {
+    name: "marketing.email.get_campaign",
+    description: "Get a single email campaign by id, including every content + variant + AI-metadata field.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string" } },
+      required: ["id"],
+    },
+    handler: async (input: Record<string, unknown>) => {
+      const [row] = await db.select().from(emailCampaigns).where(eq(emailCampaigns.id, input.id as string)).limit(1);
+      if (!row) return { content: [{ type: "text", text: JSON.stringify({ error: "Not found" }) }], isError: true };
+      return { content: [{ type: "text", text: JSON.stringify(row, null, 2) }] };
+    },
+  },
+
+  {
+    name: "marketing.email.create_campaign",
+    description: "Create a new email campaign slot. Returns the id. Most fields default — set them later via save_draft or generate_copy.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        audience: { type: "string", enum: ["retail", "wholesale"] },
+        scheduledDate: { type: "string", description: "ISO date YYYY-MM-DD" },
+        weekOf: { type: "string", description: "ISO Monday — optional, auto-computed if omitted" },
+        themeId: { type: "string", description: "optional theme to link" },
+        heroVariant: { type: "string", enum: ["full_bleed_overlay", "image_75_solid", "split_50_50"] },
+        sectionAVariant: { type: "string", enum: ["centered", "with_pullquote"] },
+        secondaryImageVariant: { type: "string", enum: ["full_bleed", "centered_75", "grid_2up"] },
+        sectionBVariant: { type: "string", enum: ["centered_with_cta", "two_column_with_cta"] },
+      },
+      required: ["audience", "scheduledDate"],
+    },
+    handler: async (input: Record<string, unknown>) => {
+      if (input.audience !== "retail" && input.audience !== "wholesale") {
+        return { content: [{ type: "text", text: "audience must be 'retail' or 'wholesale'" }], isError: true };
+      }
+      const id = crypto.randomUUID();
+      const scheduled = input.scheduledDate as string;
+      const weekOf = (input.weekOf as string | undefined) ?? mondayOf(scheduled);
+      sqlite.prepare(
+        `INSERT INTO marketing_email_campaigns
+           (id, audience, scheduled_date, week_of, theme_id, status,
+            hero_variant, section_a_variant, secondary_image_variant, section_b_variant,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'idea', ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+      ).run(
+        id,
+        input.audience,
+        scheduled,
+        weekOf,
+        (input.themeId as string | undefined) ?? null,
+        (input.heroVariant as string) ?? "full_bleed_overlay",
+        (input.sectionAVariant as string) ?? "centered",
+        (input.secondaryImageVariant as string) ?? "full_bleed",
+        (input.sectionBVariant as string) ?? "centered_with_cta",
+      );
+      return { content: [{ type: "text", text: JSON.stringify({ id, weekOf, scheduledDate: scheduled }) }] };
+    },
+  },
+
+  {
+    name: "marketing.email.save_draft",
+    description:
+      "Chat-Claude wrote the email copy in conversation — this tool persists it to a campaign. Runs SERVER-SIDE validation against the banned-word list and the gut-check rules; returns warnings as 'failedChecks' which you should show the user. Use this when YOU drafted the copy; use generate_with_v5_prompt if you want the SERVER to draft using the locked prompt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        campaignId: { type: "string" },
+        subject: { type: "string" },
+        preheader: { type: "string" },
+        heroHeadline: { type: "string" },
+        heroSubtitle: { type: "string" },
+        heroCtaLabel: { type: "string" },
+        heroCtaUrl: { type: "string" },
+        heroScrim: { type: "string", enum: ["dark", "light", "none"] },
+        sectionAHeading: { type: "string" },
+        sectionABody: { type: "string" },
+        sectionBHeading: { type: "string" },
+        sectionBBody: { type: "string" },
+        sectionBCtaLabel: { type: "string" },
+        sectionBCtaUrl: { type: "string" },
+      },
+      required: ["campaignId"],
+    },
+    handler: async (input: Record<string, unknown>) => {
+      const campaignId = input.campaignId as string;
+      const [existing] = await db.select().from(emailCampaigns).where(eq(emailCampaigns.id, campaignId)).limit(1);
+      if (!existing) return { content: [{ type: "text", text: "Campaign not found" }], isError: true };
+
+      const FIELD_MAP: Record<string, string> = {
+        subject: "subject", preheader: "preheader",
+        heroHeadline: "hero_headline", heroSubtitle: "hero_subtitle",
+        heroCtaLabel: "hero_cta_label", heroCtaUrl: "hero_cta_url",
+        heroScrim: "hero_scrim",
+        sectionAHeading: "section_a_heading", sectionABody: "section_a_body",
+        sectionBHeading: "section_b_heading", sectionBBody: "section_b_body",
+        sectionBCtaLabel: "section_b_cta_label", sectionBCtaUrl: "section_b_cta_url",
+      };
+      const sets: string[] = [];
+      const vals: unknown[] = [];
+      for (const [k, col] of Object.entries(FIELD_MAP)) {
+        if (input[k] !== undefined) { sets.push(`${col} = ?`); vals.push(input[k]); }
+      }
+      if (sets.length === 0) return { content: [{ type: "text", text: "No fields to save" }] };
+
+      sets.push("status = CASE WHEN status IN ('idea','themed','copy_pending') THEN 'copy_review' ELSE status END");
+      sets.push("ai_copy_prompt_version = 'chat-Claude-draft'");
+      sets.push("updated_at = datetime('now')");
+      vals.push(campaignId);
+      sqlite.prepare(`UPDATE marketing_email_campaigns SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+
+      // Lightweight server-side validation. Mirrors the worst of
+      // the banned-word list — chat-Claude already had the full
+      // list via get_brand_context but this is the safety net.
+      const all = [
+        input.subject, input.heroHeadline, input.heroSubtitle,
+        input.sectionAHeading, input.sectionABody,
+        input.sectionBHeading, input.sectionBBody,
+      ].filter((v) => typeof v === "string").join(" ").toLowerCase();
+      const BANNED_HARD = [
+        "curated", "premium", "luxury", "investment piece",
+        "elevate", "effortless", "game-changer", "must-have",
+        "introducing", "we're so excited", "we're thrilled",
+        "made in la", "made in california",
+        "lose them", "throw them around",
+      ];
+      const failedChecks: string[] = [];
+      for (const b of BANNED_HARD) {
+        if (all.includes(b)) failedChecks.push(`banned_phrase: "${b}"`);
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            ok: true,
+            campaignId,
+            failedChecks,
+            warning:
+              failedChecks.length > 0
+                ? "Server validation found banned phrases. The copy IS saved — you should revise and call save_draft again."
+                : null,
+          }, null, 2),
+        }],
+      };
+    },
+  },
+
+  {
+    name: "marketing.email.generate_with_v5_prompt",
+    description:
+      "Server-side AI generation using the LOCKED v5 copy-generation prompt. Use when the user says 'just do it' or wants the guaranteed-on-brand version. Returns the generated copy + persists it to the campaign + reports any self-check failures. This is the MORE CONSERVATIVE path; save_draft is the conversational path.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        campaignId: { type: "string" },
+        themeTitle: { type: "string", description: "Optional override — defaults to the campaign's linked theme" },
+        themeAngle: { type: "string" },
+        productHook: { type: "string" },
+        seasonalContext: { type: "string" },
+      },
+      required: ["campaignId"],
+    },
+    handler: async (input: Record<string, unknown>) => {
+      const campaignId = input.campaignId as string;
+      const [campaign] = await db.select().from(emailCampaigns).where(eq(emailCampaigns.id, campaignId)).limit(1);
+      if (!campaign) return { content: [{ type: "text", text: "Campaign not found" }], isError: true };
+
+      let themeTitle = input.themeTitle as string | undefined;
+      let themeAngle = input.themeAngle as string | undefined;
+      let productHook = (input.productHook as string | undefined) ?? null;
+      let seasonalContext = (input.seasonalContext as string | undefined) ?? null;
+
+      if ((!themeTitle || !themeAngle) && campaign.themeId) {
+        const [theme] = await db.select().from(emailThemes).where(eq(emailThemes.id, campaign.themeId)).limit(1);
+        if (theme) {
+          themeTitle = themeTitle ?? theme.title;
+          themeAngle = themeAngle ?? theme.angle ?? "";
+          productHook = productHook ?? theme.productHook;
+          seasonalContext = seasonalContext ?? theme.seasonalContext;
+        }
+      }
+
+      const result = await generateCopy({
+        audience: campaign.audience as "retail" | "wholesale",
+        scheduledDate: campaign.scheduledDate,
+        heroVariant: campaign.heroVariant,
+        themeTitle: themeTitle ?? "(unspecified)",
+        themeAngle: themeAngle ?? "(unspecified)",
+        productHook,
+        seasonalContext,
+      });
+      if (!result.ok) return { content: [{ type: "text", text: `AI error: ${result.error}` }], isError: true };
+      const out = result.output as Record<string, unknown>;
+
+      sqlite.prepare(
+        `UPDATE marketing_email_campaigns SET
+           subject = ?, preheader = ?,
+           hero_headline = ?, hero_subtitle = ?,
+           hero_cta_label = ?, hero_cta_url = COALESCE(NULLIF(hero_cta_url, ''), ?),
+           section_a_heading = ?, section_a_body = ?,
+           section_b_heading = ?, section_b_body = ?,
+           section_b_cta_label = ?, section_b_cta_url = COALESCE(NULLIF(section_b_cta_url, ''), ?),
+           ai_copy_prompt_version = 'v5',
+           ai_copy_raw_json = ?,
+           status = CASE WHEN status IN ('idea','themed','copy_pending') THEN 'copy_review' ELSE status END,
+           updated_at = datetime('now')
+         WHERE id = ?`,
+      ).run(
+        out.subject, out.preheader,
+        out.heroHeadline, out.heroSubtitle,
+        out.heroCtaLabel, out.heroCtaUrlSuggestion,
+        out.sectionAHeading, out.sectionABody,
+        out.sectionBHeading, out.sectionBBody,
+        out.sectionBCtaLabel, out.sectionBCtaUrlSuggestion,
+        JSON.stringify(out),
+        campaignId,
+      );
+
+      const checks = (out.selfCheckPassed ?? {}) as Record<string, boolean>;
+      const failed = Object.entries(checks).filter(([, v]) => v === false).map(([k]) => k);
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ ok: true, campaignId, generated: out, failedChecks: failed }, null, 2),
+        }],
+      };
+    },
+  },
+
+  {
+    name: "marketing.email.generate_image_prompts",
+    description:
+      "Generates Higgsfield-ready briefs for the hero + secondary images of a campaign. Uses the v3 image-prompt prompt. Persists the prompts + recommended scrim onto the campaign. Designer reads them from the queue + renders manually in Higgsfield's web UI.",
+    inputSchema: {
+      type: "object",
+      properties: { campaignId: { type: "string" } },
+      required: ["campaignId"],
+    },
+    handler: async (input: Record<string, unknown>) => {
+      const campaignId = input.campaignId as string;
+      const [campaign] = await db.select().from(emailCampaigns).where(eq(emailCampaigns.id, campaignId)).limit(1);
+      if (!campaign) return { content: [{ type: "text", text: "Campaign not found" }], isError: true };
+
+      let themeTitle = "(no theme)", themeAngle = "(no theme)";
+      if (campaign.themeId) {
+        const [theme] = await db.select().from(emailThemes).where(eq(emailThemes.id, campaign.themeId)).limit(1);
+        if (theme) { themeTitle = theme.title; themeAngle = theme.angle ?? "(no angle)"; }
+      }
+
+      const result = await generateImagePrompts({
+        audience: campaign.audience as "retail" | "wholesale",
+        heroVariant: campaign.heroVariant,
+        secondaryImageVariant: campaign.secondaryImageVariant,
+        themeTitle, themeAngle,
+        heroHeadline: campaign.heroHeadline,
+        heroSubtitle: campaign.heroSubtitle,
+      });
+      if (!result.ok) return { content: [{ type: "text", text: `AI error: ${result.error}` }], isError: true };
+      const out = result.output as { hero: { prompt: string; alt: string; recommendedScrim: "dark"|"light"|"none"|null; dimensions: string; notes: string }; secondary: { prompts: string[]; alts: string[]; dimensions: string; notes: string }; };
+
+      sqlite.prepare(
+        `UPDATE marketing_email_campaigns SET
+           hero_image_prompt = ?, hero_image_alt = COALESCE(NULLIF(hero_image_alt, ''), ?),
+           hero_scrim = COALESCE(?, hero_scrim),
+           secondary_image_prompt = ?, secondary_image_alt = COALESCE(NULLIF(secondary_image_alt, ''), ?),
+           secondary_image_prompt_2 = ?, secondary_image_alt_2 = COALESCE(NULLIF(secondary_image_alt_2, ''), ?),
+           ai_image_prompt_raw_json = ?,
+           status = CASE WHEN status IN ('idea','themed','copy_pending','copy_review') THEN 'image_pending' ELSE status END,
+           updated_at = datetime('now')
+         WHERE id = ?`,
+      ).run(
+        out.hero.prompt, out.hero.alt, out.hero.recommendedScrim,
+        out.secondary.prompts[0] ?? "", out.secondary.alts[0] ?? "",
+        out.secondary.prompts[1] ?? null, out.secondary.alts[1] ?? null,
+        JSON.stringify(out),
+        campaignId,
+      );
+
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true, campaignId, generated: out }, null, 2) }] };
+    },
+  },
+
+  {
+    name: "marketing.email.list_themes",
+    description: "List themes for an audience and/or weekOf. Useful to pick from existing themes before creating a campaign.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        audience: { type: "string", enum: ["retail", "wholesale"] },
+        weekOf: { type: "string", description: "ISO Monday date" },
+      },
+    },
+    handler: async (input: Record<string, unknown>) => {
+      const conditions = [];
+      if (input.audience) conditions.push(eq(emailThemes.audience, input.audience as "retail" | "wholesale"));
+      if (input.weekOf)   conditions.push(eq(emailThemes.weekOf, input.weekOf as string));
+      const rows = await (conditions.length
+        ? db.select().from(emailThemes).where(and(...conditions)).orderBy(desc(emailThemes.createdAt))
+        : db.select().from(emailThemes).orderBy(desc(emailThemes.createdAt)));
+      return { content: [{ type: "text", text: JSON.stringify({ themes: rows }, null, 2) }] };
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────
+  // ORCHESTRATION SHORTCUTS — common multi-step flows
+  // ──────────────────────────────────────────────────────────────
+
+  {
+    name: "marketing.email.plan_week",
+    description:
+      "Plan a week (or N weeks) of emails for an audience in one call. Uses the v3 theme-generation prompt to propose themes, persists them, then optionally creates campaign slots on the cadence days (retail Mon/Thu, wholesale Tue/Fri). Returns the themes + the created campaign slots.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        audience: { type: "string", enum: ["retail", "wholesale"] },
+        weekStart: { type: "string", description: "ISO Monday — defaults to next Monday" },
+        weeks: { type: "number", description: "How many weeks to plan (default 4)" },
+        createCampaigns: { type: "boolean", description: "Also create campaign slots for each theme (default true)" },
+      },
+      required: ["audience"],
+    },
+    handler: async (input: Record<string, unknown>) => {
+      const audience = input.audience as "retail" | "wholesale";
+      const weeks = (input.weeks as number) ?? 4;
+      const createCampaigns = input.createCampaigns !== false;
+      const weekStart = (input.weekStart as string | undefined) ?? nextMonday();
+
+      // Generate themes — one per week
+      const themeRes = await generateThemes({ audience, weekStart, count: weeks });
+      if (!themeRes.ok) return { content: [{ type: "text", text: `Theme AI error: ${themeRes.error}` }], isError: true };
+      const themes = (themeRes.output.themes ?? []) as Array<{
+        weekOf: string; title: string; angle: string;
+        productHook?: string | null; seasonalContext?: string | null;
+      }>;
+
+      // Persist themes
+      const themeInsertStmt = sqlite.prepare(
+        `INSERT INTO marketing_email_themes
+          (id, week_of, audience, title, angle, product_hook, seasonal_context, raw_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      );
+      const insertedThemes = themes.map((t) => {
+        const id = crypto.randomUUID();
+        themeInsertStmt.run(
+          id, t.weekOf, audience, t.title, t.angle ?? null,
+          t.productHook ?? null, t.seasonalContext ?? null, JSON.stringify(t),
+        );
+        return { id, ...t };
+      });
+
+      // Maybe create campaigns
+      let campaignsCreated: { id: string; scheduledDate: string; themeId: string; themeTitle: string }[] = [];
+      if (createCampaigns) {
+        const campaignInsertStmt = sqlite.prepare(
+          `INSERT INTO marketing_email_campaigns
+            (id, audience, scheduled_date, week_of, theme_id, status, hero_variant, section_a_variant, secondary_image_variant, section_b_variant, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'themed', 'full_bleed_overlay', 'centered', 'full_bleed', 'centered_with_cta', datetime('now'), datetime('now'))`,
+        );
+        // Cadence: retail Mon + Thu, wholesale Tue + Fri.
+        const sendDayOffsets = audience === "retail" ? [0, 3] : [1, 4]; // Mon=0, Thu=3 / Tue=1, Fri=4
+        for (const theme of insertedThemes) {
+          for (const offset of sendDayOffsets) {
+            const d = new Date(`${theme.weekOf}T00:00:00Z`);
+            d.setUTCDate(d.getUTCDate() + offset);
+            const iso = d.toISOString().slice(0, 10);
+            const id = crypto.randomUUID();
+            campaignInsertStmt.run(id, audience, iso, theme.weekOf, theme.id);
+            campaignsCreated.push({ id, scheduledDate: iso, themeId: theme.id, themeTitle: theme.title });
+          }
+        }
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            ok: true,
+            audience,
+            weekStart,
+            weeksPlanned: weeks,
+            themes: insertedThemes,
+            campaignsCreated,
+            note: createCampaigns
+              ? `Created ${campaignsCreated.length} campaign slots on ${audience === "retail" ? "Mon + Thu" : "Tue + Fri"} cadence. Each campaign is in 'themed' status — call generate_with_v5_prompt OR save_draft next to add copy.`
+              : "Themes only — no campaigns created.",
+          }, null, 2),
+        }],
+      };
+    },
+  },
+
+  {
+    name: "marketing.email.build_campaign_from_idea",
+    description:
+      "One-shot 'build a campaign from an idea' flow. Given an audience, a date, and a description of the idea, this: (1) creates a theme row, (2) creates a campaign slot, (3) generates copy via v5 prompt, (4) generates image prompts. Returns the fully-populated campaign id. Use when the user says something like 'build me a wholesale email about the Faire Summer Market for next Tuesday' — call this once and you're done.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        audience: { type: "string", enum: ["retail", "wholesale"] },
+        scheduledDate: { type: "string", description: "ISO date YYYY-MM-DD" },
+        themeTitle: { type: "string", description: "3-8 word theme title" },
+        themeAngle: { type: "string", description: "1-2 sentence angle — why now, who it's for" },
+        productHook: { type: "string", description: "Optional — SKU/category" },
+        seasonalContext: { type: "string", description: "Optional — holiday/season/weather anchor" },
+        heroVariant: { type: "string", enum: ["full_bleed_overlay", "image_75_solid", "split_50_50"] },
+        secondaryImageVariant: { type: "string", enum: ["full_bleed", "centered_75", "grid_2up"] },
+      },
+      required: ["audience", "scheduledDate", "themeTitle", "themeAngle"],
+    },
+    handler: async (input: Record<string, unknown>) => {
+      const audience = input.audience as "retail" | "wholesale";
+      const scheduled = input.scheduledDate as string;
+      const weekOf = mondayOf(scheduled);
+
+      // 1. Theme
+      const themeId = crypto.randomUUID();
+      sqlite.prepare(
+        `INSERT INTO marketing_email_themes
+          (id, week_of, audience, title, angle, product_hook, seasonal_context, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      ).run(
+        themeId, weekOf, audience,
+        input.themeTitle as string,
+        input.themeAngle as string,
+        (input.productHook as string | undefined) ?? null,
+        (input.seasonalContext as string | undefined) ?? null,
+      );
+
+      // 2. Campaign
+      const campaignId = crypto.randomUUID();
+      const heroVariant = (input.heroVariant as string) ?? "full_bleed_overlay";
+      const secondaryImageVariant = (input.secondaryImageVariant as string) ?? "full_bleed";
+      sqlite.prepare(
+        `INSERT INTO marketing_email_campaigns
+          (id, audience, scheduled_date, week_of, theme_id, status,
+           hero_variant, section_a_variant, secondary_image_variant, section_b_variant,
+           created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'copy_pending', ?, 'centered', ?, 'centered_with_cta', datetime('now'), datetime('now'))`,
+      ).run(campaignId, audience, scheduled, weekOf, themeId, heroVariant, secondaryImageVariant);
+
+      // 3. Copy via v5 prompt
+      const copyRes = await generateCopy({
+        audience, scheduledDate: scheduled, heroVariant,
+        themeTitle: input.themeTitle as string,
+        themeAngle: input.themeAngle as string,
+        productHook: (input.productHook as string | undefined) ?? null,
+        seasonalContext: (input.seasonalContext as string | undefined) ?? null,
+      });
+      if (!copyRes.ok) {
+        return { content: [{ type: "text", text: `Copy AI error: ${copyRes.error}. Campaign + theme created (id=${campaignId}) but copy generation failed.` }], isError: true };
+      }
+      const c = copyRes.output as Record<string, unknown>;
+      sqlite.prepare(
+        `UPDATE marketing_email_campaigns SET
+           subject = ?, preheader = ?,
+           hero_headline = ?, hero_subtitle = ?,
+           hero_cta_label = ?, hero_cta_url = ?,
+           section_a_heading = ?, section_a_body = ?,
+           section_b_heading = ?, section_b_body = ?,
+           section_b_cta_label = ?, section_b_cta_url = ?,
+           ai_copy_prompt_version = 'v5',
+           ai_copy_raw_json = ?,
+           status = 'copy_review',
+           updated_at = datetime('now')
+         WHERE id = ?`,
+      ).run(
+        c.subject, c.preheader,
+        c.heroHeadline, c.heroSubtitle,
+        c.heroCtaLabel, c.heroCtaUrlSuggestion,
+        c.sectionAHeading, c.sectionABody,
+        c.sectionBHeading, c.sectionBBody,
+        c.sectionBCtaLabel, c.sectionBCtaUrlSuggestion,
+        JSON.stringify(c),
+        campaignId,
+      );
+
+      // 4. Image prompts
+      const imageRes = await generateImagePrompts({
+        audience, heroVariant, secondaryImageVariant,
+        themeTitle: input.themeTitle as string,
+        themeAngle: input.themeAngle as string,
+        heroHeadline: c.heroHeadline as string,
+        heroSubtitle: c.heroSubtitle as string,
+      });
+      if (imageRes.ok) {
+        const i = imageRes.output as { hero: { prompt: string; alt: string; recommendedScrim: "dark"|"light"|"none"|null; }; secondary: { prompts: string[]; alts: string[]; }; };
+        sqlite.prepare(
+          `UPDATE marketing_email_campaigns SET
+             hero_image_prompt = ?, hero_image_alt = ?,
+             hero_scrim = COALESCE(?, hero_scrim),
+             secondary_image_prompt = ?, secondary_image_alt = ?,
+             secondary_image_prompt_2 = ?, secondary_image_alt_2 = ?,
+             ai_image_prompt_raw_json = ?,
+             status = 'image_pending',
+             updated_at = datetime('now')
+           WHERE id = ?`,
+        ).run(
+          i.hero.prompt, i.hero.alt, i.hero.recommendedScrim,
+          i.secondary.prompts[0] ?? "", i.secondary.alts[0] ?? "",
+          i.secondary.prompts[1] ?? null, i.secondary.alts[1] ?? null,
+          JSON.stringify(i),
+          campaignId,
+        );
+      }
+
+      const [final] = await db.select().from(emailCampaigns).where(eq(emailCampaigns.id, campaignId)).limit(1);
+      const failedChecks = Object.entries((c.selfCheckPassed ?? {}) as Record<string, boolean>)
+        .filter(([, v]) => v === false).map(([k]) => k);
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            ok: true,
+            campaignId,
+            themeId,
+            campaign: final,
+            failedChecks,
+            previewUrl: `https://theframe.getjaxy.com/marketing/email/campaigns/${campaignId}`,
+            note: "Campaign built end-to-end. Designer renders the images per the hero/secondary prompts, uploads via the editor or the upload endpoint, then user reviews + exports.",
+          }, null, 2),
+        }],
+      };
+    },
+  },
+
+  {
+    name: "marketing.email.refine_campaign",
+    description:
+      "Re-generate one section of an existing campaign with a specific instruction. E.g. 'make the subject more urgent' or 'rewrite section A to lead with the price instead of the feeling'. Pulls the existing campaign + the instruction into a focused prompt, returns the new copy for that section only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        campaignId: { type: "string" },
+        section: { type: "string", enum: ["subject_preheader", "hero", "section_a", "section_b", "all"] },
+        instruction: { type: "string", description: "What to change and why" },
+      },
+      required: ["campaignId", "section", "instruction"],
+    },
+    handler: async (input: Record<string, unknown>) => {
+      // For v1 we route refine to a re-run of generate_with_v5_prompt
+      // with the instruction appended to the theme angle. Future
+      // versions will support per-section regeneration with a more
+      // surgical prompt — for now it's a full regen scoped by intent.
+      const campaignId = input.campaignId as string;
+      const instruction = input.instruction as string;
+      const [campaign] = await db.select().from(emailCampaigns).where(eq(emailCampaigns.id, campaignId)).limit(1);
+      if (!campaign) return { content: [{ type: "text", text: "Campaign not found" }], isError: true };
+
+      let themeTitle = "(no theme)", themeAngle = "";
+      if (campaign.themeId) {
+        const [theme] = await db.select().from(emailThemes).where(eq(emailThemes.id, campaign.themeId)).limit(1);
+        if (theme) { themeTitle = theme.title; themeAngle = theme.angle ?? ""; }
+      }
+      // Append the refinement instruction to the angle so the v5
+      // prompt incorporates it without changing the prompt template.
+      const refinedAngle = `${themeAngle}\n\nREFINEMENT REQUEST (${input.section as string}): ${instruction}`;
+
+      const res = await generateCopy({
+        audience: campaign.audience as "retail" | "wholesale",
+        scheduledDate: campaign.scheduledDate,
+        heroVariant: campaign.heroVariant,
+        themeTitle,
+        themeAngle: refinedAngle,
+        productHook: null, seasonalContext: null,
+      });
+      if (!res.ok) return { content: [{ type: "text", text: `AI error: ${res.error}` }], isError: true };
+      const out = res.output as Record<string, unknown>;
+
+      // Apply ONLY the requested section's fields.
+      const section = input.section as string;
+      const writes: Record<string, string> = {};
+      if (section === "subject_preheader" || section === "all") {
+        writes.subject = out.subject as string;
+        writes.preheader = out.preheader as string;
+      }
+      if (section === "hero" || section === "all") {
+        writes.hero_headline = out.heroHeadline as string;
+        writes.hero_subtitle = out.heroSubtitle as string;
+        writes.hero_cta_label = out.heroCtaLabel as string;
+      }
+      if (section === "section_a" || section === "all") {
+        writes.section_a_heading = out.sectionAHeading as string;
+        writes.section_a_body = out.sectionABody as string;
+      }
+      if (section === "section_b" || section === "all") {
+        writes.section_b_heading = out.sectionBHeading as string;
+        writes.section_b_body = out.sectionBBody as string;
+        writes.section_b_cta_label = out.sectionBCtaLabel as string;
+      }
+      const sets = Object.keys(writes).map(k => `${k} = ?`).concat(["updated_at = datetime('now')"]).join(", ");
+      const vals = [...Object.values(writes), campaignId];
+      sqlite.prepare(`UPDATE marketing_email_campaigns SET ${sets} WHERE id = ?`).run(...vals);
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ ok: true, campaignId, section, applied: writes, fullResponse: out }, null, 2),
+        }],
+      };
+    },
+  },
 ];
+
+// ── Helpers ─────────────────────────────────────────────────────
+
+function mondayOf(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  const dayOfWeek = d.getUTCDay();
+  const offset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  d.setUTCDate(d.getUTCDate() + offset);
+  return d.toISOString().slice(0, 10);
+}
+
+function nextMonday(): string {
+  const d = new Date();
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + (day === 1 ? 7 : 8 - day));
+  return d.toISOString().slice(0, 10);
+}

@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, Monitor, Smartphone, Save } from "lucide-react";
+import { Trash2, Monitor, Smartphone, Save, Sparkles, Image as ImageIcon } from "lucide-react";
 
 type Campaign = Record<string, unknown>;
 
@@ -48,6 +48,57 @@ export default function CampaignDetailPage({
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
   const [previewKey, setPreviewKey] = useState(0);
+  const [generating, setGenerating] = useState<"copy" | "image_prompts" | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [failedChecks, setFailedChecks] = useState<string[]>([]);
+
+  // ── AI generate handlers ────────────────────────────────────
+  async function handleGenerateCopy() {
+    setGenerating("copy");
+    setGenerateError(null);
+    setFailedChecks([]);
+    try {
+      const res = await fetch(
+        `/api/v1/marketing/email/campaigns/${id}/generate-copy`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+      );
+      const data = await res.json();
+      if (data.error) {
+        setGenerateError(data.error);
+      } else {
+        setCampaign(data.campaign);
+        setFailedChecks(data.failedChecks ?? []);
+        setPreviewKey(k => k + 1);
+        setSavedAt(Date.now());
+      }
+    } catch (e) {
+      setGenerateError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setGenerating(null);
+    }
+  }
+
+  async function handleGenerateImagePrompts() {
+    setGenerating("image_prompts");
+    setGenerateError(null);
+    try {
+      const res = await fetch(
+        `/api/v1/marketing/email/campaigns/${id}/generate-image-prompts`,
+        { method: "POST" },
+      );
+      const data = await res.json();
+      if (data.error) setGenerateError(data.error);
+      else {
+        setCampaign(data.campaign);
+        setPreviewKey(k => k + 1);
+        setSavedAt(Date.now());
+      }
+    } catch (e) {
+      setGenerateError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setGenerating(null);
+    }
+  }
 
   // Load
   useEffect(() => {
@@ -131,6 +182,24 @@ export default function CampaignDetailPage({
           </p>
         </div>
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={handleGenerateCopy}
+            disabled={generating !== null}
+            title="Generate subject, hero, and section copy via Claude using the v5 prompt"
+          >
+            <Sparkles className="h-4 w-4 mr-2" />
+            {generating === "copy" ? "Writing…" : "Generate copy"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleGenerateImagePrompts}
+            disabled={generating !== null}
+            title="Generate Higgsfield briefs for hero + secondary images"
+          >
+            <ImageIcon className="h-4 w-4 mr-2" />
+            {generating === "image_prompts" ? "Briefing…" : "Generate image prompts"}
+          </Button>
           <Button onClick={save} disabled={saving}>
             <Save className="h-4 w-4 mr-2" />
             {saving ? "Saving…" : "Save"}
@@ -140,6 +209,19 @@ export default function CampaignDetailPage({
           </Button>
         </div>
       </div>
+
+      {/* AI feedback banner — error OR failed self-check warnings */}
+      {generateError && (
+        <div className="rounded border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          AI error: {generateError}
+        </div>
+      )}
+      {failedChecks.length > 0 && (
+        <div className="rounded border border-orange-300 bg-orange-50 dark:bg-orange-950/20 px-3 py-2 text-sm">
+          <strong>Claude flagged self-check warnings:</strong>{" "}
+          {failedChecks.join(", ")}. Review the copy before approving.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Left pane — editor */}
