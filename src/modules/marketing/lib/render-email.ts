@@ -34,11 +34,27 @@ const C = {
   textOnDark: "#FFFDF0",
 };
 
+// Daniel (2026-06-23): "it should be Instrument Sans for the text
+// copy and Syne — look at the brand book to see the fonts to use."
+//
+// The brand book typography table (V2 Brand Guidelines pg 15) lists:
+//   Heading      Instrument Sans Medium
+//   Subheading   Instrument Sans Semibold
+//   Body text    Jost Regular                  ← Daniel overrode this
+//   Pull quote   Syne Bold
+//   Pull quote caption  Jost Medium             ← we don't use this
+//
+// Per Daniel's explicit direction, BODY now also uses Instrument
+// Sans (not Jost). The brand book remains the long-term canonical
+// reference but Daniel's pragmatic call: fewer typefaces = tighter
+// system + faster Google Fonts load + lower chance of any font
+// failing to render. Jost stays as the system fallback so email
+// clients without Instrument Sans still get a humanist sans.
 const F = {
   display:
     '"Instrument Sans", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif',
   body:
-    'Jost, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif',
+    '"Instrument Sans", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif',
   pullquote: '"Syne", Georgia, "Times New Roman", serif',
   logo: 'Glitz, "Cooper Std Black", "Cooper Black", Georgia, serif',
 };
@@ -72,14 +88,24 @@ function escAttr(s: string | null | undefined): string {
 // to the system stack in each font-family declaration. The preview
 // iframe in the editor + most modern clients (Apple Mail, iOS Mail,
 // Gmail app) DO load these.
+// Per Daniel's "use Instrument Sans + Syne" call, we only load two
+// families now (was three: Instrument + Jost + Syne). Faster, more
+// reliable. Glitz isn't loaded — it's logo-only and the logo is now
+// a vendored SVG.
 const FONT_LINK = `<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Jost:wght@300;400;500;600&family=Syne:wght@600;700&display=swap">`;
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Syne:wght@600;700&display=swap">`;
 
 // ── Mobile media query ────────────────────────────────────────
 
 const STYLE_BLOCK = `
-  body { margin: 0; padding: 0; background: ${C.white}; }
+  html, body {
+    margin: 0; padding: 0; background: ${C.white};
+    /* Safety net: anything that loses its inline font-family
+       (email-client CSS stripping, dev-tools "computed style"
+       inspection) inherits brand-correct Instrument Sans. */
+    font-family: ${F.body};
+  }
   img { display: block; border: 0; max-width: 100%; height: auto; }
   a { color: inherit; }
   table { border-collapse: collapse; }
