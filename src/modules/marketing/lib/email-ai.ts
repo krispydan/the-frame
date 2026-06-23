@@ -18,6 +18,7 @@
 
 import fs from "fs";
 import path from "path";
+import { emailModel } from "./ai-model";
 
 // ── Brand context loader ────────────────────────────────────────
 // Snapshot lives in src/modules/marketing/brand-context/ (copied
@@ -182,7 +183,7 @@ async function callClaude({
   userPrompt,
   tool,
   maxTokens = 4096,
-  model = "claude-opus-4-7",
+  model = emailModel(),
 }: CallClaudeOpts): Promise<{
   ok: true;
   output: Record<string, unknown>;
@@ -576,6 +577,10 @@ function fillTemplate(template: string, vars: Record<string, string>): string {
     const pattern = new RegExp(`\\{\\{\\s*${escapeRe(key)}\\s*\\}\\}`, "g");
     out = out.replace(pattern, val);
   }
+  // Strip any unresolved {{...}} tokens (e.g. the {{SYSTEM_PROMPT_BASE}}
+  // marker — injected separately as the system prompt) plus a trailing
+  // "← see ..." doc arrow, so they never leak into the user message.
+  out = out.replace(/\{\{[^}]*\}\}[ \t]*(←[^\n]*)?/g, "").replace(/[ \t]+\n/g, "\n");
   return out;
 }
 

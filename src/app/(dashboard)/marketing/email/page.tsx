@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Plus, Mail, Image as ImageIcon, Calendar as CalendarIcon, Sparkles } from "lucide-react";
+import { Plus, Mail, Image as ImageIcon, Calendar as CalendarIcon, CalendarDays, Sparkles, Trash2, Copy } from "lucide-react";
 
 type Campaign = {
   id: string;
+  name: string | null;
   audience: "retail" | "wholesale";
   scheduledDate: string;
   weekOf: string | null;
@@ -17,6 +18,18 @@ type Campaign = {
   heroHeadline: string | null;
   createdAt: string;
 };
+
+/** The label to show for a campaign — name is the title; fall back
+ *  through subject/headline, then a synthesized stub so a fresh draft
+ *  never reads as "(no subject)". */
+function campaignLabel(c: Campaign): string {
+  return (
+    c.name ||
+    c.subject ||
+    c.heroHeadline ||
+    `Untitled — ${c.scheduledDate} — ${c.audience}`
+  );
+}
 
 const STATUS_ORDER = [
   "draft",
@@ -41,8 +54,11 @@ const STATUS_LABELS: Record<string, string> = {
 export default function EmailAssistantDashboard() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [audienceFilter, setAudienceFilter] = useState<string>("all");
+  const [busyId, setBusyId] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     fetch("/api/v1/marketing/email/campaigns")
       .then((r) => r.json())
       .then((data) => {
@@ -51,6 +67,30 @@ export default function EmailAssistantDashboard() {
       })
       .catch(() => setLoading(false));
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function handleDelete(c: Campaign) {
+    if (!confirm(`Delete "${campaignLabel(c)}"? This can't be undone.`)) return;
+    setBusyId(c.id);
+    try {
+      await fetch(`/api/v1/marketing/email/campaigns/${c.id}`, { method: "DELETE" });
+      setCampaigns((cs) => cs.filter((x) => x.id !== c.id));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleDuplicate(c: Campaign) {
+    setBusyId(c.id);
+    try {
+      const res = await fetch(`/api/v1/marketing/email/campaigns/${c.id}/duplicate`, { method: "POST" });
+      const data = await res.json();
+      if (data.campaign) setCampaigns((cs) => [data.campaign, ...cs]);
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   // Group by status for pipeline chips
   const statusCounts: Record<string, number> = {};
@@ -67,8 +107,17 @@ export default function EmailAssistantDashboard() {
   const mondayIso = monday.toISOString().slice(0, 10);
   const thisWeek = campaigns.filter((c) => c.weekOf === mondayIso);
 
+  // Designer queue = campaigns the designer-queue route surfaces
+  // (status photography or design_review). Was summing two removed
+  // statuses → always NaN → the badge never showed.
   const designerQueueCount =
-    statusCounts["image_pending"] + statusCounts["image_review"];
+    (statusCounts["photography"] ?? 0) + (statusCounts["design_review"] ?? 0);
+
+  const filtered = campaigns.filter(
+    (c) =>
+      (statusFilter === "all" || c.status === statusFilter) &&
+      (audienceFilter === "all" || c.audience === audienceFilter),
+  );
 
   return (
     <div className="space-y-6">
@@ -83,7 +132,13 @@ export default function EmailAssistantDashboard() {
           <Link href="/marketing/calendar">
             <Button variant="outline">
               <CalendarIcon className="h-4 w-4 mr-2" />
-              Calendar
+              Events calendar
+            </Button>
+          </Link>
+          <Link href="/marketing/email/calendar">
+            <Button variant="outline">
+              <CalendarDays className="h-4 w-4 mr-2" />
+              Month view
             </Button>
           </Link>
           <Link href="/marketing/email/plan">
@@ -155,10 +210,10 @@ export default function EmailAssistantDashboard() {
                     </span>
                   </div>
                   <div className="font-medium text-sm leading-snug">
-                    {c.subject ?? c.heroHeadline ?? "(no subject yet)"}
+                    {campaignLabel(c)}
                   </div>
                   <div className="mt-2 text-xs text-muted-foreground">
-                    {STATUS_LABELS[c.status]}
+                    {STATUS_LABELS[c.status] ?? c.status}
                   </div>
                 </Link>
               ))}
@@ -169,8 +224,34 @@ export default function EmailAssistantDashboard() {
 
       {/* All campaigns */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">All campaigns</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between gap-2">
+          <CardTitle className="text-lg">
+            All campaigns
+            <span className="ml-2 text-sm font-normal text-muted-foreground">
+              {filtered.length}{filtered.length !== campaigns.length ? ` of ${campaigns.length}` : ""}
+            </span>
+          </CardTitle>
+          <div className="flex gap-2">
+            <select
+              value={audienceFilter}
+              onChange={(e) => setAudienceFilter(e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+            >
+              <option value="all">All audiences</option>
+              <option value="retail">Retail</option>
+              <option value="wholesale">Wholesale</option>
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+            >
+              <option value="all">All statuses</option>
+              {STATUS_ORDER.map((s) => (
+                <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+              ))}
+            </select>
+          </div>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -180,31 +261,49 @@ export default function EmailAssistantDashboard() {
               <Mail className="inline h-4 w-4 mr-1" />
               No campaigns yet. Click <strong>New campaign</strong> to start.
             </div>
+          ) : filtered.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No campaigns match the current filter.</div>
           ) : (
             <div className="divide-y">
-              {campaigns.map((c) => (
-                <Link
+              {filtered.map((c) => (
+                <div
                   key={c.id}
-                  href={`/marketing/email/campaigns/${c.id}`}
-                  className="flex items-center justify-between py-2 hover:bg-accent rounded px-2 -mx-2"
+                  className="flex items-center justify-between py-2 px-2 -mx-2 rounded hover:bg-accent group"
                 >
-                  <div className="flex items-center gap-3">
-                    <Badge
-                      variant={c.audience === "wholesale" ? "default" : "outline"}
-                    >
+                  <Link
+                    href={`/marketing/email/campaigns/${c.id}`}
+                    className="flex items-center gap-3 min-w-0 flex-1"
+                  >
+                    <Badge variant={c.audience === "wholesale" ? "default" : "outline"}>
                       {c.audience}
                     </Badge>
-                    <span className="text-sm text-muted-foreground tabular-nums">
+                    <span className="text-sm text-muted-foreground tabular-nums shrink-0">
                       {c.scheduledDate}
                     </span>
-                    <span className="text-sm">
-                      {c.subject ?? c.heroHeadline ?? "(no subject)"}
-                    </span>
+                    <span className="text-sm truncate">{campaignLabel(c)}</span>
+                  </Link>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Badge variant="outline" className="text-xs">
+                      {STATUS_LABELS[c.status] ?? c.status}
+                    </Badge>
+                    <button
+                      title="Duplicate"
+                      disabled={busyId === c.id}
+                      onClick={() => handleDuplicate(c)}
+                      className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-background disabled:opacity-50"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      title="Delete"
+                      disabled={busyId === c.id}
+                      onClick={() => handleDelete(c)}
+                      className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-background disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   </div>
-                  <Badge variant="outline" className="text-xs">
-                    {STATUS_LABELS[c.status]}
-                  </Badge>
-                </Link>
+                </div>
               ))}
             </div>
           )}

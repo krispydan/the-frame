@@ -1096,7 +1096,7 @@ function GenerationStatus({
             <dt className="text-muted-foreground">Prompt version</dt>
             <dd className="font-mono">{promptVersion}</dd>
             <dt className="text-muted-foreground">Model</dt>
-            <dd className="font-mono">claude-opus-4-7</dd>
+            <dd className="font-mono">Claude Opus</dd>
           </dl>
         </div>
         <div className="text-muted-foreground">
