@@ -1764,6 +1764,88 @@ try {
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_segments_status ON segments (status)`);
 } catch (e) { console.error("[db] Segment ensure error:", e); }
 
+// ── Marketing email assistant tables ────────────────────────────
+// Three tables backing the Email Assistant feature in the marketing
+// module. Schema definitions live in
+// src/modules/marketing/schema/email-campaigns.ts; this boot block
+// just ensures the tables exist on every startup. Idempotent —
+// CREATE IF NOT EXISTS so existing data isn't touched.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS marketing_email_campaigns (
+    id TEXT PRIMARY KEY NOT NULL,
+    audience TEXT NOT NULL,
+    scheduled_date TEXT NOT NULL,
+    week_of TEXT,
+    status TEXT NOT NULL DEFAULT 'idea',
+    theme_id TEXT,
+    subject TEXT,
+    preheader TEXT,
+    hero_variant TEXT NOT NULL DEFAULT 'full_bleed_overlay',
+    section_a_variant TEXT NOT NULL DEFAULT 'centered',
+    secondary_image_variant TEXT NOT NULL DEFAULT 'full_bleed',
+    section_b_variant TEXT NOT NULL DEFAULT 'centered_with_cta',
+    hero_headline TEXT,
+    hero_subtitle TEXT,
+    hero_cta_label TEXT,
+    hero_cta_url TEXT,
+    hero_scrim TEXT DEFAULT 'dark',
+    hero_image_path TEXT,
+    hero_image_alt TEXT,
+    hero_image_prompt TEXT,
+    section_a_heading TEXT,
+    section_a_body TEXT,
+    secondary_image_path TEXT,
+    secondary_image_path_2 TEXT,
+    secondary_image_alt TEXT,
+    secondary_image_alt_2 TEXT,
+    secondary_image_prompt TEXT,
+    secondary_image_prompt_2 TEXT,
+    section_b_heading TEXT,
+    section_b_body TEXT,
+    section_b_cta_label TEXT,
+    section_b_cta_url TEXT,
+    utm_campaign TEXT,
+    designer_notes TEXT,
+    ai_copy_prompt_version TEXT,
+    ai_copy_raw_json TEXT,
+    ai_image_prompt_raw_json TEXT,
+    exported_html_path TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_email_campaigns_status ON marketing_email_campaigns (status)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_email_campaigns_scheduled ON marketing_email_campaigns (scheduled_date)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_email_campaigns_audience ON marketing_email_campaigns (audience)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_email_campaigns_theme ON marketing_email_campaigns (theme_id)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS marketing_email_themes (
+    id TEXT PRIMARY KEY NOT NULL,
+    week_of TEXT NOT NULL,
+    audience TEXT NOT NULL,
+    title TEXT NOT NULL,
+    angle TEXT,
+    product_hook TEXT,
+    seasonal_context TEXT,
+    raw_json TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_email_themes_week ON marketing_email_themes (week_of)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_email_themes_audience ON marketing_email_themes (audience)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS marketing_email_send_results (
+    id TEXT PRIMARY KEY NOT NULL,
+    campaign_id TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    sent_at TEXT,
+    recipients INTEGER,
+    opens INTEGER,
+    clicks INTEGER,
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_email_send_results_campaign ON marketing_email_send_results (campaign_id)`);
+} catch (e) { console.error("[db] Marketing email tables error:", e); }
+
 // Auto-run migrations on startup (idempotent — safe to run every time)
 try {
   const migrationsFolder = path.join(process.cwd(), "drizzle", "migrations");

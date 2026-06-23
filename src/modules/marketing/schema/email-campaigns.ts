@@ -1,0 +1,160 @@
+/**
+ * Marketing Email Assistant schema.
+ *
+ * Separate from `marketing_content_calendar` (which conflates
+ * blog/social/email under a single "content idea" row). Email
+ * campaigns have a richer per-block template structure with
+ * variant choices, AI-generated copy, designer images, and a
+ * multi-stage workflow status — they earn their own tables.
+ */
+
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+
+const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
+const timestamp = (name: string) => text(name).default(sql`(datetime('now'))`);
+
+/**
+ * One row per scheduled email. The audience (retail|wholesale) is
+ * paired with a calendar slot (scheduledDate). Each block of the
+ * template stores its variant choice + the content for that variant
+ * + AI metadata so we can re-run the AI later without losing the
+ * human edits.
+ *
+ * Status moves through the 10-stage workflow:
+ *   idea → themed → copy_pending → copy_review →
+ *   image_pending → image_review → preview_ready →
+ *   exported → sent → analyzed
+ */
+export const emailCampaigns = sqliteTable("marketing_email_campaigns", {
+  id: id(),
+
+  // Planning
+  audience: text("audience", { enum: ["retail", "wholesale"] }).notNull(),
+  scheduledDate: text("scheduled_date").notNull(),          // ISO date (YYYY-MM-DD)
+  weekOf: text("week_of"),                                   // Monday ISO date, for calendar grouping
+  status: text("status", {
+    enum: [
+      "idea",
+      "themed",
+      "copy_pending",
+      "copy_review",
+      "image_pending",
+      "image_review",
+      "preview_ready",
+      "exported",
+      "sent",
+      "analyzed",
+    ],
+  }).notNull().default("idea"),
+  themeId: text("theme_id"),                                 // → marketing_email_themes.id
+
+  // Subject + preheader (inbox metadata, separate from in-email content)
+  subject: text("subject"),
+  preheader: text("preheader"),
+
+  // ── Variant choice per block ──
+  // Each block has 1+ variants; renderer dispatches based on these.
+  // New variants drop in as additional enum values + a new component file.
+  heroVariant: text("hero_variant", {
+    enum: ["full_bleed_overlay", "image_75_solid", "split_50_50"],
+  }).notNull().default("full_bleed_overlay"),
+  sectionAVariant: text("section_a_variant", {
+    enum: ["centered", "with_pullquote"],
+  }).notNull().default("centered"),
+  secondaryImageVariant: text("secondary_image_variant", {
+    enum: ["full_bleed", "centered_75", "grid_2up"],
+  }).notNull().default("full_bleed"),
+  sectionBVariant: text("section_b_variant", {
+    enum: ["centered_with_cta", "two_column_with_cta"],
+  }).notNull().default("centered_with_cta"),
+
+  // ── Hero block content ──
+  heroHeadline: text("hero_headline"),
+  heroSubtitle: text("hero_subtitle"),
+  heroCtaLabel: text("hero_cta_label"),
+  heroCtaUrl: text("hero_cta_url"),
+  /**
+   * Scrim is only meaningful for heroVariant=full_bleed_overlay.
+   * Other variants ignore it; the field stays for forward-compat.
+   */
+  heroScrim: text("hero_scrim", { enum: ["dark", "light", "none"] }).default("dark"),
+  heroImagePath: text("hero_image_path"),                    // /data/images/email/{id}/hero.jpg
+  heroImageAlt: text("hero_image_alt"),
+  heroImagePrompt: text("hero_image_prompt"),                // Higgsfield brief
+
+  // ── Text section A ──
+  sectionAHeading: text("section_a_heading"),
+  sectionABody: text("section_a_body"),
+
+  // ── Secondary image block ──
+  secondaryImagePath: text("secondary_image_path"),
+  /** Second image — only populated when secondaryImageVariant=grid_2up. */
+  secondaryImagePath2: text("secondary_image_path_2"),
+  secondaryImageAlt: text("secondary_image_alt"),
+  secondaryImageAlt2: text("secondary_image_alt_2"),
+  secondaryImagePrompt: text("secondary_image_prompt"),
+  secondaryImagePrompt2: text("secondary_image_prompt_2"),
+
+  // ── Text section B (with CTA) ──
+  sectionBHeading: text("section_b_heading"),
+  sectionBBody: text("section_b_body"),
+  sectionBCtaLabel: text("section_b_cta_label"),
+  sectionBCtaUrl: text("section_b_cta_url"),
+
+  // ── Tracking + designer + AI metadata ──
+  utmCampaign: text("utm_campaign"),                         // e.g. 2026-w26-retail
+  designerNotes: text("designer_notes"),
+  aiCopyPromptVersion: text("ai_copy_prompt_version"),       // prompt template version used
+  aiCopyRawJson: text("ai_copy_raw_json"),                   // last Claude response, full
+  aiImagePromptRawJson: text("ai_image_prompt_raw_json"),    // last image-prompt response
+  exportedHtmlPath: text("exported_html_path"),              // post-export, where the file lives
+
+  // Timestamps
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+}, (table) => ({
+  statusIdx: index("idx_email_campaigns_status").on(table.status),
+  scheduledIdx: index("idx_email_campaigns_scheduled").on(table.scheduledDate),
+  audienceIdx: index("idx_email_campaigns_audience").on(table.audience),
+  themeIdx: index("idx_email_campaigns_theme").on(table.themeId),
+}));
+
+/**
+ * A theme = a weekly content angle (e.g. "Late-summer linen", "First
+ * cool morning"). One theme can seed multiple campaigns if we run
+ * the same idea across both audiences. AI generates a batch per
+ * call (4-8 weeks at a time); user picks.
+ */
+export const emailThemes = sqliteTable("marketing_email_themes", {
+  id: id(),
+  weekOf: text("week_of").notNull(),                         // Monday ISO date
+  audience: text("audience", { enum: ["retail", "wholesale"] }).notNull(),
+  title: text("title").notNull(),                            // "Late-summer linen"
+  angle: text("angle"),                                       // why now, who it's for
+  productHook: text("product_hook"),                          // SKU family or category
+  seasonalContext: text("seasonal_context"),                  // holiday / weather / cultural anchor
+  rawJson: text("raw_json"),                                  // raw Claude output for debugging
+  createdAt: timestamp("created_at"),
+}, (table) => ({
+  weekOfIdx: index("idx_email_themes_week").on(table.weekOf),
+  audienceIdx: index("idx_email_themes_audience").on(table.audience),
+}));
+
+/**
+ * Send-result capture. v1 = manual entry form so Daniel can paste
+ * what Omnisend/Faire report. v2 = pulled via API.
+ */
+export const emailSendResults = sqliteTable("marketing_email_send_results", {
+  id: id(),
+  campaignId: text("campaign_id").notNull(),
+  platform: text("platform", { enum: ["omnisend", "faire"] }).notNull(),
+  sentAt: text("sent_at"),
+  recipients: integer("recipients"),
+  opens: integer("opens"),
+  clicks: integer("clicks"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at"),
+}, (table) => ({
+  campaignIdx: index("idx_email_send_results_campaign").on(table.campaignId),
+}));

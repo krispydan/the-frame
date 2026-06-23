@@ -103,3 +103,13 @@ export const socialAccounts = sqliteTable("marketing_social_accounts", {
   updatedAt: timestamp("updated_at"),
   createdAt: timestamp("created_at"),
 });
+
+// ── Marketing Email Assistant ──
+// Separate from contentCalendar (above) — emails have a richer
+// per-block template structure with variants, AI-generated content,
+// and a 10-stage workflow. See ./email-campaigns.ts for details.
+export {
+  emailCampaigns,
+  emailThemes,
+  emailSendResults,
+} from "./email-campaigns";
