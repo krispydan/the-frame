@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Plus, Mail, Image as ImageIcon } from "lucide-react";
+import { Plus, Mail, Image as ImageIcon, Calendar as CalendarIcon } from "lucide-react";
 
 type Campaign = {
   id: string;
@@ -80,8 +80,11 @@ export default function EmailAssistantDashboard() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Link href="/marketing/email/calendar">
-            <Button variant="outline">Calendar</Button>
+          <Link href="/marketing/calendar">
+            <Button variant="outline">
+              <CalendarIcon className="h-4 w-4 mr-2" />
+              Calendar
+            </Button>
           </Link>
           <Link href="/marketing/email/designer-queue">
             <Button variant="outline" className="relative">

@@ -24,6 +24,17 @@ Hero variant: {{heroVariant}}      ← full_bleed_overlay | image_75_solid | spl
 Product hook (optional): {{theme.productHook}}
 Seasonal context (optional): {{theme.seasonalContext}}
 
+Marketing calendar — what's happening within ±14 days of send:
+{{calendarEvents}}
+
+(If a `[PRIMARY — lead with this]` event appears above, the email's
+angle should clearly lean into it — that's the dominant moment for
+this send window. `[background]` events should only surface if they
+fit naturally; don't force them. SALE / LAUNCH / PROMO events with
+no priority marker should be woven in when they support the brief's
+angle. HOLIDAYS provide tonal context — Mother's Day = gift framing,
+Memorial Day = long-weekend kickoff, etc.)
+
 ────────────────────────────────────────────────────────────
 HARD SHAPE CONSTRAINTS (the email template fields you must fill)
 ────────────────────────────────────────────────────────────

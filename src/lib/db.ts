@@ -1894,6 +1894,65 @@ try {
   }
 } catch (e) { console.error("[db] Marketing email tables error:", e); }
 
+// ── Marketing calendar (holidays / sales / launches / promos) ──
+// Feeds the AI prompt so generate-copy knows what's coming up
+// within a campaign's date window.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS marketing_calendar_events (
+    id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL CHECK(event_type IN ('holiday','sale','launch','promotion')),
+    date_start TEXT NOT NULL,
+    date_end TEXT NOT NULL,
+    audience TEXT NOT NULL DEFAULT 'all' CHECK(audience IN ('all','retail','wholesale')),
+    title TEXT NOT NULL,
+    description TEXT,
+    product_skus TEXT,
+    link_url TEXT,
+    priority INTEGER NOT NULL DEFAULT 2,
+    tag TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_calendar_date_start ON marketing_calendar_events (date_start)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_calendar_audience ON marketing_calendar_events (audience)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_calendar_event_type ON marketing_calendar_events (event_type)`);
+
+  // Seed US holidays for the upcoming 12 months. Uses INSERT OR IGNORE
+  // keyed on a deterministic id so re-running is idempotent. Daniel
+  // can edit titles/descriptions in the UI — they won't be overwritten
+  // because the seed only inserts when the id doesn't exist.
+  //
+  // Limited to dates Daniel's emails would actually anchor to. Federal
+  // holidays + a few cultural anchors (Mother's Day, Father's Day,
+  // Valentine's Day) that matter for retail. Wholesale-relevant
+  // shopping anchors (BFCM, Cyber Monday, EOSS) included too.
+  const HOLIDAYS = [
+    { id: "seed-2026-07-04", dateStart: "2026-07-04", dateEnd: "2026-07-04", title: "Fourth of July", description: "Federal holiday. Summer-sun lifestyle angle — boardwalks, lake days, road trips." },
+    { id: "seed-2026-09-07", dateStart: "2026-09-07", dateEnd: "2026-09-07", title: "Labor Day", description: "End-of-summer long weekend. EOSS angle works here." },
+    { id: "seed-2026-10-31", dateStart: "2026-10-31", dateEnd: "2026-10-31", title: "Halloween", description: "Costume / playful angle. Skip for wholesale." },
+    { id: "seed-2026-11-26", dateStart: "2026-11-26", dateEnd: "2026-11-26", title: "Thanksgiving", description: "Family / gratitude framing. Wholesale: thank carriers." },
+    { id: "seed-2026-11-27", dateStart: "2026-11-27", dateEnd: "2026-12-01", title: "Black Friday + Cyber Monday weekend", description: "The biggest discount window of the year — BFCM. Plan separate sale event with promotion type if running offers." },
+    { id: "seed-2026-12-13", dateStart: "2026-12-13", dateEnd: "2026-12-19", title: "Last shipping week before Christmas", description: "Gift-deadline urgency. Ship-by reminders." },
+    { id: "seed-2026-12-25", dateStart: "2026-12-25", dateEnd: "2026-12-25", title: "Christmas Day", description: "Hold sends on the day itself unless explicitly festive." },
+    { id: "seed-2026-12-31", dateStart: "2026-12-31", dateEnd: "2026-12-31", title: "New Year's Eve", description: "Year-end reflection or party angle." },
+    { id: "seed-2027-01-01", dateStart: "2027-01-01", dateEnd: "2027-01-01", title: "New Year's Day", description: "Fresh start framing. New-year-new-look angle." },
+    { id: "seed-2027-02-14", dateStart: "2027-02-14", dateEnd: "2027-02-14", title: "Valentine's Day", description: "Gift-for-them angle. Pairs well for retail couples / gift sets." },
+    { id: "seed-2027-03-17", dateStart: "2027-03-17", dateEnd: "2027-03-17", title: "St Patrick's Day", description: "Light cultural anchor. Skip unless brand has a green colorway." },
+    { id: "seed-2027-04-22", dateStart: "2027-04-22", dateEnd: "2027-04-22", title: "Earth Day", description: "Sustainability angle. Wholesale: highlight bio-acetate." },
+    { id: "seed-2027-05-09", dateStart: "2027-05-09", dateEnd: "2027-05-09", title: "Mother's Day", description: "Gift / mom-aesthetic framing. Strong retail moment." },
+    { id: "seed-2027-05-31", dateStart: "2027-05-31", dateEnd: "2027-05-31", title: "Memorial Day", description: "Long-weekend kickoff to summer. EOSS lite if running a promo." },
+    { id: "seed-2027-06-20", dateStart: "2027-06-20", dateEnd: "2027-06-20", title: "Father's Day", description: "Gift / dad-aesthetic angle. Retail: men's classics." },
+  ];
+  const insertHoliday = sqlite.prepare(
+    `INSERT OR IGNORE INTO marketing_calendar_events
+       (id, event_type, date_start, date_end, audience, title, description, priority, tag, created_at, updated_at)
+     VALUES (?, 'holiday', ?, ?, 'all', ?, ?, 1, 'seed-holidays', datetime('now'), datetime('now'))`,
+  );
+  for (const h of HOLIDAYS) {
+    insertHoliday.run(h.id, h.dateStart, h.dateEnd, h.title, h.description);
+  }
+} catch (e) { console.error("[db] Marketing calendar tables error:", e); }
+
 // Auto-run migrations on startup (idempotent — safe to run every time)
 try {
   const migrationsFolder = path.join(process.cwd(), "drizzle", "migrations");

@@ -25,6 +25,7 @@ import type { McpTool } from "@/modules/core/mcp/server";
 import { generateContentIdeas } from "../agents/content-idea-generator";
 import { analyzeContent } from "../agents/seo-optimizer";
 import { emailCampaigns, emailThemes } from "../schema";
+import { getCalendarContextForCampaign } from "../lib/calendar-context";
 import { and, eq, desc, gte, lte } from "drizzle-orm";
 import {
   generateCopy,
@@ -421,6 +422,10 @@ export const marketingMcpTools: McpTool[] = [
         }
       }
 
+      const calendarEvents = await getCalendarContextForCampaign({
+        scheduledDate: campaign.scheduledDate,
+        audience: campaign.audience as "retail" | "wholesale",
+      });
       const result = await generateCopy({
         audience: campaign.audience as "retail" | "wholesale",
         scheduledDate: campaign.scheduledDate,
@@ -429,6 +434,7 @@ export const marketingMcpTools: McpTool[] = [
         themeAngle: themeAngle ?? "(unspecified)",
         productHook,
         seasonalContext,
+        calendarEvents,
       });
       if (!result.ok) return { content: [{ type: "text", text: `AI error: ${result.error}` }], isError: true };
       const out = result.output as Record<string, unknown>;
@@ -771,13 +777,18 @@ Slot context: ${imageStyleLabel}. Subject-angle direction: ${rec.subjectAngleHin
         designerNote,
       );
 
-      // 3. Copy via v5 prompt
+      // 3. Copy via v5 prompt — with calendar context for the date window
+      const buildCalendarEvents = await getCalendarContextForCampaign({
+        scheduledDate: scheduled,
+        audience,
+      });
       const copyRes = await generateCopy({
         audience, scheduledDate: scheduled, heroVariant,
         themeTitle: input.themeTitle as string,
         themeAngle: input.themeAngle as string,
         productHook: (input.productHook as string | undefined) ?? null,
         seasonalContext: (input.seasonalContext as string | undefined) ?? null,
+        calendarEvents: buildCalendarEvents,
       });
       if (!copyRes.ok) {
         return { content: [{ type: "text", text: `Copy AI error: ${copyRes.error}. Campaign + theme created (id=${campaignId}) but copy generation failed.` }], isError: true };
@@ -889,6 +900,10 @@ Slot context: ${imageStyleLabel}. Subject-angle direction: ${rec.subjectAngleHin
       // prompt incorporates it without changing the prompt template.
       const refinedAngle = `${themeAngle}\n\nREFINEMENT REQUEST (${input.section as string}): ${instruction}`;
 
+      const refineCalendar = await getCalendarContextForCampaign({
+        scheduledDate: campaign.scheduledDate,
+        audience: campaign.audience as "retail" | "wholesale",
+      });
       const res = await generateCopy({
         audience: campaign.audience as "retail" | "wholesale",
         scheduledDate: campaign.scheduledDate,
@@ -896,6 +911,7 @@ Slot context: ${imageStyleLabel}. Subject-angle direction: ${rec.subjectAngleHin
         themeTitle,
         themeAngle: refinedAngle,
         productHook: null, seasonalContext: null,
+        calendarEvents: refineCalendar,
       });
       if (!res.ok) return { content: [{ type: "text", text: `AI error: ${res.error}` }], isError: true };
       const out = res.output as Record<string, unknown>;
@@ -981,6 +997,111 @@ Slot context: ${imageStyleLabel}. Subject-angle direction: ${rec.subjectAngleHin
             notes:
               "v1 = static rotation rules. v2 will weight rotation by open/click data. See lib/email-strategy.ts for the recommendForSlot() rules.",
           }, null, 2),
+        }],
+      };
+    },
+  },
+
+  // ── Marketing calendar ──────────────────────────────────────────
+  // Lets chat-Claude see upcoming holidays / sales / launches /
+  // promos AND add new ones inline ("there's a Memorial Day promo
+  // coming up — add it to the calendar so the email planner picks
+  // it up automatically").
+  {
+    name: "marketing.calendar.list_events",
+    description:
+      "List marketing calendar events (holidays, sales, launches, promotions) in a date window. By default returns ±60 days from today. These events are auto-injected into email generate-copy as context, so the calendar drives what the AI knows is coming.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        from: { type: "string", description: "ISO date (YYYY-MM-DD). Defaults to today." },
+        to: { type: "string", description: "ISO date. Defaults to today + 60 days." },
+        audience: { type: "string", enum: ["all", "retail", "wholesale"] },
+        event_type: { type: "string", enum: ["holiday", "sale", "launch", "promotion"] },
+      },
+    },
+    handler: async ({ input }) => {
+      const { calendarEvents } = await import("../schema");
+      const { and, asc, gte, lte } = await import("drizzle-orm");
+      const today = new Date().toISOString().slice(0, 10);
+      const from = (input.from as string) ?? today;
+      const toDate = new Date(from + "T00:00:00Z");
+      toDate.setUTCDate(toDate.getUTCDate() + 60);
+      const to = (input.to as string) ?? toDate.toISOString().slice(0, 10);
+      const audience = input.audience as "all" | "retail" | "wholesale" | undefined;
+      const eventType = input.event_type as string | undefined;
+
+      const all = await db
+        .select()
+        .from(calendarEvents)
+        .where(and(lte(calendarEvents.dateStart, to), gte(calendarEvents.dateEnd, from)))
+        .orderBy(asc(calendarEvents.dateStart));
+      const filtered = all.filter(e => {
+        if (eventType && e.eventType !== eventType) return false;
+        if (audience && audience !== "all" && e.audience !== "all" && e.audience !== audience) return false;
+        return true;
+      });
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            window: { from, to },
+            count: filtered.length,
+            events: filtered,
+            note: "These events are auto-injected into generate-copy / plan_week for any campaign whose scheduledDate overlaps the ±14-day window of the event.",
+          }, null, 2),
+        }],
+      };
+    },
+  },
+  {
+    name: "marketing.calendar.add_event",
+    description:
+      "Add a holiday, sale, launch, or promotion to the marketing calendar. Once added, any campaign generated for a date within ±14 days of this event will see it in the AI prompt. Use this when the user mentions an upcoming moment that should drive copy ('we're running 30% off readers Memorial Day weekend' → add a SALE event).",
+    inputSchema: {
+      type: "object",
+      required: ["event_type", "date_start", "title"],
+      properties: {
+        event_type: { type: "string", enum: ["holiday", "sale", "launch", "promotion"] },
+        date_start: { type: "string", description: "ISO date YYYY-MM-DD" },
+        date_end: { type: "string", description: "ISO date YYYY-MM-DD. Defaults to date_start (single-day event)." },
+        audience: { type: "string", enum: ["all", "retail", "wholesale"], description: "Who this event matters for. Default 'all'." },
+        title: { type: "string", description: "Short specific title. 'Memorial Day' not 'long weekend'." },
+        description: { type: "string", description: "1–3 sentences of context the AI should weigh." },
+        product_skus: { type: "string", description: "Comma-separated SKU list (optional)." },
+        link_url: { type: "string", description: "URL the campaign CTA might use." },
+        priority: { type: "number", enum: [1, 2, 3], description: "1 = primary moment, 2 = secondary, 3 = background." },
+        tag: { type: "string", description: "Optional tag for grouping (e.g. 'BFCM-2026')." },
+      },
+    },
+    handler: async ({ input }) => {
+      const { calendarEvents } = await import("../schema");
+      const dateStart = input.date_start as string;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStart)) {
+        return { content: [{ type: "text", text: "date_start must be YYYY-MM-DD" }], isError: true };
+      }
+      const dateEnd = (input.date_end as string) ?? dateStart;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateEnd)) {
+        return { content: [{ type: "text", text: "date_end must be YYYY-MM-DD" }], isError: true };
+      }
+      const id = crypto.randomUUID();
+      await db.insert(calendarEvents).values({
+        id,
+        eventType: input.event_type as "holiday" | "sale" | "launch" | "promotion",
+        dateStart,
+        dateEnd,
+        audience: (input.audience as "all" | "retail" | "wholesale" | undefined) ?? "all",
+        title: input.title as string,
+        description: (input.description as string) ?? null,
+        productSkus: (input.product_skus as string) ?? null,
+        linkUrl: (input.link_url as string) ?? null,
+        priority: (input.priority as number) ?? 2,
+        tag: (input.tag as string) ?? null,
+      });
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ ok: true, id, message: `Added "${input.title}" to the calendar. Any campaign scheduled within ±14 days of ${dateStart} will now see this in its AI prompt.` }, null, 2),
         }],
       };
     },

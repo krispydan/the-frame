@@ -113,3 +113,8 @@ export {
   emailThemes,
   emailSendResults,
 } from "./email-campaigns";
+
+// Marketing calendar — holidays, sales, launches, promos. Feeds
+// the AI prompt so generate-copy knows what's coming up.
+export { calendarEvents } from "./calendar-events";
+export type { CalendarEvent, CalendarEventInsert } from "./calendar-events";

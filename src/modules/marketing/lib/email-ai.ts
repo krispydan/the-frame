@@ -317,6 +317,13 @@ export async function generateCopy(opts: {
   themeAngle: string;
   productHook?: string | null;
   seasonalContext?: string | null;
+  /** Pre-formatted marketing-calendar context (holidays / sales /
+   *  launches / promotions in the ±14-day window). When omitted
+   *  the AI gets "(none)" — no calendar awareness. The caller
+   *  (HTTP route or MCP tool) is responsible for loading it via
+   *  getCalendarContextForCampaign(). Kept as opts not auto-loaded
+   *  so this lib stays pure of DB calls. */
+  calendarEvents?: string | null;
 }) {
   const { copyGen } = loadPrompts();
   const systemPrompt = buildSystemPrompt(opts.audience);
@@ -328,6 +335,7 @@ export async function generateCopy(opts: {
     audience: opts.audience,
     scheduledDate: opts.scheduledDate,
     heroVariant: opts.heroVariant,
+    calendarEvents: opts.calendarEvents ?? "(none)",
   });
 
   return callClaude({

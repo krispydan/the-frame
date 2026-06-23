@@ -6,6 +6,7 @@ import { db, sqlite } from "@/lib/db";
 import { emailCampaigns, emailThemes } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
 import { generateCopy } from "@/modules/marketing/lib/email-ai";
+import { getCalendarContextForCampaign } from "@/modules/marketing/lib/calendar-context";
 
 /**
  * POST /api/v1/marketing/email/campaigns/[id]/generate-copy
@@ -87,6 +88,13 @@ export async function POST(
     )
     .run(briefTitle, briefAngle, productHook, seasonalContext, id);
 
+  // Pull calendar events in the ±14-day window so the AI knows what
+  // holiday / sale / launch / promo to lean into for this send date.
+  const calendarEvents = await getCalendarContextForCampaign({
+    scheduledDate: campaign.scheduledDate,
+    audience: campaign.audience as "retail" | "wholesale",
+  });
+
   const result = await generateCopy({
     audience: campaign.audience as "retail" | "wholesale",
     scheduledDate: campaign.scheduledDate,
@@ -95,6 +103,7 @@ export async function POST(
     themeAngle: briefAngle,
     productHook,
     seasonalContext,
+    calendarEvents,
   });
 
   if (!result.ok) {
