@@ -69,6 +69,10 @@ export default function CampaignDetailPage({
 }) {
   const { id } = use(params);
   const [campaign, setCampaign] = useState<Campaign | null>(null);
+  // Always-current campaign for use inside memoized callbacks (avoids
+  // stale-closure reads). Set during render.
+  const campaignRef = useRef<Campaign | null>(null);
+  campaignRef.current = campaign;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -79,6 +83,9 @@ export default function CampaignDetailPage({
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [failedChecks, setFailedChecks] = useState<string[]>([]);
   const [lint, setLint] = useState<LintResult | null>(null);
+  // True when the brief was edited after image prompts were generated
+  // → the Higgsfield briefs are now stale and should be regenerated.
+  const [briefStale, setBriefStale] = useState(false);
   const [exportingKind, setExportingKind] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<{ url: string; name: string } | null>(null);
@@ -150,6 +157,7 @@ export default function CampaignDetailPage({
         setCampaign(data.campaign as Campaign);
         setPreviewKey(k => k + 1);
         setSavedAt(Date.now());
+        setBriefStale(false);
       }
     } catch (e) {
       setGenerateError(e instanceof Error ? e.message : String(e));
@@ -265,6 +273,14 @@ export default function CampaignDetailPage({
 
   const updateField = useCallback((key: string, value: unknown) => {
     setCampaign(c => (c ? { ...c, [key]: value } : c));
+    // Editing the brief after image prompts exist makes those prompts
+    // stale — flag it so the editor nudges a regenerate.
+    if (
+      ["name", "briefAngle", "briefProductHook", "briefSeasonalContext"].includes(key) &&
+      campaignRef.current?.heroImagePrompt
+    ) {
+      setBriefStale(true);
+    }
     pendingChanges.current[key] = value;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(flushChanges, 500);
@@ -447,6 +463,19 @@ export default function CampaignDetailPage({
           <ul className="list-disc ml-5 space-y-0.5">
             {lint.warnings.map((f, i) => <li key={i}>{f.message}</li>)}
           </ul>
+        </div>
+      )}
+
+      {/* Brief edited after image prompts were generated → stale. */}
+      {briefStale && (
+        <div className="rounded border border-amber-300 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-sm flex items-center justify-between gap-3">
+          <span>
+            You edited the brief after generating the image prompts — the
+            Higgsfield briefs below may no longer match.
+          </span>
+          <Button size="sm" variant="outline" onClick={handleGenerateImagePrompts} disabled={generating !== null}>
+            {generating === "image_prompts" ? "Regenerating…" : "Regenerate image prompts"}
+          </Button>
         </div>
       )}
 

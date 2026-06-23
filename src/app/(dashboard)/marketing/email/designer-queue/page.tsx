@@ -15,7 +15,10 @@ interface QueueRow {
   scheduledDate: string;
   weekOf: string | null;
   status: string;
+  name: string | null;
   subject: string | null;
+  briefAngle: string | null;
+  briefProductHook: string | null;
   heroVariant: string;
   secondaryImageVariant: string;
   heroImagePrompt: string | null;
@@ -195,12 +198,19 @@ function QueueRowCard({
             <Badge variant={row.audience === "wholesale" ? "default" : "outline"}>
               {row.audience}
             </Badge>
-            <span className="text-sm text-muted-foreground tabular-nums">
+            <span className="text-sm text-muted-foreground tabular-nums shrink-0">
               {row.scheduledDate}
             </span>
-            <span className="font-medium text-sm truncate">
-              {row.subject ?? "(no subject yet)"}
-            </span>
+            <div className="min-w-0">
+              <div className="font-medium text-sm truncate">
+                {row.name ?? row.subject ?? "(untitled)"}
+              </div>
+              {(row.briefProductHook || row.briefAngle || row.subject) && (
+                <div className="text-xs text-muted-foreground truncate">
+                  {[row.briefProductHook, row.subject, row.briefAngle].filter(Boolean)[0]}
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <UploadDot ready={row.heroReady} label="hero" />

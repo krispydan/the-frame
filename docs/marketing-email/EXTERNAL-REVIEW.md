@@ -86,11 +86,12 @@ So: strong on production, behind on operations. The agency-replacement bar, give
 4. **Link the month calendar** (1.6). *(done)*
 5. **Strip the `{{SYSTEM_PROMPT_BASE}}` leak** (1.5). *(done)*
 
-### Sprint B — AI loop tightening (next)
-1. Brief-change → "regenerate image prompts" stale banner (3.3).
-2. Per-slot image regeneration `?slot=hero|secondary` (3.18).
-3. Subject A/B: `subject_alt`/`preheader_alt` columns + a toggle (3.5) — Daniel asked for angle testing; this is the in-scope slice of it.
-4. AI copy version history (3.2) — lightweight `copy_versions` table + restore.
+### Sprint B — AI loop tightening (in progress)
+1. Brief-change → "regenerate image prompts" stale banner (3.3). *(done)*
+2. Designer queue shows campaign name + one-line brief (3.10). *(done)*
+3. Per-slot image regeneration `?slot=hero|secondary` (3.18). *(next)*
+4. Subject A/B: `subject_alt`/`preheader_alt` columns + a toggle (3.5) — Daniel asked for angle testing; this is the in-scope slice of it. *(next)*
+5. AI copy version history (3.2) — lightweight `copy_versions` table + restore. *(next)*
 
 ### Sprint C — Make the image channel excellent (Daniel's chosen channel)
 1. Batch "Generate copy + image prompts for all planned drafts" from the planner (self-review §9.6 — the highest-leverage planner upgrade).
