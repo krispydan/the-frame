@@ -1,15 +1,11 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { renderToStaticMarkup } from "react-dom/server";
 import { db } from "@/lib/db";
 import { emailCampaigns } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
-import {
-  EmailTemplateRenderer,
-  type CampaignData,
-} from "@/modules/marketing/components/email-template";
-import { catalogImageUrl } from "@/lib/storage/image-url";
+import type { CampaignData } from "@/modules/marketing/components/email-template";
+import { renderEmailHtml } from "@/modules/marketing/lib/render-email";
 
 /**
  * GET /api/v1/marketing/email/campaigns/[id]/preview
@@ -20,9 +16,9 @@ import { catalogImageUrl } from "@/lib/storage/image-url";
  * Response: text/html (not JSON). The iframe loads this URL directly
  * via src="..." — no srcdoc + JSON wrangling.
  *
- * Images: stored paths run through catalogImageUrl() (already
- * proxies through theframe.getjaxy.com/api/images, handles absolute
- * vs relative paths, etc.).
+ * Rendering is delegated to render-email.tsx (a `server-only`
+ * helper). Next 16 + Turbopack rejects `react-dom/server` imports
+ * inside route handlers; the helper-module hop is the workaround.
  */
 export async function GET(
   _req: NextRequest,
@@ -40,8 +36,6 @@ export async function GET(
     return new NextResponse("Not found", { status: 404 });
   }
 
-  // Map row → CampaignData. Drizzle's typed columns get coerced to
-  // the renderer's union types via the variant enums in the schema.
   const data: CampaignData = {
     heroVariant: row.heroVariant as CampaignData["heroVariant"],
     heroImagePath: row.heroImagePath,
@@ -66,18 +60,13 @@ export async function GET(
     sectionBCtaUrl: row.sectionBCtaUrl,
   };
 
-  const body = renderToStaticMarkup(
-    <EmailTemplateRenderer campaign={data} imageUrlFor={catalogImageUrl} />,
-  );
-
-  // Prepend doctype since renderToStaticMarkup doesn't.
-  const html = `<!DOCTYPE html>\n${body}`;
+  const html = renderEmailHtml(data);
 
   return new NextResponse(html, {
     status: 200,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "no-store",  // preview should always be fresh
+      "Cache-Control": "no-store",
     },
   });
 }
