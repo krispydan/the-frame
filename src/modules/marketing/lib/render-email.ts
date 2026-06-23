@@ -62,6 +62,20 @@ function escAttr(s: string | null | undefined): string {
   return esc(s);
 }
 
+// ── Brand fonts ────────────────────────────────────────────────
+// Per V2 BRAND-GUIDELINES.md: Instrument Sans (headings), Jost
+// (body), Syne (pullquote). Glitz is LOGO ONLY — Cooper Black
+// fallback covers it in email clients that block custom fonts.
+//
+// Loaded from Google Fonts. Many email clients block web fonts
+// entirely (Outlook 2007-19 most notably) — those clients fall back
+// to the system stack in each font-family declaration. The preview
+// iframe in the editor + most modern clients (Apple Mail, iOS Mail,
+// Gmail app) DO load these.
+const FONT_LINK = `<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Jost:wght@300;400;500;600&family=Syne:wght@600;700&display=swap">`;
+
 // ── Mobile media query ────────────────────────────────────────
 
 const STYLE_BLOCK = `
@@ -73,14 +87,18 @@ const STYLE_BLOCK = `
     .jx-hero-headline { font-size: 32px !important; line-height: 1.15 !important; }
     .jx-hero-subtitle { font-size: 13px !important; }
     .jx-text-pad      { padding-left: 24px !important; padding-right: 24px !important; }
-    .jx-section-heading { font-size: 11px !important; }
+    .jx-section-heading { font-size: 14px !important; }
     .jx-section-body    { font-size: 14px !important; }
     .jx-cta-pill        { padding: 10px 22px !important; font-size: 12px !important; }
     .jx-grid-cell       { display: block !important; width: 100% !important; }
   }
 `;
 
-const CTA_STYLE = `display:inline-block;background:${C.terracotta};color:${C.ivory};text-decoration:none;font-family:${F.body};font-size:13px;font-weight:500;letter-spacing:0.15em;padding:12px 28px;border-radius:999px;text-transform:uppercase;`;
+// CTA styling — sentence-case per BRAND-BIBLE.md ("Sentence case
+// always. Never Title Case, never ALL CAPS."). Terracotta pill from
+// the V2 secondary palette. Subtle letter-spacing for legibility on
+// the button without shouting.
+const CTA_STYLE = `display:inline-block;background:${C.terracotta};color:${C.ivory};text-decoration:none;font-family:${F.body};font-size:14px;font-weight:500;letter-spacing:0.02em;padding:13px 28px;border-radius:999px;`;
 
 function scrimGradient(scrim: "dark" | "light" | "none"): string {
   if (scrim === "dark")
@@ -199,7 +217,7 @@ function sectionACentered(p: { heading: string; body: string }): string {
   return `
   <tr>
     <td class="jx-text-pad" style="padding:40px 36px 28px;text-align:center;background-color:${C.white};">
-      <div class="jx-section-heading" style="font-family:${F.body};font-size:12px;font-weight:500;letter-spacing:0.22em;color:${C.espresso};margin:0 0 14px;text-transform:uppercase;">${esc(p.heading)}</div>
+      <div class="jx-section-heading" style="font-family:${F.display};font-size:15px;font-weight:600;letter-spacing:0.01em;color:${C.espresso};margin:0 0 14px;">${esc(p.heading)}</div>
       <p class="jx-section-body" style="font-family:${F.body};font-size:15px;line-height:1.65;color:${C.espresso};margin:0;">${esc(p.body)}</p>
     </td>
   </tr>`;
@@ -213,7 +231,7 @@ function sectionAWithPullquote(p: { heading: string; body: string }): string {
   return `
   <tr>
     <td class="jx-text-pad" style="padding:40px 36px 28px;text-align:center;background-color:${C.white};">
-      <div class="jx-section-heading" style="font-family:${F.body};font-size:12px;font-weight:500;letter-spacing:0.22em;color:${C.espresso};margin:0 0 14px;text-transform:uppercase;">${esc(p.heading)}</div>
+      <div class="jx-section-heading" style="font-family:${F.display};font-size:15px;font-weight:600;letter-spacing:0.01em;color:${C.espresso};margin:0 0 14px;">${esc(p.heading)}</div>
       <p style="font-family:${F.pullquote};font-style:italic;font-size:22px;line-height:1.4;color:${C.espresso};max-width:480px;margin:0 auto 18px;">&ldquo;${esc(pullquote)}&rdquo;</p>
       ${rest ? `<p class="jx-section-body" style="font-family:${F.body};font-size:15px;line-height:1.65;color:${C.espresso};margin:0;">${esc(rest)}</p>` : ""}
     </td>
@@ -298,7 +316,7 @@ function sectionBCenteredWithCta(p: SectionBProps): string {
   return `
   <tr>
     <td class="jx-text-pad" style="padding:36px 36px 48px;text-align:center;background-color:${C.white};">
-      <div class="jx-section-heading" style="font-family:${F.body};font-size:12px;font-weight:500;letter-spacing:0.22em;color:${C.espresso};margin:0 0 14px;text-transform:uppercase;">${esc(p.heading)}</div>
+      <div class="jx-section-heading" style="font-family:${F.display};font-size:15px;font-weight:600;letter-spacing:0.01em;color:${C.espresso};margin:0 0 14px;">${esc(p.heading)}</div>
       ${paraHtml}
       <a href="${escAttr(p.ctaUrl)}" class="jx-cta-pill" style="${CTA_STYLE}">${esc(p.ctaLabel)}</a>
     </td>
@@ -313,7 +331,7 @@ function sectionBTwoColumnWithCta(p: SectionBProps): string {
   return `
   <tr>
     <td class="jx-text-pad" style="padding:36px 36px 48px;text-align:center;background-color:${C.white};">
-      <div class="jx-section-heading" style="font-family:${F.body};font-size:12px;font-weight:500;letter-spacing:0.22em;color:${C.espresso};margin:0 0 20px;text-transform:uppercase;text-align:center;">${esc(p.heading)}</div>
+      <div class="jx-section-heading" style="font-family:${F.display};font-size:15px;font-weight:600;letter-spacing:0.01em;color:${C.espresso};margin:0 0 20px;text-align:center;">${esc(p.heading)}</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
         <tr>
           <td class="jx-grid-cell" width="48%" style="vertical-align:top;padding-right:12px;">
@@ -409,6 +427,7 @@ export function renderEmailHtml(campaign: CampaignData): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="x-apple-disable-message-reformatting">
 <title>Jaxy email preview</title>
+${FONT_LINK}
 <style>${STYLE_BLOCK}</style>
 </head>
 <body style="margin:0;padding:0;background-color:${C.white};font-family:${F.body};">

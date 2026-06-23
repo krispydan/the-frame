@@ -63,9 +63,11 @@ heroCtaUrlSuggestion  Sensible default URL. Retail → getjaxy.com or
                       theme. Wholesale → wholesale.getjaxy.com or a
                       Faire/line-sheet URL. User will edit.
 
-sectionAHeading       3–5 words. Small-caps treatment in template
-                      (don't actually CAPS the text — the template
-                      styles it). State a single idea.
+sectionAHeading       3–5 words, SENTENCE CASE (per BRAND-BIBLE.md
+                      §5.10: "Sentence case always. Never Title Case,
+                      never ALL CAPS."). Rendered in Instrument Sans
+                      Semibold by the template. State a single idea.
+                      Examples: "For the 405 at 6pm" / "What's moving"
 
 sectionABody          40–70 words. ONE paragraph. Sets up the
                       secondary image emotionally. Lead with feeling.

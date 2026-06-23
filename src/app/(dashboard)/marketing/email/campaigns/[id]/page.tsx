@@ -416,10 +416,10 @@ export default function CampaignDetailPage({
             </CardHeader>
             <CardContent className="space-y-3">
               <LabeledInput
-                label="Heading (3–5 words, ALL CAPS treated)"
+                label="Heading (3–5 words, sentence case)"
                 value={campaign.sectionAHeading as string ?? ""}
                 onChange={v => updateField("sectionAHeading", v)}
-                placeholder="FOR THE 405 AT 6PM"
+                placeholder="For the 405 at 6pm"
               />
               <LabeledTextarea
                 label="Body (40–70 words)"
