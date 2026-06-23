@@ -16,9 +16,12 @@ import { renderEmailHtml } from "@/modules/marketing/lib/render-email";
  * Response: text/html (not JSON). The iframe loads this URL directly
  * via src="..." — no srcdoc + JSON wrangling.
  *
- * Rendering is delegated to render-email.tsx (a `server-only`
- * helper). Next 16 + Turbopack rejects `react-dom/server` imports
- * inside route handlers; the helper-module hop is the workaround.
+ * Rendering is delegated to render-email.ts which builds the HTML
+ * via pure string templates — Next 16 + Turbopack rejected every
+ * `react-dom/server` variant we tried (direct import, server-only
+ * helper file with .tsx extension, dynamic import). The string-
+ * template approach has zero framework dependency and works
+ * regardless of which renderer Next ships in future versions.
  */
 export async function GET(
   _req: NextRequest,
