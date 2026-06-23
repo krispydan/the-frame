@@ -591,16 +591,24 @@ export const marketingMcpTools: McpTool[] = [
       });
 
       // Maybe create campaigns — now driven by the strategy engine.
-      // Each slot gets layout variants + image-style directive from
-      // recommendForSlot(). Variants are written to the row; image
-      // directive is appended to designer_notes so the designer
-      // sees "this week's email 1 is a flat-lay" without us having
-      // to add another column.
+      // Each slot gets:
+      //   1. Variant layout from recommendForSlot()
+      //   2. A UNIQUE BRIEF derived from the week's theme + the
+      //      slot's image style + subject angle (so slot 1 brief
+      //      differs from slot 2 brief even though they share a
+      //      theme).
+      //   3. Designer notes (strategy rationale + image directive)
+      //
+      // The brief is editable in the campaign editor — Daniel:
+      // "you can edit and refine it." Generate-copy reads the brief
+      // from the campaign row at run time.
       let campaignsCreated: {
         id: string;
         scheduledDate: string;
         themeId: string;
         themeTitle: string;
+        briefTitle: string;
+        briefAngle: string;
         slotInWeek: 1 | 2;
         layoutProfile: string;
         imageStyle: string;
@@ -611,9 +619,10 @@ export const marketingMcpTools: McpTool[] = [
           `INSERT INTO marketing_email_campaigns
             (id, audience, scheduled_date, week_of, theme_id, status,
              hero_variant, section_a_variant, secondary_image_variant, section_b_variant,
+             brief_title, brief_angle, brief_product_hook, brief_seasonal_context,
              designer_notes,
              created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'themed', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+           VALUES (?, ?, ?, ?, ?, 'themed', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
         );
         for (const theme of insertedThemes) {
           const slots: (1 | 2)[] = [1, 2];
@@ -621,6 +630,25 @@ export const marketingMcpTools: McpTool[] = [
             const rec = recommendForSlot(audience, theme.weekOf, slot);
             const id = crypto.randomUUID();
             const designerNote = `STRATEGY: ${rec.rationale}\n\nIMAGE STYLE: ${rec.imageStyleDirective}\n\nSUBJECT ANGLE: ${rec.subjectAngleHint}`;
+
+            // Compose a per-slot brief from theme + strategy. The
+            // title gets the slot dimension appended so the user can
+            // distinguish the two slots at a glance in the calendar.
+            // Angle weaves the image style + subject angle hints
+            // into the theme's angle so the AI knows the lens.
+            const slotLabel = slot === 1
+              ? (audience === "retail" ? "Mon" : "Tue")
+              : (audience === "retail" ? "Thu" : "Fri");
+            const imageStyleLabel = rec.imageStyle === "product_flatlay"
+              ? "product still-life angle"
+              : rec.imageStyle === "on_model_lifestyle"
+                ? "on-model lifestyle angle"
+                : rec.imageStyle.replace(/_/g, " ");
+            const briefTitle = `${theme.title} — ${slotLabel} (${imageStyleLabel})`;
+            const briefAngle = `${theme.angle ?? ""}
+
+Slot context: ${imageStyleLabel}. Subject-angle direction: ${rec.subjectAngleHint}`;
+
             campaignInsertStmt.run(
               id,
               audience,
@@ -631,6 +659,10 @@ export const marketingMcpTools: McpTool[] = [
               rec.layoutVariants.sectionAVariant,
               rec.layoutVariants.secondaryImageVariant,
               rec.layoutVariants.sectionBVariant,
+              briefTitle,
+              briefAngle,
+              theme.productHook ?? null,
+              theme.seasonalContext ?? null,
               designerNote,
             );
             campaignsCreated.push({
@@ -638,6 +670,8 @@ export const marketingMcpTools: McpTool[] = [
               scheduledDate: rec.scheduledDate,
               themeId: theme.id,
               themeTitle: theme.title,
+              briefTitle,
+              briefAngle,
               slotInWeek: slot,
               layoutProfile: rec.layoutProfile,
               imageStyle: rec.imageStyle,
@@ -658,7 +692,7 @@ export const marketingMcpTools: McpTool[] = [
             themes: insertedThemes,
             campaignsCreated,
             note: createCampaigns
-              ? `Created ${campaignsCreated.length} campaign slots on ${audience === "retail" ? "Mon + Thu" : "Tue + Fri"} cadence. Each slot's variants + image style + subject angle were picked by the strategy engine (recommendForSlot). Layout rotates weekly: editorial → product-catalog → split → UGC. Slot 1 always = product flat-lay, Slot 2 always = on-model lifestyle. Call generate_with_v5_prompt next per campaign.`
+              ? `Created ${campaignsCreated.length} campaign slots. Each slot got its own brief (slot 1 ≠ slot 2 even within the same week — different image style + subject angle). User can edit briefs in the editor at /marketing/email/campaigns/[id] before calling generate-copy. Cadence: ${audience === "retail" ? "Mon + Thu" : "Tue + Fri"}.`
               : "Themes only — no campaigns created.",
           }, null, 2),
         }],
@@ -723,12 +757,17 @@ export const marketingMcpTools: McpTool[] = [
         `INSERT INTO marketing_email_campaigns
           (id, audience, scheduled_date, week_of, theme_id, status,
            hero_variant, section_a_variant, secondary_image_variant, section_b_variant,
+           brief_title, brief_angle, brief_product_hook, brief_seasonal_context,
            designer_notes,
            created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'copy_pending', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+         VALUES (?, ?, ?, ?, ?, 'copy_pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
       ).run(
         campaignId, audience, scheduled, weekOf, themeId,
         heroVariant, sectionAVariant, secondaryImageVariant, sectionBVariant,
+        input.themeTitle as string,
+        input.themeAngle as string,
+        (input.productHook as string | undefined) ?? null,
+        (input.seasonalContext as string | undefined) ?? null,
         designerNote,
       );
 

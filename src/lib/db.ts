@@ -1778,6 +1778,10 @@ try {
     week_of TEXT,
     status TEXT NOT NULL DEFAULT 'idea',
     theme_id TEXT,
+    brief_title TEXT,
+    brief_angle TEXT,
+    brief_product_hook TEXT,
+    brief_seasonal_context TEXT,
     subject TEXT,
     preheader TEXT,
     hero_variant TEXT NOT NULL DEFAULT 'full_bleed_overlay',
@@ -1844,6 +1848,23 @@ try {
     created_at TEXT DEFAULT (datetime('now'))
   )`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_email_send_results_campaign ON marketing_email_send_results (campaign_id)`);
+
+  // ── 2026-06-23: per-campaign brief columns ───────────────────
+  // CREATE TABLE IF NOT EXISTS above only fires on a fresh DB —
+  // existing rows need these added via ALTER. Try-each-individually
+  // so the second boot (column already exists) is a no-op.
+  for (const col of [
+    "brief_title TEXT",
+    "brief_angle TEXT",
+    "brief_product_hook TEXT",
+    "brief_seasonal_context TEXT",
+  ]) {
+    try {
+      sqlite.exec(`ALTER TABLE marketing_email_campaigns ADD COLUMN ${col}`);
+    } catch {
+      /* column already exists */
+    }
+  }
 } catch (e) { console.error("[db] Marketing email tables error:", e); }
 
 // Auto-run migrations on startup (idempotent — safe to run every time)

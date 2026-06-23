@@ -49,6 +49,18 @@ export const emailCampaigns = sqliteTable("marketing_email_campaigns", {
   }).notNull().default("idea"),
   themeId: text("theme_id"),                                 // → marketing_email_themes.id
 
+  // ── Brief (the AI prompt/idea — Daniel: "before you run the AI
+  // generation, we should give it a prompt/idea for the campaign.
+  // this should be core to generating the email content.") ──
+  // These four fields are the editable surface in the campaign
+  // editor that drives the generate-copy + generate-image-prompts
+  // calls. Pre-filled by plan_week + build_campaign_from_idea;
+  // the user can refine before/after each generation.
+  briefTitle: text("brief_title"),                           // "Sara's Main Character moment"
+  briefAngle: text("brief_angle"),                            // 1-2 sentences — why this email, why now
+  briefProductHook: text("brief_product_hook"),               // SKU / category / colorway
+  briefSeasonalContext: text("brief_seasonal_context"),       // holiday / weather / cultural anchor
+
   // Subject + preheader (inbox metadata, separate from in-email content)
   subject: text("subject"),
   preheader: text("preheader"),

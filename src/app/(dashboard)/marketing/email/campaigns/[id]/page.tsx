@@ -54,6 +54,33 @@ export default function CampaignDetailPage({
 
   // ── AI generate handlers ────────────────────────────────────
   async function handleGenerateCopy() {
+    // Warn if brief is empty — generation will still proceed but
+    // with unspecified placeholders. Better to nudge the user back
+    // to the brief field.
+    const briefTitle = String(campaign?.briefTitle ?? "").trim();
+    const briefAngle = String(campaign?.briefAngle ?? "").trim();
+    if (!briefTitle || !briefAngle) {
+      const cont = confirm(
+        "The Campaign Brief (title + angle) is empty. The AI will generate with placeholders. Continue anyway?",
+      );
+      if (!cont) return;
+    }
+
+    // Save any in-flight edits to the brief BEFORE generating so the
+    // server reads the latest values.
+    if (campaign) {
+      await fetch(`/api/v1/marketing/email/campaigns/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          briefTitle: campaign.briefTitle,
+          briefAngle: campaign.briefAngle,
+          briefProductHook: campaign.briefProductHook,
+          briefSeasonalContext: campaign.briefSeasonalContext,
+        }),
+      });
+    }
+
     setGenerating("copy");
     setGenerateError(null);
     setFailedChecks([]);
@@ -79,6 +106,19 @@ export default function CampaignDetailPage({
   }
 
   async function handleGenerateImagePrompts() {
+    // Save brief edits first so the server sees the latest brief.
+    if (campaign) {
+      await fetch(`/api/v1/marketing/email/campaigns/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          briefTitle: campaign.briefTitle,
+          briefAngle: campaign.briefAngle,
+          briefProductHook: campaign.briefProductHook,
+          briefSeasonalContext: campaign.briefSeasonalContext,
+        }),
+      });
+    }
     setGenerating("image_prompts");
     setGenerateError(null);
     try {
@@ -226,6 +266,51 @@ export default function CampaignDetailPage({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Left pane — editor */}
         <div className="space-y-4">
+          {/* CAMPAIGN BRIEF — the prompt/idea that drives every AI call.
+              Save this BEFORE clicking Generate copy. */}
+          <Card className="border-foreground/30">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">
+                Campaign brief
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  The idea AI uses to generate everything below
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <LabeledInput
+                label="Title (3–8 words)"
+                value={campaign.briefTitle as string ?? ""}
+                onChange={v => updateField("briefTitle", v)}
+                placeholder="e.g. Sunday Drive in Honey lands"
+              />
+              <LabeledTextarea
+                label="Angle (why this email, why now — 1–3 sentences)"
+                value={campaign.briefAngle as string ?? ""}
+                onChange={v => updateField("briefAngle", v)}
+                rows={4}
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <LabeledInput
+                  label="Product hook (optional)"
+                  value={campaign.briefProductHook as string ?? ""}
+                  onChange={v => updateField("briefProductHook", v)}
+                  placeholder="SKU / category / colorway"
+                />
+                <LabeledInput
+                  label="Seasonal context (optional)"
+                  value={campaign.briefSeasonalContext as string ?? ""}
+                  onChange={v => updateField("briefSeasonalContext", v)}
+                  placeholder="holiday / weather / cultural anchor"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Save the brief before generating. AI calls (Generate copy +
+                Generate image prompts) read these fields.
+              </p>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm">Subject + preheader</CardTitle>

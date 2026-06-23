@@ -32,17 +32,19 @@ export async function POST(
     return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
   }
 
-  let themeTitle = "(no theme)";
-  let themeAngle = "(no theme)";
-  if (campaign.themeId) {
+  // Brief resolution: campaign's own brief_* fields are primary,
+  // theme row is the fallback for older campaigns.
+  let themeTitle = campaign.briefTitle ?? "(no brief)";
+  let themeAngle = campaign.briefAngle ?? "(no angle)";
+  if ((!campaign.briefTitle || !campaign.briefAngle) && campaign.themeId) {
     const [theme] = await db
       .select()
       .from(emailThemes)
       .where(eq(emailThemes.id, campaign.themeId))
       .limit(1);
     if (theme) {
-      themeTitle = theme.title;
-      themeAngle = theme.angle ?? "(no angle)";
+      if (!campaign.briefTitle) themeTitle = theme.title;
+      if (!campaign.briefAngle) themeAngle = theme.angle ?? "(no angle)";
     }
   }
 

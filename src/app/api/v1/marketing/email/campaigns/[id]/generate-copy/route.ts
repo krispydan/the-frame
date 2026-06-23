@@ -36,46 +36,63 @@ export async function POST(
     return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
   }
 
-  // Allow overrides from body but default to the campaign's theme.
+  // Brief resolution order (Daniel: "the prompt/idea should be core
+  // to generating the email content"):
+  //   1. Body override (caller passes briefTitle/briefAngle/...)
+  //   2. Campaign's brief_* columns (the editable surface)
+  //   3. Linked theme row (legacy fallback)
+  //   4. "(unspecified)" — generation still proceeds but warns
   let body: {
-    themeTitle?: string;
-    themeAngle?: string;
-    productHook?: string;
-    seasonalContext?: string;
+    briefTitle?: string;
+    briefAngle?: string;
+    briefProductHook?: string;
+    briefSeasonalContext?: string;
   } = {};
   try { body = await req.json(); } catch { /* empty body fine */ }
 
-  // If campaign has a theme_id and the body didn't override, look up
-  // the theme row.
-  let themeTitle = body.themeTitle;
-  let themeAngle = body.themeAngle;
-  let productHook = body.productHook ?? null;
-  let seasonalContext = body.seasonalContext ?? null;
+  let briefTitle = body.briefTitle ?? campaign.briefTitle ?? undefined;
+  let briefAngle = body.briefAngle ?? campaign.briefAngle ?? undefined;
+  let productHook = body.briefProductHook ?? campaign.briefProductHook ?? null;
+  let seasonalContext = body.briefSeasonalContext ?? campaign.briefSeasonalContext ?? null;
 
-  if ((!themeTitle || !themeAngle) && campaign.themeId) {
+  // Fallback to linked theme if brief is empty (covers older campaigns
+  // created before the brief columns existed).
+  if ((!briefTitle || !briefAngle) && campaign.themeId) {
     const [theme] = await db
       .select()
       .from(emailThemes)
       .where(eq(emailThemes.id, campaign.themeId))
       .limit(1);
     if (theme) {
-      themeTitle = themeTitle ?? theme.title;
-      themeAngle = themeAngle ?? theme.angle ?? "";
+      briefTitle = briefTitle ?? theme.title;
+      briefAngle = briefAngle ?? theme.angle ?? "";
       productHook = productHook ?? theme.productHook;
       seasonalContext = seasonalContext ?? theme.seasonalContext;
     }
   }
 
-  // Last-resort defaults — let the user generate even without a theme.
-  themeTitle = themeTitle ?? "(unspecified)";
-  themeAngle = themeAngle ?? "(unspecified)";
+  briefTitle = briefTitle ?? "(unspecified — add a brief in the editor)";
+  briefAngle = briefAngle ?? "(unspecified)";
+
+  // Persist whatever was effective so the editor reflects what
+  // the generator ran with (in case caller passed body overrides).
+  sqlite
+    .prepare(
+      `UPDATE marketing_email_campaigns
+        SET brief_title = COALESCE(NULLIF(brief_title,''), ?),
+            brief_angle = COALESCE(NULLIF(brief_angle,''), ?),
+            brief_product_hook = COALESCE(NULLIF(brief_product_hook,''), ?),
+            brief_seasonal_context = COALESCE(NULLIF(brief_seasonal_context,''), ?)
+        WHERE id = ?`,
+    )
+    .run(briefTitle, briefAngle, productHook, seasonalContext, id);
 
   const result = await generateCopy({
     audience: campaign.audience as "retail" | "wholesale",
     scheduledDate: campaign.scheduledDate,
     heroVariant: campaign.heroVariant,
-    themeTitle,
-    themeAngle,
+    themeTitle: briefTitle,
+    themeAngle: briefAngle,
     productHook,
     seasonalContext,
   });
