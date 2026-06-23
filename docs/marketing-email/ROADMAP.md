@@ -1,5 +1,12 @@
 # Marketing Email Assistant — Roadmap to Enterprise-Grade
 
+> **Scope update (2026-06-23, per Daniel):** Export to Omnisend/Faire,
+> send-results/analytics (Phase 6), email-module unit tests, and
+> Outlook/email-client robustness are **deferred** — not needed yet.
+> Export is to an **image** for now (client-side render → PNG/JPG).
+> Those features were removed from the codebase (recoverable via git)
+> to keep it lean; the notes below are retained as the future plan.
+
 Companion to `REVIEW.md`. This is the sequenced plan to take the v1 from "strong but unfinished" to "a credible, better-than-agency replacement." Items A–H are implemented in this pass; I–L are specified for follow-up with acceptance criteria.
 
 Guiding principle: **finish the pipeline first** (so a campaign can actually reach an inbox), **then make it trustworthy** (validation + robust rendering + tests), **then make it learn** (analytics loop + catalog grounding).

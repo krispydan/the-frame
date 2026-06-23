@@ -1,10 +1,13 @@
 # Marketing Email Assistant — Module Guide
 
-The integrated, AI-assisted email pipeline that replaces Jaxy's email
-agency: theme ideation → copy → image briefing → designer handoff →
-preview → **export to Omnisend/Faire** → results capture → learning loop.
+The integrated, AI-assisted email pipeline: theme ideation → copy →
+image briefing → designer handoff → preview → **export to image**.
 
-See `REVIEW.md` for the audit and `ROADMAP.md` for what's done / next.
+> Scope note (per Daniel, 2026-06-23): we are NOT building ESP export
+> (Omnisend/Faire HTML), send-results/analytics, email-module unit
+> tests, or Outlook/email-client robustness yet. Export is to an image
+> for now. See `REVIEW.md` for the full audit and `ROADMAP.md` for the
+> deferred items.
 
 ## Pipeline (10 stages)
 
@@ -13,6 +16,7 @@ image_review → preview_ready → exported → sent → analyzed`
 
 Movement is gated (`lib/workflow.ts`): each forward step validates its
 requirements; backward is always allowed. The editor shows a stepper.
+Exporting an image marks the campaign `exported`.
 
 ## Where things live
 
@@ -27,10 +31,8 @@ requirements; backward is always allowed. The editor shows a stepper.
 | Copy QA linter (pure) | `lib/copy-quality.ts` |
 | Write-time validation (pure) | `lib/campaign-validation.ts` |
 | Workflow gates (pure) | `lib/workflow.ts` |
-| Email renderer (preview + export targets) | `lib/render-email.ts` |
+| Email renderer (single render path) | `lib/render-email.ts` |
 | Template data type (single source) | `lib/email-template-types.ts` |
-| Export (Omnisend HTML / Faire JSON) | `lib/email-export.ts` |
-| Learning-loop persistence | `lib/strategy-outcomes.ts` |
 | MCP tools (chat surface) | `mcp/tools.ts` |
 | UI | `src/app/(dashboard)/marketing/email/*` |
 
@@ -43,15 +45,16 @@ requirements; backward is always allowed. The editor shows a stepper.
 | POST | `/campaigns/[id]/generate-copy` | Claude copy + server QA lint |
 | POST | `/campaigns/[id]/generate-image-prompts` | Higgsfield briefs |
 | POST | `/campaigns/[id]/upload-image` | designer render upload |
-| GET | `/campaigns/[id]/preview` | rendered HTML for the iframe |
+| GET | `/campaigns/[id]/preview` | rendered HTML (editor iframe + image capture source) |
 | GET | `/campaigns/[id]/validate` | deterministic QA + readiness |
 | POST | `/campaigns/[id]/advance` | move stage (gated) |
-| GET | `/campaigns/[id]/export?format=omnisend\|faire` | export + → exported |
-| GET/POST | `/campaigns/[id]/results` | capture metrics → learning loop |
 | POST | `/themes/generate`, GET `/themes` | themes |
 | POST | `/plan-week` | self-serve N-week planning |
 | GET | `/designer-queue` | image-pending/review queue |
-| GET | `/insights` | ROI ($ saved) + best strategy dimensions |
+
+**Export is client-side**: the editor renders the email at 600px in an
+offscreen iframe and rasterizes it to PNG/JPG with `html-to-image`
+(no server browser). Then it best-effort marks the campaign `exported`.
 
 ## Quality gates
 
@@ -62,9 +65,6 @@ requirements; backward is always allowed. The editor shows a stepper.
   confidence; warnings advise. The model's `selfCheckPassed` is advisory.
 - **Write validation** (`campaign-validation.ts`) rejects bad enums /
   non-http CTA URLs / malformed dates / pathological lengths on PATCH.
-- **Email rendering** has an `export` target that hardens HTML for
-  Outlook/Gmail (mso conditionals, VML bulletproof CTA + hero
-  background, hidden preheader).
 
 ## Environment variables
 
@@ -72,15 +72,7 @@ requirements; backward is always allowed. The editor shows a stepper.
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | required for all AI calls |
 | `MARKETING_EMAIL_MODEL` / `ANTHROPIC_MODEL` | `claude-opus-4-1-20250805` | model id (bump when account has a newer one) |
-| `MARKETING_AGENCY_MONTHLY` | `3000` | agency retainer for ROI math |
-| `MARKETING_EMAILS_PER_MONTH` | `16` | emails/month for per-email cost |
 | `NEXT_PUBLIC_IMAGE_BASE_URL` | prod CDN | image URL base |
-
-## Tests
-
-`npm test` (vitest). Marketing suites in `src/__tests__/marketing/`:
-strategy, copy-quality, render-email, email-export, workflow,
-campaign-validation (66 tests).
 
 ## Brand context
 

@@ -194,38 +194,67 @@ export default function CampaignDetailPage({
     }
   }
 
-  // ── Export (Omnisend HTML download / Faire JSON) ────────────
-  async function handleExport(format: "omnisend" | "faire") {
+  // ── Export to image (client-side capture of the rendered email) ──
+  // Renders the email at 600px in an offscreen iframe, waits for images,
+  // and rasterizes it to a PNG with html-to-image. No server browser
+  // needed — works wherever the app loads.
+  async function handleExportImage(format: "png" | "jpeg" = "png") {
     setExporting(true);
     setPipelineMsg(null);
+    let iframe: HTMLIFrameElement | null = null;
     try {
-      if (format === "omnisend") {
-        // Trigger a file download of the standalone HTML.
-        const a = document.createElement("a");
-        a.href = `/api/v1/marketing/email/campaigns/${id}/export?format=omnisend`;
-        a.download = "";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        // Reflect the status change.
-        setTimeout(() => {
-          fetch(`/api/v1/marketing/email/campaigns/${id}`)
-            .then(r => r.json())
-            .then(d => { if (d.campaign) setCampaign(d.campaign); });
-        }, 600);
-        setPipelineMsg("Omnisend HTML downloaded. Paste into Omnisend's custom-code block.");
-      } else {
-        const res = await fetch(`/api/v1/marketing/email/campaigns/${id}/export?format=faire`);
-        const data = await res.json();
-        await navigator.clipboard.writeText(data.plainText ?? JSON.stringify(data.blocks, null, 2));
-        fetch(`/api/v1/marketing/email/campaigns/${id}`)
-          .then(r => r.json())
-          .then(d => { if (d.campaign) setCampaign(d.campaign); });
-        setPipelineMsg("Faire blocks copied to clipboard. Paste into Faire's email builder.");
+      const html = await fetch(`/api/v1/marketing/email/campaigns/${id}/preview`).then(r => r.text());
+
+      iframe = document.createElement("iframe");
+      iframe.style.cssText = "position:fixed;left:-10000px;top:0;width:600px;height:200px;border:0;";
+      document.body.appendChild(iframe);
+      const doc = iframe.contentDocument!;
+      doc.open(); doc.write(html); doc.close();
+
+      // Wait for layout + every image to finish loading.
+      await new Promise((r) => setTimeout(r, 350));
+      await Promise.all(
+        Array.from(doc.images).map((img) =>
+          img.complete
+            ? Promise.resolve()
+            : new Promise<void>((res) => { img.onload = img.onerror = () => res(); }),
+        ),
+      );
+
+      const node = doc.body;
+      const height = Math.max(node.scrollHeight, 600);
+      iframe.style.height = `${height}px`;
+
+      const lib = await import("html-to-image");
+      const opts = { width: 600, height, pixelRatio: 2, backgroundColor: "#ffffff", cacheBust: true };
+      let dataUrl: string;
+      try {
+        dataUrl = format === "jpeg" ? await lib.toJpeg(node, { ...opts, quality: 0.92 }) : await lib.toPng(node, opts);
+      } catch {
+        // Web-font embedding can fail cross-origin — retry without fonts.
+        dataUrl = format === "jpeg"
+          ? await lib.toJpeg(node, { ...opts, quality: 0.92, skipFonts: true })
+          : await lib.toPng(node, { ...opts, skipFonts: true });
       }
+
+      const name = String(campaign?.subject || campaign?.heroHeadline || "jaxy-email")
+        .replace(/[^\w.-]+/g, "_").slice(0, 60);
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = `${name}.${format === "jpeg" ? "jpg" : "png"}`;
+      document.body.appendChild(a); a.click(); a.remove();
+
+      // Best-effort: mark exported (ignore if gated/blocked).
+      fetch(`/api/v1/marketing/email/campaigns/${id}/advance`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: "exported" }),
+      }).then(r => r.json()).then(d => { if (d.campaign) setCampaign(d.campaign); }).catch(() => {});
+
+      setPipelineMsg(`Email image downloaded (${format.toUpperCase()}).`);
     } catch (e) {
-      setPipelineMsg(e instanceof Error ? e.message : String(e));
+      setPipelineMsg(`Image export failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
+      if (iframe) iframe.remove();
       setExporting(false);
     }
   }
@@ -334,13 +363,13 @@ export default function CampaignDetailPage({
             <ShieldCheck className="h-4 w-4 mr-2" />
             Validate
           </Button>
-          <Button variant="outline" onClick={() => handleExport("omnisend")} disabled={exporting} title="Download standalone HTML to paste into Omnisend">
+          <Button variant="outline" onClick={() => handleExportImage("png")} disabled={exporting} title="Render the email to a PNG image and download">
             <Download className="h-4 w-4 mr-2" />
-            {exporting ? "Exporting…" : "Omnisend"}
+            {exporting ? "Rendering…" : "Export image"}
           </Button>
-          <Button variant="outline" onClick={() => handleExport("faire")} disabled={exporting} title="Copy Faire blocks to clipboard">
+          <Button variant="outline" onClick={() => handleExportImage("jpeg")} disabled={exporting} title="Export the email as a JPG image">
             <Download className="h-4 w-4 mr-2" />
-            Faire
+            JPG
           </Button>
           <Button onClick={save} disabled={saving}>
             <Save className="h-4 w-4 mr-2" />
@@ -678,13 +707,6 @@ export default function CampaignDetailPage({
               </div>
             </CardContent>
           </Card>
-
-          {["exported", "sent", "analyzed"].includes(campaign.status as string) && (
-            <ResultsPanel
-              campaignId={id}
-              onRecorded={(c) => { if (c) setCampaign(c); setSavedAt(Date.now()); }}
-            />
-          )}
         </div>
 
         {/* Right pane — live preview */}
@@ -814,115 +836,5 @@ function VariantPicker({
         </option>
       ))}
     </select>
-  );
-}
-
-// ────────────────────────────────────────────────────────────
-// Results capture — Phase 6 manual entry (Omnisend / Faire metrics).
-// Feeds the strategy learning loop.
-// ────────────────────────────────────────────────────────────
-
-function ResultsPanel({
-  campaignId, onRecorded,
-}: {
-  campaignId: string;
-  onRecorded: (campaign: Campaign | null) => void;
-}) {
-  const [platform, setPlatform] = useState<"omnisend" | "faire">("omnisend");
-  const [recipients, setRecipients] = useState("");
-  const [opens, setOpens] = useState("");
-  const [clicks, setClicks] = useState("");
-  const [notes, setNotes] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [history, setHistory] = useState<Array<Record<string, unknown>>>([]);
-  const [msg, setMsg] = useState<string | null>(null);
-
-  const loadHistory = useCallback(() => {
-    fetch(`/api/v1/marketing/email/campaigns/${campaignId}/results`)
-      .then(r => r.json())
-      .then(d => setHistory(d.results ?? []));
-  }, [campaignId]);
-
-  useEffect(() => { loadHistory(); }, [loadHistory]);
-
-  async function submit() {
-    setSaving(true);
-    setMsg(null);
-    try {
-      const res = await fetch(`/api/v1/marketing/email/campaigns/${campaignId}/results`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          platform,
-          recipients: recipients ? Number(recipients) : undefined,
-          opens: opens ? Number(opens) : undefined,
-          clicks: clicks ? Number(clicks) : undefined,
-          notes: notes || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (data.error) { setMsg(data.error); return; }
-      const or = data.openRate != null ? `${(data.openRate * 100).toFixed(1)}% open` : "";
-      const cr = data.clickRate != null ? `${(data.clickRate * 100).toFixed(1)}% click` : "";
-      setMsg(`Recorded. ${[or, cr].filter(Boolean).join(" · ")}`);
-      setRecipients(""); setOpens(""); setClicks(""); setNotes("");
-      loadHistory();
-      // Refresh campaign to reflect the advanced status.
-      const c = await fetch(`/api/v1/marketing/email/campaigns/${campaignId}`).then(r => r.json());
-      onRecorded(c.campaign ?? null);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Card className="border-foreground/30">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm">
-          Results
-          <span className="ml-2 text-xs font-normal text-muted-foreground">
-            Paste Omnisend / Faire metrics — feeds the strategy engine
-          </span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex gap-1">
-          {(["omnisend", "faire"] as const).map(p => (
-            <button
-              key={p}
-              onClick={() => setPlatform(p)}
-              className={`px-3 py-1 text-xs rounded border ${platform === p ? "bg-accent border-foreground" : "border-input"}`}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-        <div className="grid grid-cols-3 gap-2">
-          <LabeledInput label="Recipients" value={recipients} onChange={setRecipients} placeholder="0" />
-          <LabeledInput label="Opens" value={opens} onChange={setOpens} placeholder="0" />
-          <LabeledInput label="Clicks" value={clicks} onChange={setClicks} placeholder="0" />
-        </div>
-        <LabeledInput label="Notes (optional)" value={notes} onChange={setNotes} />
-        <div className="flex items-center gap-2">
-          <Button size="sm" onClick={submit} disabled={saving}>
-            {saving ? "Saving…" : "Record results"}
-          </Button>
-          {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
-        </div>
-        {history.length > 0 && (
-          <div className="text-xs text-muted-foreground space-y-1 pt-1 border-t">
-            {history.map((h, i) => {
-              const rate = (n: unknown) => (typeof n === "number" ? `${(n * 100).toFixed(1)}%` : "—");
-              return (
-                <div key={i} className="flex justify-between tabular-nums">
-                  <span>{String(h.platform)} · {Number(h.recipients) || 0} sent</span>
-                  <span>{rate(h.openRate)} open · {rate(h.clickRate)} click</span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </CardContent>
-    </Card>
   );
 }

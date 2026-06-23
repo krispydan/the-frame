@@ -1849,27 +1849,6 @@ try {
   )`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_email_send_results_campaign ON marketing_email_send_results (campaign_id)`);
 
-  // Strategy outcomes — metrics tagged with the strategy dimensions
-  // (layout / image style / subject angle) that produced them. The
-  // substrate the v2 data-driven recommender reads.
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS marketing_email_strategy_outcomes (
-    id TEXT PRIMARY KEY NOT NULL,
-    campaign_id TEXT NOT NULL,
-    audience TEXT NOT NULL,
-    week_of TEXT,
-    layout_profile TEXT,
-    image_style TEXT,
-    subject_angle TEXT,
-    recipients INTEGER,
-    opens INTEGER,
-    clicks INTEGER,
-    open_rate REAL,
-    click_rate REAL,
-    created_at TEXT DEFAULT (datetime('now'))
-  )`);
-  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_email_strategy_outcomes_campaign ON marketing_email_strategy_outcomes (campaign_id)`);
-  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_email_strategy_outcomes_audience ON marketing_email_strategy_outcomes (audience)`);
-
   // ── 2026-06-23: per-campaign brief columns ───────────────────
   // CREATE TABLE IF NOT EXISTS above only fires on a fresh DB —
   // existing rows need these added via ALTER. Try-each-individually
