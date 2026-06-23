@@ -416,3 +416,125 @@ Pipeline maturity: ~70% of the way to replacing the agency. (Was ~60% before rou
 Unchanged from round 1: **build the send-results capture form + wire `recordOutcome()`**. Same reasoning — the engine has no feedback loop, so every other smart-engine improvement is theoretical until the data starts flowing.
 
 But there's a tactical wedge that's easier and high-value too: **Sprint 1.5 in one sitting (~3hr)** closes 8 polish items at once. Stack that with **Sprint 3.1 — Omnisend HTML download (~2hr)** and the production capability story is essentially done. That's a ~5hr afternoon that turns "feels like a v1" into "feels like a v2."
+
+---
+
+## 9. Round 3 — what shipped + remaining gaps
+
+This round (2026-06-23 continued): the calendar feature, the
+calendar-driven monthly planner, and a series of cleanups around
+the editor UX. Plus a hotfix for an `Unexpected end of JSON input`
+bug that Daniel hit live.
+
+### 9.1 What's new since v2
+
+| Feature | Commit | What |
+|---|---|---|
+| Marketing calendar | `de9bfa5` | Schema + seed (15 US holidays) + CRUD + UI + MCP + AI wire-in (auto-injects events in ±14d around campaign send date) |
+| Critical review fixes | `bc3b7ee` | PATCH SQL-name regex, PATCH status enum, preview missing logo+disabled flags, Chromium concurrency cap, upload-image transaction |
+| AI route try/catch hotfix | `855dbc1` | Both AI routes wrap their handler in try/catch; client uses `parseAiResponse` for non-JSON tolerance |
+| Static logo + name=title | `05024dc` | Removed per-campaign logo upload (Daniel: "never going to change"). Removed `briefTitle` field — campaign name IS the title. AI proposes a name when empty. |
+| AI status panel + diff PATCH + modals | `8319d8b` | Per-field debounced diff PATCH, AI generation panel with inputs + elapsed timer + calendar count, modal escape/scroll-lock/dirty-confirm |
+| **Monthly planner** | `c315483` | Calendar-driven brief proposer. AI reads calendar + strategy → proposes one brief per slot → review + edit → bulk-create campaigns. |
+
+### 9.2 Closed in this round
+
+From the round-1 / round-2 issue list:
+- 🔴 **3.1 Delete campaign UI** — endpoint exists, button still missing (Trash icon is on the editor but not the dashboard list). Still open.
+- 🟡 **3.3 Brief edits don't trigger image-prompt regen prompt** — still open.
+- 🟡 **3.6 Modal dismiss loses data** — **CLOSED**. Backdrop click, Escape, and Cancel all confirm-on-dirty now.
+- 🟡 **3.8 No campaign duplication** — still open.
+- 🟡 **3.9 No plan-ahead UI** — **CLOSED**. `/marketing/email/plan` is the bulk-plan UI. Far beyond what was originally scoped (was supposed to be "plan 4 weeks"; now does 1-12 weeks with calendar context).
+- 🟡 **3.10 Designer queue doesn't show brief preview** — still open.
+- 🟡 **3.12 Preview iframe doesn't auto-refresh on save** — **CLOSED**. Diff-PATCH triggers `setPreviewKey(k+1)` on success.
+- 🟡 **3.13 Name fallback** — partially closed. Generate-copy now AI-proposes a name when blank. Dashboard list still shows "(no subject yet)" for un-generated drafts.
+- 🟢 **3.16 FOUC in preview iframe** — still flickers on font load.
+- 🟢 **3.21 Custom logo upload** — **CLOSED** (removed by request).
+- 🟢 **3.22 Orphaned React component tree** — still there; `email-template/index.tsx` still hosts the `CampaignData` type that the renderer + routes import. Detangling is a separate cleanup PR.
+
+### 9.3 NEW issues surfaced by round 3
+
+#### 🔴 9.3.1 — Planner's strict "briefs.length === slots.length" check is brittle
+The /propose endpoint returns 502 if Claude returns N-1 or N+1 briefs. Real LLMs occasionally do this even with a `minItems`/`maxItems` schema. Should partial-accept (return whatever count + a warning) instead of nuking the whole batch.
+
+#### 🟡 9.3.2 — Diff-PATCH never sends a save indicator until 500ms after typing stops
+The "Saved" timestamp updates after the debounce + the PATCH lands (~600ms after last keystroke). If Daniel types and immediately navigates away, the PATCH is in-flight when the page unmounts. The `<beforeunload>` warn-on-unsaved hook isn't there yet.
+
+#### 🟡 9.3.3 — Plan-the-month doesn't show calendar events before AI runs
+The planning loading card says "AI is reading calendar + strategy" but doesn't tell Daniel WHICH events will be in scope. Should pre-fetch events count + show "X events in scope: Memorial Day (PRIMARY), Father's Day, …" before clicking Plan. Trust + transparency.
+
+#### 🟡 9.3.4 — `proposedName` schema requires it but doesn't enforce length
+v5 prompt asks for 3-8 words but the JSON schema only caps `maxLength: 80`. If AI returns "Email" (1 word) it passes validation. Should add a soft warning post-parse.
+
+#### 🟡 9.3.5 — Bulk-create has no preview/dry-run mode
+Daniel could click "Create 16 campaigns" without scrolling through all 16 briefs. There's no confirm. If he wanted to review fewer, he has to delete after. Small modal "create these 16? You can edit/delete individuals after" would help.
+
+#### 🟢 9.3.6 — `nameWasEmpty` is computed in generate-copy but never returned
+The route tracks whether the name was AI-proposed (good for UI hints like "AI named this") but the client never sees the flag. Either remove it or return it.
+
+#### 🟢 9.3.7 — Calendar event delete has no undo
+Daniel mis-clicks → poof. confirm() prompts but no undo toast. Low priority.
+
+#### 🟢 9.3.8 — Plan-month elapsed timer is in the page header card but not the result card
+The proposer card shows "Planning…" without elapsed. The result card shows the proposals. The transition is fine but the elapsed is lost. Minor.
+
+### 9.4 Updated workflow now
+
+```
+DAILY:
+  Daniel goes to /marketing/email
+  → Sees this week's 4 campaigns + designer queue badge
+
+PLANNING (new):
+  Click "Plan the month" → /marketing/email/plan
+  → Pick audience + start date + weeks
+  → Click "Plan with AI" (~30-60s, calendar-aware briefs)
+  → Review 8 briefs (each editable)
+  → Click "Create 8 campaigns" → all land in Draft
+
+CALENDAR (new):
+  Click "Calendar" → /marketing/calendar
+  → See 12-month list of holidays + sales + launches + promos
+  → Add new ones; they auto-inject into AI prompts within ±14d
+
+EXISTING (unchanged):
+  Open a campaign in Draft
+  → Brief is pre-filled (from planner OR from user create-modal)
+  → Click Generate Copy → AI status panel shows inputs + elapsed
+                          → Copy lands, status → Copywriting
+  → Click Generate Image Prompts → status panel again
+                                  → Higgsfield briefs land
+                                  → status → Photography
+  → Designer queue picks it up at /marketing/email/designer-queue
+  → Drag-drop renders → status → Design Review
+  → Operator reviews preview, exports section JPGs OR full HTML
+  → Move status to Scheduled / Sent / Analyzed manually
+
+MCP (chat-Claude):
+  "Plan next 4 weeks of retail" → plan_month → review → create_campaign × N
+  "Add a Memorial Day 30% off promo" → add_calendar_event
+  "Generate copy for campaign X" → generate_with_v5_prompt
+```
+
+### 9.5 Honest verdict — round 3
+
+**Now ~80% of the way to replacing the $3,000/mo agency.** (Was 70% after round 2.)
+
+The big jump in this round comes from the monthly planner. Previously, every campaign required Daniel to think up a brief from scratch (or chat-Claude to do it conversationally). Now there's a structured ideation step — calendar-aware, strategy-aware, batch-able. That's the part an agency would normally own.
+
+Still missing for full 100%:
+1. **No learning loop** (3.24 from round 1) — the planner doesn't yet read past performance. Sprint 4.
+2. **No Omnisend HTML / Faire JSON export** (3.14) — section JPGs are the workaround.
+3. **No bulk operations on the dashboard** (delete + duplicate + filter by status / audience). Sprint 1.
+4. **Planner doesn't propose calendar events** — currently only USES events that are already in the calendar. A smart planner would suggest "you don't have a Father's Day event scheduled; want me to add one?" Sprint 4+.
+5. **No A/B test surface** (3.5). Sprint 1.5.
+
+### 9.6 Single most-impactful next thing — round 3 revision
+
+**Build a "plan review mode" before AI generates copy + images on the auto-planned campaigns.** Today: planner creates 8 campaigns in Draft → Daniel has to open each one individually and click Generate Copy. That's 8 manual round trips for what feels like one decision.
+
+Better: after Create from planner, show a screen listing the 8 with checkboxes + a "Generate copy for all selected" button. Background job runs through them serially (rate-limited). Daniel comes back in 5 minutes to 8 fully-drafted emails ready for image briefing.
+
+That's ~2hr of work and turns the monthly-plan flow from "AI ideates, you draft each one" into "AI ideates AND drafts, you review."
+
+After that: send-results capture + Omnisend HTML download remain the next-biggest levers.
