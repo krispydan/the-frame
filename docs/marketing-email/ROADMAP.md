@@ -56,7 +56,18 @@ Guiding principle: **finish the pipeline first** (so a campaign can actually rea
 
 ---
 
-## Phase 6 (next): trustworthy + better-than-agency
+## Phase 6 progress
+
+Completed since the initial pass:
+- **Self-serve week planning** — `lib/plan-week.ts` shared by the MCP
+  tool + `POST /plan-week`; "Plan weeks" action on the dashboard.
+- **ROI + learning surface** — `GET /insights` ("$ saved vs. agency" +
+  best-performing strategy dimensions) shown on the dashboard.
+- **Brand-context hygiene** — central `brand-context/index.ts` loader,
+  added `photography-aesthetic.md` (injected into image briefs), and
+  `scripts/sync-brand-context.sh`.
+- **Write-time validation** — `lib/campaign-validation.ts` enforced on
+  PATCH (enums / CTA URLs / dates / lengths).
 
 ### I. Email-client rendering hardening (Outlook/Gmail)  — export renderer hardened this pass; full matrix tracked
 - VML background for the hero overlay so Outlook shows the image; `<!--[if mso]>` ghost-table buttons; replace `object-fit/aspect-ratio/flex/min-height` with fixed heights + nested tables; `mso-line-height-rule:exactly`.
@@ -68,16 +79,18 @@ Guiding principle: **finish the pipeline first** (so a campaign can actually rea
 - **Acceptance:** a brief naming a real SKU produces copy with the correct price and a working PDP deep link; an out-of-stock SKU raises a warning.
 
 ### K. Hardening: validation, audit, cost
-- Write-time enum/URL/length validation on PATCH/POST.
-- `createdBy`/`updatedBy` audit columns + an `updatedAt` precondition (optimistic lock) on save.
-- Persist Claude `usage` per campaign; a dashboard "$ saved vs. agency" panel.
-- Per-user/day AI rate limit + budget guard.
+- ✅ Write-time enum/URL/length validation on PATCH.
+- ✅ Dashboard "$ saved vs. agency" panel (`/insights`).
+- Remaining: `createdBy`/`updatedBy` audit columns + `updatedAt`
+  precondition (optimistic lock) on save; persist Claude `usage` per
+  campaign for true AI-cost tracking; per-user/day AI rate limit + budget.
 
-### L. Plan-week UI + brand-context hygiene
-- Dashboard "Plan weeks" action (audience, weeks, createCampaigns) calling a thin wrapper over the strategy engine + theme gen.
-- `brand-context/index.ts` central `loadBrandContext(audience)`; `email-ai.ts` and MCP `get_brand_context` both consume it.
-- Add `scripts/sync-brand-context.sh` and `brand-context/photography-aesthetic.md` (referenced by the image prompt).
-- Make prompt extraction explicit (tagged ` ```prompt ` fences) and strip unresolved `{{...}}`.
+### L. Plan-week UI + brand-context hygiene  ✅
+- ✅ Dashboard "Plan weeks" action over the shared `planWeeks()` lib.
+- ✅ Central `brand-context/index.ts` consumed by `email-ai.ts` + MCP.
+- ✅ `scripts/sync-brand-context.sh` + `brand-context/photography-aesthetic.md`.
+- ✅ Strip unresolved `{{...}}` from prompts. Remaining: tagged
+  ` ```prompt ` fences for fully explicit prompt extraction.
 
 ---
 

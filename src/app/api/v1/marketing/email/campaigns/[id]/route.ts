@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, sqlite } from "@/lib/db";
 import { emailCampaigns } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
+import { validateCampaignPatch } from "@/modules/marketing/lib/campaign-validation";
 
 /**
  * Whitelist of columns clients can PATCH directly. Everything else
@@ -95,6 +96,12 @@ export async function PATCH(
     .limit(1);
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // Reject invalid enum/URL/length values before they hit the row.
+  const validationErrors = validateCampaignPatch(body);
+  if (validationErrors.length > 0) {
+    return NextResponse.json({ error: "Validation failed", details: validationErrors }, { status: 400 });
   }
 
   const sets: string[] = [];
