@@ -1,10 +1,12 @@
 # Marketing Email Assistant — Self-review & Improvement Plan
 
-**Date:** 2026-06-23 (during build session)
+**Last updated:** 2026-06-23 (round 2 — see §8 for delta)
 **Reviewer:** Claude (built the whole thing — adversarial self-review)
 **Scope:** Full pipeline from "operator clicks New campaign" through "designer uploads JPG" through "Daniel exports HTML/JPG and pastes into Faire/Omnisend."
 
 This isn't a "looks great, ship it" review. The goal: find every place this falls short of "replaces a $3,000/mo agency" and write down what to do about it.
+
+> **Round 2 quick index:** see §8 for what changed (real logo SVG, in-editor image uploads, section visibility toggles) and a re-evaluation of the issue list (3 closed, 27 still open + 4 new ones surfaced).
 
 ---
 
@@ -285,3 +287,132 @@ That's another ~3-4 weeks of focused work. Currently we're maybe 60% of the way 
 **Build the send-results capture form (3.24) and wire `recordOutcome()` to it.** Today the strategy engine is deterministic-only — it has no feedback loop. Once we're capturing opens/clicks/unsubs per campaign, every other improvement (track-and-avoid, outcome-weighted, "what worked this month" review) becomes possible. Without it, we're flying blind.
 
 Second most impactful: **Omnisend HTML download (Sprint 3.1).** Right now you have to use section JPGs which is the workaround pattern. Native HTML export means Omnisend handles dark-mode, responsive properly, accessibility — and click tracking works because text is text, not pixels.
+
+---
+
+## 8. Round 2 — what changed since the first review
+
+Three asks from Daniel addressed:
+1. **Real logo** — was a Cooper-Black-fallback wordmark rendering the text "Jaxy" in whatever serif the email client had. Now uses the actual SVG from `assets/logos/svg/jaxy-logo-black.svg`, vendored into `public/brand/jaxy-logo-black.svg` and emitted as an absolute-URL `<img>` so it resolves in every render context.
+2. **In-editor image uploads** — was three text-input fields where Daniel had to type paths like `email/{id}/hero.jpg`. Now drag-drop dropzones with thumbnail previews and replace-on-drop, sharing the existing `/upload-image` endpoint.
+3. **Delete sections** — was no way to skip a block. Now each section card has a "✓ Included / ✗ Hidden" pill toggling a `{section}_disabled` flag; the renderer skips disabled sections. Content preserved when toggled off (toggle back on, copy is still there).
+
+Plus the cumulative pipeline now also has, since v1: brief modal at create time, 7-stage kanban statuses, audience/date/name inline editing in the editor, section JPG export via Playwright, on-brand fonts + sentence-case CTAs.
+
+### 8.1 What got closed
+
+From the previous severity list:
+- **3.21 No way to upload a custom logo** — CLOSED. `logoImagePath` column + logo upload card.
+- Several friction items implicitly improved by the upload flow:
+  - The editor no longer says "Phase 4 will wire uploads" anywhere
+  - Replace-on-drop is now an explicit affordance
+
+### 8.2 What stayed open
+
+All 27 other items from §3 still apply. Most-pressing ones unchanged:
+- 🔴 No delete-campaign UI (3.1)
+- 🔴 No AI version history (3.2)
+- 🔴 Brief edits don't trigger image-prompt regeneration (3.3)
+- 🔴 Railway Chromium can silent-fail (3.4)
+- 🔴 No subject-line A/B test surface (3.5)
+- 🟡 No campaign duplication (3.8)
+- 🟡 No plan-ahead UI on the dashboard (3.9)
+- 🟡 Omnisend HTML / Faire JSON export missing (3.14)
+- 🔵 No learning loop / send-results capture (3.24)
+
+### 8.3 New issues surfaced by this round
+
+While building the new features, four new issues popped up:
+
+#### 🔴 8.3.1 — Logo override doesn't validate aspect ratio
+The default Jaxy logo SVG is roughly 5:2 (wide horizontal). If you upload a square co-brand logo, the renderer still constrains to `width:96px` with `height:auto`. Square logos become tiny. Should detect aspect ratio on upload and either resize or warn.
+
+#### 🟡 8.3.2 — Logo SVG is served from `/public/brand/` directly
+That works in dev but Next.js doesn't add cache headers to `/public` by default. Production logo loads will hit the origin every time instead of CDN-caching. Small fix: add a Cache-Control header in middleware for `/brand/*`.
+
+#### 🟡 8.3.3 — Section toggles don't trigger preview refresh
+The dashboard does optimistic state updates and PATCHes the row, but the iframe preview still needs a Refresh click to see the section disappear. Same root issue as 3.12 — preview doesn't auto-refresh on field changes, just on save.
+
+#### 🟢 8.3.4 — Section-image export for a disabled section returns the rendered section anyway
+The `renderSectionHtml()` function ignores the `*_disabled` flag — it always renders the requested block. Means you can export a "Section A" JPG even when Section A is hidden in the assembled email. Probably intended (designer might want to see what's there before deleting), but warrants a UI note: "this section is currently hidden but the JPG renders it."
+
+### 8.4 Re-evaluation: what's the actual workflow now?
+
+End-to-end trace, with the new affordances:
+
+```
+1. Dashboard → "+ New campaign"
+   → Modal: name, audience, date, brief (title/angle/hook/seasonal)
+   → POST creates campaign, redirects to editor
+
+2. Editor opens, shows:
+   • Header bar:    audience / status / date / name (all editable inline)
+   • Logo card:     default brand SVG, optional custom upload
+   • Brief card:    pre-filled, editable
+   • Subject card:  inbox metadata
+   • Hero card:     [✓ Included] [variant picker]
+                     dropzone for hero image (thumbnail when uploaded)
+                     6 copy fields
+   • Section A:     [✓ Included] [variant picker] + copy
+   • Secondary:     [✓ Included] [variant picker]
+                     dropzone for secondary image (+ secondary_2 if grid)
+                     alt text
+   • Section B:     [✓ Included] [variant picker] + copy + CTA
+   • Right pane:    live preview iframe + section JPG export buttons
+
+3. Operator can:
+   • Edit any field — auto-saves on blur
+   • Toggle any section off — preview shrinks
+   • Drop an image — preview updates
+   • Click Generate copy — AI fills text fields
+   • Click Generate image prompts — Higgsfield briefs land in DB
+   • Move status manually (Draft → Copywriting → … → Sent)
+   • Download per-section JPG for pasting into Faire/Omnisend
+
+4. Or chat-Claude does it via MCP:
+   • plan_week
+   • build_campaign_from_idea
+   • generate_with_v5_prompt
+   • generate_image_prompts
+   • refine_campaign
+   • (designer queue still requires the human dropzone step)
+```
+
+**Verdict:** the editor now feels like a real composer, not a settings form. The biggest UX shift is the dropzones — typing image paths was the most "this is a database admin tool" moment of the v1 flow. Gone.
+
+### 8.5 Updated improvement plan — added Sprint 1.5
+
+Inserting a small **Sprint 1.5** between Sprint 1 (critical UX) and Sprint 2 (AI workflow) to address the round-2 polish items + remaining 🔴 issues that surfaced as soon as we removed the bigger blockers:
+
+**Sprint 1.5 — Post-round-2 polish (~3hr)**
+
+1. **Logo aspect-ratio detect on upload** (8.3.1) — sharp can read dimensions before save, store width/height, render uses `max-width:120px` with proper aspect. ~30min.
+2. **Cache-Control on /brand/*** (8.3.2) — middleware adds `public, max-age=31536000, immutable` for brand assets. ~10min.
+3. **Auto-refresh preview on PATCH** (3.12 + 8.3.3) — call `setPreviewKey(k => k + 1)` from `updateField`'s success handler. Already partially there for AI generates. ~15min.
+4. **Disabled-section indicator on JPG export buttons** (8.3.4) — show "(currently hidden)" badge next to section buttons whose section is off. ~10min.
+5. **Logo dimensions warning on hero variant pickers** (was implicit but surfaced today) — when you switch hero variant, the recommended dimensions change. Show them inline. ~30min.
+6. **Confirm-before-leave on modal with dirty data** (3.6 from round 1) — track touched state in the modal; if dirty, confirm on backdrop click. ~15min.
+7. **Name fallback in the dashboard list** (3.13) — if name empty, show brief title; if both empty, show `Untitled — {date} — {audience}`. ~15min.
+8. **Delete-campaign button in the dashboard** (3.1) — small icon + confirm. The DELETE endpoint already exists. ~30min.
+
+**Total: ~3hr.** Mostly polish, all wins.
+
+### 8.6 New honest verdict
+
+**Better than round 1, still not yet at "replaces a $3,000/mo agency."**
+
+Round 2 closed the "this feels like a database admin tool" gap (dropzones replaced path inputs, real logo replaced fallback wordmark, deletable sections replaced fixed template). The pipeline is now genuinely usable for non-engineers.
+
+What's still missing:
+1. **No learning loop** — strategy engine still flying blind. (Sprint 4.1-3)
+2. **No Omnisend HTML / Faire JSON export** — section JPGs are a workaround, not the real channel. (Sprint 3.1-2)
+3. **No campaign-level operations** — can't delete, can't duplicate, can't bulk-plan a month from the UI. (Sprint 1 + 1.5)
+4. **No version history** — AI overwrites are destructive. (Sprint 2.3)
+
+Pipeline maturity: ~70% of the way to replacing the agency. (Was ~60% before round 2.) Three more sprints (1, 1.5, 3) puts it past 85% on production capability — leaving the learning-loop work (Sprint 4) as the final agency-replacement bridge.
+
+### 8.7 Single most-impactful next thing (revised)
+
+Unchanged from round 1: **build the send-results capture form + wire `recordOutcome()`**. Same reasoning — the engine has no feedback loop, so every other smart-engine improvement is theoretical until the data starts flowing.
+
+But there's a tactical wedge that's easier and high-value too: **Sprint 1.5 in one sitting (~3hr)** closes 8 polish items at once. Stack that with **Sprint 3.1 — Omnisend HTML download (~2hr)** and the production capability story is essentially done. That's a ~5hr afternoon that turns "feels like a v1" into "feels like a v2."
