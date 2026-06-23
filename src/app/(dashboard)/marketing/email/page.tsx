@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Plus, Mail, Image as ImageIcon } from "lucide-react";
+import { Plus, Mail, Image as ImageIcon, CalendarPlus } from "lucide-react";
 
 type Campaign = {
   id: string;
@@ -48,7 +48,7 @@ export default function EmailAssistantDashboard() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     fetch("/api/v1/marketing/email/campaigns")
       .then((r) => r.json())
       .then((data) => {
@@ -57,6 +57,8 @@ export default function EmailAssistantDashboard() {
       })
       .catch(() => setLoading(false));
   }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   // Group by status for pipeline chips
   const statusCounts: Record<string, number> = {};
@@ -100,6 +102,7 @@ export default function EmailAssistantDashboard() {
               )}
             </Button>
           </Link>
+          <PlanWeeksButton onPlanned={load} />
           <NewCampaignButton onCreated={(c) => setCampaigns((cs) => [c, ...cs])} />
         </div>
       </div>
@@ -242,5 +245,81 @@ function NewCampaignButton({ onCreated }: { onCreated: (c: Campaign) => void }) 
       <Plus className="h-4 w-4 mr-2" />
       {busy ? "Creating…" : "New campaign"}
     </Button>
+  );
+}
+
+function PlanWeeksButton({ onPlanned }: { onPlanned: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [audience, setAudience] = useState<"retail" | "wholesale">("retail");
+  const [weeks, setWeeks] = useState(4);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function run() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/v1/marketing/email/plan-week", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audience, weeks, createCampaigns: true }),
+      });
+      const data = await res.json();
+      if (data.error) { setMsg(data.error); return; }
+      setMsg(`Planned ${data.weeksPlanned} week(s) — ${data.campaignsCreated?.length ?? 0} slots created.`);
+      onPlanned();
+      setTimeout(() => setOpen(false), 1500);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="relative">
+      <Button variant="outline" onClick={() => setOpen((o) => !o)}>
+        <CalendarPlus className="h-4 w-4 mr-2" />
+        Plan weeks
+      </Button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-2 w-72 rounded-lg border bg-background p-3 shadow-lg space-y-3">
+          <div className="text-sm font-medium">Plan a batch of weeks</div>
+          <p className="text-xs text-muted-foreground">
+            Generates themes + seeds campaign slots on the cadence with strategy-driven
+            layouts and per-slot briefs. Edit each before generating copy.
+          </p>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Audience</label>
+            <div className="flex gap-1">
+              {(["retail", "wholesale"] as const).map((a) => (
+                <button
+                  key={a}
+                  onClick={() => setAudience(a)}
+                  className={`px-3 py-1 text-xs rounded border ${audience === a ? "bg-accent border-foreground" : "border-input"}`}
+                >
+                  {a}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Weeks (1–8)</label>
+            <input
+              type="number"
+              min={1}
+              max={8}
+              value={weeks}
+              onChange={(e) => setWeeks(Math.min(8, Math.max(1, Number(e.target.value) || 1)))}
+              className="w-full border rounded px-2 py-1 text-sm bg-background"
+            />
+          </div>
+          <Button size="sm" onClick={run} disabled={busy} className="w-full">
+            {busy ? "Planning…" : "Generate plan"}
+          </Button>
+          {msg && <div className="text-xs text-muted-foreground">{msg}</div>}
+        </div>
+      )}
+    </div>
   );
 }

@@ -28,18 +28,18 @@ import { emailCampaigns, emailThemes } from "../schema";
 import { and, eq, desc, gte, lte } from "drizzle-orm";
 import {
   generateCopy,
-  generateThemes,
   generateImagePrompts,
 } from "../lib/email-ai";
 import {
   recommendForSlot,
   recommendForWeek,
-  recommendForWeeks,
   IMAGE_STYLES,
   SUBJECT_ANGLES,
   LAYOUT_PROFILES,
 } from "../lib/email-strategy";
 import { lintCopy, lintGeneratedCopy } from "../lib/copy-quality";
+import { planWeeks } from "../lib/plan-week";
+import { loadBrandContext } from "../brand-context";
 import fs from "fs";
 import path from "path";
 
@@ -181,12 +181,11 @@ export const marketingMcpTools: McpTool[] = [
     },
     handler: async (input: Record<string, unknown>) => {
       const audience = input.audience as "retail" | "wholesale";
-      const brandDir = path.join(process.cwd(), "src", "modules", "marketing", "brand-context");
       const promptsDir = path.join(process.cwd(), "src", "modules", "marketing", "prompts");
 
-      const voice = audience === "wholesale"
-        ? fs.readFileSync(path.join(brandDir, "wholesale-voice.md"), "utf-8")
-        : fs.readFileSync(path.join(brandDir, "brand-bible.md"), "utf-8");
+      // Voice docs via the central brand-context loader (single reader).
+      const ctx = loadBrandContext();
+      const voice = audience === "wholesale" ? ctx.wholesaleVoice : ctx.brandBible;
       const systemBase = fs.readFileSync(path.join(promptsDir, "system-prompt-base.md"), "utf-8");
       const copyGen = fs.readFileSync(path.join(promptsDir, "copy-generation-prompt.md"), "utf-8");
 
@@ -552,141 +551,21 @@ export const marketingMcpTools: McpTool[] = [
       required: ["audience"],
     },
     handler: async (input: Record<string, unknown>) => {
-      const audience = input.audience as "retail" | "wholesale";
-      const weeks = (input.weeks as number) ?? 4;
-      const createCampaigns = input.createCampaigns !== false;
-      const weekStart = (input.weekStart as string | undefined) ?? nextMonday();
-
-      // Generate themes — one per week
-      const themeRes = await generateThemes({ audience, weekStart, count: weeks });
-      if (!themeRes.ok) return { content: [{ type: "text", text: `Theme AI error: ${themeRes.error}` }], isError: true };
-      const themes = (themeRes.output.themes ?? []) as Array<{
-        weekOf: string; title: string; angle: string;
-        productHook?: string | null; seasonalContext?: string | null;
-      }>;
-
-      // Persist themes
-      const themeInsertStmt = sqlite.prepare(
-        `INSERT INTO marketing_email_themes
-          (id, week_of, audience, title, angle, product_hook, seasonal_context, raw_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-      );
-      const insertedThemes = themes.map((t) => {
-        const id = crypto.randomUUID();
-        themeInsertStmt.run(
-          id, t.weekOf, audience, t.title, t.angle ?? null,
-          t.productHook ?? null, t.seasonalContext ?? null, JSON.stringify(t),
-        );
-        return { id, ...t };
+      // Delegates to the shared planWeeks() lib so the MCP tool and the
+      // HTTP /plan-week route never drift.
+      const result = await planWeeks({
+        audience: input.audience as "retail" | "wholesale",
+        weekStart: input.weekStart as string | undefined,
+        weeks: input.weeks as number | undefined,
+        createCampaigns: input.createCampaigns as boolean | undefined,
       });
-
-      // Maybe create campaigns — now driven by the strategy engine.
-      // Each slot gets:
-      //   1. Variant layout from recommendForSlot()
-      //   2. A UNIQUE BRIEF derived from the week's theme + the
-      //      slot's image style + subject angle (so slot 1 brief
-      //      differs from slot 2 brief even though they share a
-      //      theme).
-      //   3. Designer notes (strategy rationale + image directive)
-      //
-      // The brief is editable in the campaign editor — Daniel:
-      // "you can edit and refine it." Generate-copy reads the brief
-      // from the campaign row at run time.
-      let campaignsCreated: {
-        id: string;
-        scheduledDate: string;
-        themeId: string;
-        themeTitle: string;
-        briefTitle: string;
-        briefAngle: string;
-        slotInWeek: 1 | 2;
-        layoutProfile: string;
-        imageStyle: string;
-        subjectAngle: string;
-      }[] = [];
-      if (createCampaigns) {
-        const campaignInsertStmt = sqlite.prepare(
-          `INSERT INTO marketing_email_campaigns
-            (id, audience, scheduled_date, week_of, theme_id, status,
-             hero_variant, section_a_variant, secondary_image_variant, section_b_variant,
-             brief_title, brief_angle, brief_product_hook, brief_seasonal_context,
-             designer_notes,
-             created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'themed', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-        );
-        for (const theme of insertedThemes) {
-          const slots: (1 | 2)[] = [1, 2];
-          for (const slot of slots) {
-            const rec = recommendForSlot(audience, theme.weekOf, slot);
-            const id = crypto.randomUUID();
-            const designerNote = `STRATEGY: ${rec.rationale}\n\nIMAGE STYLE: ${rec.imageStyleDirective}\n\nSUBJECT ANGLE: ${rec.subjectAngleHint}`;
-
-            // Compose a per-slot brief from theme + strategy. The
-            // title gets the slot dimension appended so the user can
-            // distinguish the two slots at a glance in the calendar.
-            // Angle weaves the image style + subject angle hints
-            // into the theme's angle so the AI knows the lens.
-            const slotLabel = slot === 1
-              ? (audience === "retail" ? "Mon" : "Tue")
-              : (audience === "retail" ? "Thu" : "Fri");
-            const imageStyleLabel = rec.imageStyle === "product_flatlay"
-              ? "product still-life angle"
-              : rec.imageStyle === "on_model_lifestyle"
-                ? "on-model lifestyle angle"
-                : rec.imageStyle.replace(/_/g, " ");
-            const briefTitle = `${theme.title} — ${slotLabel} (${imageStyleLabel})`;
-            const briefAngle = `${theme.angle ?? ""}
-
-Slot context: ${imageStyleLabel}. Subject-angle direction: ${rec.subjectAngleHint}`;
-
-            campaignInsertStmt.run(
-              id,
-              audience,
-              rec.scheduledDate,
-              theme.weekOf,
-              theme.id,
-              rec.layoutVariants.heroVariant,
-              rec.layoutVariants.sectionAVariant,
-              rec.layoutVariants.secondaryImageVariant,
-              rec.layoutVariants.sectionBVariant,
-              briefTitle,
-              briefAngle,
-              theme.productHook ?? null,
-              theme.seasonalContext ?? null,
-              designerNote,
-            );
-            campaignsCreated.push({
-              id,
-              scheduledDate: rec.scheduledDate,
-              themeId: theme.id,
-              themeTitle: theme.title,
-              briefTitle,
-              briefAngle,
-              slotInWeek: slot,
-              layoutProfile: rec.layoutProfile,
-              imageStyle: rec.imageStyle,
-              subjectAngle: rec.subjectAngle,
-            });
-          }
-        }
+      if (!result.ok) {
+        return { content: [{ type: "text", text: `Plan error: ${result.error}` }], isError: true };
       }
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            ok: true,
-            audience,
-            weekStart,
-            weeksPlanned: weeks,
-            themes: insertedThemes,
-            campaignsCreated,
-            note: createCampaigns
-              ? `Created ${campaignsCreated.length} campaign slots. Each slot got its own brief (slot 1 ≠ slot 2 even within the same week — different image style + subject angle). User can edit briefs in the editor at /marketing/email/campaigns/[id] before calling generate-copy. Cadence: ${audience === "retail" ? "Mon + Thu" : "Tue + Fri"}.`
-              : "Themes only — no campaigns created.",
-          }, null, 2),
-        }],
-      };
+      const note = result.campaignsCreated.length
+        ? `Created ${result.campaignsCreated.length} campaign slots. Each slot got its own brief (slot 1 ≠ slot 2 even within the same week — different image style + subject angle). Edit briefs at /marketing/email/campaigns/[id] before generate-copy. Cadence: ${result.audience === "retail" ? "Mon + Thu" : "Tue + Fri"}.`
+        : "Themes only — no campaigns created.";
+      return { content: [{ type: "text", text: JSON.stringify({ ...result, note }, null, 2) }] };
     },
   },
 
@@ -1003,11 +882,4 @@ function inferSlotFromDate(audience: "retail" | "wholesale", iso: string): 1 | 2
     if (dow === 5) return 2;   // Friday
     return 1;                  // default Tuesday-or-other
   }
-}
-
-function nextMonday(): string {
-  const d = new Date();
-  const day = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + (day === 1 ? 7 : 8 - day));
-  return d.toISOString().slice(0, 10);
 }

@@ -19,13 +19,13 @@
 import fs from "fs";
 import path from "path";
 import { emailModel, ANTHROPIC_VERSION } from "./ai-model";
+import { loadBrandContext, voiceFor } from "../brand-context";
 
 // ── Brand context loader ────────────────────────────────────────
 // Snapshot lives in src/modules/marketing/brand-context/ (copied
 // from Google Drive per the migration plan). Read at module load,
 // cache for process lifetime.
 
-const BRAND_DIR = path.join(process.cwd(), "src", "modules", "marketing", "brand-context");
 const PROMPTS_DIR = path.join(process.cwd(), "src", "modules", "marketing", "prompts");
 
 function readFileSafe(p: string): string {
@@ -35,22 +35,6 @@ function readFileSafe(p: string): string {
     console.warn(`[email-ai] missing file: ${p}`, e);
     return "";
   }
-}
-
-let cachedBrand: {
-  bible: string;
-  wholesaleVoice: string;
-  visualGuidelines: string;
-} | null = null;
-
-function loadBrandContext() {
-  if (cachedBrand) return cachedBrand;
-  cachedBrand = {
-    bible: readFileSafe(path.join(BRAND_DIR, "brand-bible.md")),
-    wholesaleVoice: readFileSafe(path.join(BRAND_DIR, "wholesale-voice.md")),
-    visualGuidelines: readFileSafe(path.join(BRAND_DIR, "visual-guidelines.md")),
-  };
-  return cachedBrand;
 }
 
 let cachedPrompts: {
@@ -90,7 +74,6 @@ function extractPromptBody(md: string): string {
  */
 function buildSystemPrompt(audience: "retail" | "wholesale"): string {
   const { systemBase } = loadPrompts();
-  const { bible, wholesaleVoice } = loadBrandContext();
 
   // The system-prompt-base.md has {IF audience == "..."} pseudocode
   // blocks. We resolve them deterministically here so Claude doesn't
@@ -98,13 +81,11 @@ function buildSystemPrompt(audience: "retail" | "wholesale"): string {
   const baseBody = extractPromptBody(systemBase);
   const resolved = resolveAudienceBlock(baseBody, audience);
 
-  // Append the full brand voice doc as ground-truth context. Large
-  // (~30KB) but inside Claude's context window and gives the model
-  // every example + worded principle without us having to summarize.
-  const voiceDoc =
-    audience === "wholesale"
-      ? wholesaleVoice
-      : extractBrandBibleVoiceSection(bible);
+  // Append the full brand voice doc as ground-truth context (central
+  // brand-context loader picks retail bible §5 vs wholesale doc). Large
+  // but inside Claude's context window and gives the model every
+  // example + worded principle without us having to summarize.
+  const voiceDoc = voiceFor(audience);
 
   return `${resolved}\n\n────────────────────────────────────────────────────────────\nFULL VOICE REFERENCE DOC\n────────────────────────────────────────────────────────────\n\n${voiceDoc}`;
 }
@@ -134,18 +115,6 @@ function resolveAudienceBlock(body: string, audience: "retail" | "wholesale"): s
   });
 
   return out;
-}
-
-/**
- * The brand bible is 770+ lines. The voice section (§5) is ~300
- * lines and the densest signal. Snip just that part for the
- * retail prompt so we don't burn tokens on mission/positioning.
- */
-function extractBrandBibleVoiceSection(bible: string): string {
-  const start = bible.indexOf("## 5. Brand Voice");
-  if (start < 0) return bible;
-  const end = bible.indexOf("## 6.", start);
-  return end > 0 ? bible.slice(start, end) : bible.slice(start);
 }
 
 // ── Anthropic API call ──────────────────────────────────────────
@@ -393,8 +362,9 @@ export async function generateImagePrompts(opts: {
   heroSubtitle?: string | null;
 }) {
   const { imagePromptGen } = loadPrompts();
+  const { photoAesthetic } = loadBrandContext();
   const systemPrompt = buildSystemPrompt(opts.audience);
-  const taskPrompt = fillTemplate(extractPromptBody(imagePromptGen), {
+  const filled = fillTemplate(extractPromptBody(imagePromptGen), {
     "theme.title": opts.themeTitle,
     "theme.angle": opts.themeAngle,
     heroHeadline: opts.heroHeadline ?? "(not yet generated)",
@@ -403,6 +373,9 @@ export async function generateImagePrompts(opts: {
     heroVariant: opts.heroVariant,
     secondaryImageVariant: opts.secondaryImageVariant,
   });
+  // Ground every brief in the actual photography aesthetic doc (the
+  // image prompt references it; we inject the real text here).
+  const taskPrompt = `${filled}\n\n────────────────────────────────────────────────────────────\nPHOTOGRAPHY AESTHETIC — every brief must match this\n────────────────────────────────────────────────────────────\n\n${photoAesthetic}`;
 
   return callClaude({
     systemPrompt,
