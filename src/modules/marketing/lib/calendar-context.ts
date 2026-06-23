@@ -91,3 +91,35 @@ export async function getCalendarContextForCampaign(opts: {
   const events = await loadRelevantEvents(opts);
   return formatEventsForPrompt(events);
 }
+
+/**
+ * Load events overlapping an arbitrary date range — used by the
+ * monthly planner where the window isn't ±14 days from a single
+ * date but rather a multi-week span.
+ */
+export async function loadEventsInRange(opts: {
+  startDate: string;
+  endDate: string;
+  audience: "retail" | "wholesale";
+}) {
+  const all = await db
+    .select()
+    .from(calendarEvents)
+    .where(
+      and(
+        lte(calendarEvents.dateStart, opts.endDate),
+        gte(calendarEvents.dateEnd, opts.startDate),
+      ),
+    )
+    .orderBy(asc(calendarEvents.dateStart));
+  return all.filter(e => e.audience === "all" || e.audience === opts.audience);
+}
+
+export async function getCalendarContextForRange(opts: {
+  startDate: string;
+  endDate: string;
+  audience: "retail" | "wholesale";
+}): Promise<string> {
+  const events = await loadEventsInRange(opts);
+  return formatEventsForPrompt(events);
+}

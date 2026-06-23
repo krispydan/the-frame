@@ -1055,6 +1055,71 @@ Slot context: ${imageStyleLabel}. Subject-angle direction: ${rec.subjectAngleHin
     },
   },
   {
+    name: "marketing.email.plan_month",
+    description:
+      "Calendar-driven planner. Given audience + start date + weeks, AI proposes one unique brief per email slot — calendar-aware (leans into upcoming holidays/sales/launches/promos) and slot-aware (matches the strategy engine's pre-assigned layout + image-style + subject-angle per slot). Returns proposals for review. Use marketing.email.create_campaign per accepted brief OR direct the user to /marketing/email/plan for bulk-create UI.",
+    inputSchema: {
+      type: "object",
+      required: ["audience", "start_date"],
+      properties: {
+        audience: { type: "string", enum: ["retail", "wholesale"] },
+        start_date: { type: "string", description: "ISO YYYY-MM-DD" },
+        weeks: { type: "number", description: "1-12, default 4", minimum: 1, maximum: 12 },
+      },
+    },
+    handler: async ({ input }) => {
+      const { planMonth } = await import("../lib/email-ai");
+      const { getCalendarContextForRange, loadEventsInRange } = await import("../lib/calendar-context");
+      const { recommendForWeeks } = await import("../lib/email-strategy");
+      const audience = input.audience as "retail" | "wholesale";
+      const startDate = input.start_date as string;
+      const weeks = (input.weeks as number) ?? 4;
+
+      const slots = recommendForWeeks(audience, startDate, weeks);
+      if (slots.length === 0) {
+        return { content: [{ type: "text", text: "Strategy engine returned no slots" }], isError: true };
+      }
+      const firstDate = slots[0].scheduledDate;
+      const lastDate = slots[slots.length - 1].scheduledDate;
+      const events = await loadEventsInRange({ startDate: firstDate, endDate: lastDate, audience });
+      const calendarBlock = await getCalendarContextForRange({ startDate: firstDate, endDate: lastDate, audience });
+      const aiResult = await planMonth({
+        audience,
+        startDate: firstDate,
+        endDate: lastDate,
+        slots: slots.map(s => ({
+          date: s.scheduledDate, slotInWeek: s.slotInWeek,
+          layoutProfile: s.layoutProfile, imageStyle: s.imageStyle,
+          subjectAngle: s.subjectAngle,
+        })),
+        calendarEvents: calendarBlock,
+      });
+      if (!aiResult.ok) {
+        return { content: [{ type: "text", text: `AI error: ${aiResult.error}` }], isError: true };
+      }
+      const briefs = (aiResult.output as { briefs?: Array<Record<string, string>> }).briefs ?? [];
+      const proposals = slots.map((s, i) => ({
+        slotIndex: i,
+        scheduledDate: s.scheduledDate,
+        weekOf: s.weekOf,
+        slotInWeek: s.slotInWeek,
+        layoutVariants: s.layoutVariants,
+        imageStyle: s.imageStyle,
+        subjectAngle: s.subjectAngle,
+        brief: briefs[i] ?? null,
+      }));
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            audience, weeks, eventsConsidered: events.length, proposals,
+            note: "Review with the user. To accept all → marketing.email.create_campaign per proposal (preserving layoutVariants + brief). Or direct user to /marketing/email/plan for bulk-create UI.",
+          }, null, 2),
+        }],
+      };
+    },
+  },
+  {
     name: "marketing.calendar.add_event",
     description:
       "Add a holiday, sale, launch, or promotion to the marketing calendar. Once added, any campaign generated for a date within ±14 days of this event will see it in the AI prompt. Use this when the user mentions an upcoming moment that should drive copy ('we're running 30% off readers Memorial Day weekend' → add a SALE event).",

@@ -57,6 +57,7 @@ let cachedPrompts: {
   copyGen: string;
   themeGen: string;
   imagePromptGen: string;
+  monthPlan: string;
 } | null = null;
 
 function loadPrompts() {
@@ -66,6 +67,7 @@ function loadPrompts() {
     copyGen: readFileSafe(path.join(PROMPTS_DIR, "copy-generation-prompt.md")),
     themeGen: readFileSafe(path.join(PROMPTS_DIR, "theme-generation-prompt.md")),
     imagePromptGen: readFileSafe(path.join(PROMPTS_DIR, "image-prompt-generation.md")),
+    monthPlan: readFileSafe(path.join(PROMPTS_DIR, "month-plan-prompt.md")),
   };
   return cachedPrompts;
 }
@@ -449,6 +451,107 @@ export async function generateImagePrompts(opts: {
               alts: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 2 },
               dimensions: { type: "string" },
               notes: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+/**
+ * Monthly campaign planner. Given an audience + date window +
+ * calendar context + slot dimensions from the strategy engine,
+ * proposes one BRIEF per slot. Returned briefs are then user-
+ * reviewable; on accept they become real campaigns.
+ *
+ * Daniel: "let's work on the marketing calendar for the next
+ * month/2 months. it gives suggestions for themes for each email
+ * (different concepts) based on the calendar (if anything). it
+ * creates the title and short brief per email."
+ */
+export async function planMonth(opts: {
+  audience: "retail" | "wholesale";
+  startDate: string;        // ISO YYYY-MM-DD
+  endDate: string;          // ISO YYYY-MM-DD
+  slots: Array<{
+    date: string;
+    slotInWeek: 1 | 2;
+    layoutProfile: string;
+    imageStyle: string;
+    subjectAngle: string;
+  }>;
+  /** Pre-formatted calendar block from getCalendarContextForRange(). */
+  calendarEvents: string;
+}) {
+  const { monthPlan } = loadPrompts();
+  const systemPrompt = buildSystemPrompt(opts.audience);
+  const cadence = opts.audience === "retail" ? "Mon + Thu" : "Tue + Fri";
+
+  // Build a compact text table of slots so the AI can reference
+  // them by position. Each row: date | slot# | layout | image | angle
+  const slotsTable = opts.slots
+    .map((s, i) =>
+      `  ${i + 1}. ${s.date}  slot${s.slotInWeek}  layout=${s.layoutProfile}  image=${s.imageStyle}  angle=${s.subjectAngle}`,
+    )
+    .join("\n");
+
+  const taskPrompt = fillTemplate(extractPromptBody(monthPlan), {
+    audience: opts.audience,
+    startDate: opts.startDate,
+    endDate: opts.endDate,
+    cadence,
+    slotCount: String(opts.slots.length),
+    calendarEvents: opts.calendarEvents,
+    slotsTable,
+  });
+
+  return callClaude({
+    systemPrompt,
+    userPrompt: taskPrompt,
+    // Bumped from 4096 — N briefs × ~150 tokens each + reasoning
+    // could overflow on 8-week wholesale plans.
+    maxTokens: 6000,
+    tool: {
+      name: "submit_month_plan",
+      description: "Submit the month's planned briefs, one per slot, in slot order.",
+      input_schema: {
+        type: "object",
+        required: ["briefs"],
+        properties: {
+          briefs: {
+            type: "array",
+            description: `Array of length ${opts.slots.length}. ORDER MATCHES the input slots array — briefs[0] is for slots[0], etc.`,
+            minItems: opts.slots.length,
+            maxItems: opts.slots.length,
+            items: {
+              type: "object",
+              required: ["name", "angle", "rationale"],
+              properties: {
+                name: {
+                  type: "string",
+                  description: "3–8 word campaign name (sentence case, no quotes). The operator's internal label. Examples: 'Honey colorway lands for Labor Day' / 'Last-chance readers, 30% off'",
+                  maxLength: 80,
+                },
+                angle: {
+                  type: "string",
+                  description: "2–4 sentences. The IDEA — why this email, why now, what specific moment / product / framing. Don't write the headline.",
+                  maxLength: 600,
+                },
+                productHook: {
+                  type: "string",
+                  description: "Optional SKU / category / colorway. Empty string if no specific product.",
+                },
+                seasonalContext: {
+                  type: "string",
+                  description: "Optional holiday / weather / cultural anchor. Empty string if none.",
+                },
+                rationale: {
+                  type: "string",
+                  description: "One sentence explaining which calendar event drove this brief (if any) + why the angle fits the slot's image-style + subject-angle. The AI-to-operator handoff.",
+                  maxLength: 250,
+                },
+              },
             },
           },
         },
