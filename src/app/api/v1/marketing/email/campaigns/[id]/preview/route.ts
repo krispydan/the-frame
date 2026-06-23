@@ -40,6 +40,11 @@ export async function GET(
   }
 
   const data: CampaignData = {
+    logoImagePath: row.logoImagePath,
+    heroDisabled: row.heroDisabled,
+    sectionADisabled: row.sectionADisabled,
+    secondaryDisabled: row.secondaryDisabled,
+    sectionBDisabled: row.sectionBDisabled,
     heroVariant: row.heroVariant as CampaignData["heroVariant"],
     heroImagePath: row.heroImagePath,
     heroImageAlt: row.heroImageAlt,

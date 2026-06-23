@@ -114,41 +114,58 @@ export async function POST(
     );
   }
 
-  // Update the campaign row's image path column
+  // Update the path + auto-advance status in a single transaction so
+  // two concurrent uploads can't read stale state and both miss (or
+  // both trigger) the photography→design_review hop. The UPDATE for
+  // status uses a guarded WHERE clause that also prevents over-write
+  // if another upload already advanced.
   const column = KIND_TO_COLUMN[kind as ImageKind];
-  sqlite
-    .prepare(
-      `UPDATE marketing_email_campaigns
-        SET ${column} = ?, updated_at = datetime('now')
-        WHERE id = ?`,
-    )
-    .run(relPath, campaignId);
-
-  // Auto-advance status if all required images are present.
-  // Required images: hero + secondary; plus secondary_2 if grid_2up.
-  const [after] = await db
-    .select()
-    .from(emailCampaigns)
-    .where(eq(emailCampaigns.id, campaignId))
-    .limit(1);
-
-  const hasHero = !!after?.heroImagePath;
-  const hasSecondary = !!after?.secondaryImagePath;
-  const needsSecondary2 = after?.secondaryImageVariant === "grid_2up";
-  const hasSecondary2 = !!after?.secondaryImagePath2;
-  const allReady = hasHero && hasSecondary && (!needsSecondary2 || hasSecondary2);
-
-  let statusAfter = after?.status ?? "photography";
-  if (allReady && after?.status === "photography") {
+  const tx = sqlite.transaction((relP: string, cid: string) => {
+    // 1. Set the new image path
     sqlite
       .prepare(
         `UPDATE marketing_email_campaigns
-          SET status = 'design_review', updated_at = datetime('now')
+          SET ${column} = ?, updated_at = datetime('now')
           WHERE id = ?`,
       )
-      .run(campaignId);
-    statusAfter = "design_review";
-  }
+      .run(relP, cid);
+    // 2. Re-read inside the transaction for an isolated view
+    const row = sqlite
+      .prepare(
+        `SELECT status, hero_image_path, secondary_image_path,
+                secondary_image_path_2, secondary_image_variant
+           FROM marketing_email_campaigns WHERE id = ?`,
+      )
+      .get(cid) as {
+        status: string | null;
+        hero_image_path: string | null;
+        secondary_image_path: string | null;
+        secondary_image_path_2: string | null;
+        secondary_image_variant: string | null;
+      } | undefined;
+    if (!row) return { status: "photography", allReady: false };
+    const hasHero = !!row.hero_image_path;
+    const hasSecondary = !!row.secondary_image_path;
+    const needsSecondary2 = row.secondary_image_variant === "grid_2up";
+    const hasSecondary2 = !!row.secondary_image_path_2;
+    const allReady = hasHero && hasSecondary && (!needsSecondary2 || hasSecondary2);
+    let newStatus = row.status ?? "photography";
+    if (allReady && row.status === "photography") {
+      sqlite
+        .prepare(
+          `UPDATE marketing_email_campaigns
+            SET status = 'design_review', updated_at = datetime('now')
+            WHERE id = ? AND status = 'photography'`,
+        )
+        .run(cid);
+      newStatus = "design_review";
+    }
+    return { status: newStatus, allReady };
+  });
+
+  const result = tx(relPath, campaignId);
+  const statusAfter = result.status;
+  const allReady = result.allReady;
 
   return NextResponse.json({
     ok: true,

@@ -104,11 +104,40 @@ export async function PATCH(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // Tight enum check — `status` is in PATCHABLE_COLUMNS but Drizzle's
+  // enum isn't enforced at the SQL layer. Reject obvious garbage.
+  if ("status" in body) {
+    const VALID_STATUSES = ["draft", "copywriting", "photography", "design_review", "scheduled", "sent", "analyzed"];
+    if (typeof body.status !== "string" || !VALID_STATUSES.includes(body.status)) {
+      return NextResponse.json(
+        { error: `status must be one of: ${VALID_STATUSES.join(", ")}` },
+        { status: 400 },
+      );
+    }
+  }
+  if ("audience" in body) {
+    if (body.audience !== "retail" && body.audience !== "wholesale") {
+      return NextResponse.json(
+        { error: "audience must be 'retail' or 'wholesale'" },
+        { status: 400 },
+      );
+    }
+  }
+
+  // Defense-in-depth: belt + suspenders on the column name. The
+  // PATCHABLE_COLUMNS allowlist is the primary gate, but in case
+  // someone adds a column with an unsafe name in the future,
+  // require the snake_cased name match [a-z_][a-z0-9_]* before
+  // string-concatenating into the UPDATE.
+  const COLUMN_NAME_RE = /^[a-z][a-z0-9_]*$/;
+
   const sets: string[] = [];
   const vals: unknown[] = [];
   for (const [key, val] of Object.entries(body)) {
     if (!PATCHABLE_COLUMNS.has(key)) continue;
-    sets.push(`${toSnake(key)} = ?`);
+    const column = toSnake(key);
+    if (!COLUMN_NAME_RE.test(column)) continue;
+    sets.push(`${column} = ?`);
     vals.push(val);
   }
 

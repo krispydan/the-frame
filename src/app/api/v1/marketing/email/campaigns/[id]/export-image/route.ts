@@ -79,6 +79,9 @@ export async function GET(
   // Coerce row to CampaignData — same coercion used by the preview
   // route. Variant strings come back as plain strings from sqlite;
   // the renderer narrows them via the union type.
+  // `...row` already carries logoImagePath + the *_disabled flags
+  // since they were added to the schema. The explicit casts below
+  // only narrow the variant string columns to their union types.
   const campaign: CampaignData = {
     ...row,
     heroVariant: row.heroVariant as CampaignData["heroVariant"],

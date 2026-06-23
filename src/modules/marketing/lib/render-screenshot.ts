@@ -20,6 +20,31 @@ import { join } from "node:path";
 
 let browserSingleton: import("playwright").Browser | null = null;
 
+/**
+ * Concurrency cap. Chromium uses ~300MB per active context — without
+ * this, 5 concurrent /export-image hits OOM the Railway pod. Two at
+ * a time is plenty: the bottleneck is page-load + font-ready, not
+ * the GPU. Requests beyond the cap queue rather than crash.
+ */
+const MAX_CONCURRENT = 2;
+let activeRenders = 0;
+const waitQueue: (() => void)[] = [];
+
+async function acquireSlot(): Promise<() => void> {
+  if (activeRenders < MAX_CONCURRENT) {
+    activeRenders++;
+    return releaseSlot;
+  }
+  await new Promise<void>(resolve => waitQueue.push(resolve));
+  activeRenders++;
+  return releaseSlot;
+}
+function releaseSlot(): void {
+  activeRenders--;
+  const next = waitQueue.shift();
+  if (next) next();
+}
+
 async function getBrowser(): Promise<import("playwright").Browser> {
   if (browserSingleton && browserSingleton.isConnected()) {
     return browserSingleton;
@@ -74,6 +99,7 @@ export async function renderHtmlToJpg(
     waitForFonts = true,
   } = opts;
 
+  const release = await acquireSlot();
   const browser = await getBrowser();
   const context = await browser.newContext({
     viewport: { width: viewportWidth, height: 800 },
@@ -108,5 +134,6 @@ export async function renderHtmlToJpg(
   } finally {
     await context.close();
     await rm(dir, { recursive: true, force: true });
+    release();
   }
 }
