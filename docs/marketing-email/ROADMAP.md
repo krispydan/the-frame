@@ -87,4 +87,3 @@ Guiding principle: **finish the pipeline first** (so a campaign can actually rea
 2. **D + H make it trustworthy** (enforced QA + tests) — required before anyone relies on it for live sends.
 3. **E seeds the learning loop**; **F/G remove debt & finish UX**.
 4. **I–L** turn "works" into "beats the agency": robust rendering, real catalog data, cost proof, and operational hardening.
-</content>

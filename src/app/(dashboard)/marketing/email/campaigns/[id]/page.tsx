@@ -7,9 +7,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, Monitor, Smartphone, Save, Sparkles, Image as ImageIcon } from "lucide-react";
+import {
+  Trash2, Monitor, Smartphone, Save, Sparkles, Image as ImageIcon,
+  Download, ChevronLeft, ChevronRight, CheckCircle2, AlertTriangle, ShieldCheck,
+} from "lucide-react";
+import { STATUS_ORDER, STATUS_LABELS } from "@/modules/marketing/lib/workflow";
 
 type Campaign = Record<string, unknown>;
+
+interface LintFinding { level: "error" | "warning"; code: string; field: string; message: string }
+interface LintResult { ok: boolean; errors: LintFinding[]; warnings: LintFinding[]; score: number }
 
 const HERO_VARIANTS = [
   { value: "full_bleed_overlay", label: "Full-bleed + overlay", note: "Hero image + HTML text overlaid (top 30% calm)" },
@@ -51,6 +58,10 @@ export default function CampaignDetailPage({
   const [generating, setGenerating] = useState<"copy" | "image_prompts" | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [failedChecks, setFailedChecks] = useState<string[]>([]);
+  const [lint, setLint] = useState<LintResult | null>(null);
+  const [pipelineMsg, setPipelineMsg] = useState<string | null>(null);
+  const [pipelineBusy, setPipelineBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   // ── AI generate handlers ────────────────────────────────────
   async function handleGenerateCopy() {
@@ -95,6 +106,7 @@ export default function CampaignDetailPage({
       } else {
         setCampaign(data.campaign);
         setFailedChecks(data.failedChecks ?? []);
+        setLint(data.lint ?? null);
         setPreviewKey(k => k + 1);
         setSavedAt(Date.now());
       }
@@ -137,6 +149,84 @@ export default function CampaignDetailPage({
       setGenerateError(e instanceof Error ? e.message : String(e));
     } finally {
       setGenerating(null);
+    }
+  }
+
+  // ── Pipeline: advance / revert with gate validation ─────────
+  async function handleAdvance(direction: "forward" | "back") {
+    setPipelineBusy(true);
+    setPipelineMsg(null);
+    try {
+      const res = await fetch(`/api/v1/marketing/email/campaigns/${id}/advance`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ direction }),
+      });
+      const data = await res.json();
+      if (data.ok && data.campaign) {
+        setCampaign(data.campaign);
+        setSavedAt(Date.now());
+      } else if (data.blocked) {
+        setPipelineMsg(`Can't advance to "${data.target}": ${data.blocked.join(" ")}`);
+      } else if (data.error) {
+        setPipelineMsg(data.error);
+      }
+    } finally {
+      setPipelineBusy(false);
+    }
+  }
+
+  // ── Validate (deterministic server-side QA) ─────────────────
+  async function runValidate() {
+    setPipelineBusy(true);
+    setPipelineMsg(null);
+    try {
+      const res = await fetch(`/api/v1/marketing/email/campaigns/${id}/validate`);
+      const data = await res.json();
+      setLint(data.lint ?? null);
+      if (data.readiness && !data.readiness.ready) {
+        setPipelineMsg(`Not export-ready — missing: ${data.readiness.missing.join(", ")}.`);
+      } else {
+        setPipelineMsg("Export-ready. Copy QA below.");
+      }
+    } finally {
+      setPipelineBusy(false);
+    }
+  }
+
+  // ── Export (Omnisend HTML download / Faire JSON) ────────────
+  async function handleExport(format: "omnisend" | "faire") {
+    setExporting(true);
+    setPipelineMsg(null);
+    try {
+      if (format === "omnisend") {
+        // Trigger a file download of the standalone HTML.
+        const a = document.createElement("a");
+        a.href = `/api/v1/marketing/email/campaigns/${id}/export?format=omnisend`;
+        a.download = "";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        // Reflect the status change.
+        setTimeout(() => {
+          fetch(`/api/v1/marketing/email/campaigns/${id}`)
+            .then(r => r.json())
+            .then(d => { if (d.campaign) setCampaign(d.campaign); });
+        }, 600);
+        setPipelineMsg("Omnisend HTML downloaded. Paste into Omnisend's custom-code block.");
+      } else {
+        const res = await fetch(`/api/v1/marketing/email/campaigns/${id}/export?format=faire`);
+        const data = await res.json();
+        await navigator.clipboard.writeText(data.plainText ?? JSON.stringify(data.blocks, null, 2));
+        fetch(`/api/v1/marketing/email/campaigns/${id}`)
+          .then(r => r.json())
+          .then(d => { if (d.campaign) setCampaign(d.campaign); });
+        setPipelineMsg("Faire blocks copied to clipboard. Paste into Faire's email builder.");
+      }
+    } catch (e) {
+      setPipelineMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -240,6 +330,18 @@ export default function CampaignDetailPage({
             <ImageIcon className="h-4 w-4 mr-2" />
             {generating === "image_prompts" ? "Briefing…" : "Generate image prompts"}
           </Button>
+          <Button variant="outline" onClick={runValidate} disabled={pipelineBusy} title="Deterministic copy QA + export-readiness check">
+            <ShieldCheck className="h-4 w-4 mr-2" />
+            Validate
+          </Button>
+          <Button variant="outline" onClick={() => handleExport("omnisend")} disabled={exporting} title="Download standalone HTML to paste into Omnisend">
+            <Download className="h-4 w-4 mr-2" />
+            {exporting ? "Exporting…" : "Omnisend"}
+          </Button>
+          <Button variant="outline" onClick={() => handleExport("faire")} disabled={exporting} title="Copy Faire blocks to clipboard">
+            <Download className="h-4 w-4 mr-2" />
+            Faire
+          </Button>
           <Button onClick={save} disabled={saving}>
             <Save className="h-4 w-4 mr-2" />
             {saving ? "Saving…" : "Save"}
@@ -260,6 +362,80 @@ export default function CampaignDetailPage({
         <div className="rounded border border-orange-300 bg-orange-50 dark:bg-orange-950/20 px-3 py-2 text-sm">
           <strong>Claude flagged self-check warnings:</strong>{" "}
           {failedChecks.join(", ")}. Review the copy before approving.
+        </div>
+      )}
+
+      {/* Pipeline stepper — the 10-stage workflow */}
+      <Card>
+        <CardContent className="p-3 space-y-3">
+          <div className="flex items-center gap-1 overflow-x-auto pb-1">
+            {STATUS_ORDER.map((s, i) => {
+              const curIdx = STATUS_ORDER.indexOf(campaign.status as typeof STATUS_ORDER[number]);
+              const done = i < curIdx;
+              const current = i === curIdx;
+              return (
+                <div key={s} className="flex items-center shrink-0">
+                  <div
+                    className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs whitespace-nowrap ${
+                      current
+                        ? "bg-foreground text-background font-medium"
+                        : done
+                          ? "bg-muted text-foreground"
+                          : "text-muted-foreground"
+                    }`}
+                  >
+                    {done && <CheckCircle2 className="h-3 w-3" />}
+                    {STATUS_LABELS[s]}
+                  </div>
+                  {i < STATUS_ORDER.length - 1 && (
+                    <ChevronRight className="h-3 w-3 text-muted-foreground/40 mx-0.5" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => handleAdvance("back")} disabled={pipelineBusy}>
+              <ChevronLeft className="h-4 w-4 mr-1" /> Back
+            </Button>
+            <Button size="sm" onClick={() => handleAdvance("forward")} disabled={pipelineBusy}>
+              Advance <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+            {pipelineMsg && (
+              <span className="text-xs text-muted-foreground">{pipelineMsg}</span>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Deterministic copy-QA results */}
+      {lint && (lint.errors.length > 0 || lint.warnings.length > 0) && (
+        <div className="space-y-2">
+          {lint.errors.length > 0 && (
+            <div className="rounded border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm">
+              <div className="flex items-center gap-1 font-medium text-destructive mb-1">
+                <AlertTriangle className="h-4 w-4" /> {lint.errors.length} QA error{lint.errors.length > 1 ? "s" : ""} (score {lint.score}/100)
+              </div>
+              <ul className="list-disc ml-5 space-y-0.5">
+                {lint.errors.map((f, i) => <li key={i}>{f.message}</li>)}
+              </ul>
+            </div>
+          )}
+          {lint.warnings.length > 0 && (
+            <div className="rounded border border-orange-300 bg-orange-50 dark:bg-orange-950/20 px-3 py-2 text-sm">
+              <div className="flex items-center gap-1 font-medium mb-1">
+                <AlertTriangle className="h-4 w-4" /> {lint.warnings.length} warning{lint.warnings.length > 1 ? "s" : ""}
+              </div>
+              <ul className="list-disc ml-5 space-y-0.5">
+                {lint.warnings.map((f, i) => <li key={i}>{f.message}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+      {lint && lint.ok && lint.warnings.length === 0 && (
+        <div className="rounded border border-green-300 bg-green-50 dark:bg-green-950/20 px-3 py-2 text-sm flex items-center gap-1">
+          <CheckCircle2 className="h-4 w-4 text-green-600" /> Copy QA passed (score {lint.score}/100).
         </div>
       )}
 
@@ -502,6 +678,13 @@ export default function CampaignDetailPage({
               </div>
             </CardContent>
           </Card>
+
+          {["exported", "sent", "analyzed"].includes(campaign.status as string) && (
+            <ResultsPanel
+              campaignId={id}
+              onRecorded={(c) => { if (c) setCampaign(c); setSavedAt(Date.now()); }}
+            />
+          )}
         </div>
 
         {/* Right pane — live preview */}
@@ -631,5 +814,115 @@ function VariantPicker({
         </option>
       ))}
     </select>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Results capture — Phase 6 manual entry (Omnisend / Faire metrics).
+// Feeds the strategy learning loop.
+// ────────────────────────────────────────────────────────────
+
+function ResultsPanel({
+  campaignId, onRecorded,
+}: {
+  campaignId: string;
+  onRecorded: (campaign: Campaign | null) => void;
+}) {
+  const [platform, setPlatform] = useState<"omnisend" | "faire">("omnisend");
+  const [recipients, setRecipients] = useState("");
+  const [opens, setOpens] = useState("");
+  const [clicks, setClicks] = useState("");
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [history, setHistory] = useState<Array<Record<string, unknown>>>([]);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const loadHistory = useCallback(() => {
+    fetch(`/api/v1/marketing/email/campaigns/${campaignId}/results`)
+      .then(r => r.json())
+      .then(d => setHistory(d.results ?? []));
+  }, [campaignId]);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  async function submit() {
+    setSaving(true);
+    setMsg(null);
+    try {
+      const res = await fetch(`/api/v1/marketing/email/campaigns/${campaignId}/results`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          platform,
+          recipients: recipients ? Number(recipients) : undefined,
+          opens: opens ? Number(opens) : undefined,
+          clicks: clicks ? Number(clicks) : undefined,
+          notes: notes || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) { setMsg(data.error); return; }
+      const or = data.openRate != null ? `${(data.openRate * 100).toFixed(1)}% open` : "";
+      const cr = data.clickRate != null ? `${(data.clickRate * 100).toFixed(1)}% click` : "";
+      setMsg(`Recorded. ${[or, cr].filter(Boolean).join(" · ")}`);
+      setRecipients(""); setOpens(""); setClicks(""); setNotes("");
+      loadHistory();
+      // Refresh campaign to reflect the advanced status.
+      const c = await fetch(`/api/v1/marketing/email/campaigns/${campaignId}`).then(r => r.json());
+      onRecorded(c.campaign ?? null);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card className="border-foreground/30">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm">
+          Results
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
+            Paste Omnisend / Faire metrics — feeds the strategy engine
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex gap-1">
+          {(["omnisend", "faire"] as const).map(p => (
+            <button
+              key={p}
+              onClick={() => setPlatform(p)}
+              className={`px-3 py-1 text-xs rounded border ${platform === p ? "bg-accent border-foreground" : "border-input"}`}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <LabeledInput label="Recipients" value={recipients} onChange={setRecipients} placeholder="0" />
+          <LabeledInput label="Opens" value={opens} onChange={setOpens} placeholder="0" />
+          <LabeledInput label="Clicks" value={clicks} onChange={setClicks} placeholder="0" />
+        </div>
+        <LabeledInput label="Notes (optional)" value={notes} onChange={setNotes} />
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={submit} disabled={saving}>
+            {saving ? "Saving…" : "Record results"}
+          </Button>
+          {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
+        </div>
+        {history.length > 0 && (
+          <div className="text-xs text-muted-foreground space-y-1 pt-1 border-t">
+            {history.map((h, i) => {
+              const rate = (n: unknown) => (typeof n === "number" ? `${(n * 100).toFixed(1)}%` : "—");
+              return (
+                <div key={i} className="flex justify-between tabular-nums">
+                  <span>{String(h.platform)} · {Number(h.recipients) || 0} sent</span>
+                  <span>{rate(h.openRate)} open · {rate(h.clickRate)} click</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

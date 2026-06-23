@@ -6,6 +6,7 @@ import { db, sqlite } from "@/lib/db";
 import { emailCampaigns, emailThemes } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
 import { generateCopy } from "@/modules/marketing/lib/email-ai";
+import { lintGeneratedCopy } from "@/modules/marketing/lib/copy-quality";
 
 /**
  * POST /api/v1/marketing/email/campaigns/[id]/generate-copy
@@ -139,6 +140,11 @@ export async function POST(
     .filter(([, v]) => v === false)
     .map(([k]) => k);
 
+  // Deterministic, server-side QA — the source of truth (the model's
+  // selfCheck above is advisory). Surfaced to the editor as hard errors
+  // / warnings.
+  const lint = lintGeneratedCopy(out as Record<string, unknown>, campaign.audience as "retail" | "wholesale");
+
   const [updated] = await db
     .select()
     .from(emailCampaigns)
@@ -150,6 +156,7 @@ export async function POST(
     campaign: updated,
     generated: out,
     failedChecks,
+    lint,
     usage: result.usage,
   });
 }

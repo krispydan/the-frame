@@ -141,5 +141,3 @@ The agency's moat is taste + reliability + reporting. This tool's moat should be
 | L | Plan-week UI, sync-brand-context.sh, photography-aesthetic.md, central brand loader | P2 | tracked |
 
 See **ROADMAP.md** for the sequenced build plan and acceptance criteria.
-</content>
-</invoke>

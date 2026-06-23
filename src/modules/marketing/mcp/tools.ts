@@ -39,6 +39,7 @@ import {
   SUBJECT_ANGLES,
   LAYOUT_PROFILES,
 } from "../lib/email-strategy";
+import { lintCopy, lintGeneratedCopy } from "../lib/copy-quality";
 import fs from "fs";
 import path from "path";
 
@@ -349,25 +350,13 @@ export const marketingMcpTools: McpTool[] = [
       vals.push(campaignId);
       sqlite.prepare(`UPDATE marketing_email_campaigns SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
 
-      // Lightweight server-side validation. Mirrors the worst of
-      // the banned-word list — chat-Claude already had the full
-      // list via get_brand_context but this is the safety net.
-      const all = [
-        input.subject, input.heroHeadline, input.heroSubtitle,
-        input.sectionAHeading, input.sectionABody,
-        input.sectionBHeading, input.sectionBBody,
-      ].filter((v) => typeof v === "string").join(" ").toLowerCase();
-      const BANNED_HARD = [
-        "curated", "premium", "luxury", "investment piece",
-        "elevate", "effortless", "game-changer", "must-have",
-        "introducing", "we're so excited", "we're thrilled",
-        "made in la", "made in california",
-        "lose them", "throw them around",
-      ];
-      const failedChecks: string[] = [];
-      for (const b of BANNED_HARD) {
-        if (all.includes(b)) failedChecks.push(`banned_phrase: "${b}"`);
-      }
+      // Deterministic server-side QA — the full copy-quality linter
+      // (brand banned words, char/word limits, emoji, exclamation
+      // count, preheader≠subject, pronoun ratio, wholesale-number…).
+      // Lints the MERGED final row so it catches issues across fields
+      // the draft didn't touch.
+      const [merged] = await db.select().from(emailCampaigns).where(eq(emailCampaigns.id, campaignId)).limit(1);
+      const lint = lintCopy(merged ?? {}, (merged?.audience ?? "retail") as "retail" | "wholesale");
 
       return {
         content: [{
@@ -375,10 +364,10 @@ export const marketingMcpTools: McpTool[] = [
           text: JSON.stringify({
             ok: true,
             campaignId,
-            failedChecks,
+            lint,
             warning:
-              failedChecks.length > 0
-                ? "Server validation found banned phrases. The copy IS saved — you should revise and call save_draft again."
+              lint.errors.length > 0
+                ? "Server QA found hard errors. The copy IS saved — revise and call save_draft again."
                 : null,
           }, null, 2),
         }],
@@ -459,11 +448,12 @@ export const marketingMcpTools: McpTool[] = [
 
       const checks = (out.selfCheckPassed ?? {}) as Record<string, boolean>;
       const failed = Object.entries(checks).filter(([, v]) => v === false).map(([k]) => k);
+      const lint = lintGeneratedCopy(out, campaign.audience as "retail" | "wholesale");
 
       return {
         content: [{
           type: "text",
-          text: JSON.stringify({ ok: true, campaignId, generated: out, failedChecks: failed }, null, 2),
+          text: JSON.stringify({ ok: true, campaignId, generated: out, failedChecks: failed, lint }, null, 2),
         }],
       };
     },
@@ -839,6 +829,7 @@ Slot context: ${imageStyleLabel}. Subject-angle direction: ${rec.subjectAngleHin
       const [final] = await db.select().from(emailCampaigns).where(eq(emailCampaigns.id, campaignId)).limit(1);
       const failedChecks = Object.entries((c.selfCheckPassed ?? {}) as Record<string, boolean>)
         .filter(([, v]) => v === false).map(([k]) => k);
+      const lint = lintGeneratedCopy(c, audience);
 
       return {
         content: [{
@@ -849,6 +840,7 @@ Slot context: ${imageStyleLabel}. Subject-angle direction: ${rec.subjectAngleHin
             themeId,
             campaign: final,
             failedChecks,
+            lint,
             previewUrl: `https://theframe.getjaxy.com/marketing/email/campaigns/${campaignId}`,
             note: "Campaign built end-to-end. Designer renders the images per the hero/secondary prompts, uploads via the editor or the upload endpoint, then user reviews + exports.",
           }, null, 2),

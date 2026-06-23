@@ -2,26 +2,34 @@
  * Email HTML renderer — pure string templates.
  *
  * Why no React: Next 16 + Turbopack rejects every variant of
- * `react-dom/server` imports inside the App Router. The previous
- * approach (renderToStaticMarkup of a React component tree) was
- * elegant but kept tripping the build. Pivoted to plain string
- * templates which:
- *   - Don't depend on any framework's rendering pipeline
- *   - Have zero runtime cost (no React tree to walk)
- *   - Work in any future Next/Turbopack/Vite/anything
- *   - Still email-safe (table-based layout + inline styles)
+ * `react-dom/server` imports inside the App Router. The string-template
+ * approach has zero framework dependency, zero runtime cost, and stays
+ * email-safe (table layout + inline styles).
+ *
+ * Two render targets:
+ *   - "preview"  → clean modern-client HTML for the editor iframe.
+ *   - "export"   → client-hardened HTML for Omnisend (mso conditionals,
+ *                  VML bulletproof CTA + hero background, hidden
+ *                  preheader). Outlook/Windows is the Word rendering
+ *                  engine — it ignores CSS background-image, object-fit,
+ *                  flex, and rounded-corner buttons, so export mode adds
+ *                  the VML fallbacks an agency would hand-build.
  *
  * Adding a new variant = drop a function below + a case in the
- * dispatcher. Same modularity as the React version, less framework
- * coupling.
+ * dispatcher.
  */
 
 import { catalogImageUrl } from "@/lib/storage/image-url";
-import type { CampaignData } from "../components/email-template";
+import type { CampaignData } from "./email-template-types";
 
-// ── Brand tokens (mirror lib/email-template/shared/tokens.ts) ──
-// Inlined here so this file is self-contained and the React
-// component tree can be deleted in a follow-up cleanup.
+export type RenderTarget = "preview" | "export";
+export interface RenderOptions {
+  target?: RenderTarget;
+  /** Hidden inbox preview text — injected at top of body in export mode. */
+  preheader?: string | null;
+}
+
+// ── Brand tokens ────────────────────────────────────────────────
 
 const C = {
   white: "#FFFFFF",
@@ -44,6 +52,7 @@ const F = {
 };
 
 const EMAIL_W = 600;
+const HERO_H = 460;
 
 // ── HTML escape ────────────────────────────────────────────────
 
@@ -58,31 +67,20 @@ function esc(s: string | null | undefined): string {
   if (s == null) return "";
   return String(s).replace(/[&<>"']/g, (c) => ESC_MAP[c]);
 }
-function escAttr(s: string | null | undefined): string {
-  return esc(s);
-}
+const escAttr = esc;
 
 // ── Brand fonts ────────────────────────────────────────────────
-// Per V2 BRAND-GUIDELINES.md: Instrument Sans (headings), Jost
-// (body), Syne (pullquote). Glitz is LOGO ONLY — Cooper Black
-// fallback covers it in email clients that block custom fonts.
-//
-// Loaded from Google Fonts. Many email clients block web fonts
-// entirely (Outlook 2007-19 most notably) — those clients fall back
-// to the system stack in each font-family declaration. The preview
-// iframe in the editor + most modern clients (Apple Mail, iOS Mail,
-// Gmail app) DO load these.
 const FONT_LINK = `<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Jost:wght@300;400;500;600&family=Syne:wght@600;700&display=swap">`;
 
 // ── Mobile media query ────────────────────────────────────────
-
 const STYLE_BLOCK = `
   body { margin: 0; padding: 0; background: ${C.white}; }
-  img { display: block; border: 0; max-width: 100%; height: auto; }
+  img { display: block; border: 0; max-width: 100%; height: auto; -ms-interpolation-mode: bicubic; }
   a { color: inherit; }
-  table { border-collapse: collapse; }
+  table { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+  td { mso-line-height-rule: exactly; }
   @media only screen and (max-width: 480px) {
     .jx-hero-headline { font-size: 32px !important; line-height: 1.15 !important; }
     .jx-hero-subtitle { font-size: 13px !important; }
@@ -94,10 +92,6 @@ const STYLE_BLOCK = `
   }
 `;
 
-// CTA styling — sentence-case per BRAND-BIBLE.md ("Sentence case
-// always. Never Title Case, never ALL CAPS."). Terracotta pill from
-// the V2 secondary palette. Subtle letter-spacing for legibility on
-// the button without shouting.
 const CTA_STYLE = `display:inline-block;background:${C.terracotta};color:${C.ivory};text-decoration:none;font-family:${F.body};font-size:14px;font-weight:500;letter-spacing:0.02em;padding:13px 28px;border-radius:999px;`;
 
 function scrimGradient(scrim: "dark" | "light" | "none"): string {
@@ -106,6 +100,23 @@ function scrimGradient(scrim: "dark" | "light" | "none"): string {
   if (scrim === "light")
     return "linear-gradient(180deg, rgba(255,253,240,0.7) 0%, rgba(255,253,240,0) 55%)";
   return "";
+}
+
+/**
+ * Bulletproof CTA. In export mode, wraps a VML roundrect so Outlook
+ * (which ignores border-radius + inline-block padding buttons) shows a
+ * real pill. Non-Outlook clients use the styled anchor.
+ */
+function ctaButton(label: string, url: string, mso: boolean): string {
+  const anchor = `<a href="${escAttr(url)}" class="jx-cta-pill" style="${CTA_STYLE}">${esc(label)}</a>`;
+  if (!mso) return anchor;
+  const w = Math.max(160, 26 + label.length * 9);
+  return `<!--[if mso]>
+<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${escAttr(url)}" style="height:44px;v-text-anchor:middle;width:${w}px;" arcsize="50%" stroke="f" fillcolor="${C.terracotta}">
+<w:anchorlock/><center style="color:${C.ivory};font-family:sans-serif;font-size:14px;font-weight:bold;">${esc(label)}</center>
+</v:roundrect>
+<![endif]-->
+<!--[if !mso]><!-->${anchor}<!--<![endif]-->`;
 }
 
 // ── HEADER ─────────────────────────────────────────────────────
@@ -130,7 +141,10 @@ interface HeroProps {
   ctaUrl: string;
 }
 
-function heroFullBleedOverlay(p: HeroProps & { scrim: "dark" | "light" | "none" }): string {
+function heroFullBleedOverlay(
+  p: HeroProps & { scrim: "dark" | "light" | "none" },
+  mso: boolean,
+): string {
   const isDark = p.scrim === "dark";
   const textColor = isDark ? C.ivory : C.espresso;
   const textShadow = isDark ? "0 1px 2px rgba(0,0,0,0.15)" : "none";
@@ -138,30 +152,44 @@ function heroFullBleedOverlay(p: HeroProps & { scrim: "dark" | "light" | "none" 
   const bg = p.imageUrl
     ? `background-color:${C.ivory};background-image:url('${escAttr(p.imageUrl)}');background-size:cover;background-position:center;`
     : `background-color:${C.ivory};`;
-  const inner = grad
-    ? `background-image:${grad};`
-    : "";
+  const inner = grad ? `background-image:${grad};` : "";
+
+  const content = `
+            <h1 class="jx-hero-headline" style="font-family:${F.display};font-size:44px;line-height:1.1;font-weight:500;color:${textColor};text-shadow:${textShadow};margin:0 0 12px;">${esc(p.headline)}</h1>
+            <p class="jx-hero-subtitle" style="font-family:${F.body};font-size:14px;line-height:1.55;color:${textColor};text-shadow:${textShadow};margin:0 auto 20px;max-width:380px;">${esc(p.subtitle)}</p>
+            ${ctaButton(p.ctaLabel, p.ctaUrl, mso)}`;
+
+  // Export mode: add a VML background so Outlook shows the hero image
+  // with the text on top (Outlook ignores CSS background-image).
+  const vmlOpen =
+    mso && p.imageUrl
+      ? `<!--[if gte mso 9]>
+      <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="width:${EMAIL_W}px;height:${HERO_H}px;">
+      <v:fill type="frame" src="${escAttr(p.imageUrl)}" color="${C.ivory}" />
+      <v:textbox inset="0,0,0,0"><![endif]-->`
+      : "";
+  const vmlClose = mso && p.imageUrl ? `<!--[if gte mso 9]></v:textbox></v:rect><![endif]-->` : "";
 
   return `
   <tr>
-    <td role="img" aria-label="${escAttr(p.imageAlt)}" style="position:relative;min-height:460px;${bg}">
+    <td role="img" aria-label="${escAttr(p.imageAlt)}" style="position:relative;min-height:${HERO_H}px;${bg}">
+      ${vmlOpen}
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
         <tr>
-          <td style="position:relative;padding:40px 36px 0;text-align:center;${inner}min-height:460px;">
-            <h1 class="jx-hero-headline" style="font-family:${F.display};font-size:44px;line-height:1.1;font-weight:500;color:${textColor};text-shadow:${textShadow};margin:0 0 12px;">${esc(p.headline)}</h1>
-            <p class="jx-hero-subtitle" style="font-family:${F.body};font-size:14px;line-height:1.55;color:${textColor};text-shadow:${textShadow};margin:0 auto 20px;max-width:380px;">${esc(p.subtitle)}</p>
-            <a href="${escAttr(p.ctaUrl)}" class="jx-cta-pill" style="${CTA_STYLE}">${esc(p.ctaLabel)}</a>
+          <td style="position:relative;padding:40px 36px 44px;text-align:center;${inner}min-height:${HERO_H}px;">
+${content}
           </td>
         </tr>
       </table>
+      ${vmlClose}
     </td>
   </tr>`;
 }
 
-function heroImage75Solid(p: HeroProps): string {
+function heroImage75Solid(p: HeroProps, mso: boolean): string {
   const imgCell = p.imageUrl
     ? `<img src="${escAttr(p.imageUrl)}" alt="${escAttr(p.imageAlt)}" width="${Math.round(EMAIL_W * 0.75)}" style="width:100%;max-width:450px;height:auto;display:block;margin:0 auto;" />`
-    : `<div style="width:100%;aspect-ratio:1/1;background:${C.lavender};color:${C.espresso};display:flex;align-items:center;justify-content:center;font-size:11px;font-family:${F.body};letter-spacing:0.1em;">[ hero image — 900×900 centered ]</div>`;
+    : `<div style="width:100%;height:300px;line-height:300px;background:${C.lavender};color:${C.espresso};text-align:center;font-size:11px;font-family:${F.body};letter-spacing:0.1em;">[ hero image — 900×900 centered ]</div>`;
 
   return `
   <tr>
@@ -178,7 +206,7 @@ function heroImage75Solid(p: HeroProps): string {
           <td class="jx-text-pad" style="padding:28px 36px 0;text-align:center;">
             <h1 class="jx-hero-headline" style="font-family:${F.display};font-size:44px;line-height:1.1;font-weight:500;color:${C.espresso};margin:0;">${esc(p.headline)}</h1>
             <p class="jx-hero-subtitle" style="font-family:${F.body};font-size:15px;line-height:1.55;color:${C.espresso};margin:10px auto 0;max-width:380px;font-weight:400;">${esc(p.subtitle)}</p>
-            <div style="margin-top:20px;"><a href="${escAttr(p.ctaUrl)}" class="jx-cta-pill" style="${CTA_STYLE}">${esc(p.ctaLabel)}</a></div>
+            <div style="margin-top:20px;">${ctaButton(p.ctaLabel, p.ctaUrl, mso)}</div>
           </td>
         </tr>
       </table>
@@ -186,24 +214,30 @@ function heroImage75Solid(p: HeroProps): string {
   </tr>`;
 }
 
-function heroSplit5050(p: HeroProps): string {
+function heroSplit5050(p: HeroProps, mso: boolean): string {
   const leftCell = p.imageUrl
     ? `background-color:${C.ivory};background-image:url('${escAttr(p.imageUrl)}');background-size:cover;background-position:center;`
     : `background-color:${C.ivory};`;
   const placeholder = p.imageUrl
     ? ""
     : `<div style="text-align:center;color:${C.espresso};font-size:10px;font-family:${F.body};letter-spacing:0.1em;padding:16px;">[ hero image — 600×900 portrait, fills left ]</div>`;
+  // For export, when there's an image, drop an actual <img> in the left
+  // cell so Outlook (no bg-image) still shows it.
+  const leftInner =
+    mso && p.imageUrl
+      ? `<img src="${escAttr(p.imageUrl)}" alt="${escAttr(p.imageAlt)}" width="300" style="width:100%;height:auto;display:block;" />`
+      : placeholder;
 
   return `
   <tr>
     <td style="background-color:${C.white};">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
         <tr>
-          <td class="jx-grid-cell" width="50%" role="img" aria-label="${escAttr(p.imageAlt)}" style="${leftCell}min-height:460px;vertical-align:middle;">${placeholder}</td>
+          <td class="jx-grid-cell" width="50%" role="img" aria-label="${escAttr(p.imageAlt)}" style="${mso && p.imageUrl ? `background-color:${C.ivory};` : leftCell}min-height:${HERO_H}px;vertical-align:middle;">${leftInner}</td>
           <td class="jx-grid-cell" width="50%" style="padding:40px 28px;vertical-align:middle;background-color:${C.white};text-align:left;">
             <h1 class="jx-hero-headline" style="font-family:${F.display};font-size:36px;line-height:1.15;font-weight:500;color:${C.espresso};margin:0 0 12px;">${esc(p.headline)}</h1>
             <p class="jx-hero-subtitle" style="font-family:${F.body};font-size:14px;line-height:1.55;color:${C.espresso};margin:0 0 22px;">${esc(p.subtitle)}</p>
-            <a href="${escAttr(p.ctaUrl)}" class="jx-cta-pill" style="${CTA_STYLE}">${esc(p.ctaLabel)}</a>
+            ${ctaButton(p.ctaLabel, p.ctaUrl, mso)}
           </td>
         </tr>
       </table>
@@ -224,9 +258,9 @@ function sectionACentered(p: { heading: string; body: string }): string {
 }
 
 function sectionAWithPullquote(p: { heading: string; body: string }): string {
-  const sentences = p.body.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean);
+  const sentences = p.body.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
   const pullquote = sentences.reduce((a, b) => (b.length > a.length ? b : a), "");
-  const rest = sentences.filter(s => s !== pullquote).join(" ");
+  const rest = sentences.filter((s) => s !== pullquote).join(" ");
 
   return `
   <tr>
@@ -240,22 +274,25 @@ function sectionAWithPullquote(p: { heading: string; body: string }): string {
 
 // ── SECONDARY IMAGE VARIANTS ───────────────────────────────────
 
-function secondaryFullBleed(p: { imageUrl: string | null; imageAlt: string }): string {
+function secondaryFullBleed(p: { imageUrl: string | null; imageAlt: string }, mso: boolean): string {
+  // object-fit is ignored by Outlook; in export mode use a natural
+  // full-width image (height auto) so it never distorts.
   const inner = p.imageUrl
-    ? `<img src="${escAttr(p.imageUrl)}" alt="${escAttr(p.imageAlt)}" width="${EMAIL_W}" style="width:100%;height:360px;object-fit:cover;display:block;" />`
-    : `<div style="display:flex;align-items:flex-end;justify-content:center;height:360px;padding:16px;color:${C.espresso};font-size:10px;font-family:${F.body};letter-spacing:0.1em;">[ secondary image — 1200×800 full bleed ]</div>`;
-  const bg = p.imageUrl ? "" : `background-color:${C.ivory};`;
+    ? mso
+      ? `<img src="${escAttr(p.imageUrl)}" alt="${escAttr(p.imageAlt)}" width="${EMAIL_W}" style="width:100%;height:auto;display:block;" />`
+      : `<img src="${escAttr(p.imageUrl)}" alt="${escAttr(p.imageAlt)}" width="${EMAIL_W}" style="width:100%;height:360px;object-fit:cover;display:block;" />`
+    : `<div style="height:360px;line-height:360px;text-align:center;color:${C.espresso};font-size:10px;font-family:${F.body};letter-spacing:0.1em;background-color:${C.ivory};">[ secondary image — 1200×800 full bleed ]</div>`;
 
   return `
   <tr>
-    <td role="img" aria-label="${escAttr(p.imageAlt)}" style="${bg}height:360px;position:relative;">${inner}</td>
+    <td role="img" aria-label="${escAttr(p.imageAlt)}">${inner}</td>
   </tr>`;
 }
 
 function secondaryCentered75(p: { imageUrl: string | null; imageAlt: string }): string {
   const imgCell = p.imageUrl
     ? `<img src="${escAttr(p.imageUrl)}" alt="${escAttr(p.imageAlt)}" width="${Math.round(EMAIL_W * 0.75)}" style="width:100%;max-width:450px;height:auto;display:block;margin:0 auto;" />`
-    : `<div style="width:100%;aspect-ratio:9/8;background:${C.lavender};color:${C.espresso};display:flex;align-items:center;justify-content:center;font-size:11px;font-family:${F.body};letter-spacing:0.1em;">[ secondary image — 900×800 centered ]</div>`;
+    : `<div style="width:100%;height:300px;line-height:300px;text-align:center;background:${C.lavender};color:${C.espresso};font-size:11px;font-family:${F.body};letter-spacing:0.1em;">[ secondary image — 900×800 centered ]</div>`;
 
   return `
   <tr>
@@ -280,7 +317,7 @@ function secondaryGrid2Up(p: {
   const cell = (url: string | null, alt: string, fallbackColor: string, idx: number) =>
     url
       ? `<img src="${escAttr(url)}" alt="${escAttr(alt)}" width="290" style="width:100%;height:auto;display:block;" />`
-      : `<div style="width:100%;aspect-ratio:1/1;background:${fallbackColor};color:${C.espresso};display:flex;align-items:center;justify-content:center;font-size:10px;font-family:${F.body};letter-spacing:0.1em;">[ image ${idx} — 580×580 ]</div>`;
+      : `<div style="width:100%;height:200px;line-height:200px;text-align:center;background:${fallbackColor};color:${C.espresso};font-size:10px;font-family:${F.body};letter-spacing:0.1em;">[ image ${idx} — 580×580 ]</div>`;
 
   return `
   <tr>
@@ -304,8 +341,8 @@ interface SectionBProps {
   ctaUrl: string;
 }
 
-function sectionBCenteredWithCta(p: SectionBProps): string {
-  const paras = p.body.split(/\n\n+/).map(x => x.trim()).filter(Boolean);
+function sectionBCenteredWithCta(p: SectionBProps, mso: boolean): string {
+  const paras = p.body.split(/\n\n+/).map((x) => x.trim()).filter(Boolean);
   const paraHtml = paras
     .map((para, i) => {
       const mb = i < paras.length - 1 ? 12 : 22;
@@ -318,15 +355,15 @@ function sectionBCenteredWithCta(p: SectionBProps): string {
     <td class="jx-text-pad" style="padding:36px 36px 48px;text-align:center;background-color:${C.white};">
       <div class="jx-section-heading" style="font-family:${F.display};font-size:15px;font-weight:600;letter-spacing:0.01em;color:${C.espresso};margin:0 0 14px;">${esc(p.heading)}</div>
       ${paraHtml}
-      <a href="${escAttr(p.ctaUrl)}" class="jx-cta-pill" style="${CTA_STYLE}">${esc(p.ctaLabel)}</a>
+      ${ctaButton(p.ctaLabel, p.ctaUrl, mso)}
     </td>
   </tr>`;
 }
 
-function sectionBTwoColumnWithCta(p: SectionBProps): string {
-  const paras = p.body.split(/\n\n+/).map(x => x.trim()).filter(Boolean);
+function sectionBTwoColumnWithCta(p: SectionBProps, mso: boolean): string {
+  const paras = p.body.split(/\n\n+/).map((x) => x.trim()).filter(Boolean);
   const [left, right] = paras;
-  if (!right) return sectionBCenteredWithCta(p);
+  if (!right) return sectionBCenteredWithCta(p, mso);
 
   return `
   <tr>
@@ -343,9 +380,7 @@ function sectionBTwoColumnWithCta(p: SectionBProps): string {
           </td>
         </tr>
       </table>
-      <div style="margin-top:12px;text-align:center;">
-        <a href="${escAttr(p.ctaUrl)}" class="jx-cta-pill" style="${CTA_STYLE}">${esc(p.ctaLabel)}</a>
-      </div>
+      <div style="margin-top:12px;text-align:center;">${ctaButton(p.ctaLabel, p.ctaUrl, mso)}</div>
     </td>
   </tr>`;
 }
@@ -359,7 +394,7 @@ function imgUrl(path: string | null | undefined): string | null {
   return catalogImageUrl(path);
 }
 
-function dispatchHero(c: CampaignData): string {
+function dispatchHero(c: CampaignData, mso: boolean): string {
   const common = {
     imageUrl: imgUrl(c.heroImagePath),
     imageAlt: c.heroImageAlt ?? "",
@@ -369,10 +404,13 @@ function dispatchHero(c: CampaignData): string {
     ctaUrl: c.heroCtaUrl ?? "#",
   };
   switch (c.heroVariant) {
-    case "image_75_solid": return heroImage75Solid(common);
-    case "split_50_50": return heroSplit5050(common);
+    case "image_75_solid":
+      return heroImage75Solid(common, mso);
+    case "split_50_50":
+      return heroSplit5050(common, mso);
     case "full_bleed_overlay":
-    default: return heroFullBleedOverlay({ ...common, scrim: c.heroScrim ?? "dark" });
+    default:
+      return heroFullBleedOverlay({ ...common, scrim: c.heroScrim ?? "dark" }, mso);
   }
 }
 
@@ -382,26 +420,31 @@ function dispatchSectionA(c: CampaignData): string {
     body: c.sectionABody ?? PLACEHOLDER,
   };
   switch (c.sectionAVariant) {
-    case "with_pullquote": return sectionAWithPullquote(common);
+    case "with_pullquote":
+      return sectionAWithPullquote(common);
     case "centered":
-    default: return sectionACentered(common);
+    default:
+      return sectionACentered(common);
   }
 }
 
-function dispatchSecondary(c: CampaignData): string {
+function dispatchSecondary(c: CampaignData, mso: boolean): string {
   const url = imgUrl(c.secondaryImagePath);
   const url2 = imgUrl(c.secondaryImagePath2);
   const alt = c.secondaryImageAlt ?? "";
   const alt2 = c.secondaryImageAlt2 ?? "";
   switch (c.secondaryImageVariant) {
-    case "centered_75": return secondaryCentered75({ imageUrl: url, imageAlt: alt });
-    case "grid_2up": return secondaryGrid2Up({ imageUrl: url, imageUrl2: url2, imageAlt: alt, imageAlt2: alt2 });
+    case "centered_75":
+      return secondaryCentered75({ imageUrl: url, imageAlt: alt });
+    case "grid_2up":
+      return secondaryGrid2Up({ imageUrl: url, imageUrl2: url2, imageAlt: alt, imageAlt2: alt2 });
     case "full_bleed":
-    default: return secondaryFullBleed({ imageUrl: url, imageAlt: alt });
+    default:
+      return secondaryFullBleed({ imageUrl: url, imageAlt: alt }, mso);
   }
 }
 
-function dispatchSectionB(c: CampaignData): string {
+function dispatchSectionB(c: CampaignData, mso: boolean): string {
   const common = {
     heading: c.sectionBHeading ?? PLACEHOLDER,
     body: c.sectionBBody ?? PLACEHOLDER,
@@ -409,37 +452,62 @@ function dispatchSectionB(c: CampaignData): string {
     ctaUrl: c.sectionBCtaUrl ?? "#",
   };
   switch (c.sectionBVariant) {
-    case "two_column_with_cta": return sectionBTwoColumnWithCta(common);
+    case "two_column_with_cta":
+      return sectionBTwoColumnWithCta(common, mso);
     case "centered_with_cta":
-    default: return sectionBCenteredWithCta(common);
+    default:
+      return sectionBCenteredWithCta(common, mso);
   }
 }
 
+/** Hidden preheader/preview text for the inbox line (export only). */
+function preheaderSpan(text: string): string {
+  const filler = "&#847;&zwnj;&nbsp;".repeat(60);
+  return `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:${C.white};">${esc(text)}${filler}</div>`;
+}
+
+const MSO_HEAD = `<!--[if mso]>
+<noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
+<![endif]-->
+<!--[if mso]>
+<style>* { font-family: Arial, sans-serif !important; }</style>
+<![endif]-->`;
+
 /**
  * Render a campaign to a full HTML document (includes DOCTYPE).
- * Pure string building — no React, no react-dom/server.
+ * `target: "export"` produces the client-hardened HTML for Omnisend.
  */
-export function renderEmailHtml(campaign: CampaignData): string {
+export function renderEmailHtml(campaign: CampaignData, opts: RenderOptions = {}): string {
+  const target = opts.target ?? "preview";
+  const mso = target === "export";
+  const xmlns =
+    mso
+      ? ` xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office"`
+      : "";
+
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en"${xmlns}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="x-apple-disable-message-reformatting">
-<title>Jaxy email preview</title>
+<title>Jaxy</title>
 ${FONT_LINK}
+${mso ? MSO_HEAD : ""}
 <style>${STYLE_BLOCK}</style>
 </head>
 <body style="margin:0;padding:0;background-color:${C.white};font-family:${F.body};">
+${mso && opts.preheader ? preheaderSpan(opts.preheader) : ""}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${C.white};border-collapse:collapse;">
   <tr>
     <td align="center" style="padding:0;">
       <table role="presentation" width="${EMAIL_W}" cellpadding="0" cellspacing="0" style="width:${EMAIL_W}px;max-width:100%;background-color:${C.white};border-collapse:collapse;">
         ${headerLogoOnly()}
-        ${dispatchHero(campaign)}
+        ${dispatchHero(campaign, mso)}
         ${dispatchSectionA(campaign)}
-        ${dispatchSecondary(campaign)}
-        ${dispatchSectionB(campaign)}
+        ${dispatchSecondary(campaign, mso)}
+        ${dispatchSectionB(campaign, mso)}
       </table>
     </td>
   </tr>

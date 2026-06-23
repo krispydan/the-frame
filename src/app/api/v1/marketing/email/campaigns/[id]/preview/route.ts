@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { emailCampaigns } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
-import type { CampaignData } from "@/modules/marketing/components/email-template";
+import type { CampaignData } from "@/modules/marketing/lib/email-template-types";
 import { renderEmailHtml } from "@/modules/marketing/lib/render-email";
 
 /**

@@ -18,6 +18,7 @@
 
 import fs from "fs";
 import path from "path";
+import { emailModel, ANTHROPIC_VERSION } from "./ai-model";
 
 // ── Brand context loader ────────────────────────────────────────
 // Snapshot lives in src/modules/marketing/brand-context/ (copied
@@ -180,7 +181,7 @@ async function callClaude({
   userPrompt,
   tool,
   maxTokens = 4096,
-  model = "claude-opus-4-7",
+  model = emailModel(),
 }: CallClaudeOpts): Promise<{
   ok: true;
   output: Record<string, unknown>;
@@ -210,7 +211,7 @@ async function callClaude({
       headers: {
         "Content-Type": "application/json",
         "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
+        "anthropic-version": ANTHROPIC_VERSION,
       },
       body: JSON.stringify(body),
     });
@@ -453,6 +454,11 @@ function fillTemplate(template: string, vars: Record<string, string>): string {
     const pattern = new RegExp(`\\{\\{\\s*${escapeRe(key)}\\s*\\}\\}`, "g");
     out = out.replace(pattern, val);
   }
+  // Strip any unresolved {{...}} tokens (e.g. the {{SYSTEM_PROMPT_BASE}}
+  // marker, which is injected separately as the system prompt) plus the
+  // trailing "← see ..." doc arrows so they never leak into the message
+  // we send to Claude.
+  out = out.replace(/\{\{[^}]*\}\}\s*(←[^\n]*)?/g, "").replace(/[ \t]+\n/g, "\n");
   return out;
 }
 
