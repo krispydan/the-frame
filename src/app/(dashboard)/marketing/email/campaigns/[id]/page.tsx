@@ -579,8 +579,58 @@ export default function CampaignDetailPage({
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Save to refresh the preview. Image paths show as placeholder blocks until Phase 4 wires uploads.
+            Save to refresh the preview.
           </p>
+
+          {/* SECTION IMAGE EXPORT — JPG-per-block for pasting into
+              Faire / Omnisend / wherever. Each button hits the
+              export-image endpoint and triggers a download. */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">
+                Export as images
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  JPG per block — paste into Faire / Omnisend
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {([
+                { kind: "hero",       label: "Hero block" },
+                { kind: "sectionA",   label: "Text section A" },
+                { kind: "secondary",  label: "Secondary image block" },
+                { kind: "sectionB",   label: "Text section B + CTA" },
+                { kind: "full",       label: "Whole email" },
+              ] as const).map(({ kind, label }) => (
+                <div key={kind} className="flex items-center justify-between gap-2 text-sm">
+                  <span>{label}</span>
+                  <div className="flex gap-1">
+                    <a
+                      href={`/api/v1/marketing/email/campaigns/${id}/export-image?kind=${kind}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs underline text-muted-foreground hover:text-foreground"
+                    >
+                      View
+                    </a>
+                    <a
+                      href={`/api/v1/marketing/email/campaigns/${id}/export-image?kind=${kind}&download=1`}
+                      className="text-xs px-2 py-1 rounded border border-input hover:bg-accent"
+                    >
+                      <ImageIcon className="h-3 w-3 inline mr-1" />
+                      Download JPG
+                    </a>
+                  </div>
+                </div>
+              ))}
+              <p className="text-xs text-muted-foreground pt-2 border-t mt-2">
+                First export ~1-2s (Chromium warms up), then ~300ms each.
+                Renders at 2x retina. Width 600 by default — append
+                <code className="mx-1 bg-muted px-1 rounded">&amp;width=1200</code>
+                for double-density.
+              </p>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>

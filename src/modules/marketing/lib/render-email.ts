@@ -419,6 +419,53 @@ function dispatchSectionB(c: CampaignData): string {
  * Render a campaign to a full HTML document (includes DOCTYPE).
  * Pure string building — no React, no react-dom/server.
  */
+export type SectionKind = "hero" | "sectionA" | "secondary" | "sectionB";
+
+/**
+ * Render a SINGLE section in isolation, wrapped in the same
+ * <html><head> shell (so fonts + media queries still load).
+ *
+ * Used by the section-image export endpoint — Playwright opens
+ * this URL and screenshots the body's natural bounding box, then
+ * the operator pastes the JPG into Faire / Omnisend / wherever.
+ *
+ * The wrapper table mirrors the structure of the full email so
+ * widths + padding stay identical — a hero block rendered alone
+ * looks exactly like the hero block in the assembled email.
+ */
+export function renderSectionHtml(campaign: CampaignData, kind: SectionKind): string {
+  let inner = "";
+  switch (kind) {
+    case "hero":      inner = dispatchHero(campaign); break;
+    case "sectionA":  inner = dispatchSectionA(campaign); break;
+    case "secondary": inner = dispatchSecondary(campaign); break;
+    case "sectionB":  inner = dispatchSectionB(campaign); break;
+  }
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jaxy email section — ${kind}</title>
+${FONT_LINK}
+<style>${STYLE_BLOCK}
+  body { background: ${C.white}; }
+</style>
+</head>
+<body style="margin:0;padding:0;background-color:${C.white};font-family:${F.body};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${C.white};border-collapse:collapse;">
+  <tr>
+    <td align="center" style="padding:0;">
+      <table role="presentation" width="${EMAIL_W}" cellpadding="0" cellspacing="0" style="width:${EMAIL_W}px;max-width:100%;background-color:${C.white};border-collapse:collapse;">
+        ${inner}
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>`;
+}
+
 export function renderEmailHtml(campaign: CampaignData): string {
   return `<!DOCTYPE html>
 <html lang="en">

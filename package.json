@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "(playwright install chromium 2>&1 || echo '[build] playwright chromium install failed — section image export will be unavailable until fixed') && next build",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
