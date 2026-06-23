@@ -19,27 +19,21 @@ type Campaign = {
 };
 
 const STATUS_ORDER = [
-  "idea",
-  "themed",
-  "copy_pending",
-  "copy_review",
-  "image_pending",
-  "image_review",
-  "preview_ready",
-  "exported",
+  "draft",
+  "copywriting",
+  "photography",
+  "design_review",
+  "scheduled",
   "sent",
   "analyzed",
 ] as const;
 
 const STATUS_LABELS: Record<string, string> = {
-  idea: "Idea",
-  themed: "Themed",
-  copy_pending: "Copy pending",
-  copy_review: "Copy review",
-  image_pending: "Image pending",
-  image_review: "Image review",
-  preview_ready: "Preview ready",
-  exported: "Exported",
+  draft: "Draft",
+  copywriting: "Copywriting",
+  photography: "Photography",
+  design_review: "Design review",
+  scheduled: "Scheduled",
   sent: "Sent",
   analyzed: "Analyzed",
 };
@@ -212,35 +206,187 @@ export default function EmailAssistantDashboard() {
 }
 
 function NewCampaignButton({ onCreated }: { onCreated: (c: Campaign) => void }) {
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  async function create() {
+  // Sensible defaults: next slot (Mon for retail, Tue for wholesale)
+  const today = new Date();
+  const day = today.getDay() || 7;
+  const daysUntilNextMon = day === 1 ? 7 : 8 - day;
+  const nextMon = new Date(today);
+  nextMon.setDate(today.getDate() + daysUntilNextMon);
+  const defaultDate = nextMon.toISOString().slice(0, 10);
+
+  const [form, setForm] = useState({
+    name: "",
+    audience: "retail" as "retail" | "wholesale",
+    scheduledDate: defaultDate,
+    briefTitle: "",
+    briefAngle: "",
+    briefProductHook: "",
+    briefSeasonalContext: "",
+  });
+
+  function update<K extends keyof typeof form>(k: K, v: (typeof form)[K]) {
+    setForm(f => ({ ...f, [k]: v }));
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
     setBusy(true);
+    setError(null);
     try {
-      // Default: schedule for next Monday, retail. User can change.
-      const today = new Date();
-      const day = today.getDay() || 7;
-      const daysUntilNextMon = day === 1 ? 7 : 8 - day;
-      const next = new Date(today);
-      next.setDate(today.getDate() + daysUntilNextMon);
-      const iso = next.toISOString().slice(0, 10);
-
       const res = await fetch("/api/v1/marketing/email/campaigns", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audience: "retail", scheduledDate: iso }),
+        body: JSON.stringify(form),
       });
       const data = await res.json();
-      if (data.campaign) onCreated(data.campaign);
+      if (data.error) {
+        setError(data.error);
+      } else if (data.campaign) {
+        onCreated(data.campaign);
+        // Reset form for next use, close modal
+        setForm({
+          name: "",
+          audience: "retail",
+          scheduledDate: defaultDate,
+          briefTitle: "",
+          briefAngle: "",
+          briefProductHook: "",
+          briefSeasonalContext: "",
+        });
+        setOpen(false);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <Button onClick={create} disabled={busy}>
-      <Plus className="h-4 w-4 mr-2" />
-      {busy ? "Creating…" : "New campaign"}
-    </Button>
+    <>
+      <Button onClick={() => setOpen(true)}>
+        <Plus className="h-4 w-4 mr-2" />
+        New campaign
+      </Button>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setOpen(false)}
+        >
+          <div
+            className="bg-background border rounded-lg max-w-2xl w-full max-h-[90vh] overflow-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            <form onSubmit={submit} className="p-6 space-y-4">
+              <div>
+                <h2 className="text-xl font-semibold">New email campaign</h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  The brief is what AI uses to generate everything. Be specific —
+                  what&apos;s the angle, the product hook, why this email now.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Name (your internal label)</label>
+                  <input
+                    className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                    placeholder="e.g. Honey drop wk 1"
+                    value={form.name}
+                    onChange={e => update("name", e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Audience</label>
+                  <select
+                    className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                    value={form.audience}
+                    onChange={e => update("audience", e.target.value as "retail" | "wholesale")}
+                  >
+                    <option value="retail">Retail (DTC)</option>
+                    <option value="wholesale">Wholesale (Christina)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Scheduled date</label>
+                  <input
+                    type="date"
+                    className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                    value={form.scheduledDate}
+                    onChange={e => update("scheduledDate", e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <hr className="border-border" />
+
+              <div>
+                <h3 className="text-sm font-medium mb-2">Campaign brief</h3>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Title (3–8 words)</label>
+                    <input
+                      className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                      placeholder="e.g. Sunday Drive in Honey lands"
+                      value={form.briefTitle}
+                      onChange={e => update("briefTitle", e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Angle (why this email, why now — 1–3 sentences)</label>
+                    <textarea
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      rows={4}
+                      placeholder="First time we've offered this colorway. Honey sits between amber and caramel — the warmest tortoise we've ever produced. Lead with the wait-list-energy."
+                      value={form.briefAngle}
+                      onChange={e => update("briefAngle", e.target.value)}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Product hook (optional)</label>
+                      <input
+                        className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                        placeholder="SKU / category / colorway"
+                        value={form.briefProductHook}
+                        onChange={e => update("briefProductHook", e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Seasonal context (optional)</label>
+                      <input
+                        className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                        placeholder="holiday / weather / cultural anchor"
+                        value={form.briefSeasonalContext}
+                        onChange={e => update("briefSeasonalContext", e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {error && (
+                <div className="text-sm text-destructive">{error}</div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={busy}>
+                  {busy ? "Creating…" : "Create campaign"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

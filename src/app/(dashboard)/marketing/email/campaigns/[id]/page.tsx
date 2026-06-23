@@ -199,26 +199,57 @@ export default function CampaignDetailPage({
     <div className="space-y-4">
       {/* Header bar */}
       <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <Link href="/marketing/email">
               <Button variant="outline" size="sm">← Back</Button>
             </Link>
-            <Badge variant={campaign.audience === "wholesale" ? "default" : "outline"}>
-              {campaign.audience as string}
-            </Badge>
-            <Badge variant="outline">{campaign.status as string}</Badge>
+            <select
+              value={campaign.audience as string}
+              onChange={e => updateField("audience", e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+              title="Audience"
+            >
+              <option value="retail">Retail (DTC)</option>
+              <option value="wholesale">Wholesale (Christina)</option>
+            </select>
+            <select
+              value={campaign.status as string}
+              onChange={e => updateField("status", e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+              title="Status (kanban stage)"
+            >
+              <option value="draft">Draft</option>
+              <option value="copywriting">Copywriting</option>
+              <option value="photography">Photography</option>
+              <option value="design_review">Design review</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="sent">Sent</option>
+              <option value="analyzed">Analyzed</option>
+            </select>
+            <input
+              type="date"
+              value={campaign.scheduledDate as string}
+              onChange={e => updateField("scheduledDate", e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+              title="Scheduled send date"
+            />
             {savedAt && (
               <span className="text-xs text-muted-foreground">
                 Saved {new Date(savedAt).toLocaleTimeString()}
               </span>
             )}
           </div>
-          <h1 className="text-2xl font-semibold">
-            {(campaign.subject as string | null) ?? (campaign.heroHeadline as string | null) ?? "(no subject yet)"}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Scheduled {campaign.scheduledDate as string} · Week of {campaign.weekOf as string}
+          <input
+            value={(campaign.name as string) ?? ""}
+            onChange={e => updateField("name", e.target.value)}
+            placeholder="Campaign name (your internal label)"
+            className="text-2xl font-semibold w-full bg-transparent border-0 outline-none focus:ring-1 focus:ring-foreground/20 rounded px-1 -mx-1"
+          />
+          <p className="text-sm text-muted-foreground mt-1">
+            {(campaign.subject as string | null) ?? "(no subject yet)"}
+            {" · "}
+            Week of {campaign.weekOf as string}
           </p>
         </div>
         <div className="flex gap-2">

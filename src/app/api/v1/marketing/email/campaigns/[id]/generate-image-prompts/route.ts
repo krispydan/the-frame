@@ -91,7 +91,7 @@ export async function POST(
        secondary_image_prompt_2 = ?,
        secondary_image_alt_2 = COALESCE(NULLIF(secondary_image_alt_2, ''), ?),
        ai_image_prompt_raw_json = ?,
-       status = CASE WHEN status IN ('idea','themed','copy_pending','copy_review') THEN 'image_pending' ELSE status END,
+       status = CASE WHEN status IN ('draft','copywriting') THEN 'photography' ELSE status END,
        updated_at = datetime('now')
      WHERE id = ?`,
   ).run(

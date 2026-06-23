@@ -214,7 +214,7 @@ export const marketingMcpTools: McpTool[] = [
         audience: { type: "string", enum: ["retail", "wholesale"] },
         status: {
           type: "string",
-          enum: ["idea", "themed", "copy_pending", "copy_review", "image_pending", "image_review", "preview_ready", "exported", "sent", "analyzed"],
+          enum: ["draft", "copywriting", "photography", "design_review", "scheduled", "sent", "analyzed"],
         },
         weekOf: { type: "string", description: "ISO Monday date for exact-match weekly filter" },
         from: { type: "string", description: "ISO date — start of scheduled_date range" },
@@ -282,7 +282,7 @@ export const marketingMcpTools: McpTool[] = [
            (id, audience, scheduled_date, week_of, theme_id, status,
             hero_variant, section_a_variant, secondary_image_variant, section_b_variant,
             created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'idea', ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+         VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, datetime('now'), datetime('now'))`,
       ).run(
         id,
         input.audience,
@@ -343,7 +343,7 @@ export const marketingMcpTools: McpTool[] = [
       }
       if (sets.length === 0) return { content: [{ type: "text", text: "No fields to save" }] };
 
-      sets.push("status = CASE WHEN status IN ('idea','themed','copy_pending') THEN 'copy_review' ELSE status END");
+      sets.push("status = CASE WHEN status IN ('draft','copywriting') THEN 'copywriting' ELSE status END");
       sets.push("ai_copy_prompt_version = 'chat-Claude-draft'");
       sets.push("updated_at = datetime('now')");
       vals.push(campaignId);
@@ -443,7 +443,7 @@ export const marketingMcpTools: McpTool[] = [
            section_b_cta_label = ?, section_b_cta_url = COALESCE(NULLIF(section_b_cta_url, ''), ?),
            ai_copy_prompt_version = 'v5',
            ai_copy_raw_json = ?,
-           status = CASE WHEN status IN ('idea','themed','copy_pending') THEN 'copy_review' ELSE status END,
+           status = CASE WHEN status = 'draft' THEN 'copywriting' ELSE status END,
            updated_at = datetime('now')
          WHERE id = ?`,
       ).run(
@@ -507,7 +507,7 @@ export const marketingMcpTools: McpTool[] = [
            secondary_image_prompt = ?, secondary_image_alt = COALESCE(NULLIF(secondary_image_alt, ''), ?),
            secondary_image_prompt_2 = ?, secondary_image_alt_2 = COALESCE(NULLIF(secondary_image_alt_2, ''), ?),
            ai_image_prompt_raw_json = ?,
-           status = CASE WHEN status IN ('idea','themed','copy_pending','copy_review') THEN 'image_pending' ELSE status END,
+           status = CASE WHEN status IN ('draft','copywriting') THEN 'photography' ELSE status END,
            updated_at = datetime('now')
          WHERE id = ?`,
       ).run(
@@ -622,7 +622,7 @@ export const marketingMcpTools: McpTool[] = [
              brief_title, brief_angle, brief_product_hook, brief_seasonal_context,
              designer_notes,
              created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'themed', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+           VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
         );
         for (const theme of insertedThemes) {
           const slots: (1 | 2)[] = [1, 2];
@@ -760,7 +760,7 @@ Slot context: ${imageStyleLabel}. Subject-angle direction: ${rec.subjectAngleHin
            brief_title, brief_angle, brief_product_hook, brief_seasonal_context,
            designer_notes,
            created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'copy_pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+         VALUES (?, ?, ?, ?, ?, 'copywriting', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
       ).run(
         campaignId, audience, scheduled, weekOf, themeId,
         heroVariant, sectionAVariant, secondaryImageVariant, sectionBVariant,
@@ -793,7 +793,7 @@ Slot context: ${imageStyleLabel}. Subject-angle direction: ${rec.subjectAngleHin
            section_b_cta_label = ?, section_b_cta_url = ?,
            ai_copy_prompt_version = 'v5',
            ai_copy_raw_json = ?,
-           status = 'copy_review',
+           status = 'copywriting',
            updated_at = datetime('now')
          WHERE id = ?`,
       ).run(
@@ -824,7 +824,7 @@ Slot context: ${imageStyleLabel}. Subject-angle direction: ${rec.subjectAngleHin
              secondary_image_prompt = ?, secondary_image_alt = ?,
              secondary_image_prompt_2 = ?, secondary_image_alt_2 = ?,
              ai_image_prompt_raw_json = ?,
-             status = 'image_pending',
+             status = 'photography',
              updated_at = datetime('now')
            WHERE id = ?`,
         ).run(

@@ -30,23 +30,32 @@ export const emailCampaigns = sqliteTable("marketing_email_campaigns", {
   id: id(),
 
   // Planning
+  /** Human-readable name for the campaign (separate from `subject` —
+   *  the latter is the inbox subject line, this is the operator's
+   *  internal label for finding it in lists). */
+  name: text("name"),
   audience: text("audience", { enum: ["retail", "wholesale"] }).notNull(),
   scheduledDate: text("scheduled_date").notNull(),          // ISO date (YYYY-MM-DD)
   weekOf: text("week_of"),                                   // Monday ISO date, for calendar grouping
+  /**
+   * Kanban-style status. Renamed 2026-06-23 from the verbose
+   * idea/themed/copy_pending… enum to a flatter 7-stage model
+   * that matches how Daniel thinks about the workflow.
+   *
+   * Legacy values still appear in old data; the status-display
+   * helper normalizes them on read.
+   */
   status: text("status", {
     enum: [
-      "idea",
-      "themed",
-      "copy_pending",
-      "copy_review",
-      "image_pending",
-      "image_review",
-      "preview_ready",
-      "exported",
+      "draft",            // brief filled, nothing else
+      "copywriting",      // copy AI is working / human refining
+      "photography",      // designer briefing / rendering
+      "design_review",    // full preview being reviewed
+      "scheduled",        // queued for send
       "sent",
       "analyzed",
     ],
-  }).notNull().default("idea"),
+  }).notNull().default("draft"),
   themeId: text("theme_id"),                                 // → marketing_email_themes.id
 
   // ── Brief (the AI prompt/idea — Daniel: "before you run the AI

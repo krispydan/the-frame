@@ -157,7 +157,7 @@ export default function DesignerQueuePage() {
           <CardContent className="p-6 text-center text-sm text-muted-foreground">
             <ImageIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
             No campaigns in the queue. Briefs land here once a campaign reaches
-            <code className="mx-1 text-xs bg-muted px-1 py-0.5 rounded">image_pending</code>
+            <code className="mx-1 text-xs bg-muted px-1 py-0.5 rounded">photography</code>
             status (after Generate image prompts in the editor).
           </CardContent>
         </Card>

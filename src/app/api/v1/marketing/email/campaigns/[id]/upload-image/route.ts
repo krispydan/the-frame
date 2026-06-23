@@ -137,19 +137,16 @@ export async function POST(
   const hasSecondary2 = !!after?.secondaryImagePath2;
   const allReady = hasHero && hasSecondary && (!needsSecondary2 || hasSecondary2);
 
-  let statusAfter = after?.status ?? "image_pending";
-  if (
-    allReady &&
-    (after?.status === "image_pending" || after?.status === "image_review")
-  ) {
+  let statusAfter = after?.status ?? "photography";
+  if (allReady && after?.status === "photography") {
     sqlite
       .prepare(
         `UPDATE marketing_email_campaigns
-          SET status = 'image_review', updated_at = datetime('now')
+          SET status = 'design_review', updated_at = datetime('now')
           WHERE id = ?`,
       )
       .run(campaignId);
-    statusAfter = "image_review";
+    statusAfter = "design_review";
   }
 
   return NextResponse.json({

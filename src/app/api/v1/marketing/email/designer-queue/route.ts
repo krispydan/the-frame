@@ -24,7 +24,7 @@ export async function GET() {
   const rows = await db
     .select()
     .from(emailCampaigns)
-    .where(inArray(emailCampaigns.status, ["image_pending", "image_review"] as never[]))
+    .where(inArray(emailCampaigns.status, ["photography", "design_review"] as never[]))
     .orderBy(asc(emailCampaigns.scheduledDate));
 
   // Annotate each row with what's needed vs uploaded so the UI
@@ -50,8 +50,8 @@ export async function GET() {
     queue: enriched,
     summary: {
       total: enriched.length,
-      pending: enriched.filter((c) => c.status === "image_pending").length,
-      inReview: enriched.filter((c) => c.status === "image_review").length,
+      pending: enriched.filter((c) => c.status === "photography").length,
+      inReview: enriched.filter((c) => c.status === "design_review").length,
       allReady: enriched.filter((c) => c.allReady).length,
     },
   });

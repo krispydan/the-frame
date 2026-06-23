@@ -73,9 +73,14 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   let body: {
+    name?: string;
     audience?: "retail" | "wholesale";
     scheduledDate?: string;
     weekOf?: string;
+    briefTitle?: string;
+    briefAngle?: string;
+    briefProductHook?: string;
+    briefSeasonalContext?: string;
   } = {};
   try {
     body = await req.json();
@@ -102,10 +107,15 @@ export async function POST(req: NextRequest) {
   const id = crypto.randomUUID();
   await db.insert(emailCampaigns).values({
     id,
+    name: body.name ?? null,
     audience: body.audience,
     scheduledDate: body.scheduledDate,
     weekOf,
-    status: "idea",
+    status: "draft",
+    briefTitle: body.briefTitle ?? null,
+    briefAngle: body.briefAngle ?? null,
+    briefProductHook: body.briefProductHook ?? null,
+    briefSeasonalContext: body.briefSeasonalContext ?? null,
   });
 
   const [row] = await db

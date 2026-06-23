@@ -114,7 +114,7 @@ export async function POST(
        section_b_cta_label = ?, section_b_cta_url = COALESCE(NULLIF(section_b_cta_url, ''), ?),
        ai_copy_prompt_version = 'v5',
        ai_copy_raw_json = ?,
-       status = CASE WHEN status IN ('idea','themed','copy_pending') THEN 'copy_review' ELSE status END,
+       status = CASE WHEN status IN ('draft','copywriting') THEN 'copywriting' ELSE status END,
        updated_at = datetime('now')
      WHERE id = ?`,
   ).run(

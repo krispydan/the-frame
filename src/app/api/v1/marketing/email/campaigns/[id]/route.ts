@@ -12,6 +12,8 @@ import { eq } from "drizzle-orm";
  * workflow explicit.
  */
 const PATCHABLE_COLUMNS = new Set([
+  "name",
+  "status",
   "audience",
   "scheduledDate",
   "weekOf",

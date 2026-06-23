@@ -1858,12 +1858,33 @@ try {
     "brief_angle TEXT",
     "brief_product_hook TEXT",
     "brief_seasonal_context TEXT",
+    // 2026-06-23 second pass: human-readable name + kanban statuses
+    "name TEXT",
   ]) {
     try {
       sqlite.exec(`ALTER TABLE marketing_email_campaigns ADD COLUMN ${col}`);
     } catch {
       /* column already exists */
     }
+  }
+
+  // Migrate legacy status values to the new kanban-friendly set.
+  // Mapping:
+  //   idea / themed                            → draft
+  //   copy_pending / copy_review               → copywriting
+  //   image_pending                            → photography
+  //   image_review / preview_ready             → design_review
+  //   exported                                 → scheduled
+  //   sent / analyzed                          unchanged
+  // Idempotent — re-runs find no rows with old values.
+  try {
+    sqlite.exec(`UPDATE marketing_email_campaigns SET status = 'draft'         WHERE status IN ('idea','themed')`);
+    sqlite.exec(`UPDATE marketing_email_campaigns SET status = 'copywriting'   WHERE status IN ('copy_pending','copy_review')`);
+    sqlite.exec(`UPDATE marketing_email_campaigns SET status = 'photography'   WHERE status = 'image_pending'`);
+    sqlite.exec(`UPDATE marketing_email_campaigns SET status = 'design_review' WHERE status IN ('image_review','preview_ready')`);
+    sqlite.exec(`UPDATE marketing_email_campaigns SET status = 'scheduled'     WHERE status = 'exported'`);
+  } catch {
+    /* no rows or already migrated */
   }
 } catch (e) { console.error("[db] Marketing email tables error:", e); }
 
