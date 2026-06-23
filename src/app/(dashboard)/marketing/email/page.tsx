@@ -212,6 +212,31 @@ function NewCampaignButton({ onCreated }: { onCreated: (c: Campaign) => void }) 
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+
+  // Escape closes the modal (with dirty-confirm via attemptClose
+  // declared below). Body scroll lock while open. Both flagged in
+  // the code review as missing modal UX.
+  useEffect(() => {
+    if (!open) return;
+    const origOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        // Inline check so we don't close-over a stale dirty value.
+        // Use the same logic the close-button uses.
+        if (!dirty || confirm("Discard your changes to this brief?")) {
+          setOpen(false);
+          setDirty(false);
+        }
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = origOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, dirty]);
 
   // Sensible defaults: next slot (Mon for retail, Tue for wholesale)
   const today = new Date();
@@ -232,6 +257,16 @@ function NewCampaignButton({ onCreated }: { onCreated: (c: Campaign) => void }) 
 
   function update<K extends keyof typeof form>(k: K, v: (typeof form)[K]) {
     setForm(f => ({ ...f, [k]: v }));
+    setDirty(true);
+  }
+
+  // Wrap close with dirty-confirm so backdrop-click + cancel-button
+  // + escape-key all share the same data-loss guard.
+  function attemptClose() {
+    if (!dirty || confirm("Discard your changes to this brief?")) {
+      setOpen(false);
+      setDirty(false);
+    }
   }
 
   async function submit(e: React.FormEvent) {
@@ -258,6 +293,7 @@ function NewCampaignButton({ onCreated }: { onCreated: (c: Campaign) => void }) 
           briefProductHook: "",
           briefSeasonalContext: "",
         });
+        setDirty(false);
         setOpen(false);
       }
     } catch (e) {
@@ -277,7 +313,7 @@ function NewCampaignButton({ onCreated }: { onCreated: (c: Campaign) => void }) 
       {open && (
         <div
           className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-          onClick={() => setOpen(false)}
+          onClick={attemptClose}
         >
           <div
             className="bg-background border rounded-lg max-w-2xl w-full max-h-[90vh] overflow-auto"
@@ -372,7 +408,7 @@ function NewCampaignButton({ onCreated }: { onCreated: (c: Campaign) => void }) 
               )}
 
               <div className="flex justify-end gap-2 pt-2">
-                <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                <Button type="button" variant="outline" onClick={attemptClose}>
                   Cancel
                 </Button>
                 <Button type="submit" disabled={busy}>

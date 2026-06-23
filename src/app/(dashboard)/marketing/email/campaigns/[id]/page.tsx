@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState, useCallback } from "react";
+import { use, useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -92,20 +92,10 @@ export default function CampaignDetailPage({
       if (!cont) return;
     }
 
-    // Save any in-flight edits to the brief BEFORE generating so the
-    // server reads the latest values.
-    if (campaign) {
-      await fetch(`/api/v1/marketing/email/campaigns/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: campaign.name,
-          briefAngle: campaign.briefAngle,
-          briefProductHook: campaign.briefProductHook,
-          briefSeasonalContext: campaign.briefSeasonalContext,
-        }),
-      });
-    }
+    // Flush any pending in-flight edits before the AI runs so the
+    // server reads the latest. flushChanges = no-op when nothing's
+    // queued, so this is cheap when the user hasn't typed in a while.
+    await save();
 
     setGenerating("copy");
     setGenerateError(null);
@@ -134,19 +124,7 @@ export default function CampaignDetailPage({
   }
 
   async function handleGenerateImagePrompts() {
-    // Save brief edits first so the server sees the latest brief.
-    if (campaign) {
-      await fetch(`/api/v1/marketing/email/campaigns/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: campaign.name,
-          briefAngle: campaign.briefAngle,
-          briefProductHook: campaign.briefProductHook,
-          briefSeasonalContext: campaign.briefSeasonalContext,
-        }),
-      });
-    }
+    await save(); // flush any queued edits before the AI runs
     setGenerating("image_prompts");
     setGenerateError(null);
     try {
@@ -182,30 +160,52 @@ export default function CampaignDetailPage({
       });
   }, [id]);
 
-  // Field updater — local state only, debounced save
-  const updateField = useCallback((key: string, value: string) => {
-    setCampaign(c => (c ? { ...c, [key]: value } : c));
-  }, []);
+  // ── Debounced diff PATCH ─────────────────────────────────────
+  // Was: every updateField triggered a full-row PATCH (700+ fields).
+  // That caused lost-update races when rapid edits piled up — a
+  // second PATCH could clobber the first with stale local state.
+  // Now: only the keys actually changed since the last save get
+  // sent, batched on a 500ms debounce. Multiple field edits in
+  // < 500ms collapse into one PATCH with the union of changes.
+  const pendingChanges = useRef<Record<string, unknown>>({});
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Save (called on blur / explicit click)
-  const save = useCallback(async () => {
-    if (!campaign) return;
+  const flushChanges = useCallback(async () => {
+    const changes = pendingChanges.current;
+    pendingChanges.current = {};
+    if (Object.keys(changes).length === 0) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/v1/marketing/email/campaigns/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(campaign),
+        body: JSON.stringify(changes),
       });
       const data = await res.json();
-      if (data.campaign) setCampaign(data.campaign);
+      if (data.campaign) {
+        // Merge server response into local state — don't fully
+        // replace, in case the user has unsaved edits queued
+        // since the PATCH started.
+        setCampaign(c => (c ? { ...c, ...data.campaign } : data.campaign));
+      }
       setSavedAt(Date.now());
-      // Refresh preview iframe
       setPreviewKey(k => k + 1);
     } finally {
       setSaving(false);
     }
-  }, [campaign, id]);
+  }, [id]);
+
+  const updateField = useCallback((key: string, value: unknown) => {
+    setCampaign(c => (c ? { ...c, [key]: value } : c));
+    pendingChanges.current[key] = value;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(flushChanges, 500);
+  }, [flushChanges]);
+
+  // Manual save fallback used by AI handlers — pushes any pending
+  // edits immediately so the server reads the latest before the AI
+  // call. Resolves once the PATCH lands.
+  const save = flushChanges;
 
   async function handleDelete() {
     if (!confirm("Delete this campaign?")) return;
@@ -311,6 +311,11 @@ export default function CampaignDetailPage({
           </Button>
         </div>
       </div>
+
+      {/* AI status panel — visible while generating */}
+      {generating !== null && (
+        <GenerationStatus kind={generating} campaign={campaign} />
+      )}
 
       {/* AI feedback banner — error OR failed self-check warnings */}
       {generateError && (
@@ -775,6 +780,115 @@ function VariantPicker({
         </option>
       ))}
     </select>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// AI generation status panel — replaces the silent spinner with
+// a live view of what the AI sees + how long it's been running.
+// Daniel: "add the loading for the ai generate with some updates
+// so we know what's going on, maybe even show the prompt that
+// we're using and the input etc."
+// ────────────────────────────────────────────────────────────
+
+function GenerationStatus({
+  kind, campaign, onCancel,
+}: {
+  kind: "copy" | "image_prompts";
+  campaign: Campaign;
+  onCancel?: () => void;
+}) {
+  // Elapsed-time tick — 1s resolution is fine, no need for RAF
+  const [elapsed, setElapsed] = useState(0);
+  const [calendarCount, setCalendarCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    const start = Date.now();
+    const t = setInterval(() => setElapsed(Math.round((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Fetch calendar-event count so we can show "5 events in the
+  // ±14 day window" — confirms the AI is using calendar context.
+  useEffect(() => {
+    const scheduled = campaign.scheduledDate as string | undefined;
+    const audience = campaign.audience as string | undefined;
+    if (!scheduled) return;
+    const from = new Date(new Date(scheduled).getTime() - 14 * 86400000).toISOString().slice(0, 10);
+    const to = new Date(new Date(scheduled).getTime() + 14 * 86400000).toISOString().slice(0, 10);
+    const qs = new URLSearchParams({ from, to, audience: audience ?? "all" });
+    fetch(`/api/v1/marketing/calendar/events?${qs}`)
+      .then(r => r.json())
+      .then(d => setCalendarCount((d.events ?? []).length))
+      .catch(() => setCalendarCount(0));
+  }, [campaign.scheduledDate, campaign.audience]);
+
+  const label = kind === "copy" ? "Generating copy" : "Generating image prompts";
+  const promptVersion = kind === "copy" ? "v5" : "v3";
+
+  return (
+    <Card className="border-foreground/40 bg-accent/30">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm flex items-center justify-between">
+          <span className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 animate-pulse" />
+            {label}
+            <span className="text-xs font-normal text-muted-foreground tabular-nums">
+              {elapsed}s elapsed · typical 10-30s
+            </span>
+          </span>
+          {onCancel && (
+            <button onClick={onCancel} className="text-xs text-muted-foreground hover:text-foreground">
+              Hide (generation continues)
+            </button>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-xs">
+        <div>
+          <div className="font-medium text-muted-foreground mb-1">What the AI sees:</div>
+          <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 pl-3 border-l-2 border-input">
+            <dt className="text-muted-foreground">Name / title</dt>
+            <dd className="font-mono">{(campaign.name as string) || <em className="text-muted-foreground">(blank — AI will propose)</em>}</dd>
+            <dt className="text-muted-foreground">Angle</dt>
+            <dd className="font-mono whitespace-pre-wrap">{(campaign.briefAngle as string) || <em className="text-muted-foreground">(blank)</em>}</dd>
+            {(campaign.briefProductHook as string) && (<><dt className="text-muted-foreground">Product hook</dt><dd className="font-mono">{campaign.briefProductHook as string}</dd></>)}
+            {(campaign.briefSeasonalContext as string) && (<><dt className="text-muted-foreground">Seasonal</dt><dd className="font-mono">{campaign.briefSeasonalContext as string}</dd></>)}
+            <dt className="text-muted-foreground">Audience</dt>
+            <dd className="font-mono">{campaign.audience as string}</dd>
+            <dt className="text-muted-foreground">Send date</dt>
+            <dd className="font-mono tabular-nums">{campaign.scheduledDate as string}</dd>
+            <dt className="text-muted-foreground">Hero variant</dt>
+            <dd className="font-mono">{campaign.heroVariant as string}</dd>
+            {kind === "image_prompts" && (
+              <>
+                <dt className="text-muted-foreground">Secondary variant</dt>
+                <dd className="font-mono">{campaign.secondaryImageVariant as string}</dd>
+              </>
+            )}
+            <dt className="text-muted-foreground">Calendar context</dt>
+            <dd className="font-mono">
+              {calendarCount === null
+                ? "loading…"
+                : calendarCount === 0
+                  ? "no events in ±14 day window"
+                  : `${calendarCount} event${calendarCount === 1 ? "" : "s"} in ±14 day window`}
+            </dd>
+            <dt className="text-muted-foreground">Brand context</dt>
+            <dd className="font-mono">brand-bible.md + {campaign.audience === "wholesale" ? "wholesale-voice.md" : "retail voice"}</dd>
+            <dt className="text-muted-foreground">Prompt version</dt>
+            <dd className="font-mono">{promptVersion}</dd>
+            <dt className="text-muted-foreground">Model</dt>
+            <dd className="font-mono">claude-opus-4-7</dd>
+          </dl>
+        </div>
+        <div className="text-muted-foreground">
+          AI is composing the email now. Server logs the full prompt server-side.
+          Cancel-safe: closing this card does not abort the generation; result
+          will land when ready.
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

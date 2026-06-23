@@ -260,9 +260,31 @@ function AddEventModal({ onClose, onCreated }: { onClose: () => void; onCreated:
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+
+  // Escape closes (with confirm if dirty). Body scroll lock while open.
+  useEffect(() => {
+    const origOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        if (!dirty || confirm("Discard this event?")) onClose();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = origOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [dirty, onClose]);
+
+  function attemptClose() {
+    if (!dirty || confirm("Discard this event?")) onClose();
+  }
 
   function update<K extends keyof typeof form>(k: K, v: (typeof form)[K]) {
     setForm(f => ({ ...f, [k]: v }));
+    setDirty(true);
   }
 
   async function submit(e: React.FormEvent) {
@@ -293,7 +315,7 @@ function AddEventModal({ onClose, onCreated }: { onClose: () => void; onCreated:
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={attemptClose}>
       <div
         className="bg-background border rounded-lg max-w-xl w-full max-h-[90vh] overflow-auto"
         onClick={e => e.stopPropagation()}
@@ -421,7 +443,7 @@ function AddEventModal({ onClose, onCreated }: { onClose: () => void; onCreated:
           {error && <div className="text-sm text-destructive">{error}</div>}
 
           <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={attemptClose}>Cancel</Button>
             <Button type="submit" disabled={busy}>{busy ? "Adding…" : "Add to calendar"}</Button>
           </div>
         </form>
