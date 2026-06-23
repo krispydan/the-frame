@@ -31,6 +31,14 @@ import {
   generateThemes,
   generateImagePrompts,
 } from "../lib/email-ai";
+import {
+  recommendForSlot,
+  recommendForWeek,
+  recommendForWeeks,
+  IMAGE_STYLES,
+  SUBJECT_ANGLES,
+  LAYOUT_PROFILES,
+} from "../lib/email-strategy";
 import fs from "fs";
 import path from "path";
 
@@ -582,24 +590,59 @@ export const marketingMcpTools: McpTool[] = [
         return { id, ...t };
       });
 
-      // Maybe create campaigns
-      let campaignsCreated: { id: string; scheduledDate: string; themeId: string; themeTitle: string }[] = [];
+      // Maybe create campaigns — now driven by the strategy engine.
+      // Each slot gets layout variants + image-style directive from
+      // recommendForSlot(). Variants are written to the row; image
+      // directive is appended to designer_notes so the designer
+      // sees "this week's email 1 is a flat-lay" without us having
+      // to add another column.
+      let campaignsCreated: {
+        id: string;
+        scheduledDate: string;
+        themeId: string;
+        themeTitle: string;
+        slotInWeek: 1 | 2;
+        layoutProfile: string;
+        imageStyle: string;
+        subjectAngle: string;
+      }[] = [];
       if (createCampaigns) {
         const campaignInsertStmt = sqlite.prepare(
           `INSERT INTO marketing_email_campaigns
-            (id, audience, scheduled_date, week_of, theme_id, status, hero_variant, section_a_variant, secondary_image_variant, section_b_variant, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'themed', 'full_bleed_overlay', 'centered', 'full_bleed', 'centered_with_cta', datetime('now'), datetime('now'))`,
+            (id, audience, scheduled_date, week_of, theme_id, status,
+             hero_variant, section_a_variant, secondary_image_variant, section_b_variant,
+             designer_notes,
+             created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'themed', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
         );
-        // Cadence: retail Mon + Thu, wholesale Tue + Fri.
-        const sendDayOffsets = audience === "retail" ? [0, 3] : [1, 4]; // Mon=0, Thu=3 / Tue=1, Fri=4
         for (const theme of insertedThemes) {
-          for (const offset of sendDayOffsets) {
-            const d = new Date(`${theme.weekOf}T00:00:00Z`);
-            d.setUTCDate(d.getUTCDate() + offset);
-            const iso = d.toISOString().slice(0, 10);
+          const slots: (1 | 2)[] = [1, 2];
+          for (const slot of slots) {
+            const rec = recommendForSlot(audience, theme.weekOf, slot);
             const id = crypto.randomUUID();
-            campaignInsertStmt.run(id, audience, iso, theme.weekOf, theme.id);
-            campaignsCreated.push({ id, scheduledDate: iso, themeId: theme.id, themeTitle: theme.title });
+            const designerNote = `STRATEGY: ${rec.rationale}\n\nIMAGE STYLE: ${rec.imageStyleDirective}\n\nSUBJECT ANGLE: ${rec.subjectAngleHint}`;
+            campaignInsertStmt.run(
+              id,
+              audience,
+              rec.scheduledDate,
+              theme.weekOf,
+              theme.id,
+              rec.layoutVariants.heroVariant,
+              rec.layoutVariants.sectionAVariant,
+              rec.layoutVariants.secondaryImageVariant,
+              rec.layoutVariants.sectionBVariant,
+              designerNote,
+            );
+            campaignsCreated.push({
+              id,
+              scheduledDate: rec.scheduledDate,
+              themeId: theme.id,
+              themeTitle: theme.title,
+              slotInWeek: slot,
+              layoutProfile: rec.layoutProfile,
+              imageStyle: rec.imageStyle,
+              subjectAngle: rec.subjectAngle,
+            });
           }
         }
       }
@@ -615,7 +658,7 @@ export const marketingMcpTools: McpTool[] = [
             themes: insertedThemes,
             campaignsCreated,
             note: createCampaigns
-              ? `Created ${campaignsCreated.length} campaign slots on ${audience === "retail" ? "Mon + Thu" : "Tue + Fri"} cadence. Each campaign is in 'themed' status — call generate_with_v5_prompt OR save_draft next to add copy.`
+              ? `Created ${campaignsCreated.length} campaign slots on ${audience === "retail" ? "Mon + Thu" : "Tue + Fri"} cadence. Each slot's variants + image style + subject angle were picked by the strategy engine (recommendForSlot). Layout rotates weekly: editorial → product-catalog → split → UGC. Slot 1 always = product flat-lay, Slot 2 always = on-model lifestyle. Call generate_with_v5_prompt next per campaign.`
               : "Themes only — no campaigns created.",
           }, null, 2),
         }],
@@ -660,17 +703,34 @@ export const marketingMcpTools: McpTool[] = [
         (input.seasonalContext as string | undefined) ?? null,
       );
 
-      // 2. Campaign
+      // 2. Campaign — variants default to the strategy engine's
+      // recommendation for this audience × week × slot. The caller
+      // can override by passing heroVariant/secondaryImageVariant
+      // explicitly; otherwise we let the rotation decide.
+      // For a single one-shot campaign we don't know slot 1 vs 2 —
+      // infer from the send day (retail Mon = slot 1, Thu = slot 2;
+      // wholesale Tue = slot 1, Fri = slot 2). If the date doesn't
+      // match a cadence day, default to slot 1.
+      const inferredSlot = inferSlotFromDate(audience, scheduled);
+      const recommendation = recommendForSlot(audience, weekOf, inferredSlot);
       const campaignId = crypto.randomUUID();
-      const heroVariant = (input.heroVariant as string) ?? "full_bleed_overlay";
-      const secondaryImageVariant = (input.secondaryImageVariant as string) ?? "full_bleed";
+      const heroVariant = (input.heroVariant as string) ?? recommendation.layoutVariants.heroVariant;
+      const secondaryImageVariant = (input.secondaryImageVariant as string) ?? recommendation.layoutVariants.secondaryImageVariant;
+      const sectionAVariant = recommendation.layoutVariants.sectionAVariant;
+      const sectionBVariant = recommendation.layoutVariants.sectionBVariant;
+      const designerNote = `STRATEGY: ${recommendation.rationale}\n\nIMAGE STYLE: ${recommendation.imageStyleDirective}\n\nSUBJECT ANGLE: ${recommendation.subjectAngleHint}`;
       sqlite.prepare(
         `INSERT INTO marketing_email_campaigns
           (id, audience, scheduled_date, week_of, theme_id, status,
            hero_variant, section_a_variant, secondary_image_variant, section_b_variant,
+           designer_notes,
            created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'copy_pending', ?, 'centered', ?, 'centered_with_cta', datetime('now'), datetime('now'))`,
-      ).run(campaignId, audience, scheduled, weekOf, themeId, heroVariant, secondaryImageVariant);
+         VALUES (?, ?, ?, ?, ?, 'copy_pending', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+      ).run(
+        campaignId, audience, scheduled, weekOf, themeId,
+        heroVariant, sectionAVariant, secondaryImageVariant, sectionBVariant,
+        designerNote,
+      );
 
       // 3. Copy via v5 prompt
       const copyRes = await generateCopy({
@@ -834,6 +894,58 @@ export const marketingMcpTools: McpTool[] = [
       };
     },
   },
+
+  // ──────────────────────────────────────────────────────────────
+  // STRATEGY ENGINE — surfaces the methodic rotation as a tool
+  // ──────────────────────────────────────────────────────────────
+
+  {
+    name: "marketing.email.get_strategy_recommendation",
+    description:
+      "Returns the methodic recommendation for a given audience × week × slot: layout variants, image style (product-flatlay vs on-model lifestyle), subject angle to test. Driven by the deterministic rotation engine (LAYOUT_PROFILES + SUBJECT_ANGLES in lib/email-strategy.ts). Use this BEFORE building a campaign to see what the strategy says you should do — then override only the bits the moment requires. Slot 1 = first email of the week, Slot 2 = second.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        audience: { type: "string", enum: ["retail", "wholesale"] },
+        weekOf: { type: "string", description: "ISO Monday date" },
+        slotInWeek: { type: "number", enum: [1, 2], description: "1 = first email of week, 2 = second" },
+        bothSlots: { type: "boolean", description: "If true, return recommendations for BOTH slots of the week (default: only the requested slot)" },
+      },
+      required: ["audience", "weekOf"],
+    },
+    handler: async (input: Record<string, unknown>) => {
+      const audience = input.audience as "retail" | "wholesale";
+      const weekOf = input.weekOf as string;
+      if (input.bothSlots) {
+        const recs = recommendForWeek(audience, weekOf);
+        return { content: [{ type: "text", text: JSON.stringify({ recommendations: recs }, null, 2) }] };
+      }
+      const slot = (input.slotInWeek as 1 | 2) ?? 1;
+      const rec = recommendForSlot(audience, weekOf, slot);
+      return { content: [{ type: "text", text: JSON.stringify(rec, null, 2) }] };
+    },
+  },
+
+  {
+    name: "marketing.email.list_strategy_catalog",
+    description:
+      "Returns the full strategy vocabulary — every LAYOUT_PROFILE, every IMAGE_STYLE, every SUBJECT_ANGLE with their descriptions + examples. Use this when the user asks 'what are my options' or you want to explain why the engine picked X.",
+    inputSchema: { type: "object", properties: {} },
+    handler: async () => {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            layoutProfiles: LAYOUT_PROFILES,
+            imageStyles: IMAGE_STYLES,
+            subjectAngles: SUBJECT_ANGLES,
+            notes:
+              "v1 = static rotation rules. v2 will weight rotation by open/click data. See lib/email-strategy.ts for the recommendForSlot() rules.",
+          }, null, 2),
+        }],
+      };
+    },
+  },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────
@@ -844,6 +956,22 @@ function mondayOf(iso: string): string {
   const offset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
   d.setUTCDate(d.getUTCDate() + offset);
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Given a scheduled date + audience, figure out whether this slot
+ * is the first (Mon retail / Tue wholesale) or second (Thu / Fri).
+ * Defaults to slot 1 if the date isn't on a cadence day.
+ */
+function inferSlotFromDate(audience: "retail" | "wholesale", iso: string): 1 | 2 {
+  const dow = new Date(`${iso}T00:00:00Z`).getUTCDay();
+  if (audience === "retail") {
+    if (dow === 4) return 2;   // Thursday
+    return 1;                  // default Monday-or-other
+  } else {
+    if (dow === 5) return 2;   // Friday
+    return 1;                  // default Tuesday-or-other
+  }
 }
 
 function nextMonday(): string {
