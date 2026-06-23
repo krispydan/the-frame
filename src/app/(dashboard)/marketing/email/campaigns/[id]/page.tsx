@@ -11,6 +11,9 @@ import { Trash2, Monitor, Smartphone, Save, Sparkles, Image as ImageIcon, Copy, 
 
 type Campaign = Record<string, unknown>;
 
+interface LintFinding { level: "error" | "warning"; code: string; field: string; message: string }
+interface LintResult { ok: boolean; errors: LintFinding[]; warnings: LintFinding[]; score: number }
+
 const HERO_VARIANTS = [
   { value: "full_bleed_overlay", label: "Full-bleed + overlay", note: "Hero image + HTML text overlaid (top 30% calm)" },
   { value: "image_75_solid",     label: "75% image, text below", note: "Centered image, headline + CTA below" },
@@ -75,6 +78,7 @@ export default function CampaignDetailPage({
   const [generating, setGenerating] = useState<"copy" | "image_prompts" | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [failedChecks, setFailedChecks] = useState<string[]>([]);
+  const [lint, setLint] = useState<LintResult | null>(null);
   const [exportingKind, setExportingKind] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<{ url: string; name: string } | null>(null);
@@ -103,6 +107,7 @@ export default function CampaignDetailPage({
     setGenerating("copy");
     setGenerateError(null);
     setFailedChecks([]);
+    setLint(null);
     try {
       const res = await fetch(
         `/api/v1/marketing/email/campaigns/${id}/generate-copy`,
@@ -116,6 +121,7 @@ export default function CampaignDetailPage({
       } else {
         setCampaign(data.campaign as Campaign);
         setFailedChecks((data.failedChecks as string[]) ?? []);
+        setLint((data.lint as LintResult) ?? null);
         setPreviewKey(k => k + 1);
         setSavedAt(Date.now());
       }
@@ -420,6 +426,27 @@ export default function CampaignDetailPage({
         <div className="rounded border border-orange-300 bg-orange-50 dark:bg-orange-950/20 px-3 py-2 text-sm">
           <strong>Claude flagged self-check warnings:</strong>{" "}
           {failedChecks.join(", ")}. Review the copy before approving.
+        </div>
+      )}
+
+      {/* Deterministic copy QA (brand + hard-shape rules) — the real
+          gate, run server-side on every generate. */}
+      {lint && lint.errors.length > 0 && (
+        <div className="rounded border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm">
+          <div className="font-medium text-destructive mb-1">
+            {lint.errors.length} copy QA error{lint.errors.length > 1 ? "s" : ""} (score {lint.score}/100)
+          </div>
+          <ul className="list-disc ml-5 space-y-0.5">
+            {lint.errors.map((f, i) => <li key={i}>{f.message}</li>)}
+          </ul>
+        </div>
+      )}
+      {lint && lint.errors.length === 0 && lint.warnings.length > 0 && (
+        <div className="rounded border border-orange-300 bg-orange-50 dark:bg-orange-950/20 px-3 py-2 text-sm">
+          <div className="font-medium mb-1">{lint.warnings.length} copy QA warning{lint.warnings.length > 1 ? "s" : ""}</div>
+          <ul className="list-disc ml-5 space-y-0.5">
+            {lint.warnings.map((f, i) => <li key={i}>{f.message}</li>)}
+          </ul>
         </div>
       )}
 

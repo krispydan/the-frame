@@ -409,7 +409,7 @@ export async function generateImagePrompts(opts: {
 }) {
   const { imagePromptGen } = loadPrompts();
   const systemPrompt = buildSystemPrompt(opts.audience);
-  const taskPrompt = fillTemplate(extractPromptBody(imagePromptGen), {
+  const filled = fillTemplate(extractPromptBody(imagePromptGen), {
     "theme.title": opts.themeTitle,
     "theme.angle": opts.themeAngle,
     heroHeadline: opts.heroHeadline ?? "(not yet generated)",
@@ -418,6 +418,12 @@ export async function generateImagePrompts(opts: {
     heroVariant: opts.heroVariant,
     secondaryImageVariant: opts.secondaryImageVariant,
   });
+  // Ground every brief in the actual photography aesthetic doc (the
+  // image prompt references it; we inject the real text here).
+  const photoAesthetic = readFileSafe(path.join(BRAND_DIR, "photography-aesthetic.md"));
+  const taskPrompt = photoAesthetic
+    ? `${filled}\n\n────────────────────────────────────────────────────────────\nPHOTOGRAPHY AESTHETIC — every brief must match this\n────────────────────────────────────────────────────────────\n\n${photoAesthetic}`
+    : filled;
 
   return callClaude({
     systemPrompt,
