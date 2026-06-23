@@ -110,11 +110,46 @@ function scrimGradient(scrim: "dark" | "light" | "none"): string {
 
 // ── HEADER ─────────────────────────────────────────────────────
 
-function headerLogoOnly(): string {
+/**
+ * Per BRAND-GUIDELINES.md §logo: the wordmark MUST be the real SVG
+ * file — "Don't recreate the logo in a different font that 'looks
+ * like Glitz.' It must be the actual file."
+ *
+ * The SVG lives at /public/brand/jaxy-logo-black.svg (copied from
+ * the brand assets folder, vendored into the repo). The renderer
+ * emits an absolute URL so the image still resolves when the email
+ * is sent or screenshotted by Playwright — relative paths break
+ * outside the dashboard.
+ *
+ * If campaign.logoImagePath is set (uploaded per-campaign override
+ * for co-branding), we use that instead.
+ */
+function publicBaseUrl(): string {
+  return (
+    process.env.SHOPIFY_APP_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.APP_BASE_URL ||
+    "https://theframe.getjaxy.com"
+  );
+}
+
+function headerLogoOnly(campaign: CampaignData): string {
+  const override = campaign.logoImagePath as string | null | undefined;
+  const logoSrc = override
+    ? catalogImageUrl(override)
+    : `${publicBaseUrl()}/brand/jaxy-logo-black.svg`;
+  // Width 96px is the "Primary wordmark minimum: 0.5 in / 36 px"
+  // bumped up for screen — Daniel's wholesale + retail emails
+  // want a noticeable but not loud lockup at the top.
   return `
   <tr>
-    <td style="padding:28px 0 24px;text-align:center;background-color:${C.white};">
-      <span style="font-family:${F.logo};font-size:30px;font-weight:700;letter-spacing:0.04em;color:${C.espresso};">Jaxy</span>
+    <td style="padding:32px 0 28px;text-align:center;background-color:${C.white};">
+      <img
+        src="${escAttr(logoSrc)}"
+        alt="Jaxy"
+        width="96"
+        style="display:inline-block;height:auto;width:96px;max-width:96px;border:0;"
+      />
     </td>
   </tr>`;
 }
@@ -482,11 +517,11 @@ ${FONT_LINK}
   <tr>
     <td align="center" style="padding:0;">
       <table role="presentation" width="${EMAIL_W}" cellpadding="0" cellspacing="0" style="width:${EMAIL_W}px;max-width:100%;background-color:${C.white};border-collapse:collapse;">
-        ${headerLogoOnly()}
-        ${dispatchHero(campaign)}
-        ${dispatchSectionA(campaign)}
-        ${dispatchSecondary(campaign)}
-        ${dispatchSectionB(campaign)}
+        ${headerLogoOnly(campaign)}
+        ${campaign.heroDisabled ? "" : dispatchHero(campaign)}
+        ${campaign.sectionADisabled ? "" : dispatchSectionA(campaign)}
+        ${campaign.secondaryDisabled ? "" : dispatchSecondary(campaign)}
+        ${campaign.sectionBDisabled ? "" : dispatchSectionB(campaign)}
       </table>
     </td>
   </tr>

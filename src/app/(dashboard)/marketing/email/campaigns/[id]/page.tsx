@@ -364,14 +364,44 @@ export default function CampaignDetailPage({
             </CardContent>
           </Card>
 
+          {/* HEADER LOGO — default is the brand SVG, but you can
+              override per campaign (co-branded campaigns etc.). */}
           <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">
+                Logo
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  Default: Jaxy wordmark. Override for co-branded campaigns.
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <InlineImageUpload
+                campaignId={id}
+                kind="logo"
+                currentPath={campaign.logoImagePath as string | null}
+                label="Custom logo (optional)"
+                hint="Leave blank to use the default Jaxy brand logo"
+                onUploaded={path => updateField("logoImagePath", path)}
+                onClear={() => updateField("logoImagePath", null)}
+              />
+            </CardContent>
+          </Card>
+
+          <Card className={campaign.heroDisabled ? "opacity-50" : ""}>
             <CardHeader className="pb-3 flex flex-row items-center justify-between">
               <CardTitle className="text-sm">Hero block</CardTitle>
-              <VariantPicker
-                value={campaign.heroVariant as string}
-                onChange={v => updateField("heroVariant", v)}
-                options={HERO_VARIANTS}
-              />
+              <div className="flex items-center gap-2">
+                <SectionToggle
+                  enabled={!campaign.heroDisabled}
+                  onToggle={next => updateField("heroDisabled", !next)}
+                />
+                <VariantPicker
+                  value={campaign.heroVariant as string}
+                  onChange={v => updateField("heroVariant", v)}
+                  options={HERO_VARIANTS}
+                />
+              </div>
             </CardHeader>
             <CardContent className="space-y-3">
               <LabeledInput
@@ -422,11 +452,14 @@ export default function CampaignDetailPage({
                   </div>
                 </div>
               )}
-              <LabeledInput
-                label="Hero image path"
-                value={campaign.heroImagePath as string ?? ""}
-                onChange={v => updateField("heroImagePath", v)}
-                placeholder="email/{id}/hero.jpg — uploads land in Phase 4"
+              <InlineImageUpload
+                campaignId={id}
+                kind="hero"
+                currentPath={campaign.heroImagePath as string | null}
+                label="Hero image"
+                hint="The big lead photo (variant dimensions vary)"
+                onUploaded={path => updateField("heroImagePath", path)}
+                onClear={() => updateField("heroImagePath", null)}
               />
               <LabeledInput
                 label="Hero image alt text"
@@ -436,14 +469,20 @@ export default function CampaignDetailPage({
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className={campaign.sectionADisabled ? "opacity-50" : ""}>
             <CardHeader className="pb-3 flex flex-row items-center justify-between">
               <CardTitle className="text-sm">Section A (text)</CardTitle>
-              <VariantPicker
-                value={campaign.sectionAVariant as string}
-                onChange={v => updateField("sectionAVariant", v)}
-                options={SECTIONA_VARIANTS}
-              />
+              <div className="flex items-center gap-2">
+                <SectionToggle
+                  enabled={!campaign.sectionADisabled}
+                  onToggle={next => updateField("sectionADisabled", !next)}
+                />
+                <VariantPicker
+                  value={campaign.sectionAVariant as string}
+                  onChange={v => updateField("sectionAVariant", v)}
+                  options={SECTIONA_VARIANTS}
+                />
+              </div>
             </CardHeader>
             <CardContent className="space-y-3">
               <LabeledInput
@@ -461,20 +500,29 @@ export default function CampaignDetailPage({
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className={campaign.secondaryDisabled ? "opacity-50" : ""}>
             <CardHeader className="pb-3 flex flex-row items-center justify-between">
               <CardTitle className="text-sm">Secondary image</CardTitle>
-              <VariantPicker
-                value={campaign.secondaryImageVariant as string}
-                onChange={v => updateField("secondaryImageVariant", v)}
-                options={SECONDARY_VARIANTS}
-              />
+              <div className="flex items-center gap-2">
+                <SectionToggle
+                  enabled={!campaign.secondaryDisabled}
+                  onToggle={next => updateField("secondaryDisabled", !next)}
+                />
+                <VariantPicker
+                  value={campaign.secondaryImageVariant as string}
+                  onChange={v => updateField("secondaryImageVariant", v)}
+                  options={SECONDARY_VARIANTS}
+                />
+              </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              <LabeledInput
-                label="Image path"
-                value={campaign.secondaryImagePath as string ?? ""}
-                onChange={v => updateField("secondaryImagePath", v)}
+              <InlineImageUpload
+                campaignId={id}
+                kind="secondary"
+                currentPath={campaign.secondaryImagePath as string | null}
+                label="Secondary image"
+                onUploaded={path => updateField("secondaryImagePath", path)}
+                onClear={() => updateField("secondaryImagePath", null)}
               />
               <LabeledInput
                 label="Image alt text"
@@ -483,10 +531,13 @@ export default function CampaignDetailPage({
               />
               {showSecondaryImage2 && (
                 <>
-                  <LabeledInput
-                    label="Image 2 path (grid_2up only)"
-                    value={campaign.secondaryImagePath2 as string ?? ""}
-                    onChange={v => updateField("secondaryImagePath2", v)}
+                  <InlineImageUpload
+                    campaignId={id}
+                    kind="secondary_2"
+                    currentPath={campaign.secondaryImagePath2 as string | null}
+                    label="Secondary image #2 (grid_2up only)"
+                    onUploaded={path => updateField("secondaryImagePath2", path)}
+                    onClear={() => updateField("secondaryImagePath2", null)}
                   />
                   <LabeledInput
                     label="Image 2 alt"
@@ -498,14 +549,20 @@ export default function CampaignDetailPage({
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className={campaign.sectionBDisabled ? "opacity-50" : ""}>
             <CardHeader className="pb-3 flex flex-row items-center justify-between">
               <CardTitle className="text-sm">Section B (text + CTA)</CardTitle>
-              <VariantPicker
-                value={campaign.sectionBVariant as string}
-                onChange={v => updateField("sectionBVariant", v)}
-                options={SECTIONB_VARIANTS}
-              />
+              <div className="flex items-center gap-2">
+                <SectionToggle
+                  enabled={!campaign.sectionBDisabled}
+                  onToggle={next => updateField("sectionBDisabled", !next)}
+                />
+                <VariantPicker
+                  value={campaign.sectionBVariant as string}
+                  onChange={v => updateField("sectionBVariant", v)}
+                  options={SECTIONB_VARIANTS}
+                />
+              </div>
             </CardHeader>
             <CardContent className="space-y-3">
               <LabeledInput
@@ -712,5 +769,155 @@ function VariantPicker({
         </option>
       ))}
     </select>
+  );
+}
+
+// Section enable/disable toggle. Daniel: "you should be able to
+// delete sections." We don't actually delete — we toggle a
+// {section}_disabled flag and the renderer skips the block. That
+// way content survives the toggle (turn it back on, copy is still
+// there).
+function SectionToggle({
+  enabled, onToggle,
+}: {
+  enabled: boolean;
+  onToggle: (next: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(!enabled)}
+      className={`text-xs px-2 py-1 rounded border transition-colors ${
+        enabled
+          ? "border-input hover:bg-accent"
+          : "border-destructive/30 bg-destructive/10 text-destructive"
+      }`}
+      title={enabled ? "Hide this section in the rendered email" : "Show this section again"}
+    >
+      {enabled ? "✓ Included" : "✗ Hidden"}
+    </button>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Inline image-upload field (drop or pick) — used for hero,
+// secondary, logo, etc. Uploads via the campaign's upload-image
+// endpoint, then triggers a parent refresh so the new path
+// appears in the preview iframe + the form state.
+// ────────────────────────────────────────────────────────────
+
+function InlineImageUpload({
+  campaignId, kind, currentPath, label, hint, onUploaded, onClear,
+}: {
+  campaignId: string;
+  kind: "hero" | "secondary" | "secondary_2" | "logo";
+  currentPath: string | null;
+  label: string;
+  hint?: string;
+  onUploaded: (relPath: string) => void;
+  onClear?: () => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  async function handle(file: File) {
+    setUploading(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("kind", kind);
+      const res = await fetch(
+        `/api/v1/marketing/email/campaigns/${campaignId}/upload-image`,
+        { method: "POST", body: fd },
+      );
+      const data = await res.json();
+      if (data.error) setError(data.error);
+      else if (data.path) onUploaded(data.path);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  // Cache-bust on every render — re-uploaded images share the same
+  // path, so without ?v=<timestamp> the browser shows the old copy.
+  // Keyed on the path so it only changes when we actually replaced.
+  const imgSrc = currentPath
+    ? `/api/images/${currentPath.replace(/^\/*(data\/images\/)?/, "")}?v=${encodeURIComponent(currentPath)}`
+    : null;
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <label className="text-xs text-muted-foreground">{label}</label>
+        {currentPath && onClear && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="text-xs text-muted-foreground hover:text-destructive"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
+      <label
+        className={`flex gap-3 items-center border-2 border-dashed rounded-md p-2 cursor-pointer transition-colors ${
+          dragOver ? "border-foreground bg-accent" : "border-input hover:bg-accent"
+        } ${uploading ? "opacity-50 pointer-events-none" : ""}`}
+        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={e => {
+          e.preventDefault();
+          setDragOver(false);
+          const f = e.dataTransfer.files[0];
+          if (f && f.type.startsWith("image/")) handle(f);
+          else if (f) setError(`Not an image: ${f.type}`);
+        }}
+      >
+        {currentPath && imgSrc ? (
+          <img
+            src={imgSrc}
+            alt={kind}
+            className="w-16 h-16 object-cover rounded border border-input"
+          />
+        ) : (
+          <div className="w-16 h-16 bg-muted rounded flex items-center justify-center text-muted-foreground">
+            <ImageIcon className="h-5 w-5" />
+          </div>
+        )}
+        <div className="text-xs flex-1 min-w-0">
+          {uploading ? (
+            <span className="text-foreground">Uploading…</span>
+          ) : currentPath ? (
+            <>
+              <div className="font-medium truncate">Uploaded</div>
+              <div className="text-muted-foreground truncate font-mono text-[10px]">{currentPath}</div>
+              <div className="text-muted-foreground">Drop a new image to replace</div>
+            </>
+          ) : (
+            <>
+              <div className="font-medium">Drop or click to upload</div>
+              {hint && <div className="text-muted-foreground">{hint}</div>}
+            </>
+          )}
+        </div>
+        <input
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={e => {
+            const f = e.target.files?.[0];
+            if (f) handle(f);
+            e.target.value = "";
+          }}
+        />
+      </label>
+
+      {error && <div className="text-xs text-destructive">{error}</div>}
+    </div>
   );
 }

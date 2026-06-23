@@ -34,6 +34,15 @@ import { SectionBTwoColumnWithCta } from "./sectionB/TwoColumnWithCta";
  */
 
 export interface CampaignData {
+  // Per-campaign logo override (default = brand logo SVG)
+  logoImagePath?: string | null;
+
+  // Section visibility — true skips that block
+  heroDisabled?: boolean | null;
+  sectionADisabled?: boolean | null;
+  secondaryDisabled?: boolean | null;
+  sectionBDisabled?: boolean | null;
+
   // Hero
   heroVariant: "full_bleed_overlay" | "image_75_solid" | "split_50_50";
   heroImagePath?: string | null;

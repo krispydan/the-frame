@@ -1860,6 +1860,12 @@ try {
     "brief_seasonal_context TEXT",
     // 2026-06-23 second pass: human-readable name + kanban statuses
     "name TEXT",
+    // 2026-06-23 third pass: logo override + section visibility toggles
+    "logo_image_path TEXT",
+    "hero_disabled INTEGER DEFAULT 0",
+    "section_a_disabled INTEGER DEFAULT 0",
+    "secondary_disabled INTEGER DEFAULT 0",
+    "section_b_disabled INTEGER DEFAULT 0",
   ]) {
     try {
       sqlite.exec(`ALTER TABLE marketing_email_campaigns ADD COLUMN ${col}`);

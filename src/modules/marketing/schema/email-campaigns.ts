@@ -70,6 +70,20 @@ export const emailCampaigns = sqliteTable("marketing_email_campaigns", {
   briefProductHook: text("brief_product_hook"),               // SKU / category / colorway
   briefSeasonalContext: text("brief_seasonal_context"),       // holiday / weather / cultural anchor
 
+  /** Per-campaign logo override (e.g. for co-branded campaigns).
+   *  When null, the default brand logo (/public/brand/jaxy-logo-black.svg)
+   *  is used by the renderer. */
+  logoImagePath: text("logo_image_path"),
+
+  /** Per-section visibility toggles. When TRUE the renderer skips
+   *  that block entirely — used when a campaign doesn't need a
+   *  secondary image, or wants a single-section announcement, etc.
+   *  Default false (= all sections rendered). */
+  heroDisabled: integer("hero_disabled", { mode: "boolean" }).default(false),
+  sectionADisabled: integer("section_a_disabled", { mode: "boolean" }).default(false),
+  secondaryDisabled: integer("secondary_disabled", { mode: "boolean" }).default(false),
+  sectionBDisabled: integer("section_b_disabled", { mode: "boolean" }).default(false),
+
   // Subject + preheader (inbox metadata, separate from in-email content)
   subject: text("subject"),
   preheader: text("preheader"),
