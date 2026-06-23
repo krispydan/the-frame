@@ -7,9 +7,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, Monitor, Smartphone, Save, Sparkles, Image as ImageIcon } from "lucide-react";
+import { Trash2, Monitor, Smartphone, Save, Sparkles, Image as ImageIcon, Copy, Download, Loader2 } from "lucide-react";
 
 type Campaign = Record<string, unknown>;
+
+interface LintFinding { level: "error" | "warning"; code: string; field: string; message: string }
+interface LintResult { ok: boolean; errors: LintFinding[]; warnings: LintFinding[]; score: number }
 
 const HERO_VARIANTS = [
   { value: "full_bleed_overlay", label: "Full-bleed + overlay", note: "Hero image + HTML text overlaid (top 30% calm)" },
@@ -75,6 +78,10 @@ export default function CampaignDetailPage({
   const [generating, setGenerating] = useState<"copy" | "image_prompts" | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [failedChecks, setFailedChecks] = useState<string[]>([]);
+  const [lint, setLint] = useState<LintResult | null>(null);
+  const [exportingKind, setExportingKind] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<{ url: string; name: string } | null>(null);
 
   // ── AI generate handlers ────────────────────────────────────
   async function handleGenerateCopy() {
@@ -100,6 +107,7 @@ export default function CampaignDetailPage({
     setGenerating("copy");
     setGenerateError(null);
     setFailedChecks([]);
+    setLint(null);
     try {
       const res = await fetch(
         `/api/v1/marketing/email/campaigns/${id}/generate-copy`,
@@ -113,6 +121,7 @@ export default function CampaignDetailPage({
       } else {
         setCampaign(data.campaign as Campaign);
         setFailedChecks((data.failedChecks as string[]) ?? []);
+        setLint((data.lint as LintResult) ?? null);
         setPreviewKey(k => k + 1);
         setSavedAt(Date.now());
       }
@@ -146,6 +155,65 @@ export default function CampaignDetailPage({
       setGenerateError(e instanceof Error ? e.message : String(e));
     } finally {
       setGenerating(null);
+    }
+  }
+
+  // ── Export a block (or the whole email) to an image, client-side ──
+  // Renders the section HTML in an offscreen 600px iframe and
+  // rasterizes it with html-to-image. No server browser / Chromium —
+  // works in any deploy. `download=false` opens the image in a new tab.
+  async function exportSectionImage(kind: string, download: boolean) {
+    setExportingKind(kind);
+    setExportError(null);
+    let iframe: HTMLIFrameElement | null = null;
+    try {
+      await save(); // flush edits so the rendered block is current
+      const html = await fetch(
+        `/api/v1/marketing/email/campaigns/${id}/preview?kind=${kind}`,
+      ).then((r) => r.text());
+
+      iframe = document.createElement("iframe");
+      iframe.style.cssText = "position:fixed;left:-10000px;top:0;width:600px;height:200px;border:0;";
+      document.body.appendChild(iframe);
+      const doc = iframe.contentDocument!;
+      doc.open(); doc.write(html); doc.close();
+
+      // Wait for layout + every image to finish.
+      await new Promise((r) => setTimeout(r, 350));
+      await Promise.all(
+        Array.from(doc.images).map((img) =>
+          img.complete ? Promise.resolve() : new Promise<void>((res) => { img.onload = img.onerror = () => res(); }),
+        ),
+      );
+
+      const node = doc.body;
+      const height = Math.max(node.scrollHeight, 40);
+      const lib = await import("html-to-image");
+      const opts = { width: 600, height, pixelRatio: 2, backgroundColor: "#ffffff", cacheBust: true };
+      let dataUrl: string;
+      try {
+        dataUrl = await lib.toJpeg(node, { ...opts, quality: 0.92 });
+      } catch {
+        dataUrl = await lib.toJpeg(node, { ...opts, quality: 0.92, skipFonts: true });
+      }
+
+      const slug = String(campaign?.name || campaign?.subject || "campaign")
+        .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 40) || "campaign";
+      if (download) {
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = `${slug}-${kind}.jpg`;
+        document.body.appendChild(a); a.click(); a.remove();
+      } else {
+        // In-app lightbox (avoids popup blockers killing a new tab
+        // opened after async work).
+        setImagePreview({ url: dataUrl, name: `${slug}-${kind}.jpg` });
+      }
+    } catch (e) {
+      setExportError(`Image export failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      if (iframe) iframe.remove();
+      setExportingKind(null);
     }
   }
 
@@ -228,6 +296,37 @@ export default function CampaignDetailPage({
 
   return (
     <div className="space-y-4">
+      {/* Image-export lightbox */}
+      {imagePreview && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6"
+          onClick={() => setImagePreview(null)}
+        >
+          <div className="bg-background rounded-lg p-3 max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2 gap-4">
+              <span className="text-xs text-muted-foreground font-mono">{imagePreview.name}</span>
+              <div className="flex gap-2">
+                <a
+                  href={imagePreview.url}
+                  download={imagePreview.name}
+                  className="text-xs px-2 py-1 rounded border border-input hover:bg-accent"
+                >
+                  <Download className="h-3 w-3 inline mr-1" /> Download
+                </a>
+                <button
+                  onClick={() => setImagePreview(null)}
+                  className="text-xs px-2 py-1 rounded border border-input hover:bg-accent"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={imagePreview.url} alt="email export preview" style={{ maxWidth: "600px", width: "100%", height: "auto" }} />
+          </div>
+        </div>
+      )}
+
       {/* Header bar */}
       <div className="flex items-start justify-between">
         <div className="flex-1">
@@ -329,6 +428,33 @@ export default function CampaignDetailPage({
           {failedChecks.join(", ")}. Review the copy before approving.
         </div>
       )}
+
+      {/* Deterministic copy QA (brand + hard-shape rules) — the real
+          gate, run server-side on every generate. */}
+      {lint && lint.errors.length > 0 && (
+        <div className="rounded border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm">
+          <div className="font-medium text-destructive mb-1">
+            {lint.errors.length} copy QA error{lint.errors.length > 1 ? "s" : ""} (score {lint.score}/100)
+          </div>
+          <ul className="list-disc ml-5 space-y-0.5">
+            {lint.errors.map((f, i) => <li key={i}>{f.message}</li>)}
+          </ul>
+        </div>
+      )}
+      {lint && lint.errors.length === 0 && lint.warnings.length > 0 && (
+        <div className="rounded border border-orange-300 bg-orange-50 dark:bg-orange-950/20 px-3 py-2 text-sm">
+          <div className="font-medium mb-1">{lint.warnings.length} copy QA warning{lint.warnings.length > 1 ? "s" : ""}</div>
+          <ul className="list-disc ml-5 space-y-0.5">
+            {lint.warnings.map((f, i) => <li key={i}>{f.message}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {/* Image-prompt RESULTS — the Higgsfield briefs the AI produced.
+          This is "where you see the response" after Generate image
+          prompts. Persisted on the campaign + also shown to the
+          designer in the queue. */}
+      <ImagePromptResults campaign={campaign} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Left pane — editor */}
@@ -651,8 +777,8 @@ export default function CampaignDetailPage({
           </p>
 
           {/* SECTION IMAGE EXPORT — JPG-per-block for pasting into
-              Faire / Omnisend / wherever. Each button hits the
-              export-image endpoint and triggers a download. */}
+              Faire / Omnisend / wherever. Rendered client-side with
+              html-to-image (no server Chromium). */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm">
@@ -669,33 +795,40 @@ export default function CampaignDetailPage({
                 { kind: "secondary",  label: "Secondary image block" },
                 { kind: "sectionB",   label: "Text section B + CTA" },
                 { kind: "full",       label: "Whole email" },
-              ] as const).map(({ kind, label }) => (
-                <div key={kind} className="flex items-center justify-between gap-2 text-sm">
-                  <span>{label}</span>
-                  <div className="flex gap-1">
-                    <a
-                      href={`/api/v1/marketing/email/campaigns/${id}/export-image?kind=${kind}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs underline text-muted-foreground hover:text-foreground"
-                    >
-                      View
-                    </a>
-                    <a
-                      href={`/api/v1/marketing/email/campaigns/${id}/export-image?kind=${kind}&download=1`}
-                      className="text-xs px-2 py-1 rounded border border-input hover:bg-accent"
-                    >
-                      <ImageIcon className="h-3 w-3 inline mr-1" />
-                      Download JPG
-                    </a>
+              ] as const).map(({ kind, label }) => {
+                const busy = exportingKind === kind;
+                return (
+                  <div key={kind} className="flex items-center justify-between gap-2 text-sm">
+                    <span>{label}</span>
+                    <div className="flex gap-1 items-center">
+                      {busy && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+                      <button
+                        type="button"
+                        onClick={() => exportSectionImage(kind, false)}
+                        disabled={exportingKind !== null}
+                        className="text-xs underline text-muted-foreground hover:text-foreground disabled:opacity-50"
+                      >
+                        View
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => exportSectionImage(kind, true)}
+                        disabled={exportingKind !== null}
+                        className="text-xs px-2 py-1 rounded border border-input hover:bg-accent disabled:opacity-50"
+                      >
+                        <Download className="h-3 w-3 inline mr-1" />
+                        Download JPG
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
+              {exportError && (
+                <p className="text-xs text-destructive pt-1">{exportError}</p>
+              )}
               <p className="text-xs text-muted-foreground pt-2 border-t mt-2">
-                First export ~1-2s (Chromium warms up), then ~300ms each.
-                Renders at 2x retina. Width 600 by default — append
-                <code className="mx-1 bg-muted px-1 rounded">&amp;width=1200</code>
-                for double-density.
+                Rendered in your browser at 2× retina (600px wide). No server
+                wait — &ldquo;View&rdquo; opens the image in a new tab, &ldquo;Download&rdquo; saves a JPG.
               </p>
             </CardContent>
           </Card>
@@ -790,6 +923,90 @@ function VariantPicker({
 // so we know what's going on, maybe even show the prompt that
 // we're using and the input etc."
 // ────────────────────────────────────────────────────────────
+
+// ────────────────────────────────────────────────────────────
+// Image-prompt RESULTS — shows the Higgsfield briefs the AI wrote
+// (hero + secondary), so the user can read/copy them right in the
+// editor. Mirrors how generate-copy fills the visible form fields.
+// ────────────────────────────────────────────────────────────
+function ImagePromptResults({ campaign }: { campaign: Campaign }) {
+  const heroPrompt = (campaign.heroImagePrompt as string) || "";
+  const secondaryPrompt = (campaign.secondaryImagePrompt as string) || "";
+  const secondaryPrompt2 = (campaign.secondaryImagePrompt2 as string) || "";
+  const heroAlt = (campaign.heroImageAlt as string) || "";
+  const secondaryAlt = (campaign.secondaryImageAlt as string) || "";
+  const secondaryAlt2 = (campaign.secondaryImageAlt2 as string) || "";
+  const scrim = (campaign.heroScrim as string) || "";
+
+  // Nothing generated yet — render nothing (the button + status panel
+  // handle the "before" state).
+  if (!heroPrompt && !secondaryPrompt) return null;
+
+  return (
+    <Card className="border-foreground/30">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <ImageIcon className="h-4 w-4" />
+          Image prompts (Higgsfield briefs)
+          <span className="text-xs font-normal text-muted-foreground">
+            What the designer renders — also shown in the designer queue
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {heroPrompt && (
+          <CopyablePrompt
+            label="Hero"
+            prompt={heroPrompt}
+            alt={heroAlt}
+            extra={scrim ? `Recommended scrim: ${scrim}` : null}
+          />
+        )}
+        {secondaryPrompt && (
+          <CopyablePrompt label="Secondary" prompt={secondaryPrompt} alt={secondaryAlt} extra={null} />
+        )}
+        {secondaryPrompt2 && (
+          <CopyablePrompt label="Secondary 2" prompt={secondaryPrompt2} alt={secondaryAlt2} extra={null} />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CopyablePrompt({
+  label, prompt, alt, extra,
+}: {
+  label: string;
+  prompt: string;
+  alt: string;
+  extra: string | null;
+}) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard blocked — no-op */ }
+  }
+  return (
+    <div className="rounded border border-input p-2 space-y-1">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
+        <button
+          type="button"
+          onClick={copy}
+          className="text-xs flex items-center gap-1 text-muted-foreground hover:text-foreground"
+        >
+          <Copy className="h-3 w-3" /> {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <p className="text-xs font-mono whitespace-pre-wrap leading-relaxed">{prompt}</p>
+      {alt && <p className="text-xs text-muted-foreground"><strong>Alt:</strong> {alt}</p>}
+      {extra && <p className="text-xs text-muted-foreground">{extra}</p>}
+    </div>
+  );
+}
 
 function GenerationStatus({
   kind, campaign, onCancel,

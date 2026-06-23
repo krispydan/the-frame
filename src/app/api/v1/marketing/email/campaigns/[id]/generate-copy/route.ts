@@ -7,6 +7,7 @@ import { emailCampaigns, emailThemes } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
 import { generateCopy } from "@/modules/marketing/lib/email-ai";
 import { getCalendarContextForCampaign } from "@/modules/marketing/lib/calendar-context";
+import { lintGeneratedCopy } from "@/modules/marketing/lib/copy-quality";
 
 /**
  * POST /api/v1/marketing/email/campaigns/[id]/generate-copy
@@ -173,6 +174,12 @@ async function handle(req: NextRequest, params: { id: string }) {
     .filter(([, v]) => v === false)
     .map(([k]) => k);
 
+  // Deterministic, server-side QA — the source of truth (the model's
+  // selfCheck above is advisory). Char/word limits, banned brand
+  // phrases, emoji, exclamation count, preheader≠subject, pronoun
+  // ratio, wholesale-number, CTA case/URL. Surfaced in the editor.
+  const lint = lintGeneratedCopy(out as Record<string, unknown>, campaign.audience as "retail" | "wholesale");
+
   const [updated] = await db
     .select()
     .from(emailCampaigns)
@@ -184,6 +191,7 @@ async function handle(req: NextRequest, params: { id: string }) {
     campaign: updated,
     generated: out,
     failedChecks,
+    lint,
     usage: result.usage,
   });
 }

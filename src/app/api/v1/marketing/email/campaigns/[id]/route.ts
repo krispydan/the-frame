@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, sqlite } from "@/lib/db";
 import { emailCampaigns } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
+import { validateCampaignPatch } from "@/modules/marketing/lib/campaign-validation";
 
 /**
  * Whitelist of columns clients can PATCH directly. Everything else
@@ -122,6 +123,16 @@ export async function PATCH(
         { status: 400 },
       );
     }
+  }
+
+  // Variant enums / CTA URLs / date format / oversize-field guards.
+  // (status + audience already checked above.)
+  const validationErrors = validateCampaignPatch(body);
+  if (validationErrors.length > 0) {
+    return NextResponse.json(
+      { error: "Validation failed", details: validationErrors },
+      { status: 400 },
+    );
   }
 
   // Defense-in-depth: belt + suspenders on the column name. The

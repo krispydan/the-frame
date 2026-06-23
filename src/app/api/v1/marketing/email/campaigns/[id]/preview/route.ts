@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { emailCampaigns } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
 import type { CampaignData } from "@/modules/marketing/components/email-template";
-import { renderEmailHtml } from "@/modules/marketing/lib/render-email";
+import { renderEmailHtml, renderSectionHtml, type SectionKind } from "@/modules/marketing/lib/render-email";
 
 /**
  * GET /api/v1/marketing/email/campaigns/[id]/preview
@@ -24,10 +24,14 @@ import { renderEmailHtml } from "@/modules/marketing/lib/render-email";
  * regardless of which renderer Next ships in future versions.
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  // ?kind=hero|sectionA|secondary|sectionB renders a single block
+  // (used by the client-side image export); default / "full" renders
+  // the whole email.
+  const kind = req.nextUrl.searchParams.get("kind");
 
   const [row] = await db
     .select()
@@ -68,7 +72,11 @@ export async function GET(
     sectionBCtaUrl: row.sectionBCtaUrl,
   };
 
-  const html = renderEmailHtml(data);
+  const SECTION_KINDS = ["hero", "sectionA", "secondary", "sectionB"];
+  const html =
+    kind && kind !== "full" && SECTION_KINDS.includes(kind)
+      ? renderSectionHtml(data, kind as SectionKind)
+      : renderEmailHtml(data);
 
   return new NextResponse(html, {
     status: 200,
