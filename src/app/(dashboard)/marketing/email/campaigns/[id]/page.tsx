@@ -35,6 +35,30 @@ const SCRIM_OPTIONS = [
   { value: "none",  label: "No scrim" },
 ];
 
+/**
+ * Wraps `fetch().then(r => r.json())` so empty bodies + non-JSON
+ * responses (Railway proxy timeouts, Cloudflare 524s, framework
+ * 500 HTML pages) produce an actionable error message instead of
+ * the unhelpful "Unexpected end of JSON input."
+ */
+async function parseAiResponse(res: Response): Promise<{ data: Record<string, unknown> | null; error: string | null }> {
+  const text = await res.text();
+  if (!text || text.length === 0) {
+    return {
+      data: null,
+      error: `HTTP ${res.status} from server with empty response body. This usually means the upstream timed out (Anthropic + Railway > ~30s). Try again — second attempt is usually faster because the model has cached context.`,
+    };
+  }
+  try {
+    return { data: JSON.parse(text), error: null };
+  } catch {
+    return {
+      data: null,
+      error: `HTTP ${res.status} returned non-JSON: ${text.slice(0, 200)}${text.length > 200 ? "…" : ""}`,
+    };
+  }
+}
+
 export default function CampaignDetailPage({
   params,
 }: {
@@ -89,12 +113,14 @@ export default function CampaignDetailPage({
         `/api/v1/marketing/email/campaigns/${id}/generate-copy`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
       );
-      const data = await res.json();
-      if (data.error) {
-        setGenerateError(data.error);
+      const { data, error: parseErr } = await parseAiResponse(res);
+      if (parseErr || !data) {
+        setGenerateError(parseErr ?? "Empty response");
+      } else if (data.error) {
+        setGenerateError(String(data.error));
       } else {
-        setCampaign(data.campaign);
-        setFailedChecks(data.failedChecks ?? []);
+        setCampaign(data.campaign as Campaign);
+        setFailedChecks((data.failedChecks as string[]) ?? []);
         setPreviewKey(k => k + 1);
         setSavedAt(Date.now());
       }
@@ -126,10 +152,13 @@ export default function CampaignDetailPage({
         `/api/v1/marketing/email/campaigns/${id}/generate-image-prompts`,
         { method: "POST" },
       );
-      const data = await res.json();
-      if (data.error) setGenerateError(data.error);
-      else {
-        setCampaign(data.campaign);
+      const { data, error: parseErr } = await parseAiResponse(res);
+      if (parseErr || !data) {
+        setGenerateError(parseErr ?? "Empty response");
+      } else if (data.error) {
+        setGenerateError(String(data.error));
+      } else {
+        setCampaign(data.campaign as Campaign);
         setPreviewKey(k => k + 1);
         setSavedAt(Date.now());
       }

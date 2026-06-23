@@ -18,10 +18,24 @@ import { generateImagePrompts } from "@/modules/marketing/lib/email-ai";
  * upload UI.
  */
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
+  try {
+    return await handle(req, await params);
+  } catch (e) {
+    // Defense in depth — if anything throws (DB failure, JSON parse,
+    // anything), the client always gets a structured JSON body
+    // instead of Next's default 500 HTML page (which made the
+    // client's res.json() crash with "Unexpected end of JSON input").
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[generate-image-prompts] unhandled:", e);
+    return NextResponse.json({ error: `Server error: ${message}` }, { status: 500 });
+  }
+}
+
+async function handle(_req: NextRequest, params: { id: string }) {
+  const { id } = params;
 
   const [campaign] = await db
     .select()

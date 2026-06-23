@@ -26,7 +26,17 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
+  try {
+    return await handle(req, await params);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[generate-copy] unhandled:", e);
+    return NextResponse.json({ error: `Server error: ${message}` }, { status: 500 });
+  }
+}
+
+async function handle(req: NextRequest, params: { id: string }) {
+  const { id } = params;
 
   const [campaign] = await db
     .select()
