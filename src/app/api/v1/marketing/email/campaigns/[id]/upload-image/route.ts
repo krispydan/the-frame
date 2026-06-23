@@ -31,14 +31,13 @@ import { catalogImageUrl } from "@/lib/storage/image-url";
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
-const VALID_KINDS = ["hero", "secondary", "secondary_2", "logo"] as const;
+const VALID_KINDS = ["hero", "secondary", "secondary_2"] as const;
 type ImageKind = (typeof VALID_KINDS)[number];
 
 const KIND_TO_COLUMN: Record<ImageKind, string> = {
   hero: "hero_image_path",
   secondary: "secondary_image_path",
   secondary_2: "secondary_image_path_2",
-  logo: "logo_image_path",
 };
 
 export async function POST(

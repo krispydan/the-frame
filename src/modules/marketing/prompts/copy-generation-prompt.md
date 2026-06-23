@@ -39,6 +39,19 @@ Memorial Day = long-weekend kickoff, etc.)
 HARD SHAPE CONSTRAINTS (the email template fields you must fill)
 ────────────────────────────────────────────────────────────
 
+proposedName          3–8 word internal label for this campaign,
+                      doubles as the operator's brief title. If the
+                      user already supplied a name in {{theme.title}},
+                      mirror it back EXACTLY (don't reword). If the
+                      title says "(unspecified — please propose a
+                      campaign name)" or is blank, propose one that
+                      captures the angle in plain English.
+                      Sentence case, no quotes, no period.
+                      Good: "Sunday Drive in Honey lands"
+                            "Memorial Day readers 30% off"
+                            "Tortoise classics back in stock"
+                      Bad:  "Email #1" / "Promo" / "Newsletter"
+
 subject               ≤45 char. Mobile cuts off at ~35. The first
                       3 words carry 80% of the open decision.
                       Retail: text-from-a-friend tone (lowercase OK,

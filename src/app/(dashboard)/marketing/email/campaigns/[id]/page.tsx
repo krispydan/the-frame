@@ -81,11 +81,13 @@ export default function CampaignDetailPage({
     // Warn if brief is empty — generation will still proceed but
     // with unspecified placeholders. Better to nudge the user back
     // to the brief field.
-    const briefTitle = String(campaign?.briefTitle ?? "").trim();
+    // Title now = campaign.name (top of page). If empty, the AI
+    // proposes one as part of the response. Angle is what we
+    // really need for a quality generation.
     const briefAngle = String(campaign?.briefAngle ?? "").trim();
-    if (!briefTitle || !briefAngle) {
+    if (!briefAngle) {
       const cont = confirm(
-        "The Campaign Brief (title + angle) is empty. The AI will generate with placeholders. Continue anyway?",
+        "The Campaign Brief angle is empty. The AI will generate with placeholders. Continue anyway?",
       );
       if (!cont) return;
     }
@@ -97,7 +99,7 @@ export default function CampaignDetailPage({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          briefTitle: campaign.briefTitle,
+          name: campaign.name,
           briefAngle: campaign.briefAngle,
           briefProductHook: campaign.briefProductHook,
           briefSeasonalContext: campaign.briefSeasonalContext,
@@ -138,7 +140,7 @@ export default function CampaignDetailPage({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          briefTitle: campaign.briefTitle,
+          name: campaign.name,
           briefAngle: campaign.briefAngle,
           briefProductHook: campaign.briefProductHook,
           briefSeasonalContext: campaign.briefSeasonalContext,
@@ -338,12 +340,10 @@ export default function CampaignDetailPage({
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <LabeledInput
-                label="Title (3–8 words)"
-                value={campaign.briefTitle as string ?? ""}
-                onChange={v => updateField("briefTitle", v)}
-                placeholder="e.g. Sunday Drive in Honey lands"
-              />
+              {/* Title used to live here as `briefTitle`. Now the
+                  campaign NAME at the top of the page IS the title —
+                  one field, one source of truth. If name is empty,
+                  generate-copy will propose one + persist it. */}
               <LabeledTextarea
                 label="Angle (why this email, why now — 1–3 sentences)"
                 value={campaign.briefAngle as string ?? ""}
@@ -365,7 +365,8 @@ export default function CampaignDetailPage({
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                Save the brief before generating. AI calls (Generate copy +
+                Title = the campaign name at the top of the page. Save the
+                brief before generating. AI calls (Generate copy +
                 Generate image prompts) read these fields.
               </p>
             </CardContent>
@@ -389,30 +390,6 @@ export default function CampaignDetailPage({
                 onChange={v => updateField("preheader", v)}
                 placeholder="The snippet shown next to subject in inbox view"
                 maxLength={90}
-              />
-            </CardContent>
-          </Card>
-
-          {/* HEADER LOGO — default is the brand SVG, but you can
-              override per campaign (co-branded campaigns etc.). */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm">
-                Logo
-                <span className="ml-2 text-xs font-normal text-muted-foreground">
-                  Default: Jaxy wordmark. Override for co-branded campaigns.
-                </span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <InlineImageUpload
-                campaignId={id}
-                kind="logo"
-                currentPath={campaign.logoImagePath as string | null}
-                label="Custom logo (optional)"
-                hint="Leave blank to use the default Jaxy brand logo"
-                onUploaded={path => updateField("logoImagePath", path)}
-                onClear={() => updateField("logoImagePath", null)}
               />
             </CardContent>
           </Card>

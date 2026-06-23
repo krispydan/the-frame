@@ -52,16 +52,20 @@ async function handle(req: NextRequest, params: { id: string }) {
   //   1. Body override (caller passes briefTitle/briefAngle/...)
   //   2. Campaign's brief_* columns (the editable surface)
   //   3. Linked theme row (legacy fallback)
-  //   4. "(unspecified)" — generation still proceeds but warns
+  //   4. "(unspecified)" — generation still proceeds but the AI is
+  //      told to propose a name in the output
   let body: {
-    briefTitle?: string;
+    name?: string;
     briefAngle?: string;
     briefProductHook?: string;
     briefSeasonalContext?: string;
   } = {};
   try { body = await req.json(); } catch { /* empty body fine */ }
 
-  let briefTitle = body.briefTitle ?? campaign.briefTitle ?? undefined;
+  // Campaign NAME is now the brief title (Daniel: "we don't need a
+  // campaign name and a campaign title — they are the same"). If
+  // empty, the AI is asked to propose one.
+  let briefTitle = body.name ?? campaign.name ?? undefined;
   let briefAngle = body.briefAngle ?? campaign.briefAngle ?? undefined;
   let productHook = body.briefProductHook ?? campaign.briefProductHook ?? null;
   let seasonalContext = body.briefSeasonalContext ?? campaign.briefSeasonalContext ?? null;
@@ -82,21 +86,22 @@ async function handle(req: NextRequest, params: { id: string }) {
     }
   }
 
-  briefTitle = briefTitle ?? "(unspecified — add a brief in the editor)";
+  const nameWasEmpty = !briefTitle;
+  briefTitle = briefTitle ?? "(unspecified — please propose a campaign name)";
   briefAngle = briefAngle ?? "(unspecified)";
 
   // Persist whatever was effective so the editor reflects what
   // the generator ran with (in case caller passed body overrides).
+  // The name is filled later from the AI response if it was empty.
   sqlite
     .prepare(
       `UPDATE marketing_email_campaigns
-        SET brief_title = COALESCE(NULLIF(brief_title,''), ?),
-            brief_angle = COALESCE(NULLIF(brief_angle,''), ?),
+        SET brief_angle = COALESCE(NULLIF(brief_angle,''), ?),
             brief_product_hook = COALESCE(NULLIF(brief_product_hook,''), ?),
             brief_seasonal_context = COALESCE(NULLIF(brief_seasonal_context,''), ?)
         WHERE id = ?`,
     )
-    .run(briefTitle, briefAngle, productHook, seasonalContext, id);
+    .run(briefAngle, productHook, seasonalContext, id);
 
   // Pull calendar events in the ±14-day window so the AI knows what
   // holiday / sale / launch / promo to lean into for this send date.
@@ -123,8 +128,12 @@ async function handle(req: NextRequest, params: { id: string }) {
   const out = result.output as Record<string, string | Record<string, boolean>>;
 
   // Persist to the campaign row + record the raw JSON for replay.
+  // `name` uses COALESCE-on-empty so a user-provided name isn't
+  // overwritten; only fills in when name was blank pre-generation.
   sqlite.prepare(
     `UPDATE marketing_email_campaigns SET
+       name = CASE WHEN COALESCE(NULLIF(name, ''), NULL) IS NULL THEN ? ELSE name END,
+       brief_title = CASE WHEN COALESCE(NULLIF(brief_title, ''), NULL) IS NULL THEN ? ELSE brief_title END,
        subject = ?, preheader = ?,
        hero_headline = ?, hero_subtitle = ?,
        hero_cta_label = ?, hero_cta_url = COALESCE(NULLIF(hero_cta_url, ''), ?),
@@ -137,6 +146,8 @@ async function handle(req: NextRequest, params: { id: string }) {
        updated_at = datetime('now')
      WHERE id = ?`,
   ).run(
+    out.proposedName as string,
+    out.proposedName as string,
     out.subject as string,
     out.preheader as string,
     out.heroHeadline as string,
@@ -152,6 +163,10 @@ async function handle(req: NextRequest, params: { id: string }) {
     JSON.stringify(out),
     id,
   );
+
+  // nameWasEmpty signals to the client that the name was AI-proposed
+  // (UI can show a subtle "AI named this" hint or auto-focus the field).
+  void nameWasEmpty;
 
   const selfChecks = (out.selfCheckPassed ?? {}) as Record<string, boolean>;
   const failedChecks = Object.entries(selfChecks)

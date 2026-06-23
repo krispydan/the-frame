@@ -225,7 +225,6 @@ function NewCampaignButton({ onCreated }: { onCreated: (c: Campaign) => void }) 
     name: "",
     audience: "retail" as "retail" | "wholesale",
     scheduledDate: defaultDate,
-    briefTitle: "",
     briefAngle: "",
     briefProductHook: "",
     briefSeasonalContext: "",
@@ -255,7 +254,6 @@ function NewCampaignButton({ onCreated }: { onCreated: (c: Campaign) => void }) 
           name: "",
           audience: "retail",
           scheduledDate: defaultDate,
-          briefTitle: "",
           briefAngle: "",
           briefProductHook: "",
           briefSeasonalContext: "",
@@ -331,16 +329,11 @@ function NewCampaignButton({ onCreated }: { onCreated: (c: Campaign) => void }) 
 
               <div>
                 <h3 className="text-sm font-medium mb-2">Campaign brief</h3>
+                <p className="text-xs text-muted-foreground mb-3">
+                  The campaign <strong>name</strong> above doubles as the brief title.
+                  If you leave it blank, the AI will propose one when you generate copy.
+                </p>
                 <div className="space-y-3">
-                  <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Title (3–8 words)</label>
-                    <input
-                      className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
-                      placeholder="e.g. Sunday Drive in Honey lands"
-                      value={form.briefTitle}
-                      onChange={e => update("briefTitle", e.target.value)}
-                    />
-                  </div>
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Angle (why this email, why now — 1–3 sentences)</label>
                     <textarea

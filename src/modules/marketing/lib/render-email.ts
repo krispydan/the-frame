@@ -133,14 +133,13 @@ function publicBaseUrl(): string {
   );
 }
 
-function headerLogoOnly(campaign: CampaignData): string {
-  const override = campaign.logoImagePath as string | null | undefined;
-  const logoSrc = override
-    ? catalogImageUrl(override)
-    : `${publicBaseUrl()}/brand/jaxy-logo-black.svg`;
-  // Width 96px is the "Primary wordmark minimum: 0.5 in / 36 px"
-  // bumped up for screen — Daniel's wholesale + retail emails
-  // want a noticeable but not loud lockup at the top.
+function headerLogoOnly(): string {
+  // Brand logo is fixed — Daniel: "we don't need any custom logos,
+  // the current one is ok. we will never really change it so we
+  // can remove this part of the app — make it static."
+  // SVG lives at /public/brand/jaxy-logo-black.svg (vendored from
+  // assets/logos/svg/jaxy-logo-black.svg). Width 96px per V2.
+  const logoSrc = `${publicBaseUrl()}/brand/jaxy-logo-black.svg`;
   return `
   <tr>
     <td style="padding:32px 0 28px;text-align:center;background-color:${C.white};">
@@ -517,7 +516,7 @@ ${FONT_LINK}
   <tr>
     <td align="center" style="padding:0;">
       <table role="presentation" width="${EMAIL_W}" cellpadding="0" cellspacing="0" style="width:${EMAIL_W}px;max-width:100%;background-color:${C.white};border-collapse:collapse;">
-        ${headerLogoOnly(campaign)}
+        ${headerLogoOnly()}
         ${campaign.heroDisabled ? "" : dispatchHero(campaign)}
         ${campaign.sectionADisabled ? "" : dispatchSectionA(campaign)}
         ${campaign.secondaryDisabled ? "" : dispatchSecondary(campaign)}

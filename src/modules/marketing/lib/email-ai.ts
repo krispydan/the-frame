@@ -347,6 +347,7 @@ export async function generateCopy(opts: {
       input_schema: {
         type: "object",
         required: [
+          "proposedName",
           "subject", "preheader", "heroHeadline", "heroSubtitle",
           "heroCtaLabel", "heroCtaUrlSuggestion",
           "sectionAHeading", "sectionABody",
@@ -355,6 +356,11 @@ export async function generateCopy(opts: {
           "selfCheckPassed",
         ],
         properties: {
+          proposedName: {
+            type: "string",
+            description: "A short (3-8 word) human-readable name for the campaign — used as the operator's internal label AND the brief title. Examples: 'Sunday Drive in Honey lands', 'Memorial Day readers 30% off', 'Tortoise classics back in stock'. If the user already provided a name in {{theme.title}}, mirror it back exactly. Sentence case, no quotes.",
+            maxLength: 80,
+          },
           subject: { type: "string", maxLength: 60 },
           preheader: { type: "string", maxLength: 110 },
           heroHeadline: { type: "string" },
