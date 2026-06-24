@@ -20,7 +20,7 @@ export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { suggestRandomProducts } from "@/modules/marketing/lib/product-selector";
-import { serializeFeaturedIds } from "@/modules/marketing/lib/featured-products";
+import { assignFeaturedProductIds } from "@/modules/marketing/lib/featured-products";
 
 interface Proposal {
   scheduledDate: string;
@@ -80,18 +80,13 @@ export async function POST(req: NextRequest) {
     // productHook) so SOME emails are grounded in products and the rest
     // stay brand/theme emails — a natural mix. Cycle a random pool so
     // they're not all the same frame. Operator can adjust per campaign.
-    const featuredByIndex: Array<string | null> = body.proposals.map(() => null);
+    const productHooks = body.proposals.map((p) => p.brief.productHook);
+    let featuredByIndex: Array<string | null> = productHooks.map(() => null);
     if (body.autoFeatureProducts) {
-      const anchoredIdx = body.proposals
-        .map((p, i) => (p.brief.productHook && p.brief.productHook.trim() ? i : -1))
-        .filter((i) => i >= 0);
-      if (anchoredIdx.length > 0) {
-        const pool = await suggestRandomProducts(Math.min(anchoredIdx.length, 12), "in_stock");
-        if (pool.length > 0) {
-          anchoredIdx.forEach((idx, k) => {
-            featuredByIndex[idx] = serializeFeaturedIds([pool[k % pool.length].id]);
-          });
-        }
+      const anchoredCount = productHooks.filter((h) => h && h.trim()).length;
+      if (anchoredCount > 0) {
+        const pool = await suggestRandomProducts(Math.min(anchoredCount, 12), "in_stock");
+        featuredByIndex = assignFeaturedProductIds(productHooks, pool.map((p) => p.id));
       }
     }
 

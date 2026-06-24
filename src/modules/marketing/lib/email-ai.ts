@@ -200,6 +200,9 @@ async function callClaude({
   if (!apiKey) {
     return { ok: false, error: "ANTHROPIC_API_KEY not configured" };
   }
+  // Capture narrowed (string) for use inside the nested send() closure —
+  // TS doesn't carry the non-null narrowing into a nested function.
+  const key: string = apiKey;
 
   // Text-only stays a plain string; with images the user turn becomes a
   // content array (text first, then image blocks via public URL source).
@@ -211,47 +214,54 @@ async function callClaude({
       ]
     : userPrompt;
 
-  const body = {
-    model,
-    max_tokens: maxTokens,
-    system: systemPrompt,
-    tools: [tool],
-    // Force the model to use the tool (single-tool, mandatory call).
-    tool_choice: { type: "tool", name: tool.name },
-    messages: [{ role: "user", content: userContent }],
-  };
-
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      return { ok: false, error: `Anthropic API ${res.status}: ${text}` };
-    }
-
-    const data = (await res.json()) as AnthropicResponse;
-    const toolCall = data.content.find(
-      (c): c is AnthropicToolCall => c.type === "tool_use",
-    );
-    if (!toolCall) {
-      return { ok: false, error: "Claude returned no tool_use block" };
-    }
-    return {
-      ok: true,
-      output: toolCall.input,
-      usage: data.usage ?? { input_tokens: 0, output_tokens: 0 },
+  // One network attempt for a given user-content payload.
+  async function send(content: unknown): Promise<
+    | { ok: true; output: Record<string, unknown>; usage: { input_tokens: number; output_tokens: number } }
+    | { ok: false; error: string }
+  > {
+    const body = {
+      model,
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      tools: [tool],
+      // Force the model to use the tool (single-tool, mandatory call).
+      tool_choice: { type: "tool", name: tool.name },
+      messages: [{ role: "user", content }],
     };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        return { ok: false, error: `Anthropic API ${res.status}: ${text}` };
+      }
+      const data = (await res.json()) as AnthropicResponse;
+      const toolCall = data.content.find((c): c is AnthropicToolCall => c.type === "tool_use");
+      if (!toolCall) return { ok: false, error: "Claude returned no tool_use block" };
+      return { ok: true, output: toolCall.input, usage: data.usage ?? { input_tokens: 0, output_tokens: 0 } };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
   }
+
+  let result = await send(userContent);
+
+  // Resilience: a bad/unreachable product image must not sink the whole
+  // generation. If an image-bearing request fails with an image-shaped
+  // error, retry once text-only so the operator still gets copy/briefs.
+  const IMAGE_ERR = /\b400\b|image|media_type|\bsource\b|could not (process|fetch|download)|url/i;
+  if (!result.ok && validImages.length > 0 && IMAGE_ERR.test(result.error)) {
+    console.warn(`[email-ai] image request failed, retrying text-only: ${result.error}`);
+    result = await send(userPrompt);
+  }
+  return result;
 }
 
 // ────────────────────────────────────────────────────────────

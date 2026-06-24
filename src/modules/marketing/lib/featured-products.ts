@@ -22,3 +22,30 @@ export function serializeFeaturedIds(ids: string[] | null | undefined): string |
   const clean = (ids ?? []).filter((x) => typeof x === "string" && x.length > 0);
   return clean.length ? JSON.stringify(clean) : null;
 }
+
+/**
+ * Planner auto-assign: decide which proposals get a featured product.
+ * Product-anchored proposals (those the planner gave a non-empty
+ * productHook) each get ONE product id, cycling through `poolIds` so
+ * the same frame isn't repeated across the month. Non-anchored slots
+ * get null (a brand/theme email). Pure → unit-testable; the route does
+ * the async pool fetch and feeds the ids in.
+ *
+ * @returns one serialized featured_product_ids value (or null) per proposal, in order.
+ */
+export function assignFeaturedProductIds(
+  productHooks: Array<string | null | undefined>,
+  poolIds: string[],
+): Array<string | null> {
+  const out: Array<string | null> = productHooks.map(() => null);
+  const pool = poolIds.filter(Boolean);
+  if (pool.length === 0) return out;
+  let k = 0;
+  productHooks.forEach((hook, i) => {
+    if (hook && hook.trim()) {
+      out[i] = serializeFeaturedIds([pool[k % pool.length]]);
+      k++;
+    }
+  });
+  return out;
+}
