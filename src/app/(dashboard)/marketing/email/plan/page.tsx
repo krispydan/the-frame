@@ -103,6 +103,53 @@ export default function PlanMonthPage() {
     ) ?? null);
   }
 
+  // Per-card natural-language feedback → AI revises that one brief.
+  const [feedback, setFeedback] = useState<Record<number, string>>({});
+  const [revising, setRevising] = useState<number | null>(null);
+
+  async function reviseOne(p: Proposal) {
+    const fb = (feedback[p.slotIndex] ?? "").trim();
+    if (!fb) return;
+    setRevising(p.slotIndex);
+    setError(null);
+    try {
+      const res = await fetch("/api/v1/marketing/email/plan-month/revise", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          audience,
+          scheduledDate: p.scheduledDate,
+          slotContext: `slot ${p.slotInWeek} · layout=${p.layoutProfile} · image=${p.imageStyle} · subject-angle=${p.subjectAngle}`,
+          current: {
+            name: p.brief.name,
+            angle: p.brief.angle,
+            productHook: p.brief.productHook,
+            seasonalContext: p.brief.seasonalContext,
+          },
+          feedback: fb,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) { setError(data.error); return; }
+      const b = data.brief as Partial<ProposalBrief>;
+      setProposals(ps => ps?.map(x => x.slotIndex === p.slotIndex ? {
+        ...x,
+        brief: {
+          name: b.name ?? x.brief.name,
+          angle: b.angle ?? x.brief.angle,
+          productHook: b.productHook ?? "",
+          seasonalContext: b.seasonalContext ?? "",
+          rationale: b.rationale ?? x.brief.rationale,
+        },
+      } : x) ?? null);
+      setFeedback(f => ({ ...f, [p.slotIndex]: "" }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRevising(null);
+    }
+  }
+
   async function createAll() {
     if (!proposals) return;
     setCreating(true);
@@ -328,6 +375,34 @@ export default function PlanMonthPage() {
                       <strong>AI rationale:</strong> {p.brief.rationale}
                     </div>
                   )}
+
+                  {/* Natural-language feedback → AI revises this brief */}
+                  <div className="border-t pt-3 space-y-2">
+                    <label className="text-xs text-muted-foreground block">
+                      Suggest changes (natural language)
+                    </label>
+                    <textarea
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      rows={2}
+                      placeholder="e.g. Lean into the honey drop and tie it to Labor Day — less urgency, more warmth."
+                      value={feedback[p.slotIndex] ?? ""}
+                      onChange={e => setFeedback(f => ({ ...f, [p.slotIndex]: e.target.value }))}
+                      disabled={revising !== null}
+                      onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") reviseOne(p); }}
+                    />
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => reviseOne(p)}
+                        disabled={revising !== null || !(feedback[p.slotIndex] ?? "").trim()}
+                      >
+                        {revising === p.slotIndex
+                          ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Revising…</>
+                          : <><Wand2 className="h-3 w-3 mr-1" /> Suggest changes</>}
+                      </Button>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             ))}

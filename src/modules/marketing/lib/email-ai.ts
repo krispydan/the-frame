@@ -534,6 +534,63 @@ export async function generateImagePrompts(opts: {
 }
 
 /**
+ * Revise ONE proposed brief from natural-language operator feedback.
+ * Powers the planner's per-card "Suggest changes" — the operator types
+ * "lean into the honey drop, drop the urgency" and the AI returns a
+ * revised brief that honors the same slot (date / cadence / layout /
+ * subject-angle). Still the IDEA, not the email copy.
+ */
+export async function reviseBrief(opts: {
+  audience: "retail" | "wholesale";
+  scheduledDate: string;
+  /** Compact slot descriptor, e.g. "slot 2 · layout=split · image=detail · subject-angle=urgency". */
+  slotContext?: string | null;
+  calendarEvents?: string | null;
+  current: { name: string; angle: string; productHook?: string | null; seasonalContext?: string | null };
+  feedback: string;
+}) {
+  const systemPrompt = buildSystemPrompt(opts.audience);
+  const taskPrompt = `You previously proposed this email brief for the ${opts.audience} send on ${opts.scheduledDate}.
+
+CURRENT BRIEF
+  Name: ${opts.current.name}
+  Angle: ${opts.current.angle}
+  Product hook: ${opts.current.productHook || "(none)"}
+  Seasonal context: ${opts.current.seasonalContext || "(none)"}
+${opts.slotContext ? `  Slot: ${opts.slotContext}\n` : ""}
+MARKETING CALENDAR (±14 days of this send)
+${opts.calendarEvents ?? "(none)"}
+
+THE OPERATOR'S FEEDBACK — apply this:
+"""
+${opts.feedback.trim()}
+"""
+
+Revise the brief to apply the feedback. Keep what already works, stay in Jaxy voice, and respect the slot's fixed constraints (the send date + cadence; honor the layout + subject-angle if given). This is still the IDEA/brief — do NOT write the email copy. Return the full revised brief: name, angle, optional product hook + seasonal context, and a one-line rationale stating what you changed and why.`;
+
+  return callClaude({
+    systemPrompt,
+    userPrompt: taskPrompt,
+    maxTokens: 1500,
+    tool: {
+      name: "submit_revised_brief",
+      description: "Submit the revised email brief after applying the operator's feedback.",
+      input_schema: {
+        type: "object",
+        required: ["name", "angle", "rationale"],
+        properties: {
+          name: { type: "string", maxLength: 80, description: "3–8 word campaign name, sentence case, no quotes." },
+          angle: { type: "string", maxLength: 600, description: "2–4 sentences: the idea, why now, the framing. Not the headline." },
+          productHook: { type: "string", description: "Optional SKU / category / colorway. Empty string if none." },
+          seasonalContext: { type: "string", description: "Optional holiday / weather / cultural anchor. Empty string if none." },
+          rationale: { type: "string", maxLength: 250, description: "One sentence: what you changed and why, referencing the feedback." },
+        },
+      },
+    },
+  });
+}
+
+/**
  * Monthly campaign planner. Given an audience + date window +
  * calendar context + slot dimensions from the strategy engine,
  * proposes one BRIEF per slot. Returned briefs are then user-

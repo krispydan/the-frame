@@ -8,7 +8,7 @@
  * judging the model's output (which needs a live key).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { generateCopy, generateImagePrompts } from "@/modules/marketing/lib/email-ai";
+import { generateCopy, generateImagePrompts, reviseBrief } from "@/modules/marketing/lib/email-ai";
 
 const PRODUCT_BLOCK =
   "1. Honey Reader ($28.00 retail)\n" +
@@ -138,6 +138,33 @@ describe("generateCopy — featured products reach the model", () => {
     const body = bodyOfCall(fetchMock, 0);
     expect(typeof body.messages[0].content).toBe("string");
     expect(body.messages[0].content).toContain("No-photo Reader");
+  });
+});
+
+describe("reviseBrief — applies natural-language operator feedback", () => {
+  it("sends the current brief + feedback + calendar context, returns the revised brief", async () => {
+    const fetchMock = stubAnthropic("submit_revised_brief", {
+      name: "Honey, warmer", angle: "Lean into the drop", rationale: "dropped urgency, added Labor Day",
+    });
+    const res = await reviseBrief({
+      audience: "retail",
+      scheduledDate: "2026-09-04",
+      slotContext: "slot 1 · layout=full_bleed · subject-angle=warmth",
+      calendarEvents: "[PRIMARY — lead with this] Labor Day sale",
+      current: { name: "Honey returns", angle: "urgency-led push", productHook: "Honey", seasonalContext: null },
+      feedback: "less urgency, more warmth; tie it to Labor Day",
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.output.name).toBe("Honey, warmer");
+
+    const body = bodyOfCall(fetchMock, 0);
+    // Brief revision is text-only (no images).
+    expect(typeof body.messages[0].content).toBe("string");
+    const content = body.messages[0].content as string;
+    expect(content).toContain("less urgency, more warmth"); // the feedback
+    expect(content).toContain("Honey returns");             // the current brief
+    expect(content).toContain("Labor Day");                 // calendar context
+    expect(body.tool_choice).toEqual({ type: "tool", name: "submit_revised_brief" });
   });
 });
 
