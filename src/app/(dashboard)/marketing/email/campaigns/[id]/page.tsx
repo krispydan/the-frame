@@ -534,7 +534,12 @@ export default function CampaignDetailPage({
 
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Subject + preheader</CardTitle>
+              <CardTitle className="text-sm">
+                Subject + preheader
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  Primary is what exports — keep the alt to A/B test angles
+                </span>
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <LabeledInput
@@ -551,6 +556,47 @@ export default function CampaignDetailPage({
                 placeholder="The snippet shown next to subject in inbox view"
                 maxLength={90}
               />
+
+              {/* A/B alternate — a different angle for the same email. */}
+              <div className="rounded-md border border-dashed border-input p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    Alternate subject (A/B — different angle)
+                  </span>
+                  {(campaign.subjectAlt as string) && (
+                    <button
+                      type="button"
+                      title="Swap the alternate into primary (and primary into alt)"
+                      onClick={() => {
+                        const s = campaign.subject as string ?? "";
+                        const p = campaign.preheader as string ?? "";
+                        const sa = campaign.subjectAlt as string ?? "";
+                        const pa = campaign.preheaderAlt as string ?? "";
+                        updateField("subject", sa);
+                        updateField("preheader", pa);
+                        updateField("subjectAlt", s);
+                        updateField("preheaderAlt", p);
+                      }}
+                      className="text-xs flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                    >
+                      ⇄ Make primary
+                    </button>
+                  )}
+                </div>
+                <LabeledInput
+                  label="Alt subject (≤45 char)"
+                  value={campaign.subjectAlt as string ?? ""}
+                  onChange={v => updateField("subjectAlt", v)}
+                  placeholder="a different angle on the same email"
+                  maxLength={45}
+                />
+                <LabeledInput
+                  label="Alt preheader (50–90 char)"
+                  value={campaign.preheaderAlt as string ?? ""}
+                  onChange={v => updateField("preheaderAlt", v)}
+                  maxLength={90}
+                />
+              </div>
             </CardContent>
           </Card>
 

@@ -351,7 +351,8 @@ export async function generateCopy(opts: {
         type: "object",
         required: [
           "proposedName",
-          "subject", "preheader", "heroHeadline", "heroSubtitle",
+          "subject", "preheader", "subjectAlt", "preheaderAlt",
+          "heroHeadline", "heroSubtitle",
           "heroCtaLabel", "heroCtaUrlSuggestion",
           "sectionAHeading", "sectionABody",
           "sectionBHeading", "sectionBBody",
@@ -366,6 +367,16 @@ export async function generateCopy(opts: {
           },
           subject: { type: "string", maxLength: 60 },
           preheader: { type: "string", maxLength: 110 },
+          subjectAlt: {
+            type: "string",
+            maxLength: 60,
+            description: "A SECOND subject line testing a DIFFERENT angle from `subject` (for A/B). If `subject` leads with the product, make this lead with a feeling/curiosity/benefit — or vice versa. Same voice + length rules. Must be meaningfully different, not a reword.",
+          },
+          preheaderAlt: {
+            type: "string",
+            maxLength: 110,
+            description: "Preheader that complements `subjectAlt` (not `subject`). Must not duplicate `subjectAlt`.",
+          },
           heroHeadline: { type: "string" },
           heroSubtitle: { type: "string" },
           heroCtaLabel: { type: "string" },

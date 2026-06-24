@@ -30,6 +30,8 @@ const PATCHABLE_COLUMNS = new Set([
   "sectionBDisabled",
   "subject",
   "preheader",
+  "subjectAlt",
+  "preheaderAlt",
   "heroVariant",
   "sectionAVariant",
   "secondaryImageVariant",

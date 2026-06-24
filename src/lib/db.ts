@@ -1866,6 +1866,9 @@ try {
     "section_a_disabled INTEGER DEFAULT 0",
     "secondary_disabled INTEGER DEFAULT 0",
     "section_b_disabled INTEGER DEFAULT 0",
+    // 2026-06-23: subject-line A/B (alt subject + preheader)
+    "subject_alt TEXT",
+    "preheader_alt TEXT",
   ]) {
     try {
       sqlite.exec(`ALTER TABLE marketing_email_campaigns ADD COLUMN ${col}`);

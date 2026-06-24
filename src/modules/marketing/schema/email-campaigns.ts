@@ -87,6 +87,11 @@ export const emailCampaigns = sqliteTable("marketing_email_campaigns", {
   // Subject + preheader (inbox metadata, separate from in-email content)
   subject: text("subject"),
   preheader: text("preheader"),
+  /** Alternative subject/preheader testing a DIFFERENT angle — for
+   *  A/B subject testing (Daniel: "test subject angles"). AI proposes
+   *  both; the operator can swap the alt into primary before export. */
+  subjectAlt: text("subject_alt"),
+  preheaderAlt: text("preheader_alt"),
 
   // ── Variant choice per block ──
   // Each block has 1+ variants; renderer dispatches based on these.
