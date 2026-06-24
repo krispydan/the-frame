@@ -1849,6 +1849,18 @@ try {
   )`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_email_send_results_campaign ON marketing_email_send_results (campaign_id)`);
 
+  // Copy version history — snapshot of copy fields before each AI
+  // regenerate so a worse regenerate is non-destructive (restore prior).
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS marketing_email_copy_versions (
+    id TEXT PRIMARY KEY NOT NULL,
+    campaign_id TEXT NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    source TEXT,
+    label TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_email_copy_versions_campaign ON marketing_email_copy_versions (campaign_id)`);
+
   // ── 2026-06-23: per-campaign brief columns ───────────────────
   // CREATE TABLE IF NOT EXISTS above only fires on a fresh DB —
   // existing rows need these added via ALTER. Try-each-individually

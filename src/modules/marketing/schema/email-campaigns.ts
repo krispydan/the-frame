@@ -198,3 +198,21 @@ export const emailSendResults = sqliteTable("marketing_email_send_results", {
 }, (table) => ({
   campaignIdx: index("idx_email_send_results_campaign").on(table.campaignId),
 }));
+
+/**
+ * Copy version history — a snapshot of a campaign's copy fields taken
+ * before each AI regeneration overwrites them, so a regenerate that
+ * comes back worse is non-destructive (restore the prior version).
+ * `snapshotJson` holds the copy fields (camelCase keys); `label` is a
+ * display snippet (subject/headline/name).
+ */
+export const emailCopyVersions = sqliteTable("marketing_email_copy_versions", {
+  id: id(),
+  campaignId: text("campaign_id").notNull(),
+  snapshotJson: text("snapshot_json").notNull(),
+  source: text("source"),   // 'pre_generate' | 'manual' | …
+  label: text("label"),
+  createdAt: timestamp("created_at"),
+}, (table) => ({
+  campaignIdx: index("idx_email_copy_versions_campaign").on(table.campaignId),
+}));

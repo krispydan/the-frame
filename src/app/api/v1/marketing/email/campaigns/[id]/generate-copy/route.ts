@@ -8,6 +8,7 @@ import { eq } from "drizzle-orm";
 import { generateCopy } from "@/modules/marketing/lib/email-ai";
 import { getCalendarContextForCampaign } from "@/modules/marketing/lib/calendar-context";
 import { lintGeneratedCopy } from "@/modules/marketing/lib/copy-quality";
+import { snapshotCopy } from "@/modules/marketing/lib/copy-versions";
 
 /**
  * POST /api/v1/marketing/email/campaigns/[id]/generate-copy
@@ -127,6 +128,15 @@ async function handle(req: NextRequest, params: { id: string }) {
   }
 
   const out = result.output as Record<string, string | Record<string, boolean>>;
+
+  // Snapshot the existing copy BEFORE we overwrite it, so a worse
+  // regenerate is non-destructive (the operator can restore the prior
+  // version). No-op when the campaign had no copy yet.
+  try {
+    snapshotCopy(campaign as unknown as Record<string, unknown>, "pre_generate");
+  } catch (e) {
+    console.warn("[generate-copy] snapshot failed (non-fatal):", e);
+  }
 
   // Persist to the campaign row + record the raw JSON for replay.
   // `name` uses COALESCE-on-empty so a user-provided name isn't

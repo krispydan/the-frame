@@ -112,6 +112,7 @@ export {
   emailCampaigns,
   emailThemes,
   emailSendResults,
+  emailCopyVersions,
 } from "./email-campaigns";
 
 // Marketing calendar — holidays, sales, launches, promos. Feeds

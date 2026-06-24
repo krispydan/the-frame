@@ -91,7 +91,7 @@ So: strong on production, behind on operations. The agency-replacement bar, give
 2. Designer queue shows campaign name + one-line brief (3.10). *(done)*
 3. Per-slot image regeneration `?slot=hero|secondary` (3.18). *(next)*
 4. Subject A/B: `subject_alt`/`preheader_alt` columns + a toggle (3.5) — Daniel asked for angle testing; this is the in-scope slice of it. *(done — AI now proposes a different-angle alt subject/preheader; editor shows both with a "Make primary" swap)*
-5. AI copy version history (3.2) — lightweight `copy_versions` table + restore. *(next)*
+5. AI copy version history (3.2) — lightweight `copy_versions` table + restore. *(done — snapshot before each regenerate; "Copy history" panel in the editor restores any prior version; restore is itself undoable)*
 
 ### Sprint C — Make the image channel excellent (Daniel's chosen channel)
 1. Batch "Generate copy + image prompts for all planned drafts" from the planner (self-review §9.6 — the highest-leverage planner upgrade). *(done — "Draft all N with AI" on the planner's post-create card; serial, copy default-on, image-prompts optional)*

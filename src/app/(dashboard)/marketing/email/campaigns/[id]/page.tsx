@@ -86,6 +86,8 @@ export default function CampaignDetailPage({
   // True when the brief was edited after image prompts were generated
   // → the Higgsfield briefs are now stale and should be regenerated.
   const [briefStale, setBriefStale] = useState(false);
+  // Bumped after each generate-copy so the copy-history panel refetches.
+  const [historySignal, setHistorySignal] = useState(0);
   const [exportingKind, setExportingKind] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<{ url: string; name: string } | null>(null);
@@ -131,6 +133,7 @@ export default function CampaignDetailPage({
         setLint((data.lint as LintResult) ?? null);
         setPreviewKey(k => k + 1);
         setSavedAt(Date.now());
+        setHistorySignal(s => s + 1);
       }
     } catch (e) {
       setGenerateError(e instanceof Error ? e.message : String(e));
@@ -484,6 +487,15 @@ export default function CampaignDetailPage({
           prompts. Persisted on the campaign + also shown to the
           designer in the queue. */}
       <ImagePromptResults campaign={campaign} />
+
+      {/* Copy history — restore a prior version if a regenerate came
+          back worse. Snapshots are taken automatically before each
+          generate-copy. */}
+      <CopyHistory
+        campaignId={id}
+        reloadSignal={historySignal}
+        onRestored={(c) => { setCampaign(c); setPreviewKey(k => k + 1); setSavedAt(Date.now()); }}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Left pane — editor */}
@@ -1080,6 +1092,99 @@ function CopyablePrompt({
       {alt && <p className="text-xs text-muted-foreground"><strong>Alt:</strong> {alt}</p>}
       {extra && <p className="text-xs text-muted-foreground">{extra}</p>}
     </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Copy history — the "undo" for AI regeneration. A snapshot is taken
+// before each generate-copy; this lists them with a one-click restore.
+// ────────────────────────────────────────────────────────────
+interface CopyVersion {
+  id: string;
+  source: string | null;
+  label: string | null;
+  createdAt: string | null;
+  fields: Record<string, string>;
+}
+
+function CopyHistory({
+  campaignId, reloadSignal, onRestored,
+}: {
+  campaignId: string;
+  reloadSignal: number;
+  onRestored: (campaign: Campaign) => void;
+}) {
+  const [versions, setVersions] = useState<CopyVersion[]>([]);
+  const [open, setOpen] = useState(false);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    fetch(`/api/v1/marketing/email/campaigns/${campaignId}/versions`)
+      .then(r => r.json())
+      .then(d => setVersions(d.versions ?? []))
+      .catch(() => {});
+  }, [campaignId]);
+
+  useEffect(() => { load(); }, [load, reloadSignal]);
+
+  async function restore(versionId: string) {
+    if (!confirm("Restore this version? Your current copy is snapshotted first, so this is also undoable.")) return;
+    setRestoringId(versionId);
+    try {
+      const res = await fetch(`/api/v1/marketing/email/campaigns/${campaignId}/versions`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ versionId }),
+      });
+      const data = await res.json();
+      if (data.campaign) onRestored(data.campaign as Campaign);
+      load();
+    } finally {
+      setRestoringId(null);
+    }
+  }
+
+  if (versions.length === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <button
+          type="button"
+          onClick={() => setOpen(o => !o)}
+          className="flex items-center justify-between w-full text-left"
+        >
+          <CardTitle className="text-sm">
+            Copy history
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              {versions.length} saved version{versions.length === 1 ? "" : "s"} — restore a prior draft
+            </span>
+          </CardTitle>
+          <span className="text-xs text-muted-foreground">{open ? "Hide" : "Show"}</span>
+        </button>
+      </CardHeader>
+      {open && (
+        <CardContent className="space-y-1">
+          {versions.map((v) => (
+            <div key={v.id} className="flex items-center justify-between gap-3 text-sm py-1 border-b last:border-0">
+              <div className="min-w-0">
+                <div className="truncate">{v.label || "(untitled)"}</div>
+                <div className="text-xs text-muted-foreground">
+                  {v.source === "pre_restore" ? "before a restore" : "before a regenerate"}
+                  {v.createdAt ? ` · ${new Date(v.createdAt + "Z").toLocaleString()}` : ""}
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={restoringId !== null}
+                onClick={() => restore(v.id)}
+              >
+                {restoringId === v.id ? "Restoring…" : "Restore"}
+              </Button>
+            </div>
+          ))}
+        </CardContent>
+      )}
+    </Card>
   );
 }
 
