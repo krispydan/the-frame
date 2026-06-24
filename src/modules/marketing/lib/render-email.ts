@@ -50,13 +50,19 @@ const C = {
 // system + faster Google Fonts load + lower chance of any font
 // failing to render. Jost stays as the system fallback so email
 // clients without Instrument Sans still get a humanist sans.
+// IMPORTANT: family names use SINGLE quotes, not double. These strings
+// are interpolated into double-quoted style="…" attributes; a double
+// quote inside would terminate the attribute early and silently drop
+// every CSS declaration after font-family (verified: it truncated
+// headlines + CTA pills to default styling). Single quotes are valid
+// CSS and safe inside both style="…" attributes and the <style> block.
 const F = {
   display:
-    '"Instrument Sans", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif',
+    "'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif",
   body:
-    '"Instrument Sans", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif',
-  pullquote: '"Syne", Georgia, "Times New Roman", serif',
-  logo: 'Glitz, "Cooper Std Black", "Cooper Black", Georgia, serif',
+    "'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif",
+  pullquote: "'Syne', Georgia, 'Times New Roman', serif",
+  logo: "Glitz, 'Cooper Std Black', 'Cooper Black', Georgia, serif",
 };
 
 const EMAIL_W = 600;
@@ -94,7 +100,7 @@ function escAttr(s: string | null | undefined): string {
 // a vendored SVG.
 const FONT_LINK = `<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Syne:wght@600;700&display=swap">`;
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&amp;family=Syne:wght@600;700&amp;display=swap">`;
 
 // ── Mobile media query ────────────────────────────────────────
 
@@ -126,11 +132,25 @@ const STYLE_BLOCK = `
 // the button without shouting.
 const CTA_STYLE = `display:inline-block;background:${C.terracotta};color:${C.ivory};text-decoration:none;font-family:${F.body};font-size:14px;font-weight:500;letter-spacing:0.02em;padding:13px 28px;border-radius:999px;`;
 
+// Render a CTA pill — but only when there's a REAL destination. A
+// missing/"#" URL would otherwise emit a fully-styled button that
+// links nowhere; a dead button is worse than no button (the
+// readiness/validate step already flags the missing URL to the
+// operator). Returns "" when there's nothing to link to.
+function ctaAnchor(label: string | null | undefined, url: string | null | undefined): string {
+  const real = url && url.trim() && url.trim() !== "#" ? url.trim() : null;
+  if (!real) return "";
+  return `<a href="${escAttr(real)}" class="jx-cta-pill" style="${CTA_STYLE}">${esc(label || "Shop now")}</a>`;
+}
+
+// Center-weighted scrim — content is vertically centered in the hero,
+// so the darkening/lightening peaks in the middle (behind the text)
+// and eases toward both edges so the image still breathes.
 function scrimGradient(scrim: "dark" | "light" | "none"): string {
   if (scrim === "dark")
-    return "linear-gradient(180deg, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0) 55%)";
+    return "linear-gradient(180deg, rgba(0,0,0,0.12) 0%, rgba(0,0,0,0.55) 50%, rgba(0,0,0,0.12) 100%)";
   if (scrim === "light")
-    return "linear-gradient(180deg, rgba(255,253,240,0.7) 0%, rgba(255,253,240,0) 55%)";
+    return "linear-gradient(180deg, rgba(255,253,240,0.35) 0%, rgba(255,253,240,0.85) 50%, rgba(255,253,240,0.35) 100%)";
   return "";
 }
 
@@ -191,26 +211,37 @@ interface HeroProps {
 }
 
 function heroFullBleedOverlay(p: HeroProps & { scrim: "dark" | "light" | "none" }): string {
-  const isDark = p.scrim === "dark";
+  const hasImg = !!p.imageUrl;
+  // Legibility-safe: over an image, never leave text un-scrimmed. A
+  // bare scrim:"none" + image would paint dark text on a photo with no
+  // backdrop, so we treat "none over an image" as a subtle light scrim
+  // (lightens behind the dark text). Explicit dark/light are preserved.
+  const effScrim: "dark" | "light" | "none" =
+    hasImg && p.scrim === "none" ? "light" : p.scrim;
+  const isDark = effScrim === "dark";
   const textColor = isDark ? C.ivory : C.espresso;
-  const textShadow = isDark ? "0 1px 2px rgba(0,0,0,0.15)" : "none";
-  const grad = scrimGradient(p.scrim);
+  // Always shadow text when it sits over an image, regardless of scrim.
+  const textShadow = hasImg
+    ? isDark
+      ? "0 1px 3px rgba(0,0,0,0.5)"
+      : "0 1px 3px rgba(255,253,240,0.7)"
+    : "none";
+  const grad = scrimGradient(effScrim);
   const bg = p.imageUrl
     ? `background-color:${C.ivory};background-image:url('${escAttr(p.imageUrl)}');background-size:cover;background-position:center;`
     : `background-color:${C.ivory};`;
-  const inner = grad
-    ? `background-image:${grad};`
-    : "";
+  const inner = grad ? `background-image:${grad};` : "";
+  const cta = ctaAnchor(p.ctaLabel, p.ctaUrl);
 
   return `
   <tr>
-    <td role="img" aria-label="${escAttr(p.imageAlt)}" style="position:relative;min-height:460px;${bg}">
+    <td role="img" aria-label="${escAttr(p.imageAlt)}" style="position:relative;${bg}">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
         <tr>
-          <td style="position:relative;padding:40px 36px 0;text-align:center;${inner}min-height:460px;">
+          <td height="460" style="position:relative;height:460px;padding:48px 36px;text-align:center;vertical-align:middle;${inner}">
             <h1 class="jx-hero-headline" style="font-family:${F.display};font-size:44px;line-height:1.1;font-weight:500;color:${textColor};text-shadow:${textShadow};margin:0 0 12px;">${esc(p.headline)}</h1>
             <p class="jx-hero-subtitle" style="font-family:${F.body};font-size:14px;line-height:1.55;color:${textColor};text-shadow:${textShadow};margin:0 auto 20px;max-width:380px;">${esc(p.subtitle)}</p>
-            <a href="${escAttr(p.ctaUrl)}" class="jx-cta-pill" style="${CTA_STYLE}">${esc(p.ctaLabel)}</a>
+            ${cta}
           </td>
         </tr>
       </table>
@@ -222,6 +253,7 @@ function heroImage75Solid(p: HeroProps): string {
   const imgCell = p.imageUrl
     ? `<img src="${escAttr(p.imageUrl)}" alt="${escAttr(p.imageAlt)}" width="${Math.round(EMAIL_W * 0.75)}" style="width:100%;max-width:450px;height:auto;display:block;margin:0 auto;" />`
     : `<div style="width:100%;aspect-ratio:1/1;background:${C.lavender};color:${C.espresso};display:flex;align-items:center;justify-content:center;font-size:11px;font-family:${F.body};letter-spacing:0.1em;">[ hero image — 900×900 centered ]</div>`;
+  const cta = ctaAnchor(p.ctaLabel, p.ctaUrl);
 
   return `
   <tr>
@@ -238,7 +270,7 @@ function heroImage75Solid(p: HeroProps): string {
           <td class="jx-text-pad" style="padding:28px 36px 0;text-align:center;">
             <h1 class="jx-hero-headline" style="font-family:${F.display};font-size:44px;line-height:1.1;font-weight:500;color:${C.espresso};margin:0;">${esc(p.headline)}</h1>
             <p class="jx-hero-subtitle" style="font-family:${F.body};font-size:15px;line-height:1.55;color:${C.espresso};margin:10px auto 0;max-width:380px;font-weight:400;">${esc(p.subtitle)}</p>
-            <div style="margin-top:20px;"><a href="${escAttr(p.ctaUrl)}" class="jx-cta-pill" style="${CTA_STYLE}">${esc(p.ctaLabel)}</a></div>
+            ${cta ? `<div style="margin-top:20px;">${cta}</div>` : ""}
           </td>
         </tr>
       </table>
@@ -253,6 +285,7 @@ function heroSplit5050(p: HeroProps): string {
   const placeholder = p.imageUrl
     ? ""
     : `<div style="text-align:center;color:${C.espresso};font-size:10px;font-family:${F.body};letter-spacing:0.1em;padding:16px;">[ hero image — 600×900 portrait, fills left ]</div>`;
+  const cta = ctaAnchor(p.ctaLabel, p.ctaUrl);
 
   return `
   <tr>
@@ -262,8 +295,8 @@ function heroSplit5050(p: HeroProps): string {
           <td class="jx-grid-cell" width="50%" role="img" aria-label="${escAttr(p.imageAlt)}" style="${leftCell}min-height:460px;vertical-align:middle;">${placeholder}</td>
           <td class="jx-grid-cell" width="50%" style="padding:40px 28px;vertical-align:middle;background-color:${C.white};text-align:left;">
             <h1 class="jx-hero-headline" style="font-family:${F.display};font-size:36px;line-height:1.15;font-weight:500;color:${C.espresso};margin:0 0 12px;">${esc(p.headline)}</h1>
-            <p class="jx-hero-subtitle" style="font-family:${F.body};font-size:14px;line-height:1.55;color:${C.espresso};margin:0 0 22px;">${esc(p.subtitle)}</p>
-            <a href="${escAttr(p.ctaUrl)}" class="jx-cta-pill" style="${CTA_STYLE}">${esc(p.ctaLabel)}</a>
+            <p class="jx-hero-subtitle" style="font-family:${F.body};font-size:14px;line-height:1.55;color:${C.espresso};margin:0 0 ${cta ? "22px" : "0"};">${esc(p.subtitle)}</p>
+            ${cta}
           </td>
         </tr>
       </table>
@@ -287,6 +320,14 @@ function sectionAWithPullquote(p: { heading: string; body: string }): string {
   const sentences = p.body.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean);
   const pullquote = sentences.reduce((a, b) => (b.length > a.length ? b : a), "");
   const rest = sentences.filter(s => s !== pullquote).join(" ");
+
+  // A pull quote needs supporting copy beneath it. On a single-sentence
+  // body (or when nothing is left after pulling the quote) the layout
+  // degenerates into a lone floating italic line — fall back to the
+  // clean centered layout instead.
+  if (sentences.length < 2 || !rest) {
+    return sectionACentered(p);
+  }
 
   return `
   <tr>
@@ -378,7 +419,7 @@ function sectionBCenteredWithCta(p: SectionBProps): string {
     <td class="jx-text-pad" style="padding:36px 36px 48px;text-align:center;background-color:${C.white};">
       <div class="jx-section-heading" style="font-family:${F.display};font-size:15px;font-weight:600;letter-spacing:0.01em;color:${C.espresso};margin:0 0 14px;">${esc(p.heading)}</div>
       ${paraHtml}
-      <a href="${escAttr(p.ctaUrl)}" class="jx-cta-pill" style="${CTA_STYLE}">${esc(p.ctaLabel)}</a>
+      ${ctaAnchor(p.ctaLabel, p.ctaUrl)}
     </td>
   </tr>`;
 }
@@ -403,9 +444,7 @@ function sectionBTwoColumnWithCta(p: SectionBProps): string {
           </td>
         </tr>
       </table>
-      <div style="margin-top:12px;text-align:center;">
-        <a href="${escAttr(p.ctaUrl)}" class="jx-cta-pill" style="${CTA_STYLE}">${esc(p.ctaLabel)}</a>
-      </div>
+      ${(() => { const cta = ctaAnchor(p.ctaLabel, p.ctaUrl); return cta ? `<div style="margin-top:12px;text-align:center;">${cta}</div>` : ""; })()}
     </td>
   </tr>`;
 }
@@ -485,9 +524,10 @@ export type SectionKind = "hero" | "sectionA" | "secondary" | "sectionB";
  * Render a SINGLE section in isolation, wrapped in the same
  * <html><head> shell (so fonts + media queries still load).
  *
- * Used by the section-image export endpoint — Playwright opens
- * this URL and screenshots the body's natural bounding box, then
- * the operator pastes the JPG into Faire / Omnisend / wherever.
+ * Used by the client-side image export — the editor loads this URL
+ * into an offscreen iframe and rasterizes the body with html-to-image,
+ * then the operator pastes/downloads the JPG into Faire / wherever.
+ * (No server browser: the deploy has no Chromium system libs.)
  *
  * The wrapper table mirrors the structure of the full email so
  * widths + padding stay identical — a hero block rendered alone
