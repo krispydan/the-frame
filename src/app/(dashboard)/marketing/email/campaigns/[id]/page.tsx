@@ -1,13 +1,13 @@
 "use client";
 
-import { use, useEffect, useState, useCallback, useRef } from "react";
+import { use, useEffect, useState, useCallback, useRef, type ReactNode } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, Monitor, Smartphone, Save, Sparkles, Image as ImageIcon, Copy, Download, Loader2, ShieldCheck } from "lucide-react";
+import { Trash2, Monitor, Smartphone, Save, Sparkles, Image as ImageIcon, Copy, Download, Loader2, ShieldCheck, RefreshCw } from "lucide-react";
 
 type Campaign = Record<string, unknown>;
 
@@ -80,6 +80,8 @@ export default function CampaignDetailPage({
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
   const [previewKey, setPreviewKey] = useState(0);
   const [generating, setGenerating] = useState<"copy" | "image_prompts" | null>(null);
+  // Which slot a per-slot image-prompt regenerate is targeting (null = both)
+  const [regenSlot, setRegenSlot] = useState<"hero" | "secondary" | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [failedChecks, setFailedChecks] = useState<string[]>([]);
   const [lint, setLint] = useState<LintResult | null>(null);
@@ -146,13 +148,15 @@ export default function CampaignDetailPage({
     }
   }
 
-  async function handleGenerateImagePrompts() {
+  async function handleGenerateImagePrompts(slot?: "hero" | "secondary") {
     await save(); // flush any queued edits before the AI runs
     setGenerating("image_prompts");
+    setRegenSlot(slot ?? null);
     setGenerateError(null);
     try {
+      const qs = slot ? `?slot=${slot}` : "";
       const res = await fetch(
-        `/api/v1/marketing/email/campaigns/${id}/generate-image-prompts`,
+        `/api/v1/marketing/email/campaigns/${id}/generate-image-prompts${qs}`,
         { method: "POST" },
       );
       const { data, error: parseErr } = await parseAiResponse(res);
@@ -170,6 +174,7 @@ export default function CampaignDetailPage({
       setGenerateError(e instanceof Error ? e.message : String(e));
     } finally {
       setGenerating(null);
+      setRegenSlot(null);
     }
   }
 
@@ -464,7 +469,7 @@ export default function CampaignDetailPage({
           </Button>
           <Button
             variant="outline"
-            onClick={handleGenerateImagePrompts}
+            onClick={() => handleGenerateImagePrompts()}
             disabled={generating !== null}
             title="Generate Higgsfield briefs for hero + secondary images"
           >
@@ -541,8 +546,8 @@ export default function CampaignDetailPage({
             You edited the brief after generating the image prompts — the
             Higgsfield briefs below may no longer match.
           </span>
-          <Button size="sm" variant="outline" onClick={handleGenerateImagePrompts} disabled={generating !== null}>
-            {generating === "image_prompts" ? "Regenerating…" : "Regenerate image prompts"}
+          <Button size="sm" variant="outline" onClick={() => handleGenerateImagePrompts()} disabled={generating !== null}>
+            {generating === "image_prompts" && regenSlot === null ? "Regenerating…" : "Regenerate image prompts"}
           </Button>
         </div>
       )}
@@ -550,8 +555,15 @@ export default function CampaignDetailPage({
       {/* Image-prompt RESULTS — the Higgsfield briefs the AI produced.
           This is "where you see the response" after Generate image
           prompts. Persisted on the campaign + also shown to the
-          designer in the queue. */}
-      <ImagePromptResults campaign={campaign} />
+          designer in the queue. Per-slot "Regenerate" lets the
+          designer refresh just hero or just secondary without
+          discarding the one they like. */}
+      <ImagePromptResults
+        campaign={campaign}
+        busy={generating === "image_prompts"}
+        regenSlot={regenSlot}
+        onRegenerate={(slot) => handleGenerateImagePrompts(slot)}
+      />
 
       {/* Copy history — restore a prior version if a regenerate came
           back worse. Snapshots are taken automatically before each
@@ -1104,7 +1116,14 @@ function VariantPicker({
 // (hero + secondary), so the user can read/copy them right in the
 // editor. Mirrors how generate-copy fills the visible form fields.
 // ────────────────────────────────────────────────────────────
-function ImagePromptResults({ campaign }: { campaign: Campaign }) {
+function ImagePromptResults({
+  campaign, busy, regenSlot, onRegenerate,
+}: {
+  campaign: Campaign;
+  busy: boolean;
+  regenSlot: "hero" | "secondary" | null;
+  onRegenerate: (slot: "hero" | "secondary") => void;
+}) {
   const heroPrompt = (campaign.heroImagePrompt as string) || "";
   const secondaryPrompt = (campaign.secondaryImagePrompt as string) || "";
   const secondaryPrompt2 = (campaign.secondaryImagePrompt2 as string) || "";
@@ -1116,6 +1135,22 @@ function ImagePromptResults({ campaign }: { campaign: Campaign }) {
   // Nothing generated yet — render nothing (the button + status panel
   // handle the "before" state).
   if (!heroPrompt && !secondaryPrompt) return null;
+
+  // A per-slot "Regenerate" — refreshes just this slot, leaving the
+  // other one untouched (so a good hero brief survives a secondary
+  // redo, and vice versa). Disabled while any generation runs.
+  const slotButton = (slot: "hero" | "secondary") => (
+    <button
+      type="button"
+      onClick={() => onRegenerate(slot)}
+      disabled={busy}
+      className="text-xs flex items-center gap-1 text-muted-foreground hover:text-foreground disabled:opacity-50"
+      title={`Regenerate only the ${slot} brief`}
+    >
+      <RefreshCw className={`h-3 w-3 ${busy && regenSlot === slot ? "animate-spin" : ""}`} />
+      {busy && regenSlot === slot ? "Regenerating…" : "Regenerate"}
+    </button>
+  );
 
   return (
     <Card className="border-foreground/30">
@@ -1135,10 +1170,17 @@ function ImagePromptResults({ campaign }: { campaign: Campaign }) {
             prompt={heroPrompt}
             alt={heroAlt}
             extra={scrim ? `Recommended scrim: ${scrim}` : null}
+            action={slotButton("hero")}
           />
         )}
         {secondaryPrompt && (
-          <CopyablePrompt label="Secondary" prompt={secondaryPrompt} alt={secondaryAlt} extra={null} />
+          <CopyablePrompt
+            label="Secondary"
+            prompt={secondaryPrompt}
+            alt={secondaryAlt}
+            extra={null}
+            action={slotButton("secondary")}
+          />
         )}
         {secondaryPrompt2 && (
           <CopyablePrompt label="Secondary 2" prompt={secondaryPrompt2} alt={secondaryAlt2} extra={null} />
@@ -1149,12 +1191,13 @@ function ImagePromptResults({ campaign }: { campaign: Campaign }) {
 }
 
 function CopyablePrompt({
-  label, prompt, alt, extra,
+  label, prompt, alt, extra, action,
 }: {
   label: string;
   prompt: string;
   alt: string;
   extra: string | null;
+  action?: ReactNode;
 }) {
   const [copied, setCopied] = useState(false);
   async function copy() {
@@ -1168,13 +1211,16 @@ function CopyablePrompt({
     <div className="rounded border border-input p-2 space-y-1">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
-        <button
-          type="button"
-          onClick={copy}
-          className="text-xs flex items-center gap-1 text-muted-foreground hover:text-foreground"
-        >
-          <Copy className="h-3 w-3" /> {copied ? "Copied" : "Copy"}
-        </button>
+        <div className="flex items-center gap-3">
+          {action}
+          <button
+            type="button"
+            onClick={copy}
+            className="text-xs flex items-center gap-1 text-muted-foreground hover:text-foreground"
+          >
+            <Copy className="h-3 w-3" /> {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
       </div>
       <p className="text-xs font-mono whitespace-pre-wrap leading-relaxed">{prompt}</p>
       {alt && <p className="text-xs text-muted-foreground"><strong>Alt:</strong> {alt}</p>}

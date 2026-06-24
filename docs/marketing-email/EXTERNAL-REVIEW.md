@@ -42,7 +42,10 @@ Self-review 3.1 (delete) and 3.8 (duplicate) are still open across all 3 rounds.
 `/marketing/email/calendar` now has a real month grid, but nothing links to it — the dashboard "Calendar" button points to `/marketing/calendar` (the holidays/events calendar). Two different calendars, one unreachable. Needs a nav entry or a merge decision.
 
 ### 🟢 1.7 Dead React template tree still present — ✅ FIXED
-`components/email-template/*` (the orphaned React tree, self-review 3.22) is **deleted**; `CampaignData` now lives in `lib/email-template-types.ts` and the renderer + preview + export-image routes import from there. One source of truth; no more divergence trap.
+`components/email-template/*` (the orphaned React tree, self-review 3.22) is **deleted**; `CampaignData` now lives in `lib/email-template-types.ts` and the renderer + preview routes import from there. One source of truth; no more divergence trap.
+
+### 🟢 1.8 Dead server-side Playwright export route — ✅ FIXED
+`export-image/route.ts` + `lib/render-screenshot.ts` (server-side Playwright/Chromium screenshotting) were the source of the `libglib-2.0.so.0` 500 Daniel hit — the Railway image has no Chromium system libs. Client-side `html-to-image` export fully replaced it, and nothing in the UI called the route anymore. Both files are **deleted** so a direct hit (or a future call) can't resurface that error. Recoverable from git history if a server-render path is ever wanted.
 
 ---
 
@@ -89,7 +92,7 @@ So: strong on production, behind on operations. The agency-replacement bar, give
 ### Sprint B — AI loop tightening (in progress)
 1. Brief-change → "regenerate image prompts" stale banner (3.3). *(done)*
 2. Designer queue shows campaign name + one-line brief (3.10). *(done)*
-3. Per-slot image regeneration `?slot=hero|secondary` (3.18). *(next)*
+3. Per-slot image regeneration `?slot=hero|secondary` (3.18). *(done — `generate-image-prompts?slot=hero|secondary` persists only the requested slot and splices it into the stored raw JSON so the other slot's brief survives; the editor's image-prompt panel grew a per-slot "Regenerate" button so the designer can refresh just hero or just secondary without discarding the one they like)*
 4. Subject A/B: `subject_alt`/`preheader_alt` columns + a toggle (3.5) — Daniel asked for angle testing; this is the in-scope slice of it. *(done — AI now proposes a different-angle alt subject/preheader; editor shows both with a "Make primary" swap)*
 5. AI copy version history (3.2) — lightweight `copy_versions` table + restore. *(done — snapshot before each regenerate; "Copy history" panel in the editor restores any prior version; restore is itself undoable)*
 
