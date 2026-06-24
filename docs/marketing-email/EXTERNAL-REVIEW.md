@@ -94,9 +94,9 @@ So: strong on production, behind on operations. The agency-replacement bar, give
 5. AI copy version history (3.2) — lightweight `copy_versions` table + restore. *(next)*
 
 ### Sprint C — Make the image channel excellent (Daniel's chosen channel)
-1. Batch "Generate copy + image prompts for all planned drafts" from the planner (self-review §9.6 — the highest-leverage planner upgrade).
-2. Image-export polish: per-section + whole-email already client-side; add width presets (600/1200) + a "copied to clipboard" affordance for paste-into-Faire.
-3. Designer queue: show brief/name + subject preview (3.10).
+1. Batch "Generate copy + image prompts for all planned drafts" from the planner (self-review §9.6 — the highest-leverage planner upgrade). *(done — "Draft all N with AI" on the planner's post-create card; serial, copy default-on, image-prompts optional)*
+2. Image-export polish: per-section + whole-email already client-side; add width presets (600/1200) + a "copied to clipboard" affordance for paste-into-Faire. *(next)*
+3. Designer queue: show brief/name + subject preview (3.10). *(done in Sprint B)*
 
 ### Explicitly NOT now (Daniel-deferred)
 Learning-loop analytics, Omnisend/Faire HTML export, automated tests, Outlook hardening, multi-brand, image library. Revisit when Daniel asks.

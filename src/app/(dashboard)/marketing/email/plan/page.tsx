@@ -22,7 +22,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles, ArrowRight, RefreshCw } from "lucide-react";
+import { Sparkles, ArrowRight, RefreshCw, Loader2, CheckCircle2, AlertTriangle, Wand2 } from "lucide-react";
 
 interface ProposalBrief {
   name: string;
@@ -217,25 +217,28 @@ export default function PlanMonthPage() {
 
       {created && (
         <Card>
-          <CardContent className="p-4">
-            <div className="text-sm flex items-center gap-2 mb-2">
-              <strong>Created {created.length} campaign{created.length === 1 ? "" : "s"}.</strong>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Link href="/marketing/email">
-                <Button size="sm">Open dashboard</Button>
-              </Link>
-              {created.slice(0, 4).map(id => (
-                <Link key={id} href={`/marketing/email/campaigns/${id}`}>
-                  <Button size="sm" variant="outline">Open campaign <ArrowRight className="h-3 w-3 ml-1" /></Button>
+          <CardContent className="p-4 space-y-4">
+            <div>
+              <div className="text-sm flex items-center gap-2 mb-2">
+                <strong>Created {created.length} campaign{created.length === 1 ? "" : "s"}.</strong>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Link href="/marketing/email">
+                  <Button size="sm" variant="outline">Open dashboard</Button>
                 </Link>
-              ))}
-              {created.length > 4 && (
-                <span className="text-xs text-muted-foreground self-center">
-                  + {created.length - 4} more — open from the dashboard
-                </span>
-              )}
+                {created.slice(0, 4).map(id => (
+                  <Link key={id} href={`/marketing/email/campaigns/${id}`}>
+                    <Button size="sm" variant="outline">Open campaign <ArrowRight className="h-3 w-3 ml-1" /></Button>
+                  </Link>
+                ))}
+                {created.length > 4 && (
+                  <span className="text-xs text-muted-foreground self-center">
+                    + {created.length - 4} more — open from the dashboard
+                  </span>
+                )}
+              </div>
             </div>
+            <BatchGenerate campaignIds={created} />
           </CardContent>
         </Card>
       )}
@@ -335,6 +338,127 @@ export default function PlanMonthPage() {
             AI returned 0 briefs. Try a smaller window or check the strategy engine.
           </CardContent>
         </Card>
+      )}
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Batch generate — turns the planner's N freshly-created drafts into
+// drafted emails in one action instead of opening each campaign and
+// clicking Generate individually. Client-driven serial loop (each
+// per-campaign call is a normal request within maxDuration; serial =
+// naturally rate-limited; a failure on one doesn't block the rest).
+// ────────────────────────────────────────────────────────────
+
+type BatchItem = {
+  id: string;
+  label: string;
+  state: "pending" | "running" | "done" | "error";
+  detail?: string;
+};
+
+function BatchGenerate({ campaignIds }: { campaignIds: string[] }) {
+  const [doCopy, setDoCopy] = useState(true);
+  const [doImages, setDoImages] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [finished, setFinished] = useState(false);
+  const [items, setItems] = useState<BatchItem[]>(
+    campaignIds.map((id, i) => ({ id, label: `Campaign ${i + 1}`, state: "pending" })),
+  );
+
+  function patch(id: string, p: Partial<BatchItem>) {
+    setItems(its => its.map(it => (it.id === id ? { ...it, ...p } : it)));
+  }
+
+  async function run() {
+    if (!doCopy && !doImages) return;
+    setRunning(true);
+    setFinished(false);
+    for (const id of campaignIds) {
+      patch(id, { state: "running", detail: doCopy ? "writing copy…" : "briefing images…" });
+      try {
+        if (doCopy) {
+          const res = await fetch(`/api/v1/marketing/email/campaigns/${id}/generate-copy`, {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+          });
+          const data = await res.json().catch(() => ({}));
+          if (data?.error) throw new Error(String(data.error));
+          if (data?.campaign?.name) patch(id, { label: data.campaign.name });
+        }
+        if (doImages) {
+          patch(id, { detail: "briefing images…" });
+          const res2 = await fetch(`/api/v1/marketing/email/campaigns/${id}/generate-image-prompts`, { method: "POST" });
+          const data2 = await res2.json().catch(() => ({}));
+          if (data2?.error) throw new Error(String(data2.error));
+        }
+        patch(id, { state: "done", detail: undefined });
+      } catch (e) {
+        patch(id, { state: "error", detail: e instanceof Error ? e.message : String(e) });
+      }
+      // Gentle spacing between campaigns.
+      await new Promise(r => setTimeout(r, 400));
+    }
+    setRunning(false);
+    setFinished(true);
+  }
+
+  const doneCount = items.filter(i => i.state === "done").length;
+  const errCount = items.filter(i => i.state === "error").length;
+
+  return (
+    <div className="rounded-lg border border-foreground/20 p-3 space-y-3">
+      <div className="flex items-center gap-2">
+        <Wand2 className="h-4 w-4" />
+        <span className="text-sm font-medium">Draft all {campaignIds.length} with AI</span>
+        <span className="text-xs text-muted-foreground">— skip opening each one by hand</span>
+      </div>
+
+      {!running && !finished && (
+        <div className="flex flex-wrap items-center gap-4">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={doCopy} onChange={e => setDoCopy(e.target.checked)} />
+            Generate copy
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={doImages} onChange={e => setDoImages(e.target.checked)} />
+            Generate image prompts
+          </label>
+          <Button size="sm" onClick={run} disabled={!doCopy && !doImages}>
+            Run on {campaignIds.length}
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Serial — keep this tab open. ~30–60s per email.
+          </span>
+        </div>
+      )}
+
+      {(running || finished) && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-sm">
+            {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4 text-green-600" />}
+            <span>{doneCount}/{items.length} done{errCount > 0 ? ` · ${errCount} failed` : ""}</span>
+          </div>
+          <div className="space-y-1 max-h-56 overflow-auto">
+            {items.map(it => (
+              <div key={it.id} className="flex items-center gap-2 text-xs">
+                {it.state === "running" && <Loader2 className="h-3 w-3 animate-spin shrink-0" />}
+                {it.state === "done" && <CheckCircle2 className="h-3 w-3 text-green-600 shrink-0" />}
+                {it.state === "error" && <AlertTriangle className="h-3 w-3 text-destructive shrink-0" />}
+                {it.state === "pending" && <span className="h-3 w-3 inline-block rounded-full border border-muted-foreground/40 shrink-0" />}
+                <Link href={`/marketing/email/campaigns/${it.id}`} className="truncate hover:underline">
+                  {it.label}
+                </Link>
+                {it.detail && <span className="text-muted-foreground truncate">— {it.detail}</span>}
+              </div>
+            ))}
+          </div>
+          {finished && (
+            <p className="text-xs text-muted-foreground">
+              Done. Review each in the editor{doImages ? "" : ", then generate image prompts when the copy looks right"}.
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
