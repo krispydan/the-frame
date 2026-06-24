@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, Monitor, Smartphone, Save, Sparkles, Image as ImageIcon, Copy, Download, Loader2 } from "lucide-react";
+import { Trash2, Monitor, Smartphone, Save, Sparkles, Image as ImageIcon, Copy, Download, Loader2, ShieldCheck } from "lucide-react";
 
 type Campaign = Record<string, unknown>;
 
@@ -93,6 +93,8 @@ export default function CampaignDetailPage({
   const [imagePreview, setImagePreview] = useState<{ url: string; name: string } | null>(null);
   const [exportScale, setExportScale] = useState<1 | 2 | 3>(2);
   const [copiedKind, setCopiedKind] = useState<string | null>(null);
+  const [validating, setValidating] = useState(false);
+  const [validateMsg, setValidateMsg] = useState<string | null>(null);
 
   // ── AI generate handlers ────────────────────────────────────
   async function handleGenerateCopy() {
@@ -250,6 +252,30 @@ export default function CampaignDetailPage({
     } finally {
       if (iframe) iframe.remove();
       setExportingKind(null);
+    }
+  }
+
+  // On-demand QA — re-runs the linter + readiness on the current row
+  // (including any hand edits), via the same gate AI output passes.
+  async function runValidate() {
+    setValidating(true);
+    setValidateMsg(null);
+    try {
+      await save(); // flush edits so we validate what's actually saved
+      const res = await fetch(`/api/v1/marketing/email/campaigns/${id}/validate`);
+      const data = await res.json();
+      setLint((data.lint as LintResult) ?? null);
+      if (data.readiness && !data.readiness.ready) {
+        setValidateMsg(`Not ready to export — missing: ${data.readiness.missing.join(", ")}.`);
+      } else if (data.lint && data.lint.errors?.length === 0 && data.lint.warnings?.length === 0) {
+        setValidateMsg("Looks good — copy QA passed and all fields present.");
+      } else {
+        setValidateMsg(null);
+      }
+    } catch (e) {
+      setValidateMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setValidating(false);
     }
   }
 
@@ -445,6 +471,15 @@ export default function CampaignDetailPage({
             <ImageIcon className="h-4 w-4 mr-2" />
             {generating === "image_prompts" ? "Briefing…" : "Generate image prompts"}
           </Button>
+          <Button
+            variant="outline"
+            onClick={runValidate}
+            disabled={validating}
+            title="Run copy QA + export-readiness on the current copy (incl. hand edits)"
+          >
+            <ShieldCheck className="h-4 w-4 mr-2" />
+            {validating ? "Checking…" : "Validate"}
+          </Button>
           <Button onClick={save} disabled={saving}>
             <Save className="h-4 w-4 mr-2" />
             {saving ? "Saving…" : "Save"}
@@ -491,6 +526,11 @@ export default function CampaignDetailPage({
           <ul className="list-disc ml-5 space-y-0.5">
             {lint.warnings.map((f, i) => <li key={i}>{f.message}</li>)}
           </ul>
+        </div>
+      )}
+      {validateMsg && (
+        <div className={`rounded border px-3 py-2 text-sm ${validateMsg.startsWith("Looks good") ? "border-green-300 bg-green-50 dark:bg-green-950/20" : "border-amber-300 bg-amber-50 dark:bg-amber-950/20"}`}>
+          {validateMsg}
         </div>
       )}
 
