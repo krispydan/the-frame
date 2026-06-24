@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, Monitor, Smartphone, Save, Sparkles, Image as ImageIcon, Copy, Download, Loader2, ShieldCheck, RefreshCw, Check, Plus, X, Search, Package } from "lucide-react";
+import { Trash2, Monitor, Smartphone, Save, Sparkles, Image as ImageIcon, Copy, Download, Loader2, ShieldCheck, RefreshCw, Check, Plus, X, Search, Package, MessageSquare, Send } from "lucide-react";
 import { parseFeaturedIds } from "@/modules/marketing/lib/featured-products";
 import type { ProductSummary } from "@/modules/marketing/lib/product-selector";
 
@@ -145,6 +145,37 @@ export default function CampaignDetailPage({
       }
     } catch (e) {
       setGenerateError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setGenerating(null);
+    }
+  }
+
+  // Natural-language "chat to improve the whole email" — sends feedback
+  // to revise-copy, which rewrites every field and persists it
+  // (snapshotting first, so it's undoable from Copy history).
+  async function handleReviseCopy(feedbackText: string): Promise<boolean> {
+    await save(); // flush pending edits so we revise the latest copy
+    setGenerating("copy");
+    setGenerateError(null);
+    setFailedChecks([]);
+    try {
+      const res = await fetch(
+        `/api/v1/marketing/email/campaigns/${id}/revise-copy`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ feedback: feedbackText }) },
+      );
+      const { data, error: parseErr } = await parseAiResponse(res);
+      if (parseErr || !data) { setGenerateError(parseErr ?? "Empty response"); return false; }
+      if (data.error) { setGenerateError(String(data.error)); return false; }
+      setCampaign(data.campaign as Campaign);
+      setFailedChecks((data.failedChecks as string[]) ?? []);
+      setLint((data.lint as LintResult) ?? null);
+      setPreviewKey(k => k + 1);
+      setSavedAt(Date.now());
+      setHistorySignal(s => s + 1);
+      return true;
+    } catch (e) {
+      setGenerateError(e instanceof Error ? e.message : String(e));
+      return false;
     } finally {
       setGenerating(null);
     }
@@ -578,6 +609,9 @@ export default function CampaignDetailPage({
         reloadSignal={historySignal}
         onRestored={(c) => { setCampaign(c); setPreviewKey(k => k + 1); setSavedAt(Date.now()); }}
       />
+
+      {/* Chat to improve the whole email in natural language */}
+      <ImproveCopyChat busy={generating !== null} onSend={handleReviseCopy} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Left pane — editor */}
@@ -1304,6 +1338,78 @@ function FeaturedProductsCard({
             )}
           </div>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Improve-this-email chat — natural-language feedback that rewrites the
+// WHOLE email. Each message revises from the current copy, so the
+// operator can iterate conversationally. Every revision snapshots the
+// prior copy (undo from Copy history).
+// ────────────────────────────────────────────────────────────
+function ImproveCopyChat({ busy, onSend }: { busy: boolean; onSend: (text: string) => Promise<boolean> }) {
+  const [input, setInput] = useState("");
+  const [thread, setThread] = useState<Array<{ role: "you" | "ai"; text: string }>>([]);
+  const [sending, setSending] = useState(false);
+
+  async function send() {
+    const text = input.trim();
+    if (!text || busy || sending) return;
+    setThread((t) => [...t, { role: "you", text }]);
+    setInput("");
+    setSending(true);
+    try {
+      const ok = await onSend(text);
+      setThread((t) => [
+        ...t,
+        { role: "ai", text: ok ? "✓ Rewrote the email — check the preview." : "⚠ Couldn't apply that (see the error above)." },
+      ]);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <MessageSquare className="h-4 w-4" />
+          Improve this email
+          <span className="text-xs font-normal text-muted-foreground">
+            tell the AI what to change in plain language — it rewrites the whole email
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {thread.length > 0 && (
+          <div className="max-h-48 overflow-auto space-y-1.5 rounded border border-input p-2">
+            {thread.map((m, i) => (
+              <div key={i} className={`text-xs ${m.role === "you" ? "text-foreground" : "text-muted-foreground"}`}>
+                <span className="font-medium">{m.role === "you" ? "You: " : "AI: "}</span>
+                {m.text}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2 items-end">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") send(); }}
+            placeholder="e.g. Punchier hero, tie the CTA to the fit quiz, and cut the second paragraph in section B."
+            rows={2}
+            disabled={busy || sending}
+            className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+          />
+          <Button size="sm" onClick={send} disabled={busy || sending || !input.trim()} title="Send (⌘/Ctrl+Enter)">
+            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </Button>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          Each message rewrites the full email from the current copy — iterate as much as you like. Undo any change from Copy history.
+        </p>
       </CardContent>
     </Card>
   );

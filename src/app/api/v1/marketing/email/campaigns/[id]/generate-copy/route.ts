@@ -7,8 +7,7 @@ import { emailCampaigns, emailThemes } from "@/modules/marketing/schema";
 import { eq, and, ne, desc } from "drizzle-orm";
 import { generateCopy } from "@/modules/marketing/lib/email-ai";
 import { getCalendarContextForCampaign } from "@/modules/marketing/lib/calendar-context";
-import { lintGeneratedCopy } from "@/modules/marketing/lib/copy-quality";
-import { snapshotCopy } from "@/modules/marketing/lib/copy-versions";
+import { persistGeneratedCopy } from "@/modules/marketing/lib/copy-persist";
 import { resolveProducts, formatProductsForPrompt } from "@/modules/marketing/lib/product-selector";
 import { parseFeaturedIds } from "@/modules/marketing/lib/featured-products";
 
@@ -153,77 +152,20 @@ async function handle(req: NextRequest, params: { id: string }) {
     return NextResponse.json({ error: result.error }, { status: 502 });
   }
 
-  const out = result.output as Record<string, string | Record<string, boolean>>;
-
-  // Snapshot the existing copy BEFORE we overwrite it, so a worse
-  // regenerate is non-destructive (the operator can restore the prior
-  // version). No-op when the campaign had no copy yet.
-  try {
-    snapshotCopy(campaign as unknown as Record<string, unknown>, "pre_generate");
-  } catch (e) {
-    console.warn("[generate-copy] snapshot failed (non-fatal):", e);
-  }
-
-  // Persist to the campaign row + record the raw JSON for replay.
-  // `name` uses COALESCE-on-empty so a user-provided name isn't
-  // overwritten; only fills in when name was blank pre-generation.
-  sqlite.prepare(
-    `UPDATE marketing_email_campaigns SET
-       name = CASE WHEN COALESCE(NULLIF(name, ''), NULL) IS NULL THEN ? ELSE name END,
-       brief_title = CASE WHEN COALESCE(NULLIF(brief_title, ''), NULL) IS NULL THEN ? ELSE brief_title END,
-       subject = ?, preheader = ?,
-       subject_alt = ?, preheader_alt = ?,
-       hero_headline = ?, hero_subtitle = ?,
-       hero_cta_label = ?, hero_cta_url = COALESCE(NULLIF(hero_cta_url, ''), ?),
-       section_a_heading = ?, section_a_body = ?,
-       section_b_heading = ?, section_b_body = ?,
-       section_b_cta_label = ?, section_b_cta_url = COALESCE(NULLIF(section_b_cta_url, ''), ?),
-       ai_copy_prompt_version = 'v5',
-       ai_copy_raw_json = ?,
-       status = CASE WHEN status IN ('draft','copywriting') THEN 'copywriting' ELSE status END,
-       updated_at = datetime('now')
-     WHERE id = ?`,
-  ).run(
-    out.proposedName as string,
-    out.proposedName as string,
-    out.subject as string,
-    out.preheader as string,
-    (out.subjectAlt as string) ?? null,
-    (out.preheaderAlt as string) ?? null,
-    out.heroHeadline as string,
-    out.heroSubtitle as string,
-    out.heroCtaLabel as string,
-    out.heroCtaUrlSuggestion as string,
-    out.sectionAHeading as string,
-    out.sectionABody as string,
-    out.sectionBHeading as string,
-    out.sectionBBody as string,
-    out.sectionBCtaLabel as string,
-    out.sectionBCtaUrlSuggestion as string,
-    JSON.stringify(out),
-    id,
-  );
+  const out = result.output as Record<string, unknown>;
 
   // nameWasEmpty signals to the client that the name was AI-proposed
   // (UI can show a subtle "AI named this" hint or auto-focus the field).
   void nameWasEmpty;
 
-  const selfChecks = (out.selfCheckPassed ?? {}) as Record<string, boolean>;
-  const failedChecks = Object.entries(selfChecks)
-    .filter(([, v]) => v === false)
-    .map(([k]) => k);
-
-  // Deterministic, server-side QA — the source of truth (the model's
-  // selfCheck above is advisory). Char/word limits, banned brand
-  // phrases, emoji, exclamation count, preheader≠subject, pronoun
-  // ratio, wholesale-number, CTA case/URL. Surfaced in the editor.
-  const lint = lintGeneratedCopy(out as Record<string, unknown>, campaign.audience as "retail" | "wholesale");
-
-  const [updated] = await db
-    .select()
-    .from(emailCampaigns)
-    .where(eq(emailCampaigns.id, id))
-    .limit(1);
+  // Snapshot-before-overwrite + write + deterministic QA (shared with
+  // the revise-copy route so both persist identically).
+  const { updated, failedChecks, lint } = await persistGeneratedCopy(
+    id,
+    campaign as unknown as Record<string, unknown>,
+    out,
+    "pre_generate",
+  );
 
   return NextResponse.json({
     ok: true,

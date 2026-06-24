@@ -300,6 +300,69 @@ export async function generateThemes(opts: {
   });
 }
 
+// Shared forced-tool schema for full-email copy — used by BOTH initial
+// generation (generateCopy) and natural-language revision (reviseCopy)
+// so their outputs are identical and the route persistence is shared.
+const EMAIL_COPY_TOOL = {
+  name: "submit_email_copy",
+  description: "Submit the full email copy for the campaign",
+  input_schema: {
+    type: "object",
+    required: [
+      "proposedName",
+      "subject", "preheader", "subjectAlt", "preheaderAlt",
+      "heroHeadline", "heroSubtitle",
+      "heroCtaLabel", "heroCtaUrlSuggestion",
+      "sectionAHeading", "sectionABody",
+      "sectionBHeading", "sectionBBody",
+      "sectionBCtaLabel", "sectionBCtaUrlSuggestion",
+      "selfCheckPassed",
+    ],
+    properties: {
+      proposedName: {
+        type: "string",
+        description: "A short (3-8 word) human-readable name for the campaign — used as the operator's internal label AND the brief title. Examples: 'Sunday Drive in Honey lands', 'Memorial Day readers 30% off', 'Tortoise classics back in stock'. If the user already provided a name in {{theme.title}}, mirror it back exactly. Sentence case, no quotes.",
+        maxLength: 80,
+      },
+      subject: { type: "string", maxLength: 60 },
+      preheader: { type: "string", maxLength: 110 },
+      subjectAlt: {
+        type: "string",
+        maxLength: 60,
+        description: "A SECOND subject line testing a DIFFERENT angle from `subject` (for A/B). If `subject` leads with the product, make this lead with a feeling/curiosity/benefit — or vice versa. Same voice + length rules. Must be meaningfully different, not a reword.",
+      },
+      preheaderAlt: {
+        type: "string",
+        maxLength: 110,
+        description: "Preheader that complements `subjectAlt` (not `subject`). Must not duplicate `subjectAlt`.",
+      },
+      heroHeadline: { type: "string" },
+      heroSubtitle: { type: "string" },
+      heroCtaLabel: { type: "string" },
+      heroCtaUrlSuggestion: { type: "string" },
+      sectionAHeading: { type: "string" },
+      sectionABody: { type: "string" },
+      sectionBHeading: { type: "string" },
+      sectionBBody: { type: "string" },
+      sectionBCtaLabel: { type: "string" },
+      sectionBCtaUrlSuggestion: { type: "string" },
+      selfCheckPassed: {
+        type: "object",
+        properties: {
+          subjectPreheaderComplement: { type: "boolean" },
+          headlineScreenshotWorthy: { type: "boolean" },
+          sectionAReaderIsHero: { type: "boolean" },
+          sectionBHasSpecificMoment: { type: "boolean" },
+          noBannedWords: { type: "boolean" },
+          pronounRatioPasses: { type: "boolean" },
+          wholesaleHasNumber: { type: "boolean" },
+          wholesaleHasChristina: { type: "boolean" },
+        },
+      },
+    },
+  },
+};
+
 /**
  * Copy generation — fills every text field of the email template
  * for one campaign. Uses the v5 copy-generation-prompt.md.
@@ -364,65 +427,72 @@ export async function generateCopy(opts: {
     systemPrompt,
     userPrompt: taskPrompt,
     images: featuredProducts ? opts.productImages : undefined,
-    tool: {
-      name: "submit_email_copy",
-      description: "Submit the full email copy for the campaign",
-      input_schema: {
-        type: "object",
-        required: [
-          "proposedName",
-          "subject", "preheader", "subjectAlt", "preheaderAlt",
-          "heroHeadline", "heroSubtitle",
-          "heroCtaLabel", "heroCtaUrlSuggestion",
-          "sectionAHeading", "sectionABody",
-          "sectionBHeading", "sectionBBody",
-          "sectionBCtaLabel", "sectionBCtaUrlSuggestion",
-          "selfCheckPassed",
-        ],
-        properties: {
-          proposedName: {
-            type: "string",
-            description: "A short (3-8 word) human-readable name for the campaign — used as the operator's internal label AND the brief title. Examples: 'Sunday Drive in Honey lands', 'Memorial Day readers 30% off', 'Tortoise classics back in stock'. If the user already provided a name in {{theme.title}}, mirror it back exactly. Sentence case, no quotes.",
-            maxLength: 80,
-          },
-          subject: { type: "string", maxLength: 60 },
-          preheader: { type: "string", maxLength: 110 },
-          subjectAlt: {
-            type: "string",
-            maxLength: 60,
-            description: "A SECOND subject line testing a DIFFERENT angle from `subject` (for A/B). If `subject` leads with the product, make this lead with a feeling/curiosity/benefit — or vice versa. Same voice + length rules. Must be meaningfully different, not a reword.",
-          },
-          preheaderAlt: {
-            type: "string",
-            maxLength: 110,
-            description: "Preheader that complements `subjectAlt` (not `subject`). Must not duplicate `subjectAlt`.",
-          },
-          heroHeadline: { type: "string" },
-          heroSubtitle: { type: "string" },
-          heroCtaLabel: { type: "string" },
-          heroCtaUrlSuggestion: { type: "string" },
-          sectionAHeading: { type: "string" },
-          sectionABody: { type: "string" },
-          sectionBHeading: { type: "string" },
-          sectionBBody: { type: "string" },
-          sectionBCtaLabel: { type: "string" },
-          sectionBCtaUrlSuggestion: { type: "string" },
-          selfCheckPassed: {
-            type: "object",
-            properties: {
-              subjectPreheaderComplement: { type: "boolean" },
-              headlineScreenshotWorthy: { type: "boolean" },
-              sectionAReaderIsHero: { type: "boolean" },
-              sectionBHasSpecificMoment: { type: "boolean" },
-              noBannedWords: { type: "boolean" },
-              pronounRatioPasses: { type: "boolean" },
-              wholesaleHasNumber: { type: "boolean" },
-              wholesaleHasChristina: { type: "boolean" },
-            },
-          },
-        },
-      },
-    },
+    tool: EMAIL_COPY_TOOL,
+  });
+}
+
+/**
+ * Revise the FULL email copy from natural-language operator feedback.
+ * Powers the editor's "chat to improve the email": the operator says
+ * "punchier hero, tie the CTA to the quiz, lose the second paragraph"
+ * and the AI returns the WHOLE revised copy — same shape as
+ * generateCopy, so the route persists it identically.
+ */
+export async function reviseCopy(opts: {
+  audience: "retail" | "wholesale";
+  scheduledDate: string;
+  brief: { title?: string | null; angle?: string | null };
+  /** The campaign's current copy fields (snake/camel agnostic — pass the row). */
+  current: Record<string, unknown>;
+  feedback: string;
+  calendarEvents?: string | null;
+  featuredProductsText?: string;
+  productImages?: Array<{ url: string }>;
+}) {
+  const systemPrompt = buildSystemPrompt(opts.audience);
+  const featuredProducts = (opts.featuredProductsText ?? "").trim();
+  const c = opts.current;
+  const cur = (k: string) => {
+    const v = c[k];
+    return v == null || v === "" ? "(empty)" : String(v);
+  };
+
+  const taskPrompt = `You are REVISING an existing marketing email for the ${opts.audience} audience (send date ${opts.scheduledDate}).
+
+BRIEF
+  Title: ${opts.brief.title || "(none)"}
+  Angle: ${opts.brief.angle || "(none)"}
+
+CURRENT COPY
+  Subject: ${cur("subject")}
+  Preheader: ${cur("preheader")}
+  Alt subject: ${cur("subjectAlt")}
+  Alt preheader: ${cur("preheaderAlt")}
+  Hero headline: ${cur("heroHeadline")}
+  Hero subtitle: ${cur("heroSubtitle")}
+  Hero CTA: ${cur("heroCtaLabel")} → ${cur("heroCtaUrl")}
+  Section A heading: ${cur("sectionAHeading")}
+  Section A body: ${cur("sectionABody")}
+  Section B heading: ${cur("sectionBHeading")}
+  Section B body: ${cur("sectionBBody")}
+  Section B CTA: ${cur("sectionBCtaLabel")} → ${cur("sectionBCtaUrl")}
+
+${featuredProducts ? `FEATURED PRODUCTS (keep featuring these; reference photos attached)\n${featuredProducts}\n\n` : ""}MARKETING CALENDAR (±14 days of this send)
+${opts.calendarEvents ?? "(none)"}
+
+THE OPERATOR'S FEEDBACK — apply this to the WHOLE email:
+"""
+${opts.feedback.trim()}
+"""
+
+Return the COMPLETE revised email copy via the tool — EVERY field, not only the ones you changed. Apply the feedback, keep everything that already works, stay in Jaxy voice and within all length rules. For proposedName, mirror the existing brief title unless the feedback asks to rename. Only suggest CTA URLs if they're currently empty.`;
+
+  return callClaude({
+    systemPrompt,
+    userPrompt: taskPrompt,
+    maxTokens: 4096,
+    images: featuredProducts ? opts.productImages : undefined,
+    tool: EMAIL_COPY_TOOL,
   });
 }
 

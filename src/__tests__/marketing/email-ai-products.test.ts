@@ -8,7 +8,7 @@
  * judging the model's output (which needs a live key).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { generateCopy, generateImagePrompts, reviseBrief } from "@/modules/marketing/lib/email-ai";
+import { generateCopy, generateImagePrompts, reviseBrief, reviseCopy } from "@/modules/marketing/lib/email-ai";
 import { updateDoc, resetDoc } from "@/modules/marketing/lib/prompt-store";
 
 const PRODUCT_BLOCK =
@@ -162,6 +162,28 @@ describe("living prompts — in-app edits reach the model", () => {
     } finally {
       resetDoc("copy-generation-prompt"); // restore for other tests
     }
+  });
+});
+
+describe("reviseCopy — chat to improve the whole email", () => {
+  it("sends the current copy + feedback and forces the shared copy tool", async () => {
+    const fetchMock = stubAnthropic("submit_email_copy", {
+      proposedName: "Honey returns", subject: "Punchier subject", heroHeadline: "Punchier hero",
+    });
+    const res = await reviseCopy({
+      audience: "retail",
+      scheduledDate: "2026-06-25",
+      brief: { title: "Honey returns", angle: "warm fall colorway" },
+      current: { subject: "old subject", heroHeadline: "old hero line", sectionABody: "old section A body" },
+      feedback: "make the hero punchier and shorten section A",
+    });
+    expect(res.ok).toBe(true);
+
+    const body = bodyOfCall(fetchMock, 0);
+    const content = body.messages[0].content as string;
+    expect(content).toContain("old hero line");                     // current copy is included
+    expect(content).toContain("make the hero punchier");            // the feedback
+    expect(body.tool_choice).toEqual({ type: "tool", name: "submit_email_copy" }); // shared tool
   });
 });
 
