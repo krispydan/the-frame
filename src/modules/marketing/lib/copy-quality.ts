@@ -35,6 +35,8 @@ export interface LintResult {
 export interface LintableCopy {
   subject?: string | null;
   preheader?: string | null;
+  subjectAlt?: string | null;
+  preheaderAlt?: string | null;
   heroHeadline?: string | null;
   heroSubtitle?: string | null;
   heroCtaLabel?: string | null;
@@ -47,32 +49,57 @@ export interface LintableCopy {
   sectionBCtaUrl?: string | null;
 }
 
-// ── Brand banned phrases (hard) ─────────────────────────────────
-// Mirrors the banned-word list in system-prompt-base.md. Matched
-// case-insensitively as substrings/word-boundaries.
-const BANNED_PHRASES = [
+// ── Brand banned phrases ────────────────────────────────────────
+// Mirrors the banned-word list in system-prompt-base.md. HARD = always
+// wrong (error). SOFT = marketing-speak the brand avoids but that has
+// rare legitimate uses (warn, so it nudges without false-blocking).
+const BANNED_HARD = [
   "curated",
   "premium",
   "luxury",
   "investment piece",
+  "affordable luxury",
   "elevate",
+  "elevated",
   "effortless",
   "game-changer",
   "game changer",
   "must-have",
   "must have",
+  "staple",
+  "wardrobe essential",
   "introducing",
   "we're so excited",
   "we are so excited",
   "we're thrilled",
   "we are thrilled",
+  "great news",
+  "treat yourself",
+  "leverage",
+  "synergy",
+  "ecosystem",
   "made in la",
   "made in l.a.",
   "made in california",
+  "crafted in la",
+  "jaxy eyewear",
   "lose them",
   "throw them around",
+  "crush them",
   "unlock",
   "level up",
+];
+
+// Context-dependent — the prompt allows these only with something
+// "specific and TRUE to say." Warn rather than block.
+const BANNED_SOFT = [
+  "journey",
+  "experience",
+  "sustainable",
+  "conscious",
+  "mindful",
+  "gender-neutral",
+  "unisex",
 ];
 
 // Subject-line openers that scream "marketing email."
@@ -105,6 +132,8 @@ function allText(c: LintableCopy): string {
   return [
     c.subject,
     c.preheader,
+    c.subjectAlt,
+    c.preheaderAlt,
     c.heroHeadline,
     c.heroSubtitle,
     c.heroCtaLabel,
@@ -118,16 +147,27 @@ function allText(c: LintableCopy): string {
     .join(" ");
 }
 
-function isHttpUrl(s: string): boolean {
-  return /^https?:\/\/[^\s]+\.[^\s]+/.test(s.trim());
+/** Valid CTA destination: http(s), mailto:, tel:, or the "#" placeholder.
+ *  Wholesale CTAs are frequently mailto (Christina) — the prompt's own
+ *  worked example uses mailto:christina@…, so it must pass. */
+function isValidCtaUrl(s: string): boolean {
+  const u = s.trim();
+  return (
+    u === "#" ||
+    /^https?:\/\/[^\s]+\.[^\s]+/.test(u) ||
+    /^mailto:[^\s@]+@[^\s]+/.test(u) ||
+    /^tel:[+\d][\d\s().-]*$/.test(u)
+  );
 }
 
-/** Title Case (every significant word capitalized) — brand forbids it. */
+/** True Title Case = EVERY word (len≥2) is capitalized, i.e. no
+ *  lowercase function word. "Find Your Pair" → flagged. A product-named
+ *  CTA like "Shop the Main Character" keeps "the" lowercase → not
+ *  flagged (proper-noun product names are endorsed by the prompt). */
 function looksTitleCase(s: string): boolean {
-  const w = words(s).filter((x) => x.length > 3);
-  if (w.length < 2) return false;
-  const capped = w.filter((x) => /^[A-Z]/.test(x)).length;
-  return capped >= w.length; // all long words capitalized
+  const w = words(s).filter((x) => x.length >= 2);
+  if (w.length < 3) return false;
+  return w.every((x) => /^[A-Z]/.test(x));
 }
 
 function isAllCaps(s: string): boolean {
@@ -184,11 +224,27 @@ export function lintCopy(c: LintableCopy, audience: Audience): LintResult {
   if (bangs > 1)
     err("too_many_exclamations", "body", `${bangs} exclamation marks — max 1 per email.`);
 
-  // ── Banned phrases ──
-  for (const phrase of BANNED_PHRASES) {
+  // ── Banned phrases (hard = error, soft = warn) ──
+  for (const phrase of BANNED_HARD) {
     if (textLc.includes(phrase))
       err("banned_phrase", "body", `Banned phrase: "${phrase}".`);
   }
+  for (const phrase of BANNED_SOFT) {
+    if (new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(textLc))
+      warn("soft_banned_phrase", "body", `Marketing-speak "${phrase}" — only keep if it says something specific + true.`);
+  }
+
+  // ── A/B alternate subject/preheader ──
+  const subjectAlt = (c.subjectAlt ?? "").trim();
+  if (subjectAlt) {
+    if (subjectAlt.length > 45)
+      warn("subject_alt_long", "subjectAlt", `Alt subject is ${subjectAlt.length} chars (max 45 — it can become primary).`);
+    if (subject && subjectAlt.toLowerCase() === subject.toLowerCase())
+      warn("subject_alt_same", "subjectAlt", "Alt subject is identical to the primary — A/B needs a different angle.");
+  }
+  const preheaderAlt = (c.preheaderAlt ?? "").trim();
+  if (preheaderAlt && (preheaderAlt.length < 40 || preheaderAlt.length > 100))
+    warn("preheader_alt_length", "preheaderAlt", `Alt preheader is ${preheaderAlt.length} chars (aim 50–90).`);
 
   // ── Hero headline ≤6 words ──
   const hh = (c.heroHeadline ?? "").trim();
@@ -224,14 +280,14 @@ export function lintCopy(c: LintableCopy, audience: Audience): LintResult {
     else if (looksTitleCase(l)) warn("cta_title_case", field, `CTA "${l}" looks Title Case — sentence case only.`);
   }
 
-  // ── CTA URLs: must be http(s) if present ──
+  // ── CTA URLs: http(s) / mailto: / tel: / "#" if present ──
   for (const [field, url] of [
     ["heroCtaUrl", c.heroCtaUrl],
     ["sectionBCtaUrl", c.sectionBCtaUrl],
   ] as const) {
     const u = (url ?? "").trim();
-    if (u && u !== "#" && !isHttpUrl(u))
-      err("cta_url_invalid", field, `CTA URL "${u}" is not a valid http(s) URL.`);
+    if (u && !isValidCtaUrl(u))
+      err("cta_url_invalid", field, `CTA URL "${u}" is not a valid http(s)/mailto/tel URL.`);
   }
 
   // ── Reader-as-hero pronoun ratio (retail) ──
@@ -246,11 +302,13 @@ export function lintCopy(c: LintableCopy, audience: Audience): LintResult {
     );
   }
 
-  // ── Wholesale must include a number (price/qty/percent/stat) ──
+  // ── Wholesale: needs a number + Christina's sign-off ──
   if (audience === "wholesale") {
     const hasNumber = /\$?\d/.test(text);
     if (!hasNumber)
       warn("wholesale_no_number", "body", "Wholesale copy has no number (price/qty/%/stat) — buyers need the math.");
+    if (!/christina/i.test(`${lc(c.sectionBBody)} ${lc(c.sectionABody)}`))
+      warn("wholesale_no_signoff", "sectionBBody", "Wholesale email isn't signed by Christina — add a '— Christina' sign-off.");
   }
 
   // ── Score ──
@@ -269,6 +327,8 @@ export function lintGeneratedCopy(out: Record<string, unknown>, audience: Audien
     {
       subject: s("subject"),
       preheader: s("preheader"),
+      subjectAlt: s("subjectAlt"),
+      preheaderAlt: s("preheaderAlt"),
       heroHeadline: s("heroHeadline"),
       heroSubtitle: s("heroSubtitle"),
       heroCtaLabel: s("heroCtaLabel"),

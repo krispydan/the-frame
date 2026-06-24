@@ -4,7 +4,7 @@ export const maxDuration = 60;
 import { NextRequest, NextResponse } from "next/server";
 import { db, sqlite } from "@/lib/db";
 import { emailCampaigns, emailThemes } from "@/modules/marketing/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, ne, desc } from "drizzle-orm";
 import { generateCopy } from "@/modules/marketing/lib/email-ai";
 import { getCalendarContextForCampaign } from "@/modules/marketing/lib/calendar-context";
 import { lintGeneratedCopy } from "@/modules/marketing/lib/copy-quality";
@@ -112,6 +112,16 @@ async function handle(req: NextRequest, params: { id: string }) {
     audience: campaign.audience as "retail" | "wholesale",
   });
 
+  // Recent emails for this audience (excluding this campaign) so the
+  // prompt's anti-sameness guidance has real data — otherwise every
+  // single-campaign generation is blind to what shipped recently.
+  const recentEmails = await db
+    .select({ subject: emailCampaigns.subject, heroHeadline: emailCampaigns.heroHeadline })
+    .from(emailCampaigns)
+    .where(and(eq(emailCampaigns.audience, campaign.audience as "retail" | "wholesale"), ne(emailCampaigns.id, id)))
+    .orderBy(desc(emailCampaigns.scheduledDate))
+    .limit(5);
+
   const result = await generateCopy({
     audience: campaign.audience as "retail" | "wholesale",
     scheduledDate: campaign.scheduledDate,
@@ -121,6 +131,7 @@ async function handle(req: NextRequest, params: { id: string }) {
     productHook,
     seasonalContext,
     calendarEvents,
+    recentEmails: recentEmails.filter((r) => r.subject || r.heroHeadline),
   });
 
   if (!result.ok) {

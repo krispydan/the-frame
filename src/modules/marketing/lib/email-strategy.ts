@@ -274,6 +274,18 @@ export function recommendForSlot(
   const layoutProfile = LAYOUT_CYCLE[weekIndex % LAYOUT_CYCLE.length];
   const layout = LAYOUT_PROFILES[layoutProfile];
 
+  // Within-week hero variety: the layout rotates by week, so without
+  // this both slots would inherit the SAME hero variant and a week's
+  // emails would look monotone. Slot 2 takes the NEXT hero variant in
+  // a fixed order so a single week mixes at least two hero layouts.
+  // (Other block variants stay from the profile — hero is the
+  // dominant visual, so offsetting it is enough.)
+  const HERO_ORDER = ["full_bleed_overlay", "image_75_solid", "split_50_50"] as const;
+  const heroVariant =
+    slotInWeek === 2
+      ? HERO_ORDER[(HERO_ORDER.indexOf(layout.heroVariant as typeof HERO_ORDER[number]) + 1) % HERO_ORDER.length]
+      : layout.heroVariant;
+
   // Image style is locked to slot (1 = flat-lay, 2 = on-model) —
   // this is Daniel's explicit ask. Don't rotate it.
   const imageStyle = slotDefault.imageStyle;
@@ -305,7 +317,7 @@ export function recommendForSlot(
     scheduledDate,
     layoutProfile,
     layoutVariants: {
-      heroVariant: layout.heroVariant,
+      heroVariant,
       sectionAVariant: layout.sectionAVariant,
       secondaryImageVariant: layout.secondaryImageVariant,
       sectionBVariant: layout.sectionBVariant,

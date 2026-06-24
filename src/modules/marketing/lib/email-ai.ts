@@ -327,10 +327,15 @@ export async function generateCopy(opts: {
    *  getCalendarContextForCampaign(). Kept as opts not auto-loaded
    *  so this lib stays pure of DB calls. */
   calendarEvents?: string | null;
+  /** The last few subjects + hero headlines sent to this audience, so
+   *  the prompt's "avoid sameness across consecutive emails" guidance
+   *  actually has data to work with. Without this, every single-campaign
+   *  generation is blind to recent emails and the inbox drifts same-y. */
+  recentEmails?: Array<{ subject?: string | null; heroHeadline?: string | null }>;
 }) {
   const { copyGen } = loadPrompts();
   const systemPrompt = buildSystemPrompt(opts.audience);
-  const taskPrompt = fillTemplate(extractPromptBody(copyGen), {
+  let taskPrompt = fillTemplate(extractPromptBody(copyGen), {
     "theme.title": opts.themeTitle,
     "theme.angle": opts.themeAngle,
     "theme.productHook": opts.productHook ?? "(none)",
@@ -340,6 +345,15 @@ export async function generateCopy(opts: {
     heroVariant: opts.heroVariant,
     calendarEvents: opts.calendarEvents ?? "(none)",
   });
+
+  // Inject recent-email context so the soft-variation guidance fires.
+  const recent = (opts.recentEmails ?? [])
+    .map((e) => [e.subject, e.heroHeadline].filter(Boolean).join(" / "))
+    .filter(Boolean)
+    .slice(0, 5);
+  if (recent.length > 0) {
+    taskPrompt += `\n\n────────────────────────────────────────────────────────────\nRECENTLY SENT to this audience (do NOT repeat these openers, headline rhythms, or phrases — deliberately contrast):\n${recent.map((r, i) => `${i + 1}. ${r}`).join("\n")}\n────────────────────────────────────────────────────────────`;
+  }
 
   return callClaude({
     systemPrompt,

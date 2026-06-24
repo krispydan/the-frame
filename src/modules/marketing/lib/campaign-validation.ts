@@ -33,7 +33,15 @@ const MAX_LEN: Record<string, number> = {
 
 function isHttpOrEmpty(v: string): boolean {
   const s = v.trim();
-  return s === "" || s === "#" || /^https?:\/\/[^\s]+/.test(s);
+  // http(s), mailto:, tel:, the "#" placeholder, or empty. Wholesale
+  // CTAs are frequently mailto (Christina), so those must pass.
+  return (
+    s === "" ||
+    s === "#" ||
+    /^https?:\/\/[^\s]+/.test(s) ||
+    /^mailto:[^\s@]+@[^\s]+/.test(s) ||
+    /^tel:[+\d][\d\s().-]*$/.test(s)
+  );
 }
 
 /** Returns a list of validation errors for the patch body (empty = ok). */
