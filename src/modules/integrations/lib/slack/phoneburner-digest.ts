@@ -67,7 +67,7 @@ export async function postPhoneBurnerCallDigest(): Promise<{
               AVG(CASE WHEN connected = 1 AND duration_seconds IS NOT NULL THEN duration_seconds END) AS avg_dur_connected,
               COUNT(DISTINCT agent_email) AS distinct_agents
          FROM phoneburner_call_log
-        WHERE called_at >= ? AND called_at < ?`,
+        WHERE datetime(called_at) >= datetime(?) AND datetime(called_at) < datetime(?)`,
     )
     .get(startIso, endIso) as {
       total: number;
@@ -86,7 +86,7 @@ export async function postPhoneBurnerCallDigest(): Promise<{
       `SELECT COALESCE(NULLIF(TRIM(disposition_label), ''), '(no disposition)') AS label,
               COUNT(*) AS n
          FROM phoneburner_call_log
-        WHERE called_at >= ? AND called_at < ?
+        WHERE datetime(called_at) >= datetime(?) AND datetime(called_at) < datetime(?)
         GROUP BY label
         ORDER BY n DESC, label ASC
         LIMIT 5`,
@@ -100,7 +100,7 @@ export async function postPhoneBurnerCallDigest(): Promise<{
               COUNT(*) AS n,
               SUM(CASE WHEN connected = 1 THEN 1 ELSE 0 END) AS connected
          FROM phoneburner_call_log
-        WHERE called_at >= ? AND called_at < ?
+        WHERE datetime(called_at) >= datetime(?) AND datetime(called_at) < datetime(?)
         GROUP BY agent
         ORDER BY n DESC
         LIMIT 6`,
@@ -116,7 +116,7 @@ export async function postPhoneBurnerCallDigest(): Promise<{
               l.called_at
          FROM phoneburner_call_log l
          LEFT JOIN companies co ON co.id = l.company_id
-        WHERE l.called_at >= ? AND l.called_at < ?
+        WHERE datetime(l.called_at) >= datetime(?) AND datetime(l.called_at) < datetime(?)
         ORDER BY l.called_at DESC
         LIMIT 10`,
     )

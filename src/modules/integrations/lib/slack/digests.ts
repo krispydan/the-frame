@@ -137,14 +137,20 @@ interface CallMetrics {
   interested: number;
 }
 
-function loadPhoneBurnerMetrics(startIso: string, endIso: string): CallMetrics {
+export function loadPhoneBurnerMetrics(startIso: string, endIso: string): CallMetrics {
   const row = sqlite
     .prepare(
+      // datetime() on BOTH sides so the window comparison is robust to
+      // the stored timestamp format. PhoneBurner webhooks write called_at
+      // as "YYYY-MM-DD HH:MM:SS" (space, no Z); a raw string compare
+      // against an ISO-UTC bound silently excludes those rows (space sorts
+      // before 'T'), which is why calls read 0 while revenue (which already
+      // uses datetime()) was correct.
       `SELECT COUNT(*) AS total,
               SUM(CASE WHEN connected = 1 THEN 1 ELSE 0 END) AS connected,
               SUM(CASE WHEN lower(disposition_label) LIKE 'set appointment%' THEN 1 ELSE 0 END) AS interested
          FROM phoneburner_call_log
-        WHERE called_at >= ? AND called_at < ?`,
+        WHERE datetime(called_at) >= datetime(?) AND datetime(called_at) < datetime(?)`,
     )
     .get(startIso, endIso) as { total: number; connected: number; interested: number } | undefined;
   return {
@@ -169,7 +175,7 @@ function loadInstantlyMetrics(startIso: string, endIso: string): EmailMetrics {
               SUM(CASE WHEN event_type = 'lead_interested' THEN 1 ELSE 0 END) AS interested,
               SUM(CASE WHEN event_type = 'email_bounced' THEN 1 ELSE 0 END) AS bounced
          FROM instantly_webhook_events
-        WHERE received_at >= ? AND received_at < ?
+        WHERE datetime(received_at) >= datetime(?) AND datetime(received_at) < datetime(?)
           AND token_valid = 1`,
     )
     .get(startIso, endIso) as
