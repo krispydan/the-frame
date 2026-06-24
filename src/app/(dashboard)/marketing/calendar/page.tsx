@@ -1,8 +1,10 @@
 "use client";
 
 /**
- * Marketing calendar — the "what's coming up" register that AI
- * consults when drafting campaign copy.
+ * Events & holidays — the "what's coming up" register that AI
+ * consults when drafting campaign copy. (Distinct from the Send
+ * schedule at /marketing/email/calendar, which shows when campaigns
+ * actually go out.)
  *
  * Layout: simple ordered list by date_start ASC, grouped by month.
  * Each event card shows type/audience/title/date-range/description
@@ -102,18 +104,22 @@ export default function CalendarPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Marketing calendar</h1>
+        <div className="space-y-1">
+          <Link href="/marketing/email" className="text-sm text-muted-foreground hover:text-foreground">
+            ← Email assistant
+          </Link>
+          <h1 className="text-3xl font-bold tracking-tight">Events &amp; holidays</h1>
           <p className="text-muted-foreground">
-            Holidays, sales, launches + promotions. Auto-injected into
-            email AI when a campaign&apos;s scheduled date falls within ±14
-            days of an event.
+            Holidays, sales, launches + promotions the AI reads — auto-injected into
+            email copy when a campaign&apos;s scheduled date falls within ±14 days of an
+            event. To see when campaigns actually send, use the{" "}
+            <Link href="/marketing/email/calendar" className="underline hover:text-foreground">
+              Send schedule
+            </Link>
+            .
           </p>
         </div>
         <div className="flex gap-2">
-          <Link href="/marketing/email">
-            <Button variant="outline" size="sm">← Email assistant</Button>
-          </Link>
           <Button variant="outline" size="sm" onClick={load}>
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh

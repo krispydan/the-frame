@@ -86,10 +86,20 @@ export default function EmailCalendarPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Email Calendar</h1>
-          <p className="text-muted-foreground">Month view of the send cadence — retail Mon/Thu, wholesale Tue/Fri.</p>
+      <div className="flex items-start justify-between">
+        <div className="space-y-1">
+          <Link href="/marketing/email" className="text-sm text-muted-foreground hover:text-foreground">
+            ← Email assistant
+          </Link>
+          <h1 className="text-3xl font-bold tracking-tight">Send schedule</h1>
+          <p className="text-muted-foreground">
+            When each campaign goes out — retail Mon/Thu, wholesale Tue/Fri. For the
+            holidays &amp; sales the AI reads, see{" "}
+            <Link href="/marketing/calendar" className="underline hover:text-foreground">
+              Events &amp; holidays
+            </Link>
+            .
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="icon" onClick={() => setCursor(new Date(Date.UTC(year, month - 1, 1)))}>
@@ -102,7 +112,6 @@ export default function EmailCalendarPage() {
           <Button variant="outline" size="sm" onClick={() => { const d = new Date(); setCursor(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1))); }}>
             Today
           </Button>
-          <Link href="/marketing/email"><Button variant="outline" size="sm">Dashboard</Button></Link>
         </div>
       </div>
 

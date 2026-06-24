@@ -128,37 +128,47 @@ export default function EmailAssistantDashboard() {
             Weekly email pipeline — ideation, copy, designer handoff, export.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Link href="/marketing/calendar">
-            <Button variant="outline">
-              <CalendarIcon className="h-4 w-4 mr-2" />
-              Events calendar
-            </Button>
-          </Link>
-          <Link href="/marketing/email/calendar">
-            <Button variant="outline">
-              <CalendarDays className="h-4 w-4 mr-2" />
-              Month view
-            </Button>
-          </Link>
-          <Link href="/marketing/email/plan">
-            <Button variant="outline">
-              <Sparkles className="h-4 w-4 mr-2" />
-              Plan the month
-            </Button>
-          </Link>
-          <Link href="/marketing/email/designer-queue">
-            <Button variant="outline" className="relative">
-              <ImageIcon className="h-4 w-4 mr-2" />
-              Designer queue
-              {designerQueueCount > 0 && (
-                <Badge variant="secondary" className="ml-2">
-                  {designerQueueCount}
-                </Badge>
-              )}
-            </Button>
-          </Link>
-          <NewCampaignButton onCreated={(c) => setCampaigns((cs) => [c, ...cs])} />
+        <div className="flex flex-col items-end gap-2">
+          {/* Create — the primary path. Plan the month is the
+              recommended AI-batch start; New campaign is the manual single. */}
+          <div className="flex items-center gap-2">
+            <Link href="/marketing/email/plan">
+              <Button title="AI plans a month of briefs for you, then bulk-creates drafts">
+                <Sparkles className="h-4 w-4 mr-2" />
+                Plan the month
+              </Button>
+            </Link>
+            <NewCampaignButton
+              variant="outline"
+              onCreated={(c) => setCampaigns((cs) => [c, ...cs])}
+            />
+          </div>
+          {/* Views & tools — quieter secondary cluster */}
+          <div className="flex items-center gap-1 text-muted-foreground">
+            <Link href="/marketing/email/calendar">
+              <Button variant="ghost" size="sm" title="Your campaigns laid out by send date">
+                <CalendarDays className="h-4 w-4 mr-2" />
+                Send schedule
+              </Button>
+            </Link>
+            <Link href="/marketing/calendar">
+              <Button variant="ghost" size="sm" title="Holidays, sales & launches the AI reads for context">
+                <CalendarIcon className="h-4 w-4 mr-2" />
+                Events &amp; holidays
+              </Button>
+            </Link>
+            <Link href="/marketing/email/designer-queue">
+              <Button variant="ghost" size="sm" className="relative" title="Campaigns awaiting designer renders">
+                <ImageIcon className="h-4 w-4 mr-2" />
+                Designer queue
+                {designerQueueCount > 0 && (
+                  <Badge variant="secondary" className="ml-2">
+                    {designerQueueCount}
+                  </Badge>
+                )}
+              </Button>
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -313,7 +323,13 @@ export default function EmailAssistantDashboard() {
   );
 }
 
-function NewCampaignButton({ onCreated }: { onCreated: (c: Campaign) => void }) {
+function NewCampaignButton({
+  onCreated,
+  variant = "default",
+}: {
+  onCreated: (c: Campaign) => void;
+  variant?: "default" | "outline";
+}) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -410,7 +426,7 @@ function NewCampaignButton({ onCreated }: { onCreated: (c: Campaign) => void }) 
 
   return (
     <>
-      <Button onClick={() => setOpen(true)}>
+      <Button variant={variant} onClick={() => setOpen(true)}>
         <Plus className="h-4 w-4 mr-2" />
         New campaign
       </Button>

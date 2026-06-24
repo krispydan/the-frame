@@ -1,13 +1,13 @@
 "use client";
 
-import { use, useEffect, useState, useCallback, useRef, type ReactNode } from "react";
+import { use, useEffect, useState, useCallback, useRef, Fragment, type ReactNode } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, Monitor, Smartphone, Save, Sparkles, Image as ImageIcon, Copy, Download, Loader2, ShieldCheck, RefreshCw } from "lucide-react";
+import { Trash2, Monitor, Smartphone, Save, Sparkles, Image as ImageIcon, Copy, Download, Loader2, ShieldCheck, RefreshCw, Check } from "lucide-react";
 
 type Campaign = Record<string, unknown>;
 
@@ -407,7 +407,7 @@ export default function CampaignDetailPage({
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <Link href="/marketing/email">
-              <Button variant="outline" size="sm">← Back</Button>
+              <Button variant="outline" size="sm">← Email assistant</Button>
             </Link>
             <select
               value={campaign.audience as string}
@@ -494,6 +494,9 @@ export default function CampaignDetailPage({
           </Button>
         </div>
       </div>
+
+      {/* Pipeline stepper — where am I, what's next */}
+      <PipelineStepper campaign={campaign} />
 
       {/* AI status panel — visible while generating */}
       {generating !== null && (
@@ -1116,6 +1119,86 @@ function VariantPicker({
 // (hero + secondary), so the user can read/copy them right in the
 // editor. Mirrors how generate-copy fills the visible form fields.
 // ────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────
+// Pipeline stepper — turns the pile of controls into a sequence.
+// Derives the current stage from the campaign's actual data (more
+// reliable than the manually-settable status), highlights it, and
+// names the single next action. Brief → Copy → Images → Designer →
+// Schedule.
+// ────────────────────────────────────────────────────────────
+function PipelineStepper({ campaign }: { campaign: Campaign }) {
+  const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  const status = s(campaign.status);
+
+  const hasBrief = !!(s(campaign.briefAngle) || s(campaign.name));
+  const hasCopy = !!(s(campaign.heroHeadline) || s(campaign.subject));
+  const hasImagePrompts = !!s(campaign.heroImagePrompt);
+
+  const secondaryNeeded = !campaign.secondaryDisabled;
+  const secondary2Needed = secondaryNeeded && campaign.secondaryImageVariant === "grid_2up";
+  const hasAllImages =
+    (campaign.heroDisabled || !!s(campaign.heroImagePath)) &&
+    (!secondaryNeeded || !!s(campaign.secondaryImagePath)) &&
+    (!secondary2Needed || !!s(campaign.secondaryImagePath2));
+
+  const isScheduledOrLater = ["scheduled", "sent", "analyzed"].includes(status);
+
+  const steps = ["Brief", "Copy", "Images", "Designer", "Schedule"];
+  const milestones = [hasBrief, hasCopy, hasImagePrompts, hasAllImages, isScheduledOrLater];
+  const activeIndex = milestones.findIndex((m) => !m); // -1 = all done
+
+  const NEXT: Record<number, string> = {
+    0: "write the brief angle below, then Generate copy",
+    1: "click Generate copy to draft subject + sections",
+    2: "click Generate image prompts to brief the designer",
+    3: "the designer renders & uploads images — track it in the Designer queue",
+    4: "set the send date and switch status to Scheduled",
+  };
+  const nextHint =
+    activeIndex === -1
+      ? status === "sent" || status === "analyzed"
+        ? "this campaign has sent — nothing left to do here"
+        : "everything's ready — it's scheduled to send"
+      : NEXT[activeIndex];
+
+  return (
+    <div className="rounded-lg border bg-muted/30 px-4 py-3">
+      <div className="flex items-center">
+        {steps.map((label, i) => {
+          const done = milestones[i];
+          const active = i === activeIndex;
+          const circle = done
+            ? "bg-foreground text-background border-transparent"
+            : active
+            ? "border-2 border-foreground text-foreground"
+            : "border border-muted-foreground/30 text-muted-foreground";
+          const text = active
+            ? "font-medium text-foreground"
+            : done
+            ? "text-foreground"
+            : "text-muted-foreground";
+          return (
+            <Fragment key={label}>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${circle}`}>
+                  {done ? <Check className="h-3.5 w-3.5" /> : i + 1}
+                </span>
+                <span className={`text-sm ${text}`}>{label}</span>
+              </div>
+              {i < steps.length - 1 && (
+                <div className={`mx-2 h-px flex-1 ${done ? "bg-foreground/30" : "bg-muted-foreground/20"}`} />
+              )}
+            </Fragment>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">Next:</span> {nextHint}
+      </p>
+    </div>
+  );
+}
+
 function ImagePromptResults({
   campaign, busy, regenSlot, onRegenerate,
 }: {

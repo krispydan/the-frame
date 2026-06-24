@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   ExternalLink, Upload, Check, Image as ImageIcon, Copy, RefreshCw,
+  ChevronRight, ChevronDown,
 } from "lucide-react";
 
 interface QueueRow {
@@ -87,8 +88,11 @@ export default function DesignerQueuePage() {
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Designer Queue</h1>
+        <div className="space-y-1">
+          <Link href="/marketing/email" className="text-sm text-muted-foreground hover:text-foreground">
+            ← Email assistant
+          </Link>
+          <h1 className="text-3xl font-bold tracking-tight">Designer queue</h1>
           <p className="text-muted-foreground">
             Campaigns awaiting Higgsfield renders. Each card shows the briefs +
             dimensions + drag-drop upload.
@@ -189,12 +193,36 @@ function QueueRowCard({
   onToggle: () => void;
   onUploaded: () => void;
 }) {
+  const [marking, setMarking] = useState(false);
+
+  // Close the loop here: once every required image is in, the designer
+  // can advance the campaign to design_review without leaving the queue.
+  async function markReady(e: React.MouseEvent) {
+    e.stopPropagation();
+    setMarking(true);
+    try {
+      await fetch(`/api/v1/marketing/email/campaigns/${row.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "design_review" }),
+      });
+      onUploaded();
+    } finally {
+      setMarking(false);
+    }
+  }
+
+  const statusLabel = row.status.replace(/_/g, " ");
+
   return (
     <Card>
       <CardContent className="p-4">
         {/* Header row — always visible */}
         <div className="flex items-center justify-between gap-3 cursor-pointer" onClick={onToggle}>
           <div className="flex items-center gap-3 flex-1 min-w-0">
+            {expanded
+              ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+              : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />}
             <Badge variant={row.audience === "wholesale" ? "default" : "outline"}>
               {row.audience}
             </Badge>
@@ -214,11 +242,20 @@ function QueueRowCard({
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <UploadDot ready={row.heroReady} label="hero" />
-            <UploadDot ready={row.secondaryReady} label="2nd" />
-            {row.needsSecondary2 && <UploadDot ready={row.secondary2Ready} label="2nd-b" />}
-            <Badge variant={row.allReady ? "default" : "outline"} className="text-xs">
-              {row.allReady ? "All uploaded" : row.status}
+            <UploadDot ready={row.secondaryReady} label="2nd image" />
+            {row.needsSecondary2 && <UploadDot ready={row.secondary2Ready} label="2nd image B" />}
+            {/* Image completeness — its own signal, separate from lifecycle stage */}
+            <Badge variant={row.allReady ? "default" : "secondary"} className="text-xs">
+              {row.allReady ? "Images in" : "Images pending"}
             </Badge>
+            {/* Lifecycle stage */}
+            <Badge variant="outline" className="text-xs capitalize">{statusLabel}</Badge>
+            {/* Finish the handoff in place */}
+            {row.allReady && row.status === "photography" && (
+              <Button size="sm" onClick={markReady} disabled={marking}>
+                {marking ? "Marking…" : "Mark ready for review"}
+              </Button>
+            )}
           </div>
         </div>
 

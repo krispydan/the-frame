@@ -49,8 +49,8 @@ const MODULES: ModuleCard[] = [
   {
     href: "/marketing/email/calendar",
     icon: Calendar,
-    title: "Email Calendar",
-    description: "Month grid of scheduled email campaigns by audience + status.",
+    title: "Send schedule",
+    description: "Month grid of when email campaigns send, by audience + status.",
     status: "wip",
   },
   {

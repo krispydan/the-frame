@@ -125,16 +125,16 @@ export default function PlanMonthPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
-        <div>
+        <div className="space-y-1">
+          <Link href="/marketing/email" className="text-sm text-muted-foreground hover:text-foreground">
+            ← Email assistant
+          </Link>
           <h1 className="text-3xl font-bold tracking-tight">Plan the month</h1>
           <p className="text-muted-foreground">
             AI reads the marketing calendar + strategy rotation, proposes a unique
             brief per email slot. Review, edit, then bulk-create campaigns.
           </p>
         </div>
-        <Link href="/marketing/email">
-          <Button variant="outline" size="sm">← Email assistant</Button>
-        </Link>
       </div>
 
       {/* Inputs */}
