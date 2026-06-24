@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { generateCopy, generateImagePrompts, reviseBrief } from "@/modules/marketing/lib/email-ai";
+import { updateDoc, resetDoc } from "@/modules/marketing/lib/prompt-store";
 
 const PRODUCT_BLOCK =
   "1. Honey Reader ($28.00 retail)\n" +
@@ -138,6 +139,29 @@ describe("generateCopy — featured products reach the model", () => {
     const body = bodyOfCall(fetchMock, 0);
     expect(typeof body.messages[0].content).toBe("string");
     expect(body.messages[0].content).toContain("No-photo Reader");
+  });
+});
+
+describe("living prompts — in-app edits reach the model", () => {
+  it("an edited copy-generation prompt is used on the next generation (no redeploy)", async () => {
+    const fetchMock = stubAnthropic("submit_email_copy", { subject: "ok" });
+    // Edit the prompt in the store (as the in-app editor would).
+    updateDoc("copy-generation-prompt", "```\nSENTINEL_PROMPT_v99 for {{theme.title}}\n```");
+    try {
+      await generateCopy({
+        audience: "retail",
+        scheduledDate: "2026-06-25",
+        heroVariant: "full_bleed_overlay",
+        themeTitle: "Edited-prompt test",
+        themeAngle: "a",
+      });
+      const body = bodyOfCall(fetchMock, 0);
+      const content = body.messages[0].content as string;
+      expect(content).toContain("SENTINEL_PROMPT_v99");
+      expect(content).toContain("Edited-prompt test"); // template still fills
+    } finally {
+      resetDoc("copy-generation-prompt"); // restore for other tests
+    }
   });
 });
 

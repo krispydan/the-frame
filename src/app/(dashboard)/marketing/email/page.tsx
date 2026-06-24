@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Plus, Mail, Image as ImageIcon, Calendar as CalendarIcon, CalendarDays, Sparkles, Trash2, Copy } from "lucide-react";
+import { Plus, Mail, Image as ImageIcon, Calendar as CalendarIcon, CalendarDays, Sparkles, Trash2, Copy, FileText } from "lucide-react";
 
 type Campaign = {
   id: string;
@@ -166,6 +166,12 @@ export default function EmailAssistantDashboard() {
                     {designerQueueCount}
                   </Badge>
                 )}
+              </Button>
+            </Link>
+            <Link href="/marketing/email/prompts">
+              <Button variant="ghost" size="sm" title="View + edit the AI prompts & brand-voice docs">
+                <FileText className="h-4 w-4 mr-2" />
+                Prompts
               </Button>
             </Link>
           </div>

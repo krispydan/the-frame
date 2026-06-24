@@ -16,61 +16,33 @@
  * the structured response.
  */
 
-import fs from "fs";
-import path from "path";
 import { emailModel } from "./ai-model";
+import { getDocContent } from "./prompt-store";
 
-// ── Brand context loader ────────────────────────────────────────
-// Snapshot lives in src/modules/marketing/brand-context/ (copied
-// from Google Drive per the migration plan). Read at module load,
-// cache for process lifetime.
-
-const BRAND_DIR = path.join(process.cwd(), "src", "modules", "marketing", "brand-context");
-const PROMPTS_DIR = path.join(process.cwd(), "src", "modules", "marketing", "prompts");
-
-function readFileSafe(p: string): string {
-  try {
-    return fs.readFileSync(p, "utf-8");
-  } catch (e) {
-    console.warn(`[email-ai] missing file: ${p}`, e);
-    return "";
-  }
-}
-
-let cachedBrand: {
-  bible: string;
-  wholesaleVoice: string;
-  visualGuidelines: string;
-} | null = null;
+// ── Prompt + brand-context loaders ──────────────────────────────
+// Prompts + brand-voice docs are now LIVING documents: editable in the
+// app and persisted in the DB (see prompt-store.ts), seeded from the
+// .md files in prompts/ + brand-context/. We read the LIVE version on
+// every call (no process-lifetime cache) so an in-app edit takes effect
+// on the next generation — and getDocContent falls back to the file if
+// the DB is ever unavailable.
 
 function loadBrandContext() {
-  if (cachedBrand) return cachedBrand;
-  cachedBrand = {
-    bible: readFileSafe(path.join(BRAND_DIR, "brand-bible.md")),
-    wholesaleVoice: readFileSafe(path.join(BRAND_DIR, "wholesale-voice.md")),
-    visualGuidelines: readFileSafe(path.join(BRAND_DIR, "visual-guidelines.md")),
+  return {
+    bible: getDocContent("brand-bible"),
+    wholesaleVoice: getDocContent("wholesale-voice"),
+    visualGuidelines: getDocContent("visual-guidelines"),
   };
-  return cachedBrand;
 }
 
-let cachedPrompts: {
-  systemBase: string;
-  copyGen: string;
-  themeGen: string;
-  imagePromptGen: string;
-  monthPlan: string;
-} | null = null;
-
 function loadPrompts() {
-  if (cachedPrompts) return cachedPrompts;
-  cachedPrompts = {
-    systemBase: readFileSafe(path.join(PROMPTS_DIR, "system-prompt-base.md")),
-    copyGen: readFileSafe(path.join(PROMPTS_DIR, "copy-generation-prompt.md")),
-    themeGen: readFileSafe(path.join(PROMPTS_DIR, "theme-generation-prompt.md")),
-    imagePromptGen: readFileSafe(path.join(PROMPTS_DIR, "image-prompt-generation.md")),
-    monthPlan: readFileSafe(path.join(PROMPTS_DIR, "month-plan-prompt.md")),
+  return {
+    systemBase: getDocContent("system-prompt-base"),
+    copyGen: getDocContent("copy-generation-prompt"),
+    themeGen: getDocContent("theme-generation-prompt"),
+    imagePromptGen: getDocContent("image-prompt-generation"),
+    monthPlan: getDocContent("month-plan-prompt"),
   };
-  return cachedPrompts;
 }
 
 /**
@@ -487,7 +459,7 @@ export async function generateImagePrompts(opts: {
   });
   // Ground every brief in the actual photography aesthetic doc (the
   // image prompt references it; we inject the real text here).
-  const photoAesthetic = readFileSafe(path.join(BRAND_DIR, "photography-aesthetic.md"));
+  const photoAesthetic = getDocContent("photography-aesthetic");
   const taskPrompt = photoAesthetic
     ? `${filled}\n\n────────────────────────────────────────────────────────────\nPHOTOGRAPHY AESTHETIC — every brief must match this\n────────────────────────────────────────────────────────────\n\n${photoAesthetic}`
     : filled;
