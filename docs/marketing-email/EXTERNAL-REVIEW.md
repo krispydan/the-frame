@@ -41,8 +41,8 @@ Self-review 3.1 (delete) and 3.8 (duplicate) are still open across all 3 rounds.
 ### 🟢 1.6 Orphaned month-calendar view (introduced this session)
 `/marketing/email/calendar` now has a real month grid, but nothing links to it — the dashboard "Calendar" button points to `/marketing/calendar` (the holidays/events calendar). Two different calendars, one unreachable. Needs a nav entry or a merge decision.
 
-### 🟢 1.7 Dead React template tree still present
-`components/email-template/*` (10 files) remains, used only for the `CampaignData` *type* import. Self-review flagged this (3.22) and keeps deferring it. It's a divergence trap: edit the string renderer, the React tree silently rots.
+### 🟢 1.7 Dead React template tree still present — ✅ FIXED
+`components/email-template/*` (the orphaned React tree, self-review 3.22) is **deleted**; `CampaignData` now lives in `lib/email-template-types.ts` and the renderer + preview + export-image routes import from there. One source of truth; no more divergence trap.
 
 ---
 

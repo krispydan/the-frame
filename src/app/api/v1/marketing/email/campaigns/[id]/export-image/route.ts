@@ -37,7 +37,7 @@ import { emailCampaigns } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
 import { renderEmailHtml, renderSectionHtml, SectionKind } from "@/modules/marketing/lib/render-email";
 import { renderHtmlToJpg } from "@/modules/marketing/lib/render-screenshot";
-import type { CampaignData } from "@/modules/marketing/components/email-template";
+import type { CampaignData } from "@/modules/marketing/lib/email-template-types";
 
 const VALID_KINDS = ["hero", "sectionA", "secondary", "sectionB", "full"] as const;
 type ExportKind = (typeof VALID_KINDS)[number];

@@ -17,7 +17,7 @@
  */
 
 import { catalogImageUrl } from "@/lib/storage/image-url";
-import type { CampaignData } from "../components/email-template";
+import type { CampaignData } from "./email-template-types";
 
 // ── Brand tokens (mirror lib/email-template/shared/tokens.ts) ──
 // Inlined here so this file is self-contained and the React
