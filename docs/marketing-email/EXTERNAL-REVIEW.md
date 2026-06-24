@@ -95,7 +95,7 @@ So: strong on production, behind on operations. The agency-replacement bar, give
 
 ### Sprint C — Make the image channel excellent (Daniel's chosen channel)
 1. Batch "Generate copy + image prompts for all planned drafts" from the planner (self-review §9.6 — the highest-leverage planner upgrade). *(done — "Draft all N with AI" on the planner's post-create card; serial, copy default-on, image-prompts optional)*
-2. Image-export polish: per-section + whole-email already client-side; add width presets (600/1200) + a "copied to clipboard" affordance for paste-into-Faire. *(next)*
+2. Image-export polish: per-section + whole-email already client-side; add width presets (600/1200) + a "copied to clipboard" affordance for paste-into-Faire. *(done — 1×/2×/3× resolution selector + per-block "Copy" that puts the image on the clipboard, alongside View/JPG)*
 3. Designer queue: show brief/name + subject preview (3.10). *(done in Sprint B)*
 
 ### Explicitly NOT now (Daniel-deferred)

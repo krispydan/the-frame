@@ -91,6 +91,8 @@ export default function CampaignDetailPage({
   const [exportingKind, setExportingKind] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<{ url: string; name: string } | null>(null);
+  const [exportScale, setExportScale] = useState<1 | 2 | 3>(2);
+  const [copiedKind, setCopiedKind] = useState<string | null>(null);
 
   // ── AI generate handlers ────────────────────────────────────
   async function handleGenerateCopy() {
@@ -173,7 +175,7 @@ export default function CampaignDetailPage({
   // Renders the section HTML in an offscreen 600px iframe and
   // rasterizes it with html-to-image. No server browser / Chromium —
   // works in any deploy. `download=false` opens the image in a new tab.
-  async function exportSectionImage(kind: string, download: boolean) {
+  async function exportSectionImage(kind: string, mode: "view" | "download" | "copy") {
     setExportingKind(kind);
     setExportError(null);
     let iframe: HTMLIFrameElement | null = null;
@@ -200,7 +202,32 @@ export default function CampaignDetailPage({
       const node = doc.body;
       const height = Math.max(node.scrollHeight, 40);
       const lib = await import("html-to-image");
-      const opts = { width: 600, height, pixelRatio: 2, backgroundColor: "#ffffff", cacheBust: true };
+      // Resolution preset: 1× = 600px, 2× = 1200px (retina), 3× = 1800px.
+      const opts = { width: 600, height, pixelRatio: exportScale, backgroundColor: "#ffffff", cacheBust: true };
+
+      const slug = String(campaign?.name || campaign?.subject || "campaign")
+        .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 40) || "campaign";
+
+      if (mode === "copy") {
+        // PNG blob → clipboard (image/png is the broadly-supported
+        // clipboard image type). Falls back to the lightbox if the
+        // browser blocks clipboard image writes.
+        let blob: Blob | null = null;
+        try { blob = await lib.toBlob(node, opts); }
+        catch { blob = await lib.toBlob(node, { ...opts, skipFonts: true }); }
+        if (blob && navigator.clipboard && "write" in navigator.clipboard && typeof ClipboardItem !== "undefined") {
+          try {
+            await navigator.clipboard.write([new ClipboardItem({ [blob.type || "image/png"]: blob })]);
+            setExportError(null);
+            setCopiedKind(kind);
+            setTimeout(() => setCopiedKind((k) => (k === kind ? null : k)), 1800);
+            return;
+          } catch { /* clipboard blocked — fall through to lightbox */ }
+        }
+        if (blob) setImagePreview({ url: URL.createObjectURL(blob), name: `${slug}-${kind}.png` });
+        return;
+      }
+
       let dataUrl: string;
       try {
         dataUrl = await lib.toJpeg(node, { ...opts, quality: 0.92 });
@@ -208,12 +235,10 @@ export default function CampaignDetailPage({
         dataUrl = await lib.toJpeg(node, { ...opts, quality: 0.92, skipFonts: true });
       }
 
-      const slug = String(campaign?.name || campaign?.subject || "campaign")
-        .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 40) || "campaign";
-      if (download) {
+      if (mode === "download") {
         const a = document.createElement("a");
         a.href = dataUrl;
-        a.download = `${slug}-${kind}.jpg`;
+        a.download = `${slug}-${kind}@${exportScale}x.jpg`;
         document.body.appendChild(a); a.click(); a.remove();
       } else {
         // In-app lightbox (avoids popup blockers killing a new tab
@@ -867,13 +892,25 @@ export default function CampaignDetailPage({
               Faire / Omnisend / wherever. Rendered client-side with
               html-to-image (no server Chromium). */}
           <Card>
-            <CardHeader className="pb-3">
+            <CardHeader className="pb-3 flex flex-row items-center justify-between">
               <CardTitle className="text-sm">
                 Export as images
                 <span className="ml-2 text-xs font-normal text-muted-foreground">
-                  JPG per block — paste into Faire / Omnisend
+                  per block — paste into Faire / Omnisend
                 </span>
               </CardTitle>
+              <label className="text-xs text-muted-foreground flex items-center gap-1">
+                Resolution
+                <select
+                  value={exportScale}
+                  onChange={(e) => setExportScale(Number(e.target.value) as 1 | 2 | 3)}
+                  className="h-7 rounded-md border border-input bg-background px-1 text-xs"
+                >
+                  <option value={1}>1× (600px)</option>
+                  <option value={2}>2× (1200px)</option>
+                  <option value={3}>3× (1800px)</option>
+                </select>
+              </label>
             </CardHeader>
             <CardContent className="space-y-2">
               {([
@@ -891,7 +928,7 @@ export default function CampaignDetailPage({
                       {busy && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
                       <button
                         type="button"
-                        onClick={() => exportSectionImage(kind, false)}
+                        onClick={() => exportSectionImage(kind, "view")}
                         disabled={exportingKind !== null}
                         className="text-xs underline text-muted-foreground hover:text-foreground disabled:opacity-50"
                       >
@@ -899,12 +936,22 @@ export default function CampaignDetailPage({
                       </button>
                       <button
                         type="button"
-                        onClick={() => exportSectionImage(kind, true)}
+                        onClick={() => exportSectionImage(kind, "copy")}
+                        disabled={exportingKind !== null}
+                        className="text-xs px-2 py-1 rounded border border-input hover:bg-accent disabled:opacity-50"
+                        title="Copy the image to the clipboard for pasting"
+                      >
+                        <Copy className="h-3 w-3 inline mr-1" />
+                        {copiedKind === kind ? "Copied" : "Copy"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => exportSectionImage(kind, "download")}
                         disabled={exportingKind !== null}
                         className="text-xs px-2 py-1 rounded border border-input hover:bg-accent disabled:opacity-50"
                       >
                         <Download className="h-3 w-3 inline mr-1" />
-                        Download JPG
+                        JPG
                       </button>
                     </div>
                   </div>
@@ -914,8 +961,9 @@ export default function CampaignDetailPage({
                 <p className="text-xs text-destructive pt-1">{exportError}</p>
               )}
               <p className="text-xs text-muted-foreground pt-2 border-t mt-2">
-                Rendered in your browser at 2× retina (600px wide). No server
-                wait — &ldquo;View&rdquo; opens the image in a new tab, &ldquo;Download&rdquo; saves a JPG.
+                Rendered in your browser ({exportScale}× = {600 * exportScale}px wide). No server
+                wait — <strong>Copy</strong> puts the image on your clipboard (paste straight into Faire/Omnisend),
+                <strong> View</strong> opens it, <strong>JPG</strong> downloads it.
               </p>
             </CardContent>
           </Card>
