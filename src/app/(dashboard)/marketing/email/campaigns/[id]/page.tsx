@@ -7,7 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, Monitor, Smartphone, Save, Sparkles, Image as ImageIcon, Copy, Download, Loader2, ShieldCheck, RefreshCw, Check } from "lucide-react";
+import { Trash2, Monitor, Smartphone, Save, Sparkles, Image as ImageIcon, Copy, Download, Loader2, ShieldCheck, RefreshCw, Check, Plus, X, Search, Package } from "lucide-react";
+import { parseFeaturedIds } from "@/modules/marketing/lib/featured-products";
+import type { ProductSummary } from "@/modules/marketing/lib/product-selector";
 
 type Campaign = Record<string, unknown>;
 
@@ -624,6 +626,13 @@ export default function CampaignDetailPage({
             </CardContent>
           </Card>
 
+          <FeaturedProductsCard
+            campaign={campaign}
+            onChange={(idsJson) =>
+              setCampaign((c) => (c ? { ...c, featuredProductIds: idsJson } : c))
+            }
+          />
+
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm">
@@ -1119,6 +1128,187 @@ function VariantPicker({
 // (hero + secondary), so the user can read/copy them right in the
 // editor. Mirrors how generate-copy fills the visible form fields.
 // ────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────
+// Featured products — attach real SKUs to a campaign so the copy +
+// image briefs are grounded in actual products (specs + photos fed to
+// the AI). Optional: only SOME emails feature products. Persists the
+// id list to the campaign's featured_product_ids column on each change.
+// ────────────────────────────────────────────────────────────
+const MAX_FEATURED = 3;
+
+function FeaturedProductsCard({
+  campaign, onChange,
+}: {
+  campaign: Campaign;
+  onChange: (idsJson: string | null) => void;
+}) {
+  const campaignId = campaign.id as string;
+  const [ids, setIds] = useState<string[]>(() => parseFeaturedIds(campaign.featuredProductIds as string | null));
+  const [selected, setSelected] = useState<ProductSummary[]>([]);
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"in_stock" | "top_sellers">("in_stock");
+  const [q, setQ] = useState("");
+  const [candidates, setCandidates] = useState<ProductSummary[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Resolve the selected ids → summaries for display.
+  useEffect(() => {
+    if (ids.length === 0) { setSelected([]); return; }
+    let alive = true;
+    fetch(`/api/v1/marketing/email/products?ids=${ids.join(",")}`)
+      .then((r) => r.json())
+      .then((d) => { if (alive) setSelected(d.products ?? []); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [ids]);
+
+  // Load candidates when the picker is open (debounced on the query).
+  const loadCandidates = useCallback(() => {
+    setLoading(true);
+    const url = q.trim()
+      ? `/api/v1/marketing/email/products?q=${encodeURIComponent(q.trim())}`
+      : `/api/v1/marketing/email/products?mode=${mode}`;
+    fetch(url)
+      .then((r) => r.json())
+      .then((d) => setCandidates(d.products ?? []))
+      .catch(() => setCandidates([]))
+      .finally(() => setLoading(false));
+  }, [q, mode]);
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(loadCandidates, 250);
+    return () => clearTimeout(t);
+  }, [open, loadCandidates]);
+
+  async function persist(next: string[]) {
+    setIds(next);
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/v1/marketing/email/campaigns/${campaignId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ featuredProductIds: next }),
+      });
+      const data = await res.json();
+      onChange(data.campaign?.featuredProductIds ?? null);
+    } finally {
+      setSaving(false);
+    }
+  }
+  const add = (id: string) => { if (!ids.includes(id) && ids.length < MAX_FEATURED) persist([...ids, id]); };
+  const remove = (id: string) => persist(ids.filter((x) => x !== id));
+  async function suggest() {
+    const res = await fetch(`/api/v1/marketing/email/products?suggest=2&mode=${mode}`);
+    const d = await res.json();
+    const fresh = (d.products ?? []).map((p: ProductSummary) => p.id).filter((x: string) => !ids.includes(x));
+    if (fresh.length) persist([...ids, ...fresh].slice(0, MAX_FEATURED));
+  }
+
+  const atMax = ids.length >= MAX_FEATURED;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Package className="h-4 w-4" />
+          Featured products
+          <span className="text-xs font-normal text-muted-foreground">
+            optional — grounds copy + image briefs in real SKUs (specs + photos)
+          </span>
+          {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {/* Selected products */}
+        {selected.length > 0 ? (
+          <div className="space-y-2">
+            {selected.map((p) => (
+              <div key={p.id} className="flex items-center gap-2 rounded border border-input p-2">
+                {p.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={p.imageUrl} alt={p.imageAlt ?? p.name} className="h-10 w-10 rounded object-cover" />
+                ) : (
+                  <div className="h-10 w-10 rounded bg-muted flex items-center justify-center"><Package className="h-4 w-4 text-muted-foreground" /></div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm truncate">{p.name}</div>
+                  <div className="text-xs text-muted-foreground truncate">
+                    {p.priceRetail != null ? `$${p.priceRetail.toFixed(2)}` : ""}{p.specs[0] ? ` · ${p.specs[0]}` : ""}
+                  </div>
+                </div>
+                <button type="button" onClick={() => remove(p.id)} className="text-muted-foreground hover:text-destructive" title="Remove">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            No products attached — this will be a brand/theme email. Add 1–{MAX_FEATURED} to feature specific frames.
+          </p>
+        )}
+
+        {/* Add / picker toggle */}
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setOpen((o) => !o)} disabled={atMax}>
+            <Plus className="h-3 w-3 mr-1" /> {open ? "Done" : "Add products"}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={suggest} disabled={atMax} title="Attach random in-stock / top-selling products">
+            <Sparkles className="h-3 w-3 mr-1" /> Suggest
+          </Button>
+          {atMax && <span className="text-xs text-muted-foreground">Max {MAX_FEATURED} reached</span>}
+        </div>
+
+        {/* Picker */}
+        {open && (
+          <div className="rounded border border-input p-2 space-y-2">
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={() => { setMode("in_stock"); setQ(""); }}
+                className={`text-xs px-2 py-1 rounded ${mode === "in_stock" && !q ? "bg-accent" : "text-muted-foreground"}`}>In stock</button>
+              <button type="button" onClick={() => { setMode("top_sellers"); setQ(""); }}
+                className={`text-xs px-2 py-1 rounded ${mode === "top_sellers" && !q ? "bg-accent" : "text-muted-foreground"}`}>Top sellers</button>
+              <div className="flex items-center gap-1 ml-auto">
+                <Search className="h-3 w-3 text-muted-foreground" />
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name / SKU"
+                  className="h-7 rounded-md border border-input bg-background px-2 text-xs w-40" />
+              </div>
+            </div>
+            {loading ? (
+              <div className="text-xs text-muted-foreground py-2">Loading…</div>
+            ) : candidates.length === 0 ? (
+              <div className="text-xs text-muted-foreground py-2">No products found.</div>
+            ) : (
+              <div className="max-h-64 overflow-auto space-y-1">
+                {candidates.map((p) => {
+                  const chosen = ids.includes(p.id);
+                  return (
+                    <div key={p.id} className="flex items-center gap-2 rounded p-1 hover:bg-accent/50">
+                      {p.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={p.imageUrl} alt={p.imageAlt ?? p.name} className="h-8 w-8 rounded object-cover" />
+                      ) : (
+                        <div className="h-8 w-8 rounded bg-muted flex items-center justify-center"><Package className="h-3 w-3 text-muted-foreground" /></div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs truncate">{p.name}</div>
+                        <div className="text-[11px] text-muted-foreground truncate">{p.priceRetail != null ? `$${p.priceRetail.toFixed(2)}` : ""}</div>
+                      </div>
+                      <Button size="sm" variant={chosen ? "ghost" : "outline"} disabled={chosen || atMax} onClick={() => add(p.id)}>
+                        {chosen ? <Check className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ────────────────────────────────────────────────────────────
 // Pipeline stepper — turns the pile of controls into a sequence.
 // Derives the current stage from the campaign's actual data (more

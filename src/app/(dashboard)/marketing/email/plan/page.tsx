@@ -68,6 +68,7 @@ export default function PlanMonthPage() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<string[] | null>(null);
+  const [autoFeatureProducts, setAutoFeatureProducts] = useState(true);
 
   async function propose() {
     setProposing(true);
@@ -110,7 +111,7 @@ export default function PlanMonthPage() {
       const res = await fetch("/api/v1/marketing/email/plan-month/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audience, proposals }),
+        body: JSON.stringify({ audience, proposals, autoFeatureProducts }),
       });
       const data = await res.json();
       if (data.error) { setError(data.error); return; }
@@ -254,11 +255,21 @@ export default function PlanMonthPage() {
                 {" "}Edit any field below — changes are saved on Create.
               </p>
             </div>
-            <Button onClick={createAll} disabled={creating}>
-              {creating
-                ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Creating…</>
-                : `Create ${proposals.length} campaign${proposals.length === 1 ? "" : "s"}`}
-            </Button>
+            <div className="flex flex-col items-end gap-2">
+              <Button onClick={createAll} disabled={creating}>
+                {creating
+                  ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Creating…</>
+                  : `Create ${proposals.length} campaign${proposals.length === 1 ? "" : "s"}`}
+              </Button>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoFeatureProducts}
+                  onChange={(e) => setAutoFeatureProducts(e.target.checked)}
+                />
+                Auto-feature a product on product-anchored emails
+              </label>
+            </div>
           </div>
 
           <div className="space-y-3">

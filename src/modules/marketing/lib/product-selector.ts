@@ -131,6 +131,24 @@ export async function resolveProducts(ids: string[]): Promise<ProductSummary[]> 
   return clean.map((id) => byId.get(id)).filter((s): s is ProductSummary => !!s);
 }
 
+/** Free-text search over product name + sku prefix (featurable only). */
+export async function searchProducts(q: string, limit = 12): Promise<ProductSummary[]> {
+  const term = q.trim();
+  if (!term) return [];
+  const like = `%${term.replace(/[%_]/g, (m) => "\\" + m)}%`;
+  const rows = await db
+    .select(PRODUCT_COLS)
+    .from(products)
+    .where(
+      and(
+        inArray(products.status, [...FEATURABLE_STATUSES]),
+        sql`(${products.name} LIKE ${like} ESCAPE '\\' OR ${products.skuPrefix} LIKE ${like} ESCAPE '\\')`,
+      ),
+    )
+    .limit(Math.min(Math.max(limit, 1), 50));
+  return toSummaries(rows);
+}
+
 export type PickMode = "top_sellers" | "in_stock";
 
 /**

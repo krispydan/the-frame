@@ -19,6 +19,8 @@ export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
+import { suggestRandomProducts } from "@/modules/marketing/lib/product-selector";
+import { serializeFeaturedIds } from "@/modules/marketing/lib/featured-products";
 
 interface Proposal {
   scheduledDate: string;
@@ -44,7 +46,7 @@ interface Proposal {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as { audience?: string; proposals?: Proposal[] };
+    const body = await req.json() as { audience?: string; proposals?: Proposal[]; autoFeatureProducts?: boolean };
 
     if (body.audience !== "retail" && body.audience !== "wholesale") {
       return NextResponse.json({ error: "audience must be 'retail' or 'wholesale'" }, { status: 400 });
@@ -73,6 +75,26 @@ export async function POST(req: NextRequest) {
 
     const audience = body.audience as "retail" | "wholesale";
 
+    // Auto-feature products ("Both" mode): attach a real in-stock SKU to
+    // the product-anchored proposals (the ones the planner gave a
+    // productHook) so SOME emails are grounded in products and the rest
+    // stay brand/theme emails — a natural mix. Cycle a random pool so
+    // they're not all the same frame. Operator can adjust per campaign.
+    const featuredByIndex: Array<string | null> = body.proposals.map(() => null);
+    if (body.autoFeatureProducts) {
+      const anchoredIdx = body.proposals
+        .map((p, i) => (p.brief.productHook && p.brief.productHook.trim() ? i : -1))
+        .filter((i) => i >= 0);
+      if (anchoredIdx.length > 0) {
+        const pool = await suggestRandomProducts(Math.min(anchoredIdx.length, 12), "in_stock");
+        if (pool.length > 0) {
+          anchoredIdx.forEach((idx, k) => {
+            featuredByIndex[idx] = serializeFeaturedIds([pool[k % pool.length].id]);
+          });
+        }
+      }
+    }
+
     // Single transaction so partial failures don't strand half the
     // month. better-sqlite3's tx wrapper handles rollback on throw.
     const insert = sqlite.prepare(
@@ -80,14 +102,15 @@ export async function POST(req: NextRequest) {
         (id, name, audience, scheduled_date, week_of, status,
          hero_variant, section_a_variant, secondary_image_variant, section_b_variant,
          brief_title, brief_angle, brief_product_hook, brief_seasonal_context,
+         featured_product_ids,
          designer_notes,
          created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+       VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
     );
 
     const ids: string[] = [];
     const tx = sqlite.transaction((props: Proposal[]) => {
-      for (const p of props) {
+      props.forEach((p, i) => {
         const id = crypto.randomUUID();
         ids.push(id);
         const designerNotes = [
@@ -110,9 +133,10 @@ export async function POST(req: NextRequest) {
           p.brief.angle,
           p.brief.productHook || null,
           p.brief.seasonalContext || null,
+          featuredByIndex[i],
           designerNotes,
         );
-      }
+      });
     });
     tx(body.proposals);
 
