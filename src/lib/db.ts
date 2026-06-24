@@ -1881,6 +1881,8 @@ try {
     // 2026-06-23: subject-line A/B (alt subject + preheader)
     "subject_alt TEXT",
     "preheader_alt TEXT",
+    // 2026-06-24: featured products (JSON array of catalog_products.id)
+    "featured_product_ids TEXT",
   ]) {
     try {
       sqlite.exec(`ALTER TABLE marketing_email_campaigns ADD COLUMN ${col}`);

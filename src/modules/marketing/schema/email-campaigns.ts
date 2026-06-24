@@ -145,6 +145,11 @@ export const emailCampaigns = sqliteTable("marketing_email_campaigns", {
   // ── Tracking + designer + AI metadata ──
   utmCampaign: text("utm_campaign"),                         // e.g. 2026-w26-retail
   designerNotes: text("designer_notes"),
+  // JSON array of catalog_products.id to feature in this campaign's copy
+  // + image briefs. Empty/null = a non-product email. Only SOME campaigns
+  // feature products (a good mix) — set by the operator or auto-suggested
+  // during planning.
+  featuredProductIds: text("featured_product_ids"),
   aiCopyPromptVersion: text("ai_copy_prompt_version"),       // prompt template version used
   aiCopyRawJson: text("ai_copy_raw_json"),                   // last Claude response, full
   aiImagePromptRawJson: text("ai_image_prompt_raw_json"),    // last image-prompt response
