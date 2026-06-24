@@ -24,6 +24,16 @@ Hero variant: {{heroVariant}}      ← full_bleed_overlay | image_75_solid | spl
 Product hook (optional): {{theme.productHook}}
 Seasonal context (optional): {{theme.seasonalContext}}
 
+Featured products — weave these in when present:
+{{featuredProducts}}
+
+(If specific products are listed above, GENUINELY feature them: use their
+real name, specs, benefits, and price; let the hero + a section revolve
+around them. Their product photos are attached to this message — use the
+real visual details (color, shape, material) for accuracy, never invent
+them. If it says "(none …)", write a brand/theme email and do not fabricate
+product specifics.)
+
 Marketing calendar — what's happening within ±14 days of send:
 {{calendarEvents}}
 

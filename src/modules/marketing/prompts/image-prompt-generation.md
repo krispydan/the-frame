@@ -21,6 +21,14 @@ Theme: {{theme.title}} — {{theme.angle}}
 Hero copy: {{heroHeadline}} / {{heroSubtitle}}
 Audience: {{audience}}
 
+Featured products (depict THESE when present):
+{{featuredProducts}}
+
+(If specific products are listed, the briefs must depict those exact
+frames — their real color, shape, and material. Reference photos are
+attached to this message; match them. If it says "(none …)", art-direct
+around the theme, not a specific SKU.)
+
 Selected variants:
   hero:      {{heroVariant}}            ← drives composition + safe zones
   secondary: {{secondaryImageVariant}}  ← drives count + crop

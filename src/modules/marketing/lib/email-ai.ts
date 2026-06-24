@@ -176,6 +176,9 @@ interface CallClaudeOpts {
   };
   maxTokens?: number;
   model?: string;
+  /** Optional product/reference images fed to the model as vision
+   *  inputs (public URLs). Appended after the text in the user turn. */
+  images?: Array<{ url: string }>;
 }
 
 async function callClaude({
@@ -184,6 +187,7 @@ async function callClaude({
   tool,
   maxTokens = 4096,
   model = emailModel(),
+  images,
 }: CallClaudeOpts): Promise<{
   ok: true;
   output: Record<string, unknown>;
@@ -197,6 +201,16 @@ async function callClaude({
     return { ok: false, error: "ANTHROPIC_API_KEY not configured" };
   }
 
+  // Text-only stays a plain string; with images the user turn becomes a
+  // content array (text first, then image blocks via public URL source).
+  const validImages = (images ?? []).filter((i) => i.url && /^https?:\/\//.test(i.url));
+  const userContent = validImages.length
+    ? [
+        { type: "text", text: userPrompt },
+        ...validImages.map((i) => ({ type: "image", source: { type: "url", url: i.url } })),
+      ]
+    : userPrompt;
+
   const body = {
     model,
     max_tokens: maxTokens,
@@ -204,7 +218,7 @@ async function callClaude({
     tools: [tool],
     // Force the model to use the tool (single-tool, mandatory call).
     tool_choice: { type: "tool", name: tool.name },
-    messages: [{ role: "user", content: userPrompt }],
+    messages: [{ role: "user", content: userContent }],
   };
 
   try {
@@ -332,9 +346,17 @@ export async function generateCopy(opts: {
    *  actually has data to work with. Without this, every single-campaign
    *  generation is blind to recent emails and the inbox drifts same-y. */
   recentEmails?: Array<{ subject?: string | null; heroHeadline?: string | null }>;
+  /** Pre-formatted "featured products" block (from product-selector's
+   *  formatProductsForPrompt). Empty/undefined = a non-product email.
+   *  Resolved by the caller so this lib stays free of DB calls. */
+  featuredProductsText?: string;
+  /** Public URLs of the featured products' images, fed to the model as
+   *  vision inputs so the copy can reference real visual detail. */
+  productImages?: Array<{ url: string }>;
 }) {
   const { copyGen } = loadPrompts();
   const systemPrompt = buildSystemPrompt(opts.audience);
+  const featuredProducts = (opts.featuredProductsText ?? "").trim();
   let taskPrompt = fillTemplate(extractPromptBody(copyGen), {
     "theme.title": opts.themeTitle,
     "theme.angle": opts.themeAngle,
@@ -344,6 +366,7 @@ export async function generateCopy(opts: {
     scheduledDate: opts.scheduledDate,
     heroVariant: opts.heroVariant,
     calendarEvents: opts.calendarEvents ?? "(none)",
+    featuredProducts: featuredProducts || "(none — write a non-product brand email)",
   });
 
   // Inject recent-email context so the soft-variation guidance fires.
@@ -358,6 +381,7 @@ export async function generateCopy(opts: {
   return callClaude({
     systemPrompt,
     userPrompt: taskPrompt,
+    images: featuredProducts ? opts.productImages : undefined,
     tool: {
       name: "submit_email_copy",
       description: "Submit the full email copy for the campaign",
@@ -432,9 +456,15 @@ export async function generateImagePrompts(opts: {
   themeAngle: string;
   heroHeadline?: string | null;
   heroSubtitle?: string | null;
+  /** Pre-formatted featured-products block (see generateCopy). When a
+   *  campaign features real products, the briefs should depict THOSE
+   *  products, so we pass their details + images to the model. */
+  featuredProductsText?: string;
+  productImages?: Array<{ url: string }>;
 }) {
   const { imagePromptGen } = loadPrompts();
   const systemPrompt = buildSystemPrompt(opts.audience);
+  const featuredProducts = (opts.featuredProductsText ?? "").trim();
   const filled = fillTemplate(extractPromptBody(imagePromptGen), {
     "theme.title": opts.themeTitle,
     "theme.angle": opts.themeAngle,
@@ -443,6 +473,7 @@ export async function generateImagePrompts(opts: {
     audience: opts.audience,
     heroVariant: opts.heroVariant,
     secondaryImageVariant: opts.secondaryImageVariant,
+    featuredProducts: featuredProducts || "(none — art-direct around the theme, not a specific product)",
   });
   // Ground every brief in the actual photography aesthetic doc (the
   // image prompt references it; we inject the real text here).
@@ -454,6 +485,7 @@ export async function generateImagePrompts(opts: {
   return callClaude({
     systemPrompt,
     userPrompt: taskPrompt,
+    images: featuredProducts ? opts.productImages : undefined,
     tool: {
       name: "submit_image_prompts",
       description: "Submit Higgsfield briefs for hero + secondary images",

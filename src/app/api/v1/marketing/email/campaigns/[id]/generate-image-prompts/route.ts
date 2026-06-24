@@ -6,6 +6,8 @@ import { db, sqlite } from "@/lib/db";
 import { emailCampaigns, emailThemes } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
 import { generateImagePrompts } from "@/modules/marketing/lib/email-ai";
+import { resolveProducts, formatProductsForPrompt } from "@/modules/marketing/lib/product-selector";
+import { parseFeaturedIds } from "@/modules/marketing/lib/featured-products";
 
 /**
  * POST /api/v1/marketing/email/campaigns/[id]/generate-image-prompts
@@ -74,6 +76,16 @@ async function handle(req: NextRequest, params: { id: string }) {
     }
   }
 
+  // Featured products (some campaigns only) — so the briefs depict the
+  // actual frames, with their photos passed to the model as references.
+  const featuredProducts = await resolveProducts(
+    parseFeaturedIds(campaign.featuredProductIds as string | null),
+  );
+  const featuredProductsText = formatProductsForPrompt(featuredProducts);
+  const productImages = featuredProducts
+    .filter((p) => p.imageUrl)
+    .map((p) => ({ url: p.imageUrl as string }));
+
   const result = await generateImagePrompts({
     audience: campaign.audience as "retail" | "wholesale",
     heroVariant: campaign.heroVariant,
@@ -82,6 +94,8 @@ async function handle(req: NextRequest, params: { id: string }) {
     themeAngle,
     heroHeadline: campaign.heroHeadline,
     heroSubtitle: campaign.heroSubtitle,
+    featuredProductsText,
+    productImages,
   });
 
   if (!result.ok) {

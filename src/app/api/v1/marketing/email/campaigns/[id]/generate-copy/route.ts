@@ -9,6 +9,8 @@ import { generateCopy } from "@/modules/marketing/lib/email-ai";
 import { getCalendarContextForCampaign } from "@/modules/marketing/lib/calendar-context";
 import { lintGeneratedCopy } from "@/modules/marketing/lib/copy-quality";
 import { snapshotCopy } from "@/modules/marketing/lib/copy-versions";
+import { resolveProducts, formatProductsForPrompt } from "@/modules/marketing/lib/product-selector";
+import { parseFeaturedIds } from "@/modules/marketing/lib/featured-products";
 
 /**
  * POST /api/v1/marketing/email/campaigns/[id]/generate-copy
@@ -122,6 +124,17 @@ async function handle(req: NextRequest, params: { id: string }) {
     .orderBy(desc(emailCampaigns.scheduledDate))
     .limit(5);
 
+  // Featured products (some campaigns only) — resolve the campaign's
+  // featured_product_ids into AI-ready summaries + image URLs so the
+  // copy can be grounded in real SKUs.
+  const featuredProducts = await resolveProducts(
+    parseFeaturedIds(campaign.featuredProductIds as string | null),
+  );
+  const featuredProductsText = formatProductsForPrompt(featuredProducts);
+  const productImages = featuredProducts
+    .filter((p) => p.imageUrl)
+    .map((p) => ({ url: p.imageUrl as string }));
+
   const result = await generateCopy({
     audience: campaign.audience as "retail" | "wholesale",
     scheduledDate: campaign.scheduledDate,
@@ -132,6 +145,8 @@ async function handle(req: NextRequest, params: { id: string }) {
     seasonalContext,
     calendarEvents,
     recentEmails: recentEmails.filter((r) => r.subject || r.heroHeadline),
+    featuredProductsText,
+    productImages,
   });
 
   if (!result.ok) {

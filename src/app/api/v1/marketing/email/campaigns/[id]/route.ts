@@ -5,6 +5,7 @@ import { db, sqlite } from "@/lib/db";
 import { emailCampaigns } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
 import { validateCampaignPatch } from "@/modules/marketing/lib/campaign-validation";
+import { serializeFeaturedIds } from "@/modules/marketing/lib/featured-products";
 
 /**
  * Whitelist of columns clients can PATCH directly. Everything else
@@ -58,6 +59,7 @@ const PATCHABLE_COLUMNS = new Set([
   "sectionBCtaUrl",
   "utmCampaign",
   "designerNotes",
+  "featuredProductIds",
 ]);
 
 /** Convert camelCase → snake_case for raw SQL UPDATE. */
@@ -143,6 +145,18 @@ export async function PATCH(
   // require the snake_cased name match [a-z_][a-z0-9_]* before
   // string-concatenating into the UPDATE.
   const COLUMN_NAME_RE = /^[a-z][a-z0-9_]*$/;
+
+  // featured_product_ids is a JSON-array column — accept either a
+  // pre-serialized string or a raw string[] from the client and store
+  // a normalized JSON string (or NULL when empty).
+  if ("featuredProductIds" in body) {
+    const v = body.featuredProductIds;
+    body.featuredProductIds = Array.isArray(v)
+      ? serializeFeaturedIds(v as string[])
+      : typeof v === "string" || v === null
+      ? v
+      : null;
+  }
 
   const sets: string[] = [];
   const vals: unknown[] = [];
