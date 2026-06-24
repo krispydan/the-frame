@@ -675,14 +675,33 @@ export function ingestOneCall(
   return companyId ? "ingested" : "unmatched";
 }
 
+/**
+ * Decide the `since` cursor for the safety-net poll.
+ *
+ * The cron polls every 30 min with sinceMinutes=60, intending a fixed
+ * look-back window (ingestion is idempotent on call_id, so the 30-min
+ * overlap is free + self-healing). The OLD logic used MAX(called_at) as
+ * the cursor, which silently breaks the safety net: if the newest row's
+ * called_at is ever stale, ahead of "now" (bad/clock-skewed/odd-format
+ * timestamp), or in a non-sortable format, the cursor sticks and the
+ * poll fetches nothing — so a webhook gap (e.g. yesterday's calls never
+ * arriving) goes uncaught and the digest shows 0.
+ *
+ * New rule: always look back at least the window; only reach further
+ * back than it when the last-ingested time is OLDER than the window
+ * (the poll was down and we're backfilling a gap). A future/odd `high`
+ * can never starve the poll.
+ */
+export function computePollSince(sinceMin: number, high: string | null, nowMs: number): string {
+  const windowFloor = new Date(nowMs - sinceMin * 60 * 1000).toISOString();
+  return high && high < windowFloor ? high : windowFloor;
+}
+
 export async function pullPhoneBurnerCallResults(opts?: {
   sinceMinutes?: number;
 }): Promise<PullSummary> {
   const sinceMin = opts?.sinceMinutes ?? 15;
-  const high = lastIngestedCalledAt();
-  const sinceIso =
-    high ??
-    new Date(Date.now() - sinceMin * 60 * 1000).toISOString();
+  const sinceIso = computePollSince(sinceMin, lastIngestedCalledAt(), Date.now());
 
   const summary: PullSummary = {
     ok: true,

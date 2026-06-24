@@ -291,12 +291,19 @@ export async function postDailyDigest(): Promise<{ ok: boolean }> {
   if (pbToday.total > 0 || pbPrior.total > 0) {
     const pickupPctToday = pbToday.total > 0 ? (pbToday.connected / pbToday.total) * 100 : 0;
     const pickupPctPrior = pbPrior.total > 0 ? (pbPrior.connected / pbPrior.total) * 100 : 0;
+    // 0 calls logged yesterday while the day before had real volume is
+    // far more likely an ingestion gap (webhook lapse / stuck poll) than
+    // a genuinely call-free day — flag it instead of presenting 0 as fact.
+    const suspectGap = pbToday.total === 0 && pbPrior.total > 0;
     blocks.push({
       type: "section",
       text: {
         type: "mrkdwn",
         text:
           `*📞 Cold calling (PhoneBurner)*\n` +
+          (suspectGap
+            ? `• :warning: *0 calls logged* — the day before had ${pbPrior.total}. This is likely a PhoneBurner *sync gap* (webhook delivery or the call-poll job), not a quiet day. Check before trusting the zeros below.\n`
+            : "") +
           `• Calls: *${pbToday.total}* (${delta(pbToday.total, pbPrior.total)} vs day before)\n` +
           `• Pickup rate: *${pickupPctToday.toFixed(0)}%* (${deltaPctPoints(pickupPctToday, pickupPctPrior)}) — ${pbToday.connected}/${pbToday.total} connected\n` +
           `• Interested: *${pbToday.interested}* (${delta(pbToday.interested, pbPrior.interested)})`,
