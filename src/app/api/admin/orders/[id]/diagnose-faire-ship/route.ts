@@ -79,16 +79,16 @@ async function handle(
 
   // 2. ShipHero webhook events that might reference this order. We search
   // by external_id (where the matcher puts the order #) plus a substring
-  // search in raw_body as a catch-all.
+  // search in payload_preview as a catch-all.
   const webhookEvents = sqlite
     .prepare(
-      `SELECT id, topic, hmac_valid, handler_status,
+      `SELECT id, topic, hmac_valid, handler_ok,
               substr(COALESCE(handler_message, ''), 1, 200) AS handler_message,
               external_id, received_at
          FROM shiphero_webhook_events
         WHERE external_id = ?
            OR external_id = ?
-           OR raw_body LIKE ?
+           OR payload_preview LIKE ?
         ORDER BY received_at DESC
         LIMIT 20`,
     )
@@ -145,7 +145,7 @@ async function handle(
           "ShipHero may not have fired the Ship event yet.",
       );
     }
-    const hmacFails = webhookEvents.filter((e) => e.hmac_valid === 0);
+    const hmacFails = webhookEvents.filter((e) => e.hmac_valid === 0 || e.hmac_valid === false);
     if (hmacFails.length > 0) {
       summary.push(
         `${hmacFails.length} of ${webhookEvents.length} webhooks FAILED HMAC validation — ` +
