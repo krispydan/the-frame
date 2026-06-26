@@ -24,7 +24,25 @@ export async function GET(
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const { id } = await params;
+  try {
+    return await handle(req, params);
+  } catch (e) {
+    const err = e as Error;
+    return NextResponse.json(
+      {
+        error: err.message,
+        stack: err.stack?.split("\n").slice(0, 8),
+      },
+      { status: 500 },
+    );
+  }
+}
+
+async function handle(
+  _req: NextRequest,
+  paramsP: Promise<{ id: string }>,
+) {
+  const { id } = await paramsP;
 
   const order = sqlite
     .prepare(
