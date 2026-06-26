@@ -541,6 +541,45 @@ try {
   )`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cogs_journals_week ON cogs_journals(week_start, week_end)`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cogs_journals_status ON cogs_journals(status)`);
+
+  // Daily COGS observability: run log + exceptions worklist.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS cogs_run_log (
+    id TEXT PRIMARY KEY NOT NULL,
+    run_date TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'live',
+    orders_processed INTEGER NOT NULL DEFAULT 0,
+    units_costed INTEGER NOT NULL DEFAULT 0,
+    total_cogs REAL NOT NULL DEFAULT 0,
+    exceptions_opened INTEGER NOT NULL DEFAULT 0,
+    cogs_journal_id TEXT,
+    xero_journal_id TEXT,
+    duration_ms INTEGER,
+    error TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cogs_run_log_date ON cogs_run_log(run_date)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cogs_run_log_created ON cogs_run_log(created_at)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS cogs_exceptions (
+    id TEXT PRIMARY KEY NOT NULL,
+    type TEXT NOT NULL,
+    order_id TEXT,
+    order_item_id TEXT,
+    order_number TEXT,
+    sku TEXT,
+    sku_id TEXT,
+    units INTEGER,
+    channel TEXT,
+    detail TEXT,
+    run_id TEXT,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT DEFAULT (datetime('now')),
+    resolved_at TEXT
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cogs_exceptions_status ON cogs_exceptions(status)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cogs_exceptions_type ON cogs_exceptions(type)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cogs_exceptions_order ON cogs_exceptions(order_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cogs_exceptions_order_item ON cogs_exceptions(order_item_id)`);
 } catch (e) { console.error("[db] FIFO tables error:", e); }
 
 // Shopify category metafield sync: cached AI categorization per product

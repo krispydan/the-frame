@@ -153,6 +153,56 @@ export const cogsJournals = sqliteTable("cogs_journals", {
   index("idx_cogs_journals_status").on(table.status),
 ]);
 
+// ── COGS Run Log (one row per daily-COGS job invocation) ──
+// Observability: every run — live, dry-run, backfill, correction — leaves a
+// trace so months later we can answer "what did the COGS job do on X day".
+export const cogsRunLog = sqliteTable("cogs_run_log", {
+  id: id(),
+  runDate: text("run_date").notNull(),       // the COGS day being processed (YYYY-MM-DD)
+  mode: text("mode", { enum: ["live", "dry_run", "backfill", "correction"] }).notNull().default("live"),
+  ordersProcessed: integer("orders_processed").notNull().default(0),
+  unitsCosted: integer("units_costed").notNull().default(0),
+  totalCogs: real("total_cogs").notNull().default(0),
+  exceptionsOpened: integer("exceptions_opened").notNull().default(0),
+  cogsJournalId: text("cogs_journal_id"),     // → cogs_journals.id
+  xeroJournalId: text("xero_journal_id"),
+  durationMs: integer("duration_ms"),
+  error: text("error"),
+  createdAt: timestamp("created_at"),
+}, (table) => [
+  index("idx_cogs_run_log_date").on(table.runDate),
+  index("idx_cogs_run_log_created").on(table.createdAt),
+]);
+
+// ── COGS Exceptions (per-order/SKU failures that block clean costing) ──
+// The worklist + audit trail. Nothing is ever silently swallowed: shortfalls,
+// zero/implausible cost, and unmapped SKUs each land here and on Slack. An
+// exception auto-resolves when a later run successfully costs the same order
+// item (e.g. after a layer is seeded or a cost is corrected).
+export const cogsExceptions = sqliteTable("cogs_exceptions", {
+  id: id(),
+  type: text("type", {
+    enum: ["shortfall", "zero_cost", "implausible_cost", "unmapped_sku"],
+  }).notNull(),
+  orderId: text("order_id"),
+  orderItemId: text("order_item_id"),
+  orderNumber: text("order_number"),
+  sku: text("sku"),
+  skuId: text("sku_id"),
+  units: integer("units"),                    // units affected
+  channel: text("channel"),
+  detail: text("detail"),                     // JSON: amounts, layer info, message
+  runId: text("run_id"),                      // → cogs_run_log.id that raised it
+  status: text("status", { enum: ["open", "resolved"] }).notNull().default("open"),
+  createdAt: timestamp("created_at"),
+  resolvedAt: text("resolved_at"),
+}, (table) => [
+  index("idx_cogs_exceptions_status").on(table.status),
+  index("idx_cogs_exceptions_type").on(table.type),
+  index("idx_cogs_exceptions_order").on(table.orderId),
+  index("idx_cogs_exceptions_order_item").on(table.orderItemId),
+]);
+
 // ── Expenses ──
 export const expenses = sqliteTable("expenses", {
   id: id(),
