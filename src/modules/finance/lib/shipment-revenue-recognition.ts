@@ -48,15 +48,6 @@ interface ShippedOrderRow {
   payoutPlatform: string;
 }
 
-interface CogsLineRow {
-  sku: string | null;
-  productName: string | null;
-  colorName: string | null;
-  quantity: number;
-  costPrice: number | null;
-  lineCogs: number;
-}
-
 export interface RecognitionRunResult {
   ok: boolean;
   attempted: number;
@@ -161,23 +152,14 @@ export async function runShipmentRevenueRecognition(): Promise<RecognitionRunRes
       continue;
     }
 
-    // Per-order COGS aggregation from local order_items + catalog_skus.cost_price
-    const cogsLines = sqlite.prepare(`
-      SELECT
-        oi.sku            AS sku,
-        oi.product_name   AS productName,
-        oi.color_name     AS colorName,
-        oi.quantity       AS quantity,
-        cs.cost_price     AS costPrice,
-        COALESCE(cs.cost_price, 0) * oi.quantity AS lineCogs
-      FROM order_items oi
-      LEFT JOIN catalog_skus cs ON cs.id = oi.sku_id
-      WHERE oi.order_id = ?
-    `).all(order.orderId) as CogsLineRow[];
-    const cogsTotal = cogsLines.reduce((s, l) => s + (l.lineCogs || 0), 0);
-
-    // Build the journal
-    const journal = buildShipmentRecognitionJournal(order, cogsTotal, cfg);
+    // COGS is NO LONGER posted here. It's owned entirely by the daily
+    // FIFO COGS job (finance/lib/daily-cogs.ts), which recognizes COGS at
+    // shipment using true landed cost from inventory_cost_layers — decoupled
+    // from this payout-coupled revenue job. Posting COGS here too would
+    // double-count. This journal is revenue-recognition ONLY:
+    //   DR 2050 Deferred Revenue / CR 4030|4040 Sales.
+    // See plan: "Phase 2 — Decouple COGS from revenue".
+    const journal = buildShipmentRecognitionJournal(order, cfg);
     const post = await postManualJournal(journal);
     if (!post.success) {
       result.failed++;
@@ -198,7 +180,7 @@ export async function runShipmentRevenueRecognition(): Promise<RecognitionRunRes
       channel: order.channel,
       recognizedAt: order.shippedAt.slice(0, 10),
       revenueAmount: order.total,
-      cogsAmount: cogsTotal,
+      cogsAmount: 0, // COGS handled by the daily FIFO COGS job, not here
       currency: order.currency || "USD",
       xeroManualJournalId: post.manualJournalId,
     });
@@ -208,7 +190,7 @@ export async function runShipmentRevenueRecognition(): Promise<RecognitionRunRes
       orderNumber: order.orderNumber,
       status: "recognized",
       revenue: order.total,
-      cogs: cogsTotal,
+      cogs: 0,
     });
   }
 
@@ -260,9 +242,11 @@ async function loadChannelXeroConfig(channel: string): Promise<ChannelXeroConfig
   };
 }
 
+// Revenue-recognition ONLY (DR 2050 Deferred Revenue / CR 4030|4040 Sales).
+// COGS is posted separately by the daily FIFO COGS job at shipment using true
+// landed cost — see finance/lib/daily-cogs.ts.
 function buildShipmentRecognitionJournal(
   order: ShippedOrderRow,
-  cogsTotal: number,
   cfg: ChannelXeroConfig,
 ) {
   // Narration follows the payout platform — Faire orders read as
@@ -293,28 +277,7 @@ function buildShipmentRecognitionJournal(
     },
   ];
 
-  // COGS side: only if we actually computed cost > 0 (otherwise we'd post a
-  // zero-amount line which Xero rejects)
-  if (cogsTotal > 0) {
-    lines.push(
-      {
-        LineAmount: cogsTotal,    // debit COGS
-        AccountCode: cfg.cogsAccountCode,
-        Description: `COGS — ${platform} order ${order.orderNumber}`,
-        Tracking: tracking,
-      },
-      {
-        LineAmount: -cogsTotal,   // credit Inventory
-        AccountCode: cfg.inventoryAccountCode,
-        Description: `Inventory release — ${platform} order ${order.orderNumber}`,
-        Tracking: tracking,
-      },
-    );
-  }
-
-  const narration = cogsTotal > 0
-    ? `Shipment recognition — ${platform} order ${order.orderNumber} | revenue ${order.total.toFixed(2)} | COGS ${cogsTotal.toFixed(2)} | ${order.shippedAt.slice(0, 10)}`
-    : `Shipment recognition — ${platform} order ${order.orderNumber} | revenue ${order.total.toFixed(2)} | no COGS (missing cost_price) | ${order.shippedAt.slice(0, 10)}`;
+  const narration = `Revenue recognition — ${platform} order ${order.orderNumber} | revenue ${order.total.toFixed(2)} | ${order.shippedAt.slice(0, 10)} (COGS posted separately by daily FIFO job)`;
 
   return {
     Narration: narration,
