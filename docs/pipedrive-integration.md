@@ -1,6 +1,25 @@
 # Pipedrive integration — spec & rollout plan
 
-**Status:** Draft for review · **Owner:** CRM / Sales · **Last updated:** 2026-06-27
+**Status:** Technical appendix · **Owner:** CRM / Sales · **Last updated:** 2026-06-27
+
+> ⚠️ **[`crm-master-plan.md`](./crm-master-plan.md) is the authoritative source.**
+> This appendix predates review rounds 1–3 and is **superseded where it differs**.
+> In particular, the master plan overrides the following:
+> - **Revenue truth = the frame `orders` table** (net of refunds), *not* the
+>   Customers pipeline. Do not sum Pipedrive deals for revenue. (This appendix's
+>   "Customers pipeline is the revenue source of truth" is obsolete.)
+> - **Pipedrive is the system of record for opportunities; the frame's internal
+>   `deals` table is demoted to a read-only projection** (master plan §4.1). The
+>   "mirror 1:1" framing below understates a required refactor (retire
+>   `syncDealStage`; add `pipeline`/`is_open`/`pipedrive_deal_id`).
+> - **A Pipedrive deal moving to Won does NOT set `customer`** — only a real
+>   wholesale order does (master plan §5, keystone #3).
+> - **New build items** not described here: `reQualify()` for dead leads;
+>   `order.updated`/`refunded`/`cancelled` events (they aren't emitted today);
+>   partial-refund handling; fan-out `source` union extension; in-handler webhook
+>   basic-auth. See master plan §9.1.
+> Read this appendix for client/route/cron mechanics; defer to the master plan
+> for design decisions.
 
 This document specifies how the-frame will sync high-potential leads into
 [Pipedrive](https://www.pipedrive.com/). It is a **plan**, not yet an
