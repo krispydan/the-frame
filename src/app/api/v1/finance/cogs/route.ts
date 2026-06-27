@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, sqlite } from "@/lib/db";
 import { activityFeed } from "@/modules/core/schema";
 import {
   calculateCogs,
@@ -10,6 +10,32 @@ import {
   depleteUncostedOrders,
 } from "@/modules/finance/lib/fifo-engine";
 import { postCogsJournalToXero } from "@/modules/finance/lib/xero-client";
+import { runDailyCogsPosting } from "@/modules/finance/lib/daily-cogs";
+import { runCogsBackfill, correctCogsForDate, resolveException } from "@/modules/finance/lib/cogs-backfill";
+
+/** Monitoring snapshot for the COGS dashboard header. */
+function getCogsHealth() {
+  const lastRun = sqlite.prepare(
+    "SELECT * FROM cogs_run_log ORDER BY created_at DESC LIMIT 1",
+  ).get() as Record<string, unknown> | undefined;
+
+  const openByType = sqlite.prepare(
+    "SELECT type, COUNT(*) AS count, SUM(COALESCE(units,0)) AS units FROM cogs_exceptions WHERE status='open' GROUP BY type",
+  ).all() as Array<{ type: string; count: number; units: number }>;
+
+  const openTotal = openByType.reduce((s, r) => s + r.count, 0);
+
+  const oldestOpen = sqlite.prepare(
+    "SELECT MIN(created_at) AS oldest FROM cogs_exceptions WHERE status='open'",
+  ).get() as { oldest: string | null };
+
+  // SKUs sitting on a zero/implausible cost layer (bad data still in the book).
+  const zeroCostLayers = (sqlite.prepare(
+    "SELECT COUNT(DISTINCT sku_id) AS c FROM inventory_cost_layers WHERE remaining_quantity > 0 AND unit_cost < 0.1",
+  ).get() as { c: number }).c;
+
+  return { lastRun: lastRun ?? null, openByType, openTotal, oldestOpen: oldestOpen.oldest, zeroCostLayers };
+}
 
 /**
  * GET /api/v1/finance/cogs — list COGS journals and dashboard data
@@ -22,6 +48,45 @@ export async function GET(request: NextRequest) {
   if (searchParams.get("journals") === "true") {
     const journals = getCogsJournals();
     return NextResponse.json(journals);
+  }
+
+  if (searchParams.get("health") === "true") {
+    return NextResponse.json(getCogsHealth());
+  }
+
+  if (searchParams.get("runLog") === "true") {
+    const rows = sqlite.prepare(
+      "SELECT * FROM cogs_run_log ORDER BY created_at DESC LIMIT 30",
+    ).all();
+    return NextResponse.json(rows);
+  }
+
+  if (searchParams.get("exceptions") === "true") {
+    const status = searchParams.get("status") || "open";
+    const rows = sqlite.prepare(
+      "SELECT * FROM cogs_exceptions WHERE status = ? ORDER BY created_at DESC LIMIT 200",
+    ).all(status);
+    return NextResponse.json(rows);
+  }
+
+  // Per-day journal drill-down: the orders/units behind a posted day.
+  const detailDate = searchParams.get("journalDetail");
+  if (detailDate) {
+    const rows = sqlite.prepare(`
+      SELECT d.order_id AS orderId, o.order_number AS orderNumber, d.channel,
+             cs.sku, cp.name AS productName,
+             SUM(d.quantity) AS units,
+             ROUND(SUM(d.quantity * d.landed_cost_per_unit), 2) AS landedCost
+      FROM inventory_cost_depletions d
+      LEFT JOIN orders o ON o.id = d.order_id
+      LEFT JOIN inventory_cost_layers l ON l.id = d.cost_layer_id
+      LEFT JOIN catalog_skus cs ON cs.id = l.sku_id
+      LEFT JOIN catalog_products cp ON cp.id = cs.product_id
+      WHERE d.depleted_at >= ? AND d.depleted_at <= ?
+      GROUP BY d.order_id, cs.sku
+      ORDER BY o.order_number
+    `).all(`${detailDate}T00:00:00`, `${detailDate}T23:59:59.999`);
+    return NextResponse.json(rows);
   }
 
   const weekStart = searchParams.get("weekStart");
@@ -117,6 +182,42 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(result);
   }
 
+  // ── Daily FIFO COGS (the primary, automated flow) ──
+  if (action === "run-daily") {
+    const { date, dryRun, force } = body;
+    const result = await runDailyCogsPosting({ date, dryRun, force });
+    return NextResponse.json(result);
+  }
+
+  if (action === "backfill") {
+    const { from, to, dryRun, force } = body;
+    if (!from || !to) return NextResponse.json({ error: "from and to required" }, { status: 400 });
+    const result = await runCogsBackfill({ from, to, dryRun, force });
+    return NextResponse.json(result);
+  }
+
+  if (action === "correct-date") {
+    const { date, reason } = body;
+    if (!date) return NextResponse.json({ error: "date required" }, { status: 400 });
+    try {
+      const result = await correctCogsForDate(date, { reason });
+      return NextResponse.json(result);
+    } catch (e) {
+      return NextResponse.json({ error: String(e) }, { status: 400 });
+    }
+  }
+
+  if (action === "resolve-exception") {
+    const { exceptionId } = body;
+    if (!exceptionId) return NextResponse.json({ error: "exceptionId required" }, { status: 400 });
+    try {
+      const result = await resolveException(exceptionId);
+      return NextResponse.json(result);
+    } catch (e) {
+      return NextResponse.json({ error: String(e) }, { status: 400 });
+    }
+  }
+
   if (action === "full-cycle") {
     const { weekStart, weekEnd, asDraft = true, notes } = body;
     if (!weekStart || !weekEnd) {
@@ -164,5 +265,5 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  return NextResponse.json({ error: "Unknown action. Use: calculate, post-to-xero, deplete-orders, full-cycle" }, { status: 400 });
+  return NextResponse.json({ error: "Unknown action. Use: run-daily, backfill, correct-date, resolve-exception, calculate, post-to-xero, deplete-orders, full-cycle" }, { status: 400 });
 }

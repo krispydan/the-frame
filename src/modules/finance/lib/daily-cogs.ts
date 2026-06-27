@@ -68,9 +68,11 @@ function yesterdayUTC(): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Run the daily COGS posting for a single day (defaults to yesterday, UTC). */
+/** Run the daily COGS posting for a single day (defaults to yesterday, UTC).
+ *  opts.postDate overrides the Xero journal Date (locked-period correction:
+ *  post into the current open period while still costing the original day). */
 export async function runDailyCogsPosting(
-  opts: { date?: string; dryRun?: boolean; force?: boolean } = {},
+  opts: { date?: string; dryRun?: boolean; force?: boolean; postDate?: string } = {},
 ): Promise<DailyCogsResult> {
   const date = opts.date || yesterdayUTC();
   const dryRun = !!opts.dryRun;
@@ -205,7 +207,7 @@ export async function runDailyCogsPosting(
       const journalId = saveCogsJournal(calc, `Daily FIFO COGS ${date}`);
       result.journalId = journalId;
 
-      const journal = await buildDailyCogsJournal(date, calc);
+      const journal = await buildDailyCogsJournal(date, calc, { postDate: opts.postDate });
       const post = await postManualJournal(journal);
       if (!post.success) {
         throw new Error(`Xero post failed: ${post.error}`);
@@ -230,8 +232,20 @@ export async function runDailyCogsPosting(
   }
 }
 
-/** Build the channel × component ManualJournal payload (capitalized model). */
-async function buildDailyCogsJournal(date: string, calc: Awaited<ReturnType<typeof calculateCogs>>) {
+/**
+ * Build the channel × component ManualJournal payload (capitalized model).
+ *
+ * opts.reverse negates every line — used by the correction engine to post an
+ * equal-and-opposite reversing journal (never edit-in-place).
+ * opts.postDate overrides the journal Date (locked-period guard: post into the
+ * current open period while the narration still references the original day).
+ */
+export async function buildDailyCogsJournal(
+  date: string,
+  calc: Awaited<ReturnType<typeof calculateCogs>>,
+  opts: { reverse?: boolean; postDate?: string } = {},
+) {
+  const sign = opts.reverse ? -1 : 1;
   const lines: Array<Record<string, unknown>> = [];
   let inventoryCredit = 0;
 
@@ -247,7 +261,7 @@ async function buildDailyCogsJournal(date: string, calc: Awaited<ReturnType<type
     const push = (amount: number, acct: string, desc: string) => {
       const a = round(amount);
       if (a <= 0) return; // Xero rejects zero lines
-      lines.push({ LineAmount: a, AccountCode: acct, Description: desc, Tracking: tracking });
+      lines.push({ LineAmount: sign * a, AccountCode: acct, Description: desc, Tracking: tracking });
       inventoryCredit += a;
     };
     push(b.productCost, productAcct, `COGS Product — ${label} (${b.units}u)`);
@@ -258,14 +272,18 @@ async function buildDailyCogsJournal(date: string, calc: Awaited<ReturnType<type
   // Single net inventory credit (all components were capitalized into 1400).
   const invAcct = (await loadChannelXeroConfig(Object.keys(calc.channelBreakdown)[0] || ""))?.inventoryAccountCode || DEFAULT_INVENTORY_ACCOUNT;
   lines.push({
-    LineAmount: -(Math.round(inventoryCredit * 100) / 100),
+    LineAmount: sign * -(Math.round(inventoryCredit * 100) / 100),
     AccountCode: invAcct,
     Description: `Inventory release — ${date} (${calc.unitCount}u, landed)`,
   });
 
+  const narration = opts.reverse
+    ? `REVERSAL of Daily COGS ${date} | ${calc.unitCount}u | ref:cogs-${date}-reversal`
+    : `Daily COGS — ${date} | ${calc.unitCount}u | ref:cogs-${date}`;
+
   return {
-    Narration: `Daily COGS — ${date} | ${calc.unitCount}u | ref:cogs-${date}`,
-    Date: date,
+    Narration: narration,
+    Date: opts.postDate || date,
     Status: "POSTED" as const,
     JournalLines: lines,
   };

@@ -557,6 +557,37 @@ export async function notifyCogsException(opts: {
   });
 }
 
+export async function notifyCogsCorrected(opts: {
+  date: string;
+  reason: string;
+  reversedJournalId: string | null;
+  newJournalId: string | null;
+  newTotal: number;
+  currency: string;
+  postedInPeriodNote?: string;
+}) {
+  await postSlack({
+    topic: "finance.cogs_corrected",
+    text: `♻️ COGS corrected for ${opts.date}: ${money(opts.newTotal, opts.currency)}`,
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `♻️ *COGS corrected — ${opts.date}*\n${opts.reason}\nNew total: *${money(opts.newTotal, opts.currency)}*${opts.postedInPeriodNote ? `\n_${opts.postedInPeriodNote}_` : ""}`,
+        },
+      },
+      {
+        type: "context",
+        elements: [{
+          type: "mrkdwn",
+          text: `Reversed: \`${opts.reversedJournalId ?? "—"}\` · New: \`${opts.newJournalId ?? "—"}\``,
+        }],
+      },
+    ],
+  });
+}
+
 export async function notifyXeroSyncFailed(opts: {
   payoutId: number | null;
   platform: string | null;
