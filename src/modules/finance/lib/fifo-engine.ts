@@ -376,6 +376,15 @@ export function getCostLayerSummary(): Array<{
   totalUnits: number;
   remainingUnits: number;
   avgLandedCost: number;
+  /** Landed cost of the OLDEST remaining layer — i.e. what the next unit
+   *  actually costs when it sells under FIFO. The blended avg above can match
+   *  no real layer when air + ocean shipments coexist. */
+  nextUnitCost: number | null;
+  /** Distinct shipping methods across remaining layers ("air"/"ocean") so the
+   *  UI can flag mixed-method SKUs without expanding. */
+  methods: string | null;
+  /** Count of layers with stock left (the FIFO depth that matters). */
+  openLayerCount: number;
   oldestLayerDate: string | null;
   layerCount: number;
 }> {
@@ -388,7 +397,13 @@ export function getCostLayerSummary(): Array<{
       SUM(cl.quantity) as totalUnits,
       SUM(cl.remaining_quantity) as remainingUnits,
       ROUND(AVG(cl.landed_cost_per_unit), 4) as avgLandedCost,
-      MIN(cl.received_at) as oldestLayerDate,
+      (SELECT x.landed_cost_per_unit FROM inventory_cost_layers x
+        WHERE x.sku_id = cl.sku_id AND x.remaining_quantity > 0
+        ORDER BY x.received_at ASC, x.created_at ASC LIMIT 1) as nextUnitCost,
+      (SELECT GROUP_CONCAT(DISTINCT x.shipping_method) FROM inventory_cost_layers x
+        WHERE x.sku_id = cl.sku_id AND x.remaining_quantity > 0 AND x.shipping_method IS NOT NULL) as methods,
+      SUM(CASE WHEN cl.remaining_quantity > 0 THEN 1 ELSE 0 END) as openLayerCount,
+      MIN(CASE WHEN cl.remaining_quantity > 0 THEN cl.received_at END) as oldestLayerDate,
       COUNT(*) as layerCount
     FROM inventory_cost_layers cl
     LEFT JOIN catalog_skus cs ON cl.sku_id = cs.id
@@ -399,7 +414,8 @@ export function getCostLayerSummary(): Array<{
   `).all() as Array<{
     skuId: string; sku: string | null; productName: string | null;
     colorName: string | null; totalUnits: number; remainingUnits: number;
-    avgLandedCost: number; oldestLayerDate: string | null; layerCount: number;
+    avgLandedCost: number; nextUnitCost: number | null; methods: string | null;
+    openLayerCount: number; oldestLayerDate: string | null; layerCount: number;
   }>;
 }
 

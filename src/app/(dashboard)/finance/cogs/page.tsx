@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Fragment } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,8 +24,25 @@ interface CostLayerSummary {
   totalUnits: number;
   remainingUnits: number;
   avgLandedCost: number;
+  nextUnitCost: number | null;
+  methods: string | null;
+  openLayerCount: number;
   oldestLayerDate: string | null;
   layerCount: number;
+}
+
+/** Per-layer detail from GET /cost-layers?skuId= (snake_case: SELECT *). */
+interface CostLayerDetail {
+  id: string;
+  quantity: number;
+  remaining_quantity: number;
+  unit_cost: number;
+  freight_per_unit: number;
+  duties_per_unit: number;
+  landed_cost_per_unit: number;
+  shipping_method: string | null;
+  po_number: string | null;
+  received_at: string;
 }
 
 interface CogsJournal {
@@ -54,6 +71,26 @@ function formatCurrency(n: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
 }
 
+/** ✈ Air / 🚢 Ocean badge for a shipping method (or comma-list of methods). */
+function methodBadge(method: string | null) {
+  if (!method) return null;
+  const parts = method.split(",").map((m) => m.trim().toLowerCase()).filter(Boolean);
+  const seen = new Set(parts);
+  const chips: Array<{ label: string; cls: string }> = [];
+  if (seen.has("air")) chips.push({ label: "✈ Air", cls: "bg-sky-100 text-sky-700" });
+  if (seen.has("ocean") || seen.has("sea")) chips.push({ label: "🚢 Ocean", cls: "bg-indigo-100 text-indigo-700" });
+  for (const p of parts) {
+    if (!["air", "ocean", "sea"].includes(p)) chips.push({ label: p, cls: "bg-gray-100 text-gray-700" });
+  }
+  return (
+    <span className="inline-flex gap-1">
+      {chips.map((c) => (
+        <span key={c.label} className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${c.cls}`}>{c.label}</span>
+      ))}
+    </span>
+  );
+}
+
 function getMonday(d: Date): string {
   const day = d.getDay();
   const diff = d.getDate() - day + (day === 0 ? -6 : 1);
@@ -72,6 +109,21 @@ export default function CogsPage() {
   const [layers, setLayers] = useState<CostLayerSummary[]>([]);
   const [journals, setJournals] = useState<CogsJournal[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Expandable per-SKU layer detail (lazy-fetched from ?skuId=)
+  const [expandedSku, setExpandedSku] = useState<string | null>(null);
+  const [skuLayers, setSkuLayers] = useState<Record<string, CostLayerDetail[]>>({});
+  const toggleSkuLayers = useCallback(async (skuId: string) => {
+    if (expandedSku === skuId) { setExpandedSku(null); return; }
+    setExpandedSku(skuId);
+    if (!skuLayers[skuId]) {
+      try {
+        const res = await fetch(`/api/v1/finance/cost-layers?skuId=${skuId}`);
+        const data = (await res.json()) as CostLayerDetail[];
+        setSkuLayers((m) => ({ ...m, [skuId]: data }));
+      } catch { /* leave unexpanded on error */ }
+    }
+  }, [expandedSku, skuLayers]);
 
   // Week picker — defaults to current week
   const today = new Date();
@@ -430,7 +482,7 @@ export default function CogsPage() {
             <Layers className="h-5 w-5" /> Inventory Cost Layers
           </CardTitle>
           <CardDescription>
-            Current FIFO inventory stack — oldest layers consumed first on sale
+            Current FIFO inventory stack — oldest layers consumed first on sale. Click a SKU to see its layers (air vs ocean cost differently).
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -445,31 +497,102 @@ export default function CogsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-6"></TableHead>
                   <TableHead>SKU</TableHead>
                   <TableHead>Product / Color</TableHead>
+                  <TableHead>Method</TableHead>
                   <TableHead className="text-right">Remaining</TableHead>
-                  <TableHead className="text-right">Avg Landed Cost</TableHead>
+                  <TableHead className="text-right">Next Unit Cost</TableHead>
+                  <TableHead className="text-right">Avg Landed</TableHead>
                   <TableHead className="text-right">Layer Value</TableHead>
                   <TableHead className="text-right">Layers</TableHead>
-                  <TableHead>Oldest</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {layers.map((l) => (
-                  <TableRow key={l.skuId}>
-                    <TableCell className="font-mono text-sm">{l.sku || l.skuId.slice(0, 8)}</TableCell>
-                    <TableCell className="text-sm">
-                      {l.productName} {l.colorName ? `— ${l.colorName}` : ""}
-                    </TableCell>
-                    <TableCell className="text-right font-semibold">{l.remainingUnits}</TableCell>
-                    <TableCell className="text-right text-sm">{formatCurrency(l.avgLandedCost)}</TableCell>
-                    <TableCell className="text-right text-sm font-medium">
-                      {formatCurrency(l.remainingUnits * l.avgLandedCost)}
-                    </TableCell>
-                    <TableCell className="text-right text-sm">{l.layerCount}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{formatDate(l.oldestLayerDate)}</TableCell>
-                  </TableRow>
-                ))}
+                {layers.map((l) => {
+                  const open = expandedSku === l.skuId;
+                  const detail = skuLayers[l.skuId];
+                  const mixed = (l.methods || "").split(",").map((m) => m.trim()).filter(Boolean).length > 1;
+                  return (
+                    <Fragment key={l.skuId}>
+                      <TableRow
+                        className="cursor-pointer hover:bg-muted/40"
+                        onClick={() => toggleSkuLayers(l.skuId)}
+                      >
+                        <TableCell className="text-muted-foreground">{open ? "▾" : "▸"}</TableCell>
+                        <TableCell className="font-mono text-sm">{l.sku || l.skuId.slice(0, 8)}</TableCell>
+                        <TableCell className="text-sm">
+                          {l.productName} {l.colorName ? `— ${l.colorName}` : ""}
+                        </TableCell>
+                        <TableCell>{methodBadge(l.methods)}</TableCell>
+                        <TableCell className="text-right font-semibold">{l.remainingUnits}</TableCell>
+                        <TableCell className="text-right text-sm font-medium">
+                          {l.nextUnitCost != null ? formatCurrency(l.nextUnitCost) : "—"}
+                          {mixed && l.nextUnitCost != null && Math.abs(l.nextUnitCost - l.avgLandedCost) > 0.005 && (
+                            <span className="ml-1 text-[10px] text-amber-600" title="Next unit differs from blended average (mixed air/ocean layers)">≠avg</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right text-sm text-muted-foreground">{formatCurrency(l.avgLandedCost)}</TableCell>
+                        <TableCell className="text-right text-sm font-medium">
+                          {formatCurrency(l.remainingUnits * l.avgLandedCost)}
+                        </TableCell>
+                        <TableCell className="text-right text-sm">
+                          {l.openLayerCount}{l.layerCount !== l.openLayerCount ? <span className="text-muted-foreground">/{l.layerCount}</span> : null}
+                        </TableCell>
+                      </TableRow>
+                      {open && (
+                        <TableRow className="bg-muted/20">
+                          <TableCell></TableCell>
+                          <TableCell colSpan={8} className="p-0">
+                            {!detail ? (
+                              <div className="py-3 px-2 text-xs text-muted-foreground flex items-center gap-2">
+                                <Loader2 className="h-3 w-3 animate-spin" /> Loading layers…
+                              </div>
+                            ) : (
+                              <Table>
+                                <TableHeader>
+                                  <TableRow className="text-xs">
+                                    <TableHead className="text-xs">Received</TableHead>
+                                    <TableHead className="text-xs">PO</TableHead>
+                                    <TableHead className="text-xs">Method</TableHead>
+                                    <TableHead className="text-right text-xs">Remaining / Qty</TableHead>
+                                    <TableHead className="text-right text-xs">Product</TableHead>
+                                    <TableHead className="text-right text-xs">Freight</TableHead>
+                                    <TableHead className="text-right text-xs">Duty</TableHead>
+                                    <TableHead className="text-right text-xs">Landed / unit</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {detail.map((d, i) => {
+                                    const isNext = d.remaining_quantity > 0 && detail.filter((x) => x.remaining_quantity > 0)[0]?.id === d.id;
+                                    return (
+                                      <TableRow key={d.id} className={`text-xs ${d.remaining_quantity === 0 ? "opacity-40" : ""}`}>
+                                        <TableCell className="text-xs">
+                                          {formatDate(d.received_at)}
+                                          {isNext && <span className="ml-1 text-[10px] font-medium text-green-600">next to sell</span>}
+                                        </TableCell>
+                                        <TableCell className="text-xs font-mono">{d.po_number || "—"}</TableCell>
+                                        <TableCell>{methodBadge(d.shipping_method)}</TableCell>
+                                        <TableCell className="text-right text-xs">{d.remaining_quantity} / {d.quantity}</TableCell>
+                                        <TableCell className="text-right text-xs">{formatCurrency(d.unit_cost)}</TableCell>
+                                        <TableCell className="text-right text-xs">{formatCurrency(d.freight_per_unit)}</TableCell>
+                                        <TableCell className="text-right text-xs">{formatCurrency(d.duties_per_unit)}</TableCell>
+                                        <TableCell className="text-right text-xs font-semibold">{formatCurrency(d.landed_cost_per_unit)}</TableCell>
+                                      </TableRow>
+                                    );
+                                  })}
+                                  {detail.length === 0 && (
+                                    <TableRow><TableCell colSpan={8} className="text-xs text-muted-foreground py-2">No layers.</TableCell></TableRow>
+                                  )}
+                                </TableBody>
+                              </Table>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
