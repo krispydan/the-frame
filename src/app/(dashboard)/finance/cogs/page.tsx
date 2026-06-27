@@ -105,9 +105,28 @@ function getSunday(monday: string): string {
   return d.toISOString().split("T")[0];
 }
 
+interface CogsHealth {
+  lastRun: {
+    run_date: string; mode: string; units_costed: number; total_cogs: number;
+    exceptions_opened: number; xero_journal_id: string | null; error: string | null; created_at: string;
+  } | null;
+  openByType: Array<{ type: string; count: number; units: number }>;
+  openTotal: number;
+  oldestOpen: string | null;
+  zeroCostLayers: number;
+}
+
+const EXCEPTION_LABEL: Record<string, string> = {
+  shortfall: "No inventory layer",
+  zero_cost: "Zero / implausible cost",
+  implausible_cost: "Implausible cost",
+  unmapped_sku: "Unmapped SKU",
+};
+
 export default function CogsPage() {
   const [layers, setLayers] = useState<CostLayerSummary[]>([]);
   const [journals, setJournals] = useState<CogsJournal[]>([]);
+  const [health, setHealth] = useState<CogsHealth | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Expandable per-SKU layer detail (lazy-fetched from ?skuId=)
@@ -142,14 +161,21 @@ export default function CogsPage() {
   const [depleting, setDepleting] = useState(false);
   const [posting, setPosting] = useState<string | null>(null);
 
+  // Daily run / backfill controls
+  const [running, setRunning] = useState(false);
+  const [backfillFrom, setBackfillFrom] = useState("");
+  const [backfillTo, setBackfillTo] = useState("");
+
   const load = useCallback(async () => {
     try {
-      const [layerRes, journalRes] = await Promise.all([
+      const [layerRes, journalRes, healthRes] = await Promise.all([
         fetch("/api/v1/finance/cost-layers?summary=true"),
         fetch("/api/v1/finance/cogs?journals=true"),
+        fetch("/api/v1/finance/cogs?health=true"),
       ]);
       if (layerRes.ok) setLayers(await layerRes.json());
       if (journalRes.ok) setJournals(await journalRes.json());
+      if (healthRes.ok) setHealth(await healthRes.json());
     } catch {
       toast.error("Failed to load COGS data");
     } finally {
@@ -158,6 +184,44 @@ export default function CogsPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const handleRunDaily = async (dryRun: boolean) => {
+    setRunning(true);
+    try {
+      const res = await fetch("/api/v1/finance/cogs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "run-daily", dryRun }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Run failed");
+      if (data.skipped) toast.info(data.skipped);
+      else toast.success(`${dryRun ? "Dry run" : "Posted"}: ${data.unitsCosted} units, $${(data.totalCogs || 0).toFixed(2)}${data.exceptions?.length ? ` · ${data.exceptions.length} exception(s)` : ""}`);
+      if (!dryRun) await load();
+    } catch (e) {
+      toast.error(String(e instanceof Error ? e.message : e));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const handleBackfill = async (dryRun: boolean) => {
+    if (!backfillFrom || !backfillTo) { toast.error("Pick a from and to date"); return; }
+    setRunning(true);
+    try {
+      const res = await fetch("/api/v1/finance/cogs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "backfill", from: backfillFrom, to: backfillTo, dryRun }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Backfill failed");
+      toast.success(`${dryRun ? "Dry run" : "Backfilled"} ${data.days?.length || 0} days: ${data.totalUnits} units, $${(data.totalCogs || 0).toFixed(2)}${data.totalExceptions ? ` · ${data.totalExceptions} exception(s)` : ""}`);
+      if (!dryRun) await load();
+    } catch (e) {
+      toast.error(String(e instanceof Error ? e.message : e));
+    } finally {
+      setRunning(false);
+    }
+  };
 
   const handleWeekStartChange = (val: string) => {
     setWeekStart(val);
@@ -264,7 +328,7 @@ export default function CogsPage() {
             <h1 className="text-3xl font-bold tracking-tight">FIFO Inventory Costing</h1>
           </div>
           <p className="text-muted-foreground ml-8">
-            Lot-based FIFO costing with weekly COGS journal posting to Xero
+            FIFO landed-cost COGS — posts automatically every day at shipment. Tools below for manual runs, backfill, and corrections.
           </p>
         </div>
       </div>
@@ -309,6 +373,91 @@ export default function CogsPage() {
         </Card>
       </div>
 
+      {/* COGS Health — the monitoring surface for the unattended daily job */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CheckCircle className="h-5 w-5" /> COGS Health
+          </CardTitle>
+          <CardDescription>Status of the automated daily posting + anything blocking clean costing</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Last run */}
+            <div className="rounded-md border p-3">
+              <div className="text-xs text-muted-foreground mb-1">Last run</div>
+              {health?.lastRun ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    {health.lastRun.error
+                      ? <Badge variant="destructive">Failed</Badge>
+                      : <Badge className="bg-green-100 text-green-700">OK</Badge>}
+                    <span className="text-sm font-medium">{health.lastRun.run_date}</span>
+                    {health.lastRun.mode !== "live" && <span className="text-xs text-muted-foreground">({health.lastRun.mode})</span>}
+                  </div>
+                  <p className="text-sm mt-1">{health.lastRun.units_costed} units · {formatCurrency(health.lastRun.total_cogs)}</p>
+                  {health.lastRun.error && <p className="text-xs text-red-600 mt-1 line-clamp-2">{health.lastRun.error}</p>}
+                </>
+              ) : <p className="text-sm text-muted-foreground">Never run yet</p>}
+            </div>
+            {/* Open exceptions */}
+            <div className="rounded-md border p-3">
+              <div className="text-xs text-muted-foreground mb-1">Open exceptions</div>
+              {health && health.openTotal > 0 ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="destructive">{health.openTotal}</Badge>
+                    {health.oldestOpen && <span className="text-xs text-muted-foreground">oldest {formatDate(health.oldestOpen)}</span>}
+                  </div>
+                  <div className="mt-1 space-y-0.5">
+                    {health.openByType.map((e) => (
+                      <div key={e.type} className="text-xs flex justify-between">
+                        <span className={e.type.includes("cost") ? "text-red-600" : "text-amber-600"}>{EXCEPTION_LABEL[e.type] || e.type}</span>
+                        <span className="font-medium">{e.count} · {e.units}u</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : <div className="flex items-center gap-2 text-sm text-green-700"><CheckCircle className="h-4 w-4" /> All clean</div>}
+            </div>
+            {/* Data integrity */}
+            <div className="rounded-md border p-3">
+              <div className="text-xs text-muted-foreground mb-1">Cost data</div>
+              {health && health.zeroCostLayers > 0 ? (
+                <div className="flex items-center gap-2 text-sm text-red-600">
+                  <AlertTriangle className="h-4 w-4" /> {health.zeroCostLayers} SKU(s) on a $0 layer
+                </div>
+              ) : <div className="flex items-center gap-2 text-sm text-green-700"><CheckCircle className="h-4 w-4" /> No zero-cost layers</div>}
+            </div>
+          </div>
+
+          {/* Run / backfill controls */}
+          <div className="flex flex-wrap items-end gap-3 pt-2 border-t">
+            <Button onClick={() => handleRunDaily(true)} variant="outline" size="sm" disabled={running}>
+              {running ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Dry-run yesterday
+            </Button>
+            <Button onClick={() => handleRunDaily(false)} size="sm" disabled={running}>Run yesterday now</Button>
+            <div className="h-8 w-px bg-border mx-1" />
+            <div>
+              <Label className="text-xs">Backfill from</Label>
+              <Input type="date" value={backfillFrom} onChange={(e) => setBackfillFrom(e.target.value)} className="h-9" />
+            </div>
+            <div>
+              <Label className="text-xs">to</Label>
+              <Input type="date" value={backfillTo} onChange={(e) => setBackfillTo(e.target.value)} className="h-9" />
+            </div>
+            <Button onClick={() => handleBackfill(true)} variant="outline" size="sm" disabled={running}>Dry-run range</Button>
+            <Button onClick={() => handleBackfill(false)} size="sm" disabled={running}>Backfill range</Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Manual & backfill tools — the daily job is automated; this is the escape hatch */}
+      <details className="rounded-lg border bg-card">
+        <summary className="cursor-pointer select-none px-6 py-4 text-sm font-medium flex items-center gap-2">
+          <Calculator className="h-4 w-4" /> Manual weekly calculator (legacy)
+        </summary>
+        <div className="px-2 pb-2">
       {/* Weekly COGS Calculator */}
       <Card>
         <CardHeader>
@@ -396,6 +545,8 @@ export default function CogsPage() {
           )}
         </CardContent>
       </Card>
+        </div>
+      </details>
 
       {/* COGS Journal History */}
       <Card>
@@ -404,7 +555,7 @@ export default function CogsPage() {
             <TrendingUp className="h-5 w-5" /> COGS Journals
           </CardTitle>
           <CardDescription>
-            Weekly COGS calculations and their Xero sync status
+            Daily + weekly COGS journals and their Xero sync status
           </CardDescription>
         </CardHeader>
         <CardContent>
