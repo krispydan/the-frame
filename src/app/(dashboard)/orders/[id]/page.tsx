@@ -768,6 +768,9 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
         {/* ── Sidebar (Right col) ── */}
         <div className="space-y-6">
+          {/* COGS / Costing */}
+          <OrderCogsCard orderId={order.id} />
+
           {/* Status Timeline (compact) */}
           <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
             <h2 className="text-base font-semibold mb-3">Status</h2>
@@ -985,6 +988,110 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               );
             })}
           </ol>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── COGS / Costing sidebar card ──
+// Per-order FIFO COGS status + the layers consumed behind it. Self-contained:
+// fetches /api/v1/finance/cogs/order/[orderId] so it doesn't touch the main load.
+interface OrderCogsData {
+  status: "not_shipped" | "pending" | "partial" | "blocked" | "costed";
+  blockedBy: string | null;
+  totalCogs: number;
+  depletedAt: string | null;
+  lines: Array<{
+    orderItemId: string; sku: string | null; productName: string;
+    orderedUnits: number; costedUnits: number; landedCost: number;
+    layers: Array<{ qty: number; landedPerUnit: number; method: string | null; receivedAt: string; poNumber: string | null }>;
+  }>;
+  exceptions: Array<{ type: string; units: number | null; detail: string | null; status: string; created_at: string }>;
+}
+
+const COGS_STATUS: Record<string, { label: string; cls: string }> = {
+  not_shipped: { label: "Not shipped", cls: "bg-gray-100 text-gray-600" },
+  pending: { label: "Pending costing", cls: "bg-amber-100 text-amber-700" },
+  partial: { label: "Partially costed", cls: "bg-amber-100 text-amber-700" },
+  blocked: { label: "Blocked", cls: "bg-red-100 text-red-700" },
+  costed: { label: "Costed", cls: "bg-green-100 text-green-700" },
+};
+const COGS_EXC_LABEL: Record<string, string> = {
+  shortfall: "No inventory layer (shortfall)",
+  zero_cost: "Zero / implausible cost",
+  implausible_cost: "Implausible cost",
+  unmapped_sku: "Unmapped SKU",
+};
+
+function OrderCogsCard({ orderId }: { orderId: string }) {
+  const [data, setData] = useState<OrderCogsData | null>(null);
+  const [err, setErr] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/v1/finance/cogs/order/${orderId}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => { if (active) setData(d); })
+      .catch(() => { if (active) setErr(true); });
+    return () => { active = false; };
+  }, [orderId]);
+
+  if (err) return null;
+  const money = (n: number) => `$${n.toFixed(2)}`;
+  const badge = data ? (COGS_STATUS[data.status] ?? COGS_STATUS.pending) : null;
+
+  return (
+    <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-base font-semibold">Costing (FIFO)</h2>
+        {badge && <span className={`px-2 py-0.5 rounded text-xs font-medium ${badge.cls}`}>{badge.label}</span>}
+      </div>
+
+      {!data ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : (
+        <div className="space-y-3 text-sm">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Landed COGS</span>
+            <span className="font-semibold">{money(data.totalCogs)}</span>
+          </div>
+
+          {data.exceptions.filter((e) => e.status === "open").map((e, i) => (
+            <div key={i} className="rounded-md bg-red-50 text-red-700 px-2 py-1.5 text-xs">
+              <div className="font-medium">{COGS_EXC_LABEL[e.type] ?? e.type}</div>
+              {e.detail && (() => { try { return <div className="opacity-80">{JSON.parse(e.detail).message}</div>; } catch { return null; } })()}
+            </div>
+          ))}
+
+          <div className="space-y-2 border-t pt-2">
+            {data.lines.map((l) => (
+              <div key={l.orderItemId} className="text-xs">
+                <div className="flex justify-between">
+                  <span className="font-mono">{l.sku ?? "—"}</span>
+                  <span className="font-medium">{money(l.landedCost)}</span>
+                </div>
+                <div className="text-muted-foreground">
+                  {l.costedUnits}/{l.orderedUnits} units costed
+                </div>
+                {l.layers.map((lyr, j) => (
+                  <div key={j} className="flex justify-between text-[11px] text-muted-foreground pl-2">
+                    <span>
+                      {lyr.method === "air" ? "✈" : lyr.method === "ocean" ? "🚢" : "•"} {lyr.qty} @ {money(lyr.landedPerUnit)}
+                      {lyr.poNumber ? ` · ${lyr.poNumber}` : ""}
+                    </span>
+                    <span>{(lyr.receivedAt || "").slice(0, 10)}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+
+          {data.depletedAt && (
+            <p className="text-[11px] text-muted-foreground border-t pt-2">
+              Costed {data.depletedAt.slice(0, 10)} · posts in the daily COGS journal
+            </p>
+          )}
         </div>
       )}
     </div>
