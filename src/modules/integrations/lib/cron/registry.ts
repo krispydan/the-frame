@@ -29,6 +29,7 @@ import { postPhoneBurnerCallDigest } from "@/modules/integrations/lib/slack/phon
 import { runShopifyMetafieldSync } from "@/modules/catalog/lib/shopify-metafields/bulk-sync-job";
 import { syncSettlementsAllShops } from "@/modules/finance/lib/shopify-settlements";
 import { runShipmentRevenueRecognition } from "@/modules/finance/lib/shipment-revenue-recognition";
+import { runDailyCogsPosting } from "@/modules/finance/lib/daily-cogs";
 import { syncFairePayouts } from "@/modules/integrations/lib/faire/payout-sync";
 
 export type CronJob = {
@@ -126,13 +127,27 @@ export const CRON_JOBS: CronJob[] = [
   // Stage 2 of the accrual flow. Finds orders that shipped (control
   // transferred to customer) but whose revenue is still parked in
   // Deferred Revenue (2200), and posts a per-order Manual Journal that
-  // moves it to Sales Revenue + recognizes COGS. Runs after the daily
-  // Shopify orders sync + payout sync so the data it walks is up to date.
+  // moves it to Sales Revenue. (COGS is handled separately by the daily
+  // FIFO COGS job below.) Runs after the daily Shopify orders sync +
+  // payout sync so the data it walks is up to date.
   {
     id: "shopify-shipment-revenue-recognition",
     schedule: "30 16 * * *",  // 16:30 UTC ≈ 9:30am PT (after payout-sync at 15:00 and settlements-sync at 16:00)
-    description: "Recognize Sales Revenue + COGS for shipped orders previously deferred (accrual / ASC 606)",
+    description: "Recognize Sales Revenue for shipped orders previously deferred (accrual / ASC 606)",
     handler: runShipmentRevenueRecognition,
+  },
+
+  // ── Daily FIFO COGS posting (capitalized landed cost) ──
+  // Recognizes COGS at shipment using true FIFO landed cost, decoupled from
+  // the revenue job above. Posts ONE consolidated channel-tracked Manual
+  // Journal per day (DR 5000/5010/5020, CR 1400). Runs after revenue
+  // recognition so both walk the same shipped set. Order lines that can't be
+  // costed cleanly raise cogs_exceptions + Slack and are excluded until fixed.
+  {
+    id: "daily-cogs-posting",
+    schedule: "45 16 * * *",  // 16:45 UTC ≈ 9:45am PT (after shipment-revenue-recognition at 16:30)
+    description: "Post daily FIFO COGS for yesterday's shipped orders to Xero (one channel-tracked journal)",
+    handler: () => runDailyCogsPosting(),
   },
 
   // ── Shopify Payments settlement sync ──

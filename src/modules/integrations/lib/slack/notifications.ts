@@ -482,6 +482,81 @@ export async function notifyCogsPosted(opts: {
   });
 }
 
+export async function notifyCogsDailySummary(opts: {
+  date: string;
+  units: number;
+  totalCogs: number;
+  currency: string;
+  ordersProcessed: number;
+  exceptionsOpen: number;
+  manualJournalId: string | null;
+}) {
+  const exLine = opts.exceptionsOpen > 0
+    ? `\n⚠️ *${pluralize(opts.exceptionsOpen, "exception", "exceptions")}* need attention`
+    : "";
+  await postSlack({
+    topic: "finance.cogs_daily_summary",
+    text: `📦 Daily COGS ${opts.date}: ${money(opts.totalCogs, opts.currency)} (${opts.units} units)`,
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `📦 *Daily COGS posted — ${opts.date}*\n${pluralize(opts.units, "unit", "units")} across ${pluralize(opts.ordersProcessed, "order", "orders")} · *${money(opts.totalCogs, opts.currency)}*${exLine}`,
+        },
+      },
+      ...(opts.manualJournalId
+        ? ([{ type: "context", elements: [{ type: "mrkdwn", text: `Xero journal ID: \`${opts.manualJournalId}\`` }] }] as SlackBlock[])
+        : []),
+    ],
+  });
+}
+
+export async function notifyCogsRunFailed(opts: { date: string; errorMessage: string }) {
+  await postSlack({
+    topic: "finance.cogs_run_failed",
+    text: `❌ Daily COGS run failed for ${opts.date}`,
+    blocks: [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: `❌ *Daily COGS run failed — ${opts.date}*\n_${opts.errorMessage}_` },
+      },
+    ],
+  });
+}
+
+export async function notifyCogsException(opts: {
+  type: "shortfall" | "zero_cost" | "implausible_cost" | "unmapped_sku";
+  count: number;
+  date: string;
+  examples: string[]; // e.g. "#1042 JX1001-BLK ×12"
+  orderUrl?: string;
+}) {
+  const label: Record<string, string> = {
+    shortfall: "No inventory cost layer (shortfall)",
+    zero_cost: "Zero / implausible cost",
+    implausible_cost: "Implausible cost",
+    unmapped_sku: "Unmapped SKU",
+  };
+  const emoji = opts.type === "zero_cost" || opts.type === "implausible_cost" ? "🔴" : "🟠";
+  await postSlack({
+    topic: "finance.cogs_exception",
+    text: `${emoji} COGS ${label[opts.type]}: ${opts.count} on ${opts.date}`,
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `${emoji} *COGS exception — ${label[opts.type]}*\n${pluralize(opts.count, "order line", "order lines")} on ${opts.date} couldn't be costed and were excluded from the journal until fixed.\n${opts.examples.slice(0, 8).map((e) => `• ${e}`).join("\n")}`,
+        },
+      },
+      ...(opts.orderUrl
+        ? ([{ type: "context", elements: [{ type: "mrkdwn", text: `<${opts.orderUrl}|Review in The Frame>` }] }] as SlackBlock[])
+        : []),
+    ],
+  });
+}
+
 export async function notifyXeroSyncFailed(opts: {
   payoutId: number | null;
   platform: string | null;

@@ -199,7 +199,7 @@ export async function runShipmentRevenueRecognition(): Promise<RecognitionRunRes
 
 // ── Helpers ──
 
-interface ChannelXeroConfig {
+export interface ChannelXeroConfig {
   salesAccountCode: string;
   deferredRevenueAccountCode: string;
   cogsAccountCode: string;
@@ -209,7 +209,7 @@ interface ChannelXeroConfig {
   trackingOptionName: string | null;
 }
 
-async function loadChannelXeroConfig(channel: string): Promise<ChannelXeroConfig | null> {
+export async function loadChannelXeroConfig(channel: string): Promise<ChannelXeroConfig | null> {
   const rows = await db
     .select()
     .from(xeroAccountMappings)
