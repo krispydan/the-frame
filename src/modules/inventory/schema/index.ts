@@ -80,6 +80,9 @@ export const purchaseOrdersV2 = sqliteTable("inventory_purchase_orders", {
   shippingCost: real("shipping_cost").default(0),
   dutiesCost: real("duties_cost").default(0),
   freightCost: real("freight_cost").default(0),
+  /** How this shipment travelled — drives the FIFO cost layer's
+   *  shipping_method (air lands ~2x the freight load of ocean). */
+  shippingMethod: text("shipping_method", { enum: ["air", "ocean"] }),
   notes: text("notes"),
   createdAt: timestamp("created_at"),
 });
@@ -89,7 +92,14 @@ export const poLineItems = sqliteTable("inventory_po_line_items", {
   id: id(),
   poId: text("po_id").notNull().references(() => purchaseOrdersV2.id, { onDelete: "cascade" }),
   skuId: text("sku_id").notNull(),
+  /** Quantity in the unit-of-measure entered (packs OR units). True unit
+   *  count = quantity × packSize. */
   quantity: integer("quantity").notNull(),
+  /** Units per entered quantity. 1 = entered in units; 12 = entered in
+   *  12-packs, etc. Keeps everything normalizable to units for FIFO. */
+  packSize: integer("pack_size").notNull().default(1),
+  /** Cost per individual UNIT (matches factory commercial invoices, which
+   *  are per-piece), NOT per pack. */
   unitCost: real("unit_cost").notNull().default(0),
   totalCost: real("total_cost").notNull().default(0),
 }, (table) => [

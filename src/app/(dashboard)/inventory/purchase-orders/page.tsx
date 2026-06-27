@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import {
   Plus, ChevronLeft, Package, ClipboardCheck, AlertTriangle,
-  FileText, ExternalLink, X,
+  FileText, ExternalLink, X, ChevronsUpDown, Check, ClipboardPaste, Plane, Ship,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +15,10 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+} from "@/components/ui/command";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -47,7 +51,7 @@ type PurchaseOrder = {
 
 type FactoryOption = { id: string; code: string; name: string };
 type SkuOption = { id: string; sku: string; product_name: string; color_name: string; cost_price: number };
-type LineItemDraft = { skuId: string; sku: string; productName: string; quantity: number; unitCost: number };
+type LineItemDraft = { skuId: string; sku: string; productName: string; quantity: number; packSize: number; unitCost: number };
 
 type LineItem = {
   id: string; po_id: string; sku_id: string; sku: string;
@@ -580,8 +584,17 @@ export default function PurchaseOrdersPage() {
   const [skuOptions, setSkuOptions] = useState<SkuOption[]>([]);
   const [lineItems, setLineItems] = useState<LineItemDraft[]>([]);
   const [selectedSku, setSelectedSku] = useState("");
-  const [newQty, setNewQty] = useState(300);
+  const [skuComboOpen, setSkuComboOpen] = useState(false);
+  const [newQty, setNewQty] = useState(0);
+  const [newPackSize, setNewPackSize] = useState(1);
   const [poNotes, setPoNotes] = useState("");
+  // PO-header landed-cost inputs (freight/duty bills arrive weeks later, so
+  // these are editable; the cost-layer engine allocates them across lines).
+  const [shippingMethod, setShippingMethod] = useState<"" | "air" | "ocean">("");
+  const [freightCost, setFreightCost] = useState(0);
+  const [dutiesCost, setDutiesCost] = useState(0);
+  const [pasteText, setPasteText] = useState("");
+  const [pasteMsg, setPasteMsg] = useState<string | null>(null);
 
   const loadPOs = useCallback(() => {
     fetch("/api/v1/inventory/purchase-orders")
@@ -615,12 +628,69 @@ export default function PurchaseOrdersPage() {
   function addLineItem() {
     const sku = skuOptions.find((s) => s.id === selectedSku);
     if (!sku || lineItems.find((li) => li.skuId === sku.id)) return;
+    if (!newQty || newQty <= 0) return;
     setLineItems([
       ...lineItems,
-      { skuId: sku.id, sku: sku.sku, productName: `${sku.product_name} - ${sku.color_name}`, quantity: newQty, unitCost: sku.cost_price || 7 },
+      {
+        skuId: sku.id, sku: sku.sku,
+        productName: `${sku.product_name} - ${sku.color_name}`,
+        quantity: newQty,
+        packSize: newPackSize > 0 ? newPackSize : 1,
+        unitCost: sku.cost_price || 7,
+      },
     ]);
     setSelectedSku("");
-    setNewQty(300);
+    setNewQty(0);
+    setNewPackSize(1);
+  }
+
+  /**
+   * Parse pasted invoice rows into line items. Accepts one row per line as
+   * `SKU <sep> qty [<sep> unitCost]` where <sep> is tab, comma, or runs of
+   * spaces. SKU is matched (case-insensitive) against this factory's SKUs;
+   * a `-12PK`/`-4PK` suffix sets the pack size and resolves to the bare SKU.
+   * Unmatched rows are reported, not silently dropped.
+   */
+  function parsePasteRows() {
+    if (!pasteText.trim()) return;
+    const rows = pasteText.split(/\r?\n/).map((r) => r.trim()).filter(Boolean);
+    const additions: LineItemDraft[] = [];
+    const unmatched: string[] = [];
+    const seen = new Set(lineItems.map((li) => li.skuId));
+
+    for (const row of rows) {
+      const cols = row.split(/\t|,|\s{2,}|\s+/).map((c) => c.trim()).filter(Boolean);
+      if (cols.length < 2) { unmatched.push(row); continue; }
+      const rawSku = cols[0];
+      const qty = parseInt(cols[1].replace(/[^0-9]/g, ""), 10);
+      const unitCostParsed = cols[2] != null ? parseFloat(cols[2].replace(/[^0-9.]/g, "")) : NaN;
+      if (!qty || qty <= 0) { unmatched.push(row); continue; }
+
+      // Pack suffix → pack size + bare SKU
+      const packMatch = /-(\d+)PK$/i.exec(rawSku);
+      const packSize = packMatch ? parseInt(packMatch[1], 10) : 1;
+      const bareSku = rawSku.replace(/-(\d+)PK$/i, "");
+
+      const match = skuOptions.find(
+        (s) => s.sku?.toLowerCase() === bareSku.toLowerCase() || s.sku?.toLowerCase() === rawSku.toLowerCase(),
+      );
+      if (!match || seen.has(match.id)) { if (!match) unmatched.push(rawSku); continue; }
+      seen.add(match.id);
+      additions.push({
+        skuId: match.id, sku: match.sku,
+        productName: `${match.product_name} - ${match.color_name}`,
+        quantity: qty,
+        packSize: packSize > 0 ? packSize : 1,
+        unitCost: !isNaN(unitCostParsed) ? unitCostParsed : (match.cost_price || 7),
+      });
+    }
+
+    if (additions.length > 0) setLineItems([...lineItems, ...additions]);
+    setPasteMsg(
+      `Added ${additions.length} line${additions.length === 1 ? "" : "s"}` +
+      (unmatched.length ? ` · ${unmatched.length} unmatched: ${unmatched.slice(0, 5).join(", ")}${unmatched.length > 5 ? "…" : ""}` : ""),
+    );
+    if (additions.length > 0) setPasteText("");
   }
 
   async function createPO() {
@@ -633,8 +703,11 @@ export default function PurchaseOrdersPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         factoryId: factoryObj.id,
-        lineItems: lineItems.map((li) => ({ skuId: li.skuId, quantity: li.quantity, unitCost: li.unitCost })),
+        lineItems: lineItems.map((li) => ({ skuId: li.skuId, quantity: li.quantity, packSize: li.packSize, unitCost: li.unitCost })),
         notes: poNotes,
+        shippingMethod: shippingMethod || null,
+        freightCost,
+        dutiesCost,
       }),
     });
 
@@ -642,6 +715,11 @@ export default function PurchaseOrdersPage() {
     setLineItems([]);
     setSelectedFactory("");
     setPoNotes("");
+    setShippingMethod("");
+    setFreightCost(0);
+    setDutiesCost(0);
+    setPasteText("");
+    setPasteMsg(null);
     loadPOs();
   }
 
@@ -715,26 +793,83 @@ export default function PurchaseOrdersPage() {
 
               {selectedFactory && (
                 <>
+                  {/* Add a single SKU — searchable combobox + qty + pack size */}
                   <div className="flex gap-2 items-end">
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <Label>Add SKU</Label>
-                      <Select value={selectedSku} onValueChange={(v) => setSelectedSku(v || "")}>
-                        <SelectTrigger><SelectValue placeholder="Select SKU" /></SelectTrigger>
-                        <SelectContent>
-                          {skuOptions.map((s) => (
-                            <SelectItem key={s.id} value={s.id}>
-                              {s.sku} — {s.product_name} ({s.color_name})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <Popover open={skuComboOpen} onOpenChange={setSkuComboOpen}>
+                        <PopoverTrigger
+                          render={
+                            <Button variant="outline" type="button" className="w-full justify-between font-normal">
+                              {selectedSku
+                                ? (() => { const s = skuOptions.find((o) => o.id === selectedSku); return s ? `${s.sku} — ${s.product_name}` : "Select SKU"; })()
+                                : <span className="text-muted-foreground">Search SKU…</span>}
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          }
+                        />
+                        <PopoverContent className="w-[420px] p-0" align="start">
+                          <Command filter={(v, search) => (v.toLowerCase().includes(search.toLowerCase()) ? 1 : 0)}>
+                            <CommandInput placeholder="Search by SKU, product, color…" />
+                            <CommandList>
+                              <CommandEmpty>No SKUs match.</CommandEmpty>
+                              <CommandGroup>
+                                {skuOptions.map((s) => (
+                                  <CommandItem
+                                    key={s.id}
+                                    value={`${s.sku} ${s.product_name} ${s.color_name}`}
+                                    onSelect={() => { setSelectedSku(s.id); setSkuComboOpen(false); }}
+                                  >
+                                    <Check className={`mr-2 h-4 w-4 ${s.id === selectedSku ? "opacity-100" : "opacity-0"}`} />
+                                    <span className="font-mono text-xs mr-2">{s.sku}</span>
+                                    <span className="flex-1 truncate">{s.product_name} ({s.color_name})</span>
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                    <div className="w-20">
+                      <Label>Qty</Label>
+                      <Input type="number" value={newQty || ""} placeholder="0" onChange={(e) => setNewQty(parseInt(e.target.value) || 0)} />
                     </div>
                     <div className="w-24">
-                      <Label>Qty</Label>
-                      <Input type="number" value={newQty} onChange={(e) => setNewQty(parseInt(e.target.value) || 0)} />
+                      <Label className="flex items-center gap-1">Pack size</Label>
+                      <Input type="number" value={newPackSize} onChange={(e) => setNewPackSize(parseInt(e.target.value) || 1)} />
                     </div>
-                    <Button onClick={addLineItem} size="sm">Add</Button>
+                    <Button onClick={addLineItem} size="sm" disabled={!selectedSku || !newQty}>Add</Button>
                   </div>
+                  {newPackSize > 1 && newQty > 0 && (
+                    <p className="text-xs text-muted-foreground -mt-2">
+                      {newQty} packs × {newPackSize} = <span className="font-medium">{newQty * newPackSize} units</span>
+                    </p>
+                  )}
+
+                  {/* Paste-from-invoice bulk add */}
+                  <details className="rounded-md border bg-muted/20 p-2">
+                    <summary className="text-sm font-medium cursor-pointer flex items-center gap-2">
+                      <ClipboardPaste className="h-4 w-4" /> Paste from invoice (bulk add)
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        One row per line: <code>SKU&nbsp;qty&nbsp;unitCost</code> (tab, comma, or spaces). A
+                        <code>-12PK</code>/<code>-4PK</code> suffix sets pack size. Unit cost optional (falls back to catalog cost).
+                      </p>
+                      <Textarea
+                        value={pasteText}
+                        onChange={(e) => setPasteText(e.target.value)}
+                        placeholder={"JX1001-BLK\t504\t1.55\nJX1001-TOR\t192\t1.60\nJX2001-BLK-12PK\t40\t1.50"}
+                        rows={5}
+                        className="font-mono text-xs"
+                      />
+                      <div className="flex items-center gap-2">
+                        <Button size="sm" variant="outline" onClick={parsePasteRows} disabled={!pasteText.trim()}>Parse &amp; add</Button>
+                        {pasteMsg && <span className="text-xs text-muted-foreground">{pasteMsg}</span>}
+                      </div>
+                    </div>
+                  </details>
 
                   {lineItems.length > 0 && (
                     <Table>
@@ -743,38 +878,73 @@ export default function PurchaseOrdersPage() {
                           <TableHead>SKU</TableHead>
                           <TableHead>Product</TableHead>
                           <TableHead className="text-right">Qty</TableHead>
+                          <TableHead className="text-right">Pack</TableHead>
+                          <TableHead className="text-right">Units</TableHead>
                           <TableHead className="text-right">Unit Cost</TableHead>
                           <TableHead className="text-right">Total</TableHead>
                           <TableHead></TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {lineItems.map((li, i) => (
-                          <TableRow key={li.skuId}>
-                            <TableCell className="font-mono text-sm">{li.sku}</TableCell>
-                            <TableCell>{li.productName}</TableCell>
-                            <TableCell className="text-right">{li.quantity}</TableCell>
-                            <TableCell className="text-right">${li.unitCost.toFixed(2)}</TableCell>
-                            <TableCell className="text-right">${(li.quantity * li.unitCost).toFixed(2)}</TableCell>
-                            <TableCell>
-                              <Button variant="ghost" size="sm" onClick={() => setLineItems(lineItems.filter((_, j) => j !== i))}>
-                                <X className="h-3.5 w-3.5" />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                        {lineItems.map((li, i) => {
+                          const units = li.quantity * li.packSize;
+                          return (
+                            <TableRow key={li.skuId}>
+                              <TableCell className="font-mono text-sm">{li.sku}</TableCell>
+                              <TableCell>{li.productName}</TableCell>
+                              <TableCell className="text-right">{li.quantity}</TableCell>
+                              <TableCell className="text-right">{li.packSize > 1 ? `×${li.packSize}` : "—"}</TableCell>
+                              <TableCell className="text-right font-medium">{units}</TableCell>
+                              <TableCell className="text-right">${li.unitCost.toFixed(2)}</TableCell>
+                              <TableCell className="text-right">${(units * li.unitCost).toFixed(2)}</TableCell>
+                              <TableCell>
+                                <Button variant="ghost" size="sm" onClick={() => setLineItems(lineItems.filter((_, j) => j !== i))}>
+                                  <X className="h-3.5 w-3.5" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
                         <TableRow>
-                          <TableCell colSpan={2} className="font-medium">Total</TableCell>
-                          <TableCell className="text-right font-medium">{lineItems.reduce((s, li) => s + li.quantity, 0)}</TableCell>
+                          <TableCell colSpan={4} className="font-medium">Total</TableCell>
+                          <TableCell className="text-right font-medium">{lineItems.reduce((s, li) => s + li.quantity * li.packSize, 0)}</TableCell>
                           <TableCell></TableCell>
                           <TableCell className="text-right font-medium">
-                            ${lineItems.reduce((s, li) => s + li.quantity * li.unitCost, 0).toFixed(2)}
+                            ${lineItems.reduce((s, li) => s + li.quantity * li.packSize * li.unitCost, 0).toFixed(2)}
                           </TableCell>
                           <TableCell></TableCell>
                         </TableRow>
                       </TableBody>
                     </Table>
                   )}
+
+                  {/* Landed-cost header inputs (freight/duty bills arrive later — editable) */}
+                  <div className="rounded-md border p-3 space-y-3">
+                    <div className="text-sm font-medium">Shipping &amp; landed cost</div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <Label>Method</Label>
+                        <Select value={shippingMethod} onValueChange={(v) => setShippingMethod((v as "air" | "ocean") || "")}>
+                          <SelectTrigger><SelectValue placeholder="Air / Ocean" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="air"><span className="flex items-center gap-1"><Plane className="h-3.5 w-3.5" /> Air</span></SelectItem>
+                            <SelectItem value="ocean"><span className="flex items-center gap-1"><Ship className="h-3.5 w-3.5" /> Ocean</span></SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label>Freight ($)</Label>
+                        <Input type="number" value={freightCost || ""} placeholder="0.00" onChange={(e) => setFreightCost(parseFloat(e.target.value) || 0)} />
+                      </div>
+                      <div>
+                        <Label>Duty ($)</Label>
+                        <Input type="number" value={dutiesCost || ""} placeholder="0.00" onChange={(e) => setDutiesCost(parseFloat(e.target.value) || 0)} />
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Header totals — allocated across SKUs into landed cost when received. Leave blank now and add when the KCI/DHL bill arrives; editable later.
+                    </p>
+                  </div>
 
                   <div>
                     <Label>Notes</Label>

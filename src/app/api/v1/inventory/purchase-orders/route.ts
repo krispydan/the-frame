@@ -46,7 +46,13 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { factoryId, lineItems, notes } = body;
+    const {
+      factoryId, lineItems, notes,
+      shippingMethod = null,   // "air" | "ocean" | null
+      freightCost = 0,         // PO-header total, allocated across lines at receipt
+      dutiesCost = 0,          // PO-header total
+      shippingCost = 0,        // optional extra (drayage etc.)
+    } = body;
 
     if (!factoryId || !lineItems?.length) {
       return NextResponse.json({ error: "factoryId and lineItems required" }, { status: 400 });
@@ -66,25 +72,34 @@ export async function POST(request: NextRequest) {
     const poNumber = `PO-2026-${String(nextNum).padStart(3, "0")}`;
 
     const poId = crypto.randomUUID();
-    let totalUnits = 0;
-    let totalCost = 0;
+    let totalUnits = 0;  // true individual units (qty × packSize)
+    let totalCost = 0;   // product cost only (freight/duty are PO-header totals)
 
     for (const item of lineItems) {
-      totalUnits += item.quantity;
-      totalCost += item.quantity * item.unitCost;
+      const packSize = item.packSize && item.packSize > 0 ? item.packSize : 1;
+      const units = item.quantity * packSize;
+      totalUnits += units;
+      totalCost += units * item.unitCost; // unitCost is per individual unit
     }
 
-    // Insert PO
+    // Insert PO (freight/duty/shipping captured as header totals — allocated
+    // across line items into FIFO cost layers when the PO is received)
     db.run(sql`
-      INSERT INTO inventory_purchase_orders (id, po_number, factory_id, status, total_units, total_cost, order_date, notes)
-      VALUES (${poId}, ${poNumber}, ${factoryId}, 'draft', ${totalUnits}, ${totalCost}, ${new Date().toISOString().split("T")[0]}, ${notes || null})
+      INSERT INTO inventory_purchase_orders
+        (id, po_number, factory_id, status, total_units, total_cost, order_date, notes,
+         shipping_method, freight_cost, duties_cost, shipping_cost)
+      VALUES (${poId}, ${poNumber}, ${factoryId}, 'draft', ${totalUnits}, ${totalCost},
+              ${new Date().toISOString().split("T")[0]}, ${notes || null},
+              ${shippingMethod}, ${freightCost || 0}, ${dutiesCost || 0}, ${shippingCost || 0})
     `);
 
-    // Insert line items
+    // Insert line items (quantity as entered + packSize so units = qty × packSize)
     for (const item of lineItems) {
+      const packSize = item.packSize && item.packSize > 0 ? item.packSize : 1;
+      const units = item.quantity * packSize;
       db.run(sql`
-        INSERT INTO inventory_po_line_items (id, po_id, sku_id, quantity, unit_cost, total_cost)
-        VALUES (${crypto.randomUUID()}, ${poId}, ${item.skuId}, ${item.quantity}, ${item.unitCost}, ${item.quantity * item.unitCost})
+        INSERT INTO inventory_po_line_items (id, po_id, sku_id, quantity, pack_size, unit_cost, total_cost)
+        VALUES (${crypto.randomUUID()}, ${poId}, ${item.skuId}, ${item.quantity}, ${packSize}, ${item.unitCost}, ${units * item.unitCost})
       `);
     }
 

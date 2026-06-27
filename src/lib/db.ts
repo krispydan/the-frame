@@ -741,6 +741,11 @@ try {
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_po_items_sku ON catalog_purchase_order_items(sku)`);
 } catch (e) { console.error("[db] PO items table error:", e); }
 
+// Inventory PO columns for FIFO landed-cost (shipping method on the PO header,
+// pack size on each line so packs normalize to units). Idempotent.
+try { sqlite.exec("ALTER TABLE inventory_purchase_orders ADD COLUMN shipping_method TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE inventory_po_line_items ADD COLUMN pack_size INTEGER NOT NULL DEFAULT 1"); } catch { /* exists */ }
+
 // Shopify OAuth: shops table (multi-store, channel-driven)
 try {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS shopify_shops (
