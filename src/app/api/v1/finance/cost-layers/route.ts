@@ -38,10 +38,12 @@ export async function POST(request: NextRequest) {
 
   if (body.fromPO) {
     try {
-      const layers = createCostLayersFromPO(body.fromPO);
+      const res = createCostLayersFromPO(body.fromPO);
       return NextResponse.json({
-        created: layers.length,
-        layers: layers.map((l) => ({
+        created: res.created.length,
+        skipped: res.skipped,
+        rejected: res.rejected,
+        layers: res.created.map((l) => ({
           id: l.id,
           skuId: l.skuId,
           quantity: l.quantity,

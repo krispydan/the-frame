@@ -13,6 +13,28 @@
  * mutable field (decremented on depletion). This gives a clean audit trail.
  */
 import { sqlite } from "@/lib/db";
+import { parsePackSize, unitsFor, unitSkuOf } from "./pack-size";
+
+/**
+ * Smallest plausible per-unit cost. Product cost should never be $0 (or a few
+ * cents) — that signals a bad parse / missing data, and silently booking it
+ * would understate COGS and overstate inventory for months. Layers below this
+ * are rejected so the failure is loud, not silent.
+ */
+export const MIN_PLAUSIBLE_UNIT_COST = 0.1;
+
+/** Thrown when a cost layer would be created at an implausible ($0 / sub-floor)
+ *  cost. Callers catch this, log a cogs_exception, and alert — never swallow. */
+export class ZeroCostError extends Error {
+  constructor(
+    public readonly skuId: string,
+    public readonly attemptedCost: number,
+    public readonly context?: string,
+  ) {
+    super(`Refusing to create cost layer for SKU ${skuId} at implausible unit cost ${attemptedCost}${context ? ` (${context})` : ""}`);
+    this.name = "ZeroCostError";
+  }
+}
 
 // ── Types ──
 
@@ -82,6 +104,13 @@ export function createCostLayer(input: CreateCostLayerInput): CostLayer {
   const landedCostPerUnit = input.unitCost + freightPerUnit + dutiesPerUnit;
   const receivedAt = input.receivedAt || new Date().toISOString();
 
+  // Zero/implausible-cost guard — never silently book a $0 layer. Product
+  // cost is the floor we check (freight/duty can legitimately be 0 at receipt
+  // before the KCI/DHL bill arrives — that's a provisional layer, not bad data).
+  if (!Number.isFinite(input.unitCost) || input.unitCost < MIN_PLAUSIBLE_UNIT_COST) {
+    throw new ZeroCostError(input.skuId, input.unitCost, `product unit cost below ${MIN_PLAUSIBLE_UNIT_COST}`);
+  }
+
   sqlite.prepare(`
     INSERT INTO inventory_cost_layers
       (id, sku_id, po_line_item_id, po_id, po_number, quantity, remaining_quantity,
@@ -105,63 +134,85 @@ export function createCostLayer(input: CreateCostLayerInput): CostLayer {
   };
 }
 
+export interface CreateLayersResult {
+  created: CostLayer[];
+  /** Lines that were skipped because a layer already exists (idempotent). */
+  skipped: number;
+  /** Lines refused (e.g. $0 product cost) — surfaced, never silently dropped. */
+  rejected: Array<{ skuId: string; poLineItemId: string; reason: string }>;
+}
+
 /**
- * Create cost layers from a PO receipt. Allocates the PO's shipping,
- * duties, and freight costs pro-rata across line items by quantity.
+ * Create cost layers from a PO receipt. Allocates the PO's freight + duty +
+ * shipping HEADER totals pro-rata across line items by UNIT count, and stores
+ * each layer in individual units (pack lines × pack_size).
+ *
+ * Per-unit allocation (not per-line-quantity) is what keeps the 12-pack math
+ * honest: a 12-pack line of 100 contributes 1,200 units to the denominator and
+ * 1,200 units to its own layer, so freight/duty land per individual unit.
+ *
+ * Idempotent per po_line_item_id. A line with $0 product cost is rejected (not
+ * thrown past the loop) so one bad line doesn't block the rest of the PO.
  */
-export function createCostLayersFromPO(poId: string): CostLayer[] {
+export function createCostLayersFromPO(poId: string): CreateLayersResult {
   const po = sqlite.prepare(`
     SELECT id, po_number, shipping_cost, duties_cost, freight_cost, total_units,
-           actual_arrival_date, status
+           actual_arrival_date, status, shipping_method
     FROM inventory_purchase_orders WHERE id = ?
   `).get(poId) as {
     id: string; po_number: string; shipping_cost: number; duties_cost: number;
     freight_cost: number; total_units: number; actual_arrival_date: string | null;
-    status: string;
+    status: string; shipping_method: string | null;
   } | undefined;
 
   if (!po) throw new Error(`PO ${poId} not found`);
 
   const lineItems = sqlite.prepare(`
-    SELECT id, sku_id, quantity, unit_cost FROM inventory_po_line_items WHERE po_id = ?
-  `).all(poId) as Array<{ id: string; sku_id: string; quantity: number; unit_cost: number }>;
+    SELECT id, sku_id, quantity, pack_size, unit_cost FROM inventory_po_line_items WHERE po_id = ?
+  `).all(poId) as Array<{ id: string; sku_id: string; quantity: number; pack_size: number; unit_cost: number }>;
 
   if (lineItems.length === 0) throw new Error(`PO ${poId} has no line items`);
 
-  // Total units for pro-rata allocation
-  const totalUnits = lineItems.reduce((sum, li) => sum + li.quantity, 0) || po.total_units || 1;
-  const totalLandedCosts = (po.shipping_cost || 0) + (po.duties_cost || 0) + (po.freight_cost || 0);
-  const shippingPerUnit = (po.shipping_cost || 0) / totalUnits;
-  const dutiesPerUnit = (po.duties_cost || 0) / totalUnits;
-  const freightPerUnit = ((po.freight_cost || 0) + shippingPerUnit * totalUnits === totalLandedCosts
-    ? shippingPerUnit // if freight_cost is separate from shipping_cost
-    : (po.freight_cost || 0) / totalUnits);
+  // Denominator + each line's contribution are both in individual UNITS.
+  const unitsOf = (li: { quantity: number; pack_size: number }) => li.quantity * (li.pack_size && li.pack_size > 0 ? li.pack_size : 1);
+  const totalUnits = lineItems.reduce((sum, li) => sum + unitsOf(li), 0) || po.total_units || 1;
 
-  // Combine shipping + freight into freightPerUnit for simplicity
+  // Freight = shipping + freight header totals combined; duty separate.
   const combinedFreightPerUnit = ((po.shipping_cost || 0) + (po.freight_cost || 0)) / totalUnits;
+  const dutiesPerUnit = (po.duties_cost || 0) / totalUnits;
 
-  const layers: CostLayer[] = [];
+  const result: CreateLayersResult = { created: [], skipped: 0, rejected: [] };
+
   for (const li of lineItems) {
-    // Check if a layer already exists for this PO line item (idempotent)
+    // Idempotent: skip if a layer already exists for this PO line item.
     const existing = sqlite.prepare(
       "SELECT id FROM inventory_cost_layers WHERE po_line_item_id = ?"
     ).get(li.id) as { id: string } | undefined;
-    if (existing) continue;
+    if (existing) { result.skipped++; continue; }
 
-    layers.push(createCostLayer({
-      skuId: li.sku_id,
-      poLineItemId: li.id,
-      poId: po.id,
-      poNumber: po.po_number,
-      quantity: li.quantity,
-      unitCost: li.unit_cost,
-      freightPerUnit: combinedFreightPerUnit,
-      dutiesPerUnit: dutiesPerUnit,
-      receivedAt: po.actual_arrival_date || new Date().toISOString(),
-    }));
+    try {
+      result.created.push(createCostLayer({
+        skuId: li.sku_id,
+        poLineItemId: li.id,
+        poId: po.id,
+        poNumber: po.po_number,
+        quantity: unitsOf(li),          // store the layer in individual units
+        unitCost: li.unit_cost,         // per-individual-unit product cost
+        freightPerUnit: combinedFreightPerUnit,
+        dutiesPerUnit,
+        shippingMethod: po.shipping_method ?? undefined,
+        receivedAt: po.actual_arrival_date || new Date().toISOString(),
+      }));
+    } catch (e) {
+      if (e instanceof ZeroCostError) {
+        result.rejected.push({ skuId: li.sku_id, poLineItemId: li.id, reason: e.message });
+      } else {
+        throw e;
+      }
+    }
   }
 
-  return layers;
+  return result;
 }
 
 // ── FIFO Depletion ──
@@ -210,9 +261,17 @@ export function depleteInventoryFifo(
 
   let remaining = quantity;
 
-  // Get available cost layers for this SKU, oldest first (FIFO)
+  // Get available cost layers for this SKU, oldest first (FIFO). Alias to
+  // camelCase so the row matches CostLayer — better-sqlite3 returns columns
+  // verbatim (snake_case), so a bare SELECT * would leave remainingQuantity /
+  // unitCost / landedCostPerUnit undefined and silently corrupt depletions.
   const layers = sqlite.prepare(`
-    SELECT * FROM inventory_cost_layers
+    SELECT id, sku_id AS skuId, po_line_item_id AS poLineItemId, po_id AS poId,
+           po_number AS poNumber, quantity, remaining_quantity AS remainingQuantity,
+           unit_cost AS unitCost, freight_per_unit AS freightPerUnit,
+           duties_per_unit AS dutiesPerUnit, landed_cost_per_unit AS landedCostPerUnit,
+           shipping_method AS shippingMethod, received_at AS receivedAt, created_at AS createdAt
+    FROM inventory_cost_layers
     WHERE sku_id = ? AND remaining_quantity > 0
     ORDER BY received_at ASC, created_at ASC
   `).all(skuId) as CostLayer[];
@@ -256,6 +315,34 @@ export function depleteInventoryFifo(
 
   result.shortfall = remaining;
   return result;
+}
+
+/**
+ * Resolve an order line — which may reference a PACK sku (`JX1001-BLK-12PK`) —
+ * to the unit SKU id and true individual-unit count for FIFO depletion.
+ *
+ * Cost layers live on the bare unit SKU, so a pack order must (a) multiply its
+ * quantity by the pack size and (b) look up the bare SKU's catalog id (the
+ * order's own sku_id may be null or point at a pack row that has no layers).
+ */
+export function resolveDepletionTarget(opts: {
+  sku: string | null;
+  skuId: string | null;
+  quantity: number;
+}): { unitSkuId: string | null; units: number; packSize: number; unitSku: string | null } {
+  const packSize = parsePackSize(opts.sku);
+  const units = opts.quantity * packSize;
+  const unitSku = unitSkuOf(opts.sku);
+  let unitSkuId = opts.skuId ?? null;
+
+  if (packSize > 1 && unitSku) {
+    const row = sqlite.prepare(
+      "SELECT id FROM catalog_skus WHERE sku = ? LIMIT 1"
+    ).get(unitSku) as { id: string } | undefined;
+    if (row) unitSkuId = row.id;
+  }
+
+  return { unitSkuId, units, packSize, unitSku };
 }
 
 // ── Weekly COGS Calculation ──
@@ -479,9 +566,18 @@ export function depleteUncostedOrders(options?: { since?: string; dryRun?: boole
 
   for (const item of uncosted) {
     processed++;
-    if (options?.dryRun) continue;
 
-    const result = depleteInventoryFifo(item.skuId, item.quantity, {
+    // Normalize pack order-lines to the unit SKU + true unit count.
+    const { unitSkuId, units } = resolveDepletionTarget({
+      sku: item.sku, skuId: item.skuId, quantity: item.quantity,
+    });
+    if (options?.dryRun) continue;
+    if (!unitSkuId) {
+      shortfalls.push({ sku: item.sku, skuId: item.skuId, quantity: units, shortfall: units });
+      continue;
+    }
+
+    const result = depleteInventoryFifo(unitSkuId, units, {
       orderItemId: item.orderItemId,
       orderId: item.orderId,
       channel: item.channel,
@@ -492,7 +588,7 @@ export function depleteUncostedOrders(options?: { since?: string; dryRun?: boole
     if (result.shortfall > 0) {
       shortfalls.push({
         sku: item.sku, skuId: item.skuId,
-        quantity: item.quantity, shortfall: result.shortfall,
+        quantity: units, shortfall: result.shortfall,
       });
     }
   }
