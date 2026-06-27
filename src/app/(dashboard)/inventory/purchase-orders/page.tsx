@@ -767,7 +767,7 @@ export default function PurchaseOrdersPage() {
         </div>
         <Dialog open={showCreate} onOpenChange={setShowCreate}>
           <DialogTrigger render={<Button className="gap-2"><Plus className="h-4 w-4" /> New PO</Button>} />
-          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogContent className="w-full sm:max-w-3xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Create Purchase Order</DialogTitle>
             </DialogHeader>
@@ -831,15 +831,15 @@ export default function PurchaseOrdersPage() {
                         </PopoverContent>
                       </Popover>
                     </div>
-                    <div className="w-20">
+                    <div className="w-24 shrink-0">
                       <Label>Qty</Label>
                       <Input type="number" value={newQty || ""} placeholder="0" onChange={(e) => setNewQty(parseInt(e.target.value) || 0)} />
                     </div>
-                    <div className="w-24">
-                      <Label className="flex items-center gap-1">Pack size</Label>
+                    <div className="w-24 shrink-0">
+                      <Label className="whitespace-nowrap">Pack size</Label>
                       <Input type="number" value={newPackSize} onChange={(e) => setNewPackSize(parseInt(e.target.value) || 1)} />
                     </div>
-                    <Button onClick={addLineItem} size="sm" disabled={!selectedSku || !newQty}>Add</Button>
+                    <Button onClick={addLineItem} className="shrink-0" disabled={!selectedSku || !newQty}>Add</Button>
                   </div>
                   {newPackSize > 1 && newQty > 0 && (
                     <p className="text-xs text-muted-foreground -mt-2">
