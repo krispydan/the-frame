@@ -70,6 +70,7 @@ export type SlackTopic =
   | "finance.cogs_run_failed"
   | "finance.cogs_exception"
   | "finance.cogs_corrected"
+  | "finance.shopify_cost_push_failed"
   | "finance.xero_sync_failed";
 
 export const SLACK_TOPICS: { topic: SlackTopic; label: string; defaultChannel: string; group: string; description: string }[] = [
@@ -97,6 +98,7 @@ export const SLACK_TOPICS: { topic: SlackTopic; label: string; defaultChannel: s
   { topic: "finance.cogs_run_failed", label: "Daily COGS run failed",         defaultChannel: "jaxy-finance-bot",   group: "Finance",      description: "The daily FIFO COGS job threw or the Xero post failed." },
   { topic: "finance.cogs_exception",  label: "COGS costing exception",        defaultChannel: "jaxy-finance-bot",   group: "Finance",      description: "An order couldn't be costed cleanly — zero/implausible cost, no inventory layer (shortfall), or unmapped SKU." },
   { topic: "finance.cogs_corrected",  label: "COGS day corrected",            defaultChannel: "jaxy-finance-bot",   group: "Finance",      description: "A day's COGS was reversed and re-posted (correction / landed-cost true-up)." },
+  { topic: "finance.shopify_cost_push_failed", label: "Shopify cost push failed", defaultChannel: "jaxy-finance-bot", group: "Finance",    description: "Pushing landed cost to a Shopify variant's Cost per item failed (userErrors / not found)." },
   { topic: "finance.xero_sync_failed",label: "Xero sync failed",              defaultChannel: "jaxy-finance-bot",   group: "Finance",      description: "A Xero sync errored — token issue, mapping missing, etc." },
 
   // Sales

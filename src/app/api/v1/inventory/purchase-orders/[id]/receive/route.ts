@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
 import { createCostLayersFromPO } from "@/modules/finance/lib/fifo-engine";
+import { pushLandedCostForSkus } from "@/modules/finance/lib/shopify-cost-sync";
 
 /**
  * POST /api/v1/inventory/purchase-orders/[id]/receive
@@ -176,7 +177,16 @@ export async function POST(
         if (layers.rejected.length) {
           console.warn(`[PO receive] ${id}: ${layers.rejected.length} line(s) rejected for $0/implausible cost:`, layers.rejected);
         }
-        // TODO(Phase 7): push latest landed cost to Shopify variant cost here.
+        // Push the new landed cost to Shopify "Cost per item" (both stores) so
+        // Shopify gross-profit reports reflect true COGS. Resilient — a Shopify
+        // hiccup never fails the receipt.
+        if (layers.created.length) {
+          try {
+            await pushLandedCostForSkus(layers.created.map((l) => l.skuId));
+          } catch (e) {
+            console.error(`[PO receive] Shopify cost push failed for ${id}:`, e);
+          }
+        }
       } catch (e) {
         // Don't fail the receipt if layer creation hiccups — receipt already
         // committed. Surface so it can be retried via the cost-layers endpoint.

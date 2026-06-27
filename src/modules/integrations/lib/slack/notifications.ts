@@ -588,6 +588,23 @@ export async function notifyCogsCorrected(opts: {
   });
 }
 
+export async function notifyShopifyCostPushFailed(opts: {
+  sku: string;
+  store: string;
+  errorMessage: string;
+}) {
+  await postSlack({
+    topic: "finance.shopify_cost_push_failed",
+    text: `⚠️ Shopify cost push failed: ${opts.sku} (${opts.store})`,
+    blocks: [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: `⚠️ *Shopify cost push failed*\n${opts.sku} → ${opts.store}\n_${opts.errorMessage}_` },
+      },
+    ],
+  });
+}
+
 export async function notifyXeroSyncFailed(opts: {
   payoutId: number | null;
   platform: string | null;
