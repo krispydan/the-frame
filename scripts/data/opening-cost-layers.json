@@ -1,0 +1,1281 @@
+{
+  "_note": "Opening FIFO cost layers \u2014 first 9 inbound shipments. Generated from factory invoices; see scripts/seed-opening-cost-layers.ts",
+  "shipments": [
+    {
+      "factory": "TAGA",
+      "mode": "air",
+      "poNumber": "JAX100",
+      "invoiceNumber": "CI2604020",
+      "receivedAt": "2026-04-30",
+      "freightTotal": 1114.08,
+      "brokerTotal": 94.08,
+      "dutyTotal": 535.67,
+      "expectedUnits": 2232,
+      "expectedFactoryTotal": 2746.8,
+      "lines": [
+        {
+          "sku": "JX1001-BLK",
+          "units": 96,
+          "unitCost": 1.55
+        },
+        {
+          "sku": "JX1001-TOR",
+          "units": 108,
+          "unitCost": 1.6
+        },
+        {
+          "sku": "JX1001-WHT",
+          "units": 48,
+          "unitCost": 1.55
+        },
+        {
+          "sku": "JX1002-BLK",
+          "units": 96,
+          "unitCost": 1.23
+        },
+        {
+          "sku": "JX1002-TOR",
+          "units": 96,
+          "unitCost": 1.23
+        },
+        {
+          "sku": "JX1003-SND",
+          "units": 48,
+          "unitCost": 1.05
+        },
+        {
+          "sku": "JX1003-BLU",
+          "units": 60,
+          "unitCost": 1.05
+        },
+        {
+          "sku": "JX1003-TOR",
+          "units": 60,
+          "unitCost": 1.1
+        },
+        {
+          "sku": "JX1004-BLK",
+          "units": 168,
+          "unitCost": 1.32
+        },
+        {
+          "sku": "JX1004-TOR",
+          "units": 168,
+          "unitCost": 1.38
+        },
+        {
+          "sku": "JX1004-BRW",
+          "units": 48,
+          "unitCost": 1.35
+        },
+        {
+          "sku": "JX1005-BLK",
+          "units": 36,
+          "unitCost": 1.44
+        },
+        {
+          "sku": "JX1005-OLV",
+          "units": 48,
+          "unitCost": 1.52
+        },
+        {
+          "sku": "JX1005-TOR",
+          "units": 60,
+          "unitCost": 1.52
+        },
+        {
+          "sku": "JX1006-BRW",
+          "units": 48,
+          "unitCost": 1.2
+        },
+        {
+          "sku": "JX1006-PUR",
+          "units": 48,
+          "unitCost": 1.15
+        },
+        {
+          "sku": "JX1006-TOR",
+          "units": 48,
+          "unitCost": 1.2
+        },
+        {
+          "sku": "JX1007-BLK",
+          "units": 48,
+          "unitCost": 1.05
+        },
+        {
+          "sku": "JX1007-FLW",
+          "units": 48,
+          "unitCost": 1.12
+        },
+        {
+          "sku": "JX1007-GRN",
+          "units": 48,
+          "unitCost": 1.12
+        },
+        {
+          "sku": "JX1008-BLK",
+          "units": 48,
+          "unitCost": 1.1
+        },
+        {
+          "sku": "JX1008-BRW",
+          "units": 84,
+          "unitCost": 1.1
+        },
+        {
+          "sku": "JX1008-OLV",
+          "units": 36,
+          "unitCost": 1.15
+        },
+        {
+          "sku": "JX1009-BLK",
+          "units": 60,
+          "unitCost": 1.08
+        },
+        {
+          "sku": "JX1009-GRN",
+          "units": 48,
+          "unitCost": 1.08
+        },
+        {
+          "sku": "JX1009-TOR",
+          "units": 48,
+          "unitCost": 1.15
+        },
+        {
+          "sku": "JX1010-BLK",
+          "units": 60,
+          "unitCost": 0.96
+        },
+        {
+          "sku": "JX1010-GRY",
+          "units": 48,
+          "unitCost": 1.08
+        },
+        {
+          "sku": "JX1010-TOR",
+          "units": 48,
+          "unitCost": 1.08
+        },
+        {
+          "sku": "JX1011-AMB",
+          "units": 72,
+          "unitCost": 1.05
+        },
+        {
+          "sku": "JX1011-BLK",
+          "units": 60,
+          "unitCost": 1.05
+        },
+        {
+          "sku": "JX1011-TOR",
+          "units": 60,
+          "unitCost": 1.15
+        },
+        {
+          "sku": "JX1012-BLK",
+          "units": 48,
+          "unitCost": 1.05
+        },
+        {
+          "sku": "JX1012-GRY",
+          "units": 36,
+          "unitCost": 1.1
+        },
+        {
+          "sku": "JX1012-TOR",
+          "units": 48,
+          "unitCost": 1.15
+        }
+      ]
+    },
+    {
+      "factory": "TAGA",
+      "mode": "ocean",
+      "poNumber": "JAX100",
+      "invoiceNumber": "CI2604021",
+      "receivedAt": "2026-05-28",
+      "freightTotal": 579.35,
+      "brokerTotal": 704.13,
+      "dutyTotal": 2908.44,
+      "expectedUnits": 12168,
+      "expectedFactoryTotal": 14563.2,
+      "lines": [
+        {
+          "sku": "JX1001-BLK",
+          "units": 504,
+          "unitCost": 1.55
+        },
+        {
+          "sku": "JX1001-TOR",
+          "units": 192,
+          "unitCost": 1.6
+        },
+        {
+          "sku": "JX1001-WHT",
+          "units": 252,
+          "unitCost": 1.55
+        },
+        {
+          "sku": "JX1002-BLK",
+          "units": 504,
+          "unitCost": 1.23
+        },
+        {
+          "sku": "JX1002-TOR",
+          "units": 504,
+          "unitCost": 1.23
+        },
+        {
+          "sku": "JX1003-SND",
+          "units": 252,
+          "unitCost": 1.05
+        },
+        {
+          "sku": "JX1003-BLU",
+          "units": 240,
+          "unitCost": 1.05
+        },
+        {
+          "sku": "JX1003-TOR",
+          "units": 540,
+          "unitCost": 1.1
+        },
+        {
+          "sku": "JX1004-BLK",
+          "units": 432,
+          "unitCost": 1.32
+        },
+        {
+          "sku": "JX1004-TOR",
+          "units": 132,
+          "unitCost": 1.38
+        },
+        {
+          "sku": "JX1004-BRW",
+          "units": 252,
+          "unitCost": 1.35
+        },
+        {
+          "sku": "JX1005-BLK",
+          "units": 264,
+          "unitCost": 1.44
+        },
+        {
+          "sku": "JX1005-OLV",
+          "units": 552,
+          "unitCost": 1.52
+        },
+        {
+          "sku": "JX1005-TOR",
+          "units": 240,
+          "unitCost": 1.52
+        },
+        {
+          "sku": "JX1006-BRW",
+          "units": 552,
+          "unitCost": 1.2
+        },
+        {
+          "sku": "JX1006-PUR",
+          "units": 252,
+          "unitCost": 1.15
+        },
+        {
+          "sku": "JX1006-TOR",
+          "units": 252,
+          "unitCost": 1.2
+        },
+        {
+          "sku": "JX1007-BLK",
+          "units": 552,
+          "unitCost": 1.05
+        },
+        {
+          "sku": "JX1007-FLW",
+          "units": 252,
+          "unitCost": 1.12
+        },
+        {
+          "sku": "JX1007-GRN",
+          "units": 252,
+          "unitCost": 1.12
+        },
+        {
+          "sku": "JX1008-BLK",
+          "units": 252,
+          "unitCost": 1.1
+        },
+        {
+          "sku": "JX1008-BRW",
+          "units": 516,
+          "unitCost": 1.1
+        },
+        {
+          "sku": "JX1008-OLV",
+          "units": 264,
+          "unitCost": 1.15
+        },
+        {
+          "sku": "JX1009-BLK",
+          "units": 240,
+          "unitCost": 1.08
+        },
+        {
+          "sku": "JX1009-GRN",
+          "units": 552,
+          "unitCost": 1.08
+        },
+        {
+          "sku": "JX1009-TOR",
+          "units": 252,
+          "unitCost": 1.15
+        },
+        {
+          "sku": "JX1010-BLK",
+          "units": 540,
+          "unitCost": 0.96
+        },
+        {
+          "sku": "JX1010-GRY",
+          "units": 252,
+          "unitCost": 1.08
+        },
+        {
+          "sku": "JX1010-TOR",
+          "units": 252,
+          "unitCost": 1.08
+        },
+        {
+          "sku": "JX1011-AMB",
+          "units": 228,
+          "unitCost": 1.05
+        },
+        {
+          "sku": "JX1011-BLK",
+          "units": 240,
+          "unitCost": 1.05
+        },
+        {
+          "sku": "JX1011-TOR",
+          "units": 540,
+          "unitCost": 1.15
+        },
+        {
+          "sku": "JX1012-BLK",
+          "units": 252,
+          "unitCost": 1.05
+        },
+        {
+          "sku": "JX1012-GRY",
+          "units": 264,
+          "unitCost": 1.1
+        },
+        {
+          "sku": "JX1012-TOR",
+          "units": 552,
+          "unitCost": 1.15
+        }
+      ]
+    },
+    {
+      "factory": "HD",
+      "mode": "air",
+      "poNumber": "JAX200",
+      "invoiceNumber": "HYT26010-1",
+      "receivedAt": "2026-04-30",
+      "freightTotal": 1203.46,
+      "brokerTotal": 94.08,
+      "dutyTotal": 592.41,
+      "expectedUnits": 2364,
+      "expectedFactoryTotal": 3037.68,
+      "lines": [
+        {
+          "sku": "JX2001-BLK",
+          "units": 120,
+          "unitCost": 1.5
+        },
+        {
+          "sku": "JX2004-BLK",
+          "units": 60,
+          "unitCost": 1.4
+        },
+        {
+          "sku": "JX2004-GRY",
+          "units": 60,
+          "unitCost": 1.4
+        },
+        {
+          "sku": "JX2004-RST",
+          "units": 60,
+          "unitCost": 1.4
+        },
+        {
+          "sku": "JX2001-SND",
+          "units": 72,
+          "unitCost": 1.65
+        },
+        {
+          "sku": "JX2002-GRN",
+          "units": 228,
+          "unitCost": 1.3
+        },
+        {
+          "sku": "JX2001-TOR",
+          "units": 132,
+          "unitCost": 1.5
+        },
+        {
+          "sku": "JX2001-OLV",
+          "units": 60,
+          "unitCost": 1.5
+        },
+        {
+          "sku": "JX2005-PNK",
+          "units": 108,
+          "unitCost": 1.18
+        },
+        {
+          "sku": "JX2002-AMB",
+          "units": 192,
+          "unitCost": 1.3
+        },
+        {
+          "sku": "JX2005-BRW",
+          "units": 60,
+          "unitCost": 1.18
+        },
+        {
+          "sku": "JX2005-TEA",
+          "units": 48,
+          "unitCost": 1.18
+        },
+        {
+          "sku": "JX2003-BLK",
+          "units": 216,
+          "unitCost": 1.16
+        },
+        {
+          "sku": "JX2007-BRW",
+          "units": 84,
+          "unitCost": 0.9
+        },
+        {
+          "sku": "JX2003-BRW",
+          "units": 216,
+          "unitCost": 1.16
+        },
+        {
+          "sku": "JX2007-TOR",
+          "units": 84,
+          "unitCost": 1.1
+        },
+        {
+          "sku": "JX2003-GRY",
+          "units": 108,
+          "unitCost": 1.16
+        },
+        {
+          "sku": "JX2007-BLK",
+          "units": 72,
+          "unitCost": 1.0
+        },
+        {
+          "sku": "JX2008-BLK",
+          "units": 120,
+          "unitCost": 1.35
+        },
+        {
+          "sku": "JX2006-BLK",
+          "units": 48,
+          "unitCost": 1.35
+        },
+        {
+          "sku": "JX2006-BRW",
+          "units": 48,
+          "unitCost": 1.35
+        },
+        {
+          "sku": "JX2006-YLW",
+          "units": 60,
+          "unitCost": 1.35
+        },
+        {
+          "sku": "JX2008-RED",
+          "units": 48,
+          "unitCost": 1.5
+        },
+        {
+          "sku": "JX2008-TOR",
+          "units": 60,
+          "unitCost": 1.45
+        }
+      ]
+    },
+    {
+      "factory": "HD",
+      "mode": "ocean",
+      "poNumber": "JAX200",
+      "invoiceNumber": "HYT26010-2",
+      "receivedAt": "2026-05-28",
+      "freightTotal": 371.6,
+      "brokerTotal": 615.09,
+      "dutyTotal": 1281.34,
+      "expectedUnits": 4836,
+      "expectedFactoryTotal": 6358.32,
+      "lines": [
+        {
+          "sku": "JX2001-BLK",
+          "units": 180,
+          "unitCost": 1.5
+        },
+        {
+          "sku": "JX2001-OLV",
+          "units": 240,
+          "unitCost": 1.5
+        },
+        {
+          "sku": "JX2001-SND",
+          "units": 228,
+          "unitCost": 1.65
+        },
+        {
+          "sku": "JX2001-TOR",
+          "units": 168,
+          "unitCost": 1.5
+        },
+        {
+          "sku": "JX2002-AMB",
+          "units": 108,
+          "unitCost": 1.3
+        },
+        {
+          "sku": "JX2002-GRN",
+          "units": 72,
+          "unitCost": 1.3
+        },
+        {
+          "sku": "JX2003-BLK",
+          "units": 84,
+          "unitCost": 1.16
+        },
+        {
+          "sku": "JX2003-BRW",
+          "units": 84,
+          "unitCost": 1.16
+        },
+        {
+          "sku": "JX2003-GRY",
+          "units": 192,
+          "unitCost": 1.16
+        },
+        {
+          "sku": "JX2004-BLK",
+          "units": 240,
+          "unitCost": 1.4
+        },
+        {
+          "sku": "JX2004-GRY",
+          "units": 240,
+          "unitCost": 1.4
+        },
+        {
+          "sku": "JX2004-RST",
+          "units": 240,
+          "unitCost": 1.4
+        },
+        {
+          "sku": "JX2005-BRW",
+          "units": 240,
+          "unitCost": 1.18
+        },
+        {
+          "sku": "JX2005-PNK",
+          "units": 192,
+          "unitCost": 1.18
+        },
+        {
+          "sku": "JX2005-TEA",
+          "units": 252,
+          "unitCost": 1.18
+        },
+        {
+          "sku": "JX2006-BLK",
+          "units": 252,
+          "unitCost": 1.35
+        },
+        {
+          "sku": "JX2006-BRW",
+          "units": 252,
+          "unitCost": 1.35
+        },
+        {
+          "sku": "JX2006-YLW",
+          "units": 240,
+          "unitCost": 1.35
+        },
+        {
+          "sku": "JX2007-BLK",
+          "units": 228,
+          "unitCost": 1.0
+        },
+        {
+          "sku": "JX2007-BRW",
+          "units": 216,
+          "unitCost": 0.9
+        },
+        {
+          "sku": "JX2007-TOR",
+          "units": 216,
+          "unitCost": 1.1
+        },
+        {
+          "sku": "JX2008-BLK",
+          "units": 180,
+          "unitCost": 1.35
+        },
+        {
+          "sku": "JX2008-RED",
+          "units": 252,
+          "unitCost": 1.5
+        },
+        {
+          "sku": "JX2008-TOR",
+          "units": 240,
+          "unitCost": 1.45
+        }
+      ]
+    },
+    {
+      "factory": "Geya",
+      "mode": "air",
+      "poNumber": "JAX300",
+      "invoiceNumber": "26GY1024",
+      "receivedAt": "2026-04-30",
+      "freightTotal": 780.51,
+      "brokerTotal": 18.84,
+      "dutyTotal": 441.13,
+      "expectedUnits": 1488,
+      "expectedFactoryTotal": 1650.96,
+      "lines": [
+        {
+          "sku": "JX3001-BLK",
+          "units": 48,
+          "unitCost": 1.4
+        },
+        {
+          "sku": "JX3001-SND",
+          "units": 48,
+          "unitCost": 1.4
+        },
+        {
+          "sku": "JX3001-TOR",
+          "units": 48,
+          "unitCost": 1.43
+        },
+        {
+          "sku": "JX3002-BLK",
+          "units": 48,
+          "unitCost": 0.7
+        },
+        {
+          "sku": "JX3002-TOR",
+          "units": 48,
+          "unitCost": 0.75
+        },
+        {
+          "sku": "JX3002-AMB",
+          "units": 48,
+          "unitCost": 0.75
+        },
+        {
+          "sku": "JX3003-BLK",
+          "units": 48,
+          "unitCost": 1.38
+        },
+        {
+          "sku": "JX3003-BRW",
+          "units": 48,
+          "unitCost": 1.38
+        },
+        {
+          "sku": "JX3003-TOR",
+          "units": 48,
+          "unitCost": 1.48
+        },
+        {
+          "sku": "JX3004-BLK",
+          "units": 216,
+          "unitCost": 0.7
+        },
+        {
+          "sku": "JX3004-SND",
+          "units": 48,
+          "unitCost": 0.7
+        },
+        {
+          "sku": "JX3004-TOR",
+          "units": 48,
+          "unitCost": 0.75
+        },
+        {
+          "sku": "JX3004-TGN",
+          "units": 216,
+          "unitCost": 0.75
+        },
+        {
+          "sku": "JX3005-BLK",
+          "units": 48,
+          "unitCost": 1.4
+        },
+        {
+          "sku": "JX3005-BRW",
+          "units": 48,
+          "unitCost": 1.5
+        },
+        {
+          "sku": "JX3006-BLK",
+          "units": 48,
+          "unitCost": 1.7
+        },
+        {
+          "sku": "JX3006-GLD",
+          "units": 48,
+          "unitCost": 1.7
+        },
+        {
+          "sku": "JX3006-SLV",
+          "units": 48,
+          "unitCost": 1.7
+        },
+        {
+          "sku": "JX3007-BLK",
+          "units": 48,
+          "unitCost": 1.2
+        },
+        {
+          "sku": "JX3007-OLV",
+          "units": 48,
+          "unitCost": 1.2
+        },
+        {
+          "sku": "JX3007-TOR",
+          "units": 48,
+          "unitCost": 1.45
+        },
+        {
+          "sku": "JX3008-ATO",
+          "units": 48,
+          "unitCost": 1.3
+        },
+        {
+          "sku": "JX3008-GRN",
+          "units": 48,
+          "unitCost": 1.4
+        },
+        {
+          "sku": "JX3008-BUR",
+          "units": 48,
+          "unitCost": 1.2
+        }
+      ]
+    },
+    {
+      "factory": "Geya",
+      "mode": "ocean",
+      "poNumber": "JAX300",
+      "invoiceNumber": "26GY1025",
+      "receivedAt": "2026-05-28",
+      "freightTotal": 513.3,
+      "brokerTotal": 704.13,
+      "dutyTotal": 2108.79,
+      "expectedUnits": 8412,
+      "expectedFactoryTotal": 10559.04,
+      "lines": [
+        {
+          "sku": "JX3001-BLK",
+          "units": 552,
+          "unitCost": 1.4
+        },
+        {
+          "sku": "JX3001-SND",
+          "units": 252,
+          "unitCost": 1.4
+        },
+        {
+          "sku": "JX3001-TOR",
+          "units": 252,
+          "unitCost": 1.43
+        },
+        {
+          "sku": "JX3002-BLK",
+          "units": 252,
+          "unitCost": 0.7
+        },
+        {
+          "sku": "JX3002-TOR",
+          "units": 252,
+          "unitCost": 0.75
+        },
+        {
+          "sku": "JX3002-AMB",
+          "units": 552,
+          "unitCost": 0.75
+        },
+        {
+          "sku": "JX3003-BLK",
+          "units": 552,
+          "unitCost": 1.38
+        },
+        {
+          "sku": "JX3003-BRW",
+          "units": 252,
+          "unitCost": 1.38
+        },
+        {
+          "sku": "JX3003-TOR",
+          "units": 252,
+          "unitCost": 1.48
+        },
+        {
+          "sku": "JX3004-BLK",
+          "units": 84,
+          "unitCost": 0.7
+        },
+        {
+          "sku": "JX3004-SND",
+          "units": 252,
+          "unitCost": 0.7
+        },
+        {
+          "sku": "JX3004-TOR",
+          "units": 252,
+          "unitCost": 0.75
+        },
+        {
+          "sku": "JX3004-TGN",
+          "units": 384,
+          "unitCost": 0.75
+        },
+        {
+          "sku": "JX3005-BLK",
+          "units": 552,
+          "unitCost": 1.4
+        },
+        {
+          "sku": "JX3005-BRW",
+          "units": 552,
+          "unitCost": 1.5
+        },
+        {
+          "sku": "JX3006-BLK",
+          "units": 252,
+          "unitCost": 1.7
+        },
+        {
+          "sku": "JX3006-GLD",
+          "units": 552,
+          "unitCost": 1.7
+        },
+        {
+          "sku": "JX3006-SLV",
+          "units": 252,
+          "unitCost": 1.7
+        },
+        {
+          "sku": "JX3007-BLK",
+          "units": 252,
+          "unitCost": 1.2
+        },
+        {
+          "sku": "JX3007-OLV",
+          "units": 552,
+          "unitCost": 1.2
+        },
+        {
+          "sku": "JX3007-TOR",
+          "units": 252,
+          "unitCost": 1.45
+        },
+        {
+          "sku": "JX3008-ATO",
+          "units": 552,
+          "unitCost": 1.3
+        },
+        {
+          "sku": "JX3008-GRN",
+          "units": 252,
+          "unitCost": 1.4
+        },
+        {
+          "sku": "JX3008-BUR",
+          "units": 252,
+          "unitCost": 1.2
+        }
+      ]
+    },
+    {
+      "factory": "Brilliant",
+      "mode": "air",
+      "poNumber": "WP26BZ016",
+      "invoiceNumber": "WP26BZ016",
+      "receivedAt": "2026-05-16",
+      "freightTotal": 1183.42,
+      "brokerTotal": 94.08,
+      "dutyTotal": 642.53,
+      "expectedUnits": 2064,
+      "expectedFactoryTotal": 3295.32,
+      "lines": [
+        {
+          "sku": "JX4002-BLK",
+          "units": 204,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4002-TOR",
+          "units": 216,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4004-BLK",
+          "units": 264,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4004-GRY",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4004-BRW",
+          "units": 144,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4005-BLU",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4005-OLV",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4005-BLK",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4005-ATO",
+          "units": 96,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4006-GRN",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4006-BUR",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4006-RST",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4006-BLK",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4007-BLK",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4007-RED",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4007-TOR",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4009-GRN",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4009-TOR",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4009-BLK",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4010-GRY",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4010-GRN",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4010-BRW",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4011-BLK",
+          "units": 60,
+          "unitCost": 1.59657
+        },
+        {
+          "sku": "JX4011-TOR",
+          "units": 60,
+          "unitCost": 1.59657
+        }
+      ]
+    },
+    {
+      "factory": "Brilliant",
+      "mode": "air",
+      "poNumber": "WP26BZ017",
+      "invoiceNumber": "WP26BZ017",
+      "receivedAt": "2026-05-23",
+      "freightTotal": 556.27,
+      "brokerTotal": 45.5,
+      "dutyTotal": 294.06,
+      "expectedUnits": 1008,
+      "expectedFactoryTotal": 1508.76,
+      "lines": [
+        {
+          "sku": "JX4001-OLV",
+          "units": 60,
+          "unitCost": 1.496786
+        },
+        {
+          "sku": "JX4001-TOR",
+          "units": 60,
+          "unitCost": 1.496786
+        },
+        {
+          "sku": "JX4001-BLK",
+          "units": 96,
+          "unitCost": 1.496786
+        },
+        {
+          "sku": "JX4003-BLU",
+          "units": 48,
+          "unitCost": 1.496786
+        },
+        {
+          "sku": "JX4003-BRW",
+          "units": 108,
+          "unitCost": 1.496786
+        },
+        {
+          "sku": "JX4008-BRW",
+          "units": 348,
+          "unitCost": 1.496786
+        },
+        {
+          "sku": "JX4008-GRN",
+          "units": 192,
+          "unitCost": 1.496786
+        },
+        {
+          "sku": "JX4008-TOR",
+          "units": 96,
+          "unitCost": 1.496786
+        }
+      ]
+    },
+    {
+      "factory": "Brilliant",
+      "mode": "ocean",
+      "poNumber": "WP26BZ018",
+      "invoiceNumber": "WP26BZ018",
+      "receivedAt": "2026-06-12",
+      "freightTotal": 551.0,
+      "brokerTotal": 693.5,
+      "dutyTotal": 3130.31,
+      "expectedUnits": 10097,
+      "expectedFactoryTotal": 15673.59,
+      "lines": [
+        {
+          "sku": "JX4001-OLV",
+          "units": 240,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4001-TOR",
+          "units": 240,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4001-BLK",
+          "units": 504,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4002-BLK",
+          "units": 396,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4002-TOR",
+          "units": 384,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4003-BLU",
+          "units": 552,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4003-BRW",
+          "units": 486,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4004-BLK",
+          "units": 336,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4004-GRY",
+          "units": 240,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4004-BRW",
+          "units": 156,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4005-BLU",
+          "units": 240,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4005-OLV",
+          "units": 240,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4005-BLK",
+          "units": 240,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4005-ATO",
+          "units": 204,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4006-GRN",
+          "units": 240,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4006-BUR",
+          "units": 240,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4006-RST",
+          "units": 240,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4006-BLK",
+          "units": 240,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4007-BLK",
+          "units": 540,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4007-RED",
+          "units": 240,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4007-TOR",
+          "units": 240,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4008-BRW",
+          "units": 236,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4008-GRN",
+          "units": 108,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4008-TOR",
+          "units": 195,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4009-GRN",
+          "units": 240,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4009-TOR",
+          "units": 240,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4009-BLK",
+          "units": 540,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4010-GRY",
+          "units": 540,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4010-GRN",
+          "units": 240,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4010-BRW",
+          "units": 240,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4011-BLK",
+          "units": 540,
+          "unitCost": 1.552302
+        },
+        {
+          "sku": "JX4011-TOR",
+          "units": 540,
+          "unitCost": 1.552302
+        }
+      ]
+    }
+  ]
+}

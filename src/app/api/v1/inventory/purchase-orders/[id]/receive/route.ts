@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
+import { createCostLayersFromPO } from "@/modules/finance/lib/fifo-engine";
 
 /**
  * POST /api/v1/inventory/purchase-orders/[id]/receive
@@ -162,10 +163,32 @@ export async function POST(
 
     const result = receiveItems();
 
+    // On full receipt, create FIFO cost layers from this PO (idempotent per
+    // line item). Goods are now on hand at landed cost — this is what feeds the
+    // daily COGS engine. Done after the receive tx so actual_arrival_date (the
+    // layer's received_at) is set. Partial receipts don't create layers yet to
+    // avoid full-qty layers before everything physically arrives.
+    let costLayers: { created: number; skipped: number; rejected: Array<{ skuId: string; reason: string }> } | null = null;
+    if (result.allReceived) {
+      try {
+        const layers = createCostLayersFromPO(id);
+        costLayers = { created: layers.created.length, skipped: layers.skipped, rejected: layers.rejected };
+        if (layers.rejected.length) {
+          console.warn(`[PO receive] ${id}: ${layers.rejected.length} line(s) rejected for $0/implausible cost:`, layers.rejected);
+        }
+        // TODO(Phase 7): push latest landed cost to Shopify variant cost here.
+      } catch (e) {
+        // Don't fail the receipt if layer creation hiccups — receipt already
+        // committed. Surface so it can be retried via the cost-layers endpoint.
+        console.error(`[PO receive] cost-layer creation failed for ${id}:`, e);
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       status: result.newStatus,
       fullyReceived: result.allReceived,
+      costLayers,
     });
   } catch (error) {
     console.error("PO receive error:", error);
