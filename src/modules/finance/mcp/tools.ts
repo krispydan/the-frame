@@ -4,6 +4,7 @@ import { sqlite } from "@/lib/db";
 import { calculatePnl } from "@/modules/finance/lib/pnl";
 import { calculateCashFlow } from "@/modules/finance/lib/cash-flow";
 import { syncSettlementToXero, isXeroConfigured, getXeroSetupInstructions } from "@/modules/finance/lib/xero-client";
+import { createLayersForShipment } from "@/modules/finance/lib/cogs-ingest";
 
 export function registerFinanceMcpTools() {
   // ── finance.get_pnl ──
@@ -107,6 +108,40 @@ export function registerFinanceMcpTools() {
         };
       }
       const result = await syncSettlementToXero(args.settlementId);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // ── finance.create_cost_layers_from_shipment ──
+  // The deterministic core of invoice ingestion. The agent parses the factory
+  // CI/PL (xlsx/xls/pdf) + the KCI/DHL freight/duty totals, then calls this
+  // with structured data. It validates, allocates freight/duty by value, and
+  // creates guarded, idempotent FIFO cost layers (one per SKU). Pass
+  // dryRun:true first to preview + reconcile before writing.
+  mcpRegistry.register(
+    "finance.create_cost_layers_from_shipment",
+    "Create FIFO cost layers for an inbound shipment from parsed invoice data. Allocates freight + duty across SKUs by value into landed cost. Idempotent per (poNumber, sku); rejects $0 cost; validates against expectedUnits/expectedFactoryTotal when provided. Use dryRun to preview. The caller parses the invoices; this writes the layers.",
+    z.object({
+      mode: z.enum(["air", "ocean"]).describe("Shipping method — air lands ~2x the freight load of ocean"),
+      poNumber: z.string().describe("PO number — the idempotency key with sku (e.g. JAX200)"),
+      receivedAt: z.string().describe("ShipHero physical receipt date, YYYY-MM-DD (sets FIFO order)"),
+      factory: z.string().optional(),
+      invoiceNumber: z.string().optional(),
+      freightTotal: z.number().optional().describe("Freight + shipping total for the shipment (allocated by value)"),
+      brokerTotal: z.number().optional().describe("Import entry / FDA / broker fees (allocated by value)"),
+      dutyTotal: z.number().optional().describe("Customs duty total (allocated by value)"),
+      expectedUnits: z.number().optional().describe("Validation gate: total units expected"),
+      expectedFactoryTotal: z.number().optional().describe("Validation gate: total product cost expected"),
+      lines: z.array(z.object({
+        sku: z.string(),
+        units: z.number().describe("Individual units (already pack-normalized)"),
+        unitCost: z.number().describe("Per-individual-unit product cost (FOB)"),
+      })).describe("One row per SKU. For blended-priced shipments use qty × blended unit cost."),
+      dryRun: z.boolean().optional().describe("Preview without writing (default false)"),
+    }),
+    async (args) => {
+      const { dryRun, ...shipment } = args;
+      const result = createLayersForShipment(shipment, { apply: !dryRun });
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
   );

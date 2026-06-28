@@ -20,41 +20,15 @@
  *   npx tsx scripts/seed-opening-cost-layers.ts path/to.json --apply
  */
 import { readFileSync } from "node:fs";
-import { sqlite } from "@/lib/db";
-import { createCostLayer, ZeroCostError } from "@/modules/finance/lib/fifo-engine";
+import { createLayersForShipment, type ShipmentInput } from "@/modules/finance/lib/cogs-ingest";
 
-interface SeedLine { sku: string; units: number; unitCost: number }
-interface SeedShipment {
-  factory: string;
-  mode: "air" | "ocean";
-  poNumber: string;
-  invoiceNumber: string;
-  receivedAt: string;       // YYYY-MM-DD (ShipHero physical receipt date)
-  freightTotal: number;     // freight + shipping
-  brokerTotal: number;      // import entry / FDA / misc broker fees
-  dutyTotal: number;
-  expectedUnits: number;    // from the COG report, for validation
-  expectedFactoryTotal: number;
-  lines: SeedLine[];
-}
-interface SeedFile { shipments: SeedShipment[] }
+interface SeedFile { shipments: ShipmentInput[] }
 
 const args = process.argv.slice(2);
 const apply = args.includes("--apply");
 const pathArg = args.find((a) => !a.startsWith("--")) || "scripts/data/opening-cost-layers.json";
 
-const round = (n: number) => Math.round(n * 100) / 100;
 const money = (n: number) => `$${n.toFixed(2)}`;
-
-function resolveSkuId(sku: string): string | null {
-  const row = sqlite.prepare("SELECT id FROM catalog_skus WHERE sku = ? LIMIT 1").get(sku) as { id: string } | undefined;
-  return row?.id ?? null;
-}
-function layerExists(poNumber: string, skuId: string): boolean {
-  return !!sqlite.prepare(
-    "SELECT id FROM inventory_cost_layers WHERE po_number = ? AND sku_id = ? LIMIT 1",
-  ).get(poNumber, skuId);
-}
 
 function main() {
   let file: SeedFile;
@@ -71,66 +45,26 @@ function main() {
   const problems: string[] = [];
 
   for (const s of file.shipments) {
-    const sumUnits = s.lines.reduce((a, l) => a + l.units, 0);
-    const sumFactory = round(s.lines.reduce((a, l) => a + l.units * l.unitCost, 0));
-    const tag = `${s.factory} ${s.mode.toUpperCase()} (${s.poNumber}/${s.invoiceNumber})`;
-
-    // Validation gate — refuse to seed a shipment whose lines don't reconcile.
+    const tag = `${s.factory ?? ""} ${s.mode.toUpperCase()} (${s.poNumber}/${s.invoiceNumber ?? ""})`;
     if (s.lines.length === 0) { problems.push(`${tag}: no lines — skipped`); continue; }
-    if (sumUnits !== s.expectedUnits) {
-      problems.push(`${tag}: units ${sumUnits} ≠ expected ${s.expectedUnits} — skipped`);
-      continue;
+
+    const r = createLayersForShipment(s, { apply });
+
+    if (!r.validation.unitsOk || !r.validation.factoryOk) {
+      problems.push(`${tag}: ${r.validation.message} — ${apply ? "NOT written" : "would block"}`);
     }
-    if (Math.abs(sumFactory - s.expectedFactoryTotal) > 1.0) {
-      problems.push(`${tag}: factory total ${money(sumFactory)} ≠ expected ${money(s.expectedFactoryTotal)} — skipped`);
-      continue;
-    }
+    for (const u of r.unmapped) problems.push(`${tag}: SKU ${u} not in catalog`);
+    for (const rej of r.rejected) problems.push(`${tag}: ${rej.sku} rejected — ${rej.reason}`);
 
-    const freightPlusBroker = s.freightTotal + s.brokerTotal;
-    let created = 0, skipped = 0, unmapped = 0, shipLanded = 0;
-
-    for (const l of s.lines) {
-      // Value-based allocation of freight+broker and duty (DB-independent).
-      const valueShare = sumFactory > 0 ? (l.units * l.unitCost) / sumFactory : 0;
-      const freightPerUnit = round((freightPlusBroker * valueShare) / l.units * 10000) / 10000;
-      const dutiesPerUnit = round((s.dutyTotal * valueShare) / l.units * 10000) / 10000;
-      shipLanded += (l.unitCost + freightPerUnit + dutiesPerUnit) * l.units;
-
-      const skuId = resolveSkuId(l.sku);
-      if (!skuId) {
-        unmapped++;
-        problems.push(`${tag}: SKU ${l.sku} not in catalog`);
-        continue; // can't create a layer without a catalog SKU id
-      }
-      if (layerExists(s.poNumber, skuId)) { skipped++; grandSkipped++; continue; }
-
-      if (apply) {
-        try {
-          createCostLayer({
-            skuId, poNumber: s.poNumber, quantity: l.units,
-            unitCost: l.unitCost, freightPerUnit, dutiesPerUnit,
-            shippingMethod: s.mode, receivedAt: `${s.receivedAt}T12:00:00.000Z`,
-          });
-          created++;
-        } catch (e) {
-          if (e instanceof ZeroCostError) problems.push(`${tag}: ${l.sku} rejected — ${e.message}`);
-          else throw e;
-        }
-      } else {
-        created++; // would-create (SKU resolves)
-      }
-    }
-    if (unmapped) console.log(`  (${unmapped} line(s) have no catalog SKU on this DB)`);
-
-    grandCreated += created; grandLanded += shipLanded;
+    grandCreated += r.created; grandSkipped += r.skipped; grandLanded += r.landedTotal;
     console.log(`${tag}`);
-    console.log(`  units ${sumUnits} · factory ${money(sumFactory)} · freight ${money(s.freightTotal)} · broker ${money(s.brokerTotal)} · duty ${money(s.dutyTotal)}`);
-    console.log(`  landed ${money(round(shipLanded))}  →  ${created} layer(s) ${apply ? "created" : "would create"}${skipped ? `, ${skipped} already exist` : ""}\n`);
+    console.log(`  units ${r.sumUnits} · factory ${money(r.sumFactory)} · freight ${money(s.freightTotal ?? 0)} · broker ${money(s.brokerTotal ?? 0)} · duty ${money(s.dutyTotal ?? 0)}`);
+    console.log(`  landed ${money(r.landedTotal)}  →  ${r.created} layer(s) ${apply ? "created" : "would create"}${r.skipped ? `, ${r.skipped} already exist` : ""}${r.unmapped.length ? `, ${r.unmapped.length} unmapped` : ""}\n`);
   }
 
   console.log("──────────────────────────────────────────");
   console.log(`${apply ? "Created" : "Would create"} ${grandCreated} layers · ${grandSkipped} skipped`);
-  console.log(`Total seeded landed cost: ${money(round(grandLanded))}  (COG report target: $81,245.77)`);
+  console.log(`Total seeded landed cost: ${money(Math.round(grandLanded * 100) / 100)}  (COG report target: $81,245.77)`);
   if (problems.length) {
     console.log(`\n⚠️  ${problems.length} issue(s):`);
     for (const p of problems) console.log(`   - ${p}`);
