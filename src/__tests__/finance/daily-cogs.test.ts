@@ -108,6 +108,19 @@ describe("daily COGS job", () => {
       expect((sqlite.prepare("SELECT COUNT(*) c FROM cogs_run_log WHERE mode='live'").get() as { c: number }).c).toBe(1);
     });
 
+    it("tags COGS as Faire when a Faire settlement is linked (even though channel is wholesale)", async () => {
+      seedProductSku("unit_a", "JX1001-BLK");
+      createCostLayer({ skuId: "unit_a", quantity: 100, unitCost: 1.5 });
+      // Faire order living as shopify_wholesale, with a linked Faire settlement.
+      seedShippedOrder("o1", "1001", [{ id: "oi1", sku: "JX1001-BLK", skuId: "unit_a", qty: 10 }], "shopify_wholesale");
+      sqlite.prepare("INSERT INTO settlements (id, channel) VALUES ('s1','faire')").run();
+      sqlite.prepare("INSERT INTO settlement_line_items (id, settlement_id, order_id) VALUES ('sli1','s1','o1')").run();
+
+      await runDailyCogsPosting({ date: DAY });
+      const dep = sqlite.prepare("SELECT channel FROM inventory_cost_depletions WHERE order_id='o1'").get() as { channel: string };
+      expect(dep.channel).toBe("faire");
+    });
+
     it("is idempotent — re-run after posted is skipped", async () => {
       seedProductSku("unit_a", "JX1001-BLK");
       createCostLayer({ skuId: "unit_a", quantity: 100, unitCost: 1.5 });

@@ -102,10 +102,22 @@ export async function runDailyCogsPosting(
 
     // Shipped order lines for the day with no depletion yet. sku_id may be null
     // for pack lines — resolve via the SKU string, don't filter it out.
+    //
+    // Channel: Faire orders flow through Shopify B2B as channel='shopify_wholesale',
+    // but their COGS must tag to Faire (their revenue does). The authoritative
+    // signal is a linked Faire settlement (created when the Faire payout is
+    // pulled, independent of Xero sync). Override channel→'faire' when one
+    // exists; otherwise use the order channel. If the settlement arrives after
+    // COGS posts, a later correctCogsForDate re-tags it.
     const lines = sqlite.prepare(`
       SELECT oi.id AS orderItemId, oi.order_id AS orderId, o.order_number AS orderNumber,
              oi.sku_id AS skuId, oi.sku AS sku, oi.quantity AS quantity,
-             o.channel AS channel, o.shipped_at AS shippedAt
+             CASE WHEN EXISTS (
+               SELECT 1 FROM settlement_line_items sli
+               JOIN settlements s ON s.id = sli.settlement_id
+               WHERE sli.order_id = o.id AND s.channel = 'faire'
+             ) THEN 'faire' ELSE o.channel END AS channel,
+             o.shipped_at AS shippedAt
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN inventory_cost_depletions d ON d.order_item_id = oi.id
