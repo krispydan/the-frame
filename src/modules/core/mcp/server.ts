@@ -18,6 +18,51 @@ export interface McpToolResult {
   isError?: boolean;
 }
 
+/**
+ * Minimal Zod → JSON Schema for a single field. MCP clients need each property
+ * to carry a `type` (and enum/items) or they drop the value when forwarding the
+ * call — which silently turned every parameterized tool into a no-arg tool.
+ * Defensive: unknown types fall back to an untyped object so listing never throws.
+ */
+function zodFieldToJsonSchema(zt: z.ZodType): Record<string, unknown> {
+  try {
+    // Unwrap optional / nullable / default to the inner type.
+    let inner = zt;
+    while (
+      inner instanceof z.ZodOptional ||
+      inner instanceof z.ZodNullable ||
+      inner instanceof z.ZodDefault
+    ) {
+      inner = (inner as unknown as { unwrap?: () => z.ZodType }).unwrap?.()
+        ?? (inner as unknown as { _def: { innerType: z.ZodType } })._def.innerType;
+    }
+    const desc = zt.description || inner.description;
+    const withDesc = (s: Record<string, unknown>) => (desc ? { ...s, description: desc } : s);
+
+    if (inner instanceof z.ZodString) return withDesc({ type: "string" });
+    if (inner instanceof z.ZodNumber) return withDesc({ type: "number" });
+    if (inner instanceof z.ZodBoolean) return withDesc({ type: "boolean" });
+    if (inner instanceof z.ZodEnum) return withDesc({ type: "string", enum: (inner as z.ZodEnum<never>).options });
+    if (inner instanceof z.ZodArray) {
+      return withDesc({ type: "array", items: zodFieldToJsonSchema((inner as z.ZodArray<z.ZodType>).element) });
+    }
+    if (inner instanceof z.ZodObject) {
+      const shape = (inner as ZodObject<ZodRawShape>).shape;
+      const properties: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(shape)) properties[k] = zodFieldToJsonSchema(v as z.ZodType);
+      return withDesc({ type: "object", properties });
+    }
+    return withDesc({ type: "string" }); // safe default — better a typed string than untyped
+  } catch {
+    return { type: "string" };
+  }
+}
+
+/** True when the field is required (not optional/default). */
+function zodFieldRequired(zt: z.ZodType): boolean {
+  return !(zt instanceof z.ZodOptional || zt instanceof z.ZodDefault);
+}
+
 class McpToolRegistry {
   private tools = new Map<string, McpTool>();
 
@@ -30,18 +75,24 @@ class McpToolRegistry {
     schema: ZodObject<T>,
     handler: (args: z.infer<ZodObject<T>>) => Promise<McpToolResult>
   ): void {
-    // Convert Zod to JSON Schema-like for tool listing
+    // Convert Zod to JSON Schema for tool listing. Each property MUST carry a
+    // `type` — without it, MCP clients drop the argument values when forwarding
+    // the call (every parameterized tool silently became a no-arg tool).
     const shape = schema.shape;
     const properties: Record<string, unknown> = {};
+    const required: string[] = [];
     for (const [key, val] of Object.entries(shape)) {
       const zodVal = val as z.ZodType;
-      properties[key] = { description: zodVal.description || key };
+      properties[key] = zodFieldToJsonSchema(zodVal);
+      if (zodFieldRequired(zodVal)) required.push(key);
     }
 
     this.tools.set(name, {
       name,
       description,
-      inputSchema: { type: "object", properties },
+      inputSchema: required.length
+        ? { type: "object", properties, required }
+        : { type: "object", properties },
       handler: async (args) => {
         const parsed = schema.parse(args);
         return handler(parsed);
