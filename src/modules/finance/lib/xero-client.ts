@@ -453,6 +453,42 @@ export async function xeroAdminPost(
 }
 
 /**
+ * Attach a file (e.g. a per-order COGS breakdown CSV) to a Manual Journal so
+ * the backing detail lives right on the journal in Xero for audit. Uses the
+ * `files` scope. Raw body (not JSON). Never throws — returns a status.
+ */
+export async function attachFileToManualJournal(
+  manualJournalId: string,
+  fileName: string,
+  content: string,
+  mimeType = "text/csv",
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const auth = await getAccessToken();
+    if (!auth) return { success: false, error: "Not authenticated with Xero" };
+    const url = `https://api.xero.com/api.xro/2.0/ManualJournals/${manualJournalId}/Attachments/${encodeURIComponent(fileName)}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+        "Xero-tenant-id": auth.tenantId,
+        "Content-Type": mimeType,
+        Accept: "application/json",
+      },
+      body: content,
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.error(`[Xero] attach ${fileName} → ${res.status}\n${err.slice(0, 1000)}`);
+      return { success: false, error: `Xero attach ${res.status}: ${err.slice(0, 500)}` };
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
  * Post a manual journal to Xero. Returns the created journal's ID and
  * status from Xero, or a structured error.
  */

@@ -23,7 +23,7 @@ import {
   resolveDepletionTarget, depleteInventoryFifo, MIN_PLAUSIBLE_UNIT_COST,
 } from "./fifo-engine";
 import { loadChannelXeroConfig } from "./shipment-revenue-recognition";
-import { postManualJournal } from "./xero-client";
+import { postManualJournal, attachFileToManualJournal } from "./xero-client";
 import {
   notifyCogsDailySummary, notifyCogsRunFailed, notifyCogsException,
 } from "@/modules/integrations/lib/slack/notifications";
@@ -226,6 +226,15 @@ export async function runDailyCogsPosting(
       }
       markJournalPosted(journalId, post.manualJournalId);
       result.xeroJournalId = post.manualJournalId;
+
+      // Attach the per-order/SKU backing detail to the Xero journal for audit.
+      // Best-effort — a failed attachment never fails the COGS run.
+      try {
+        const csv = buildDepletionCsv(date);
+        if (csv) await attachFileToManualJournal(post.manualJournalId, `cogs-detail-${date}.csv`, csv);
+      } catch (e) {
+        console.error(`[daily-cogs] attach detail failed for ${date}:`, e);
+      }
     }
 
     // Run log + Slack (live only).
@@ -309,6 +318,37 @@ function channelLabel(channel: string): string {
     case "unknown": return "Unattributed";
     default: return channel;
   }
+}
+
+/** Per-order/SKU COGS detail for a day as CSV — attached to the Xero journal
+ *  so the orders + layers behind the consolidated entry are auditable. */
+function buildDepletionCsv(date: string): string | null {
+  const rows = sqlite.prepare(`
+    SELECT o.order_number AS orderNumber, d.channel AS channel, cs.sku AS sku,
+           cp.name AS product, d.quantity AS units,
+           d.landed_cost_per_unit AS landedPerUnit,
+           ROUND(d.quantity * d.landed_cost_per_unit, 2) AS ext,
+           l.shipping_method AS method, date(l.received_at) AS layerReceived, l.po_number AS po
+    FROM inventory_cost_depletions d
+    JOIN inventory_cost_layers l ON l.id = d.cost_layer_id
+    LEFT JOIN orders o ON o.id = d.order_id
+    LEFT JOIN catalog_skus cs ON cs.id = l.sku_id
+    LEFT JOIN catalog_products cp ON cp.id = cs.product_id
+    WHERE d.depleted_at >= ? AND d.depleted_at <= ?
+    ORDER BY o.order_number, cs.sku
+  `).all(`${date}T00:00:00`, `${date}T23:59:59.999`) as Array<Record<string, unknown>>;
+  if (!rows.length) return null;
+
+  const esc = (v: unknown) => {
+    const s = v == null ? "" : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = ["Order", "Channel", "SKU", "Product", "Units", "Landed/unit", "Landed total", "Method", "Layer received", "PO"];
+  const lines = [header.join(",")];
+  for (const r of rows) {
+    lines.push([r.orderNumber, r.channel, r.sku, r.product, r.units, r.landedPerUnit, r.ext, r.method, r.layerReceived, r.po].map(esc).join(","));
+  }
+  return lines.join("\n");
 }
 
 function writeRunLog(runId: string, r: DailyCogsResult, durationMs: number, error: string | null) {
