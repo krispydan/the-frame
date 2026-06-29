@@ -5,6 +5,8 @@ import { calculatePnl } from "@/modules/finance/lib/pnl";
 import { calculateCashFlow } from "@/modules/finance/lib/cash-flow";
 import { syncSettlementToXero, isXeroConfigured, getXeroSetupInstructions } from "@/modules/finance/lib/xero-client";
 import { createLayersForShipment } from "@/modules/finance/lib/cogs-ingest";
+import { runDailyCogsPosting } from "@/modules/finance/lib/daily-cogs";
+import { runCogsBackfill } from "@/modules/finance/lib/cogs-backfill";
 
 export function registerFinanceMcpTools() {
   // ── finance.get_pnl ──
@@ -142,6 +144,49 @@ export function registerFinanceMcpTools() {
     async (args) => {
       const { dryRun, ...shipment } = args;
       const result = createLayersForShipment(shipment, { apply: !dryRun });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // ── finance.run_cogs_backfill ──
+  // Replay the daily FIFO COGS job across a date range. dryRun reports the
+  // would-post + exceptions with no writes/Xero posting. Live posts one Xero
+  // journal per day. Use for go-live history once opening layers are seeded.
+  mcpRegistry.register(
+    "finance.run_cogs_backfill",
+    "Backfill daily FIFO COGS across a date range (inclusive). dryRun=true previews units, COGS, and exceptions per day WITHOUT writing depletions or posting to Xero — always run dryRun first and review before a live run. Live posts one consolidated COGS journal per day to Xero.",
+    z.object({
+      from: z.string().describe("Start date YYYY-MM-DD (inclusive)"),
+      to: z.string().describe("End date YYYY-MM-DD (inclusive)"),
+      dryRun: z.boolean().optional().describe("Preview only — no writes, no Xero (default false)"),
+      force: z.boolean().optional().describe("Re-post days already posted (default false)"),
+    }),
+    async (args) => {
+      const result = await runCogsBackfill({ from: args.from, to: args.to, dryRun: args.dryRun, force: args.force });
+      // Trim per-day exception arrays for readability; keep counts + totals.
+      const summary = {
+        from: result.from, to: result.to, dryRun: result.dryRun,
+        totalUnits: result.totalUnits, totalCogs: result.totalCogs, totalExceptions: result.totalExceptions,
+        days: result.days.map((d) => ({
+          date: d.date, units: d.unitsCosted, cogs: d.totalCogs,
+          exceptions: d.exceptions.length, xeroJournalId: d.xeroJournalId, skipped: d.skipped,
+        })),
+      };
+      return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
+    }
+  );
+
+  // ── finance.run_daily_cogs ──
+  mcpRegistry.register(
+    "finance.run_daily_cogs",
+    "Run the daily FIFO COGS job for a single day (default yesterday UTC). dryRun=true previews without writing or posting to Xero. Posts one consolidated COGS journal on a live run.",
+    z.object({
+      date: z.string().optional().describe("Day to cost, YYYY-MM-DD (default yesterday UTC)"),
+      dryRun: z.boolean().optional().describe("Preview only — no writes, no Xero (default false)"),
+      force: z.boolean().optional().describe("Re-post even if the day is already posted (default false)"),
+    }),
+    async (args) => {
+      const result = await runDailyCogsPosting({ date: args.date, dryRun: args.dryRun, force: args.force });
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
   );
