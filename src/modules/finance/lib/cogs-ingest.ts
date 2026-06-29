@@ -43,8 +43,14 @@ function resolveSkuId(sku: string): string | null {
   const r = sqlite.prepare("SELECT id FROM catalog_skus WHERE sku = ? LIMIT 1").get(sku) as { id: string } | undefined;
   return r?.id ?? null;
 }
-function layerExists(poNumber: string, skuId: string): boolean {
-  return !!sqlite.prepare("SELECT id FROM inventory_cost_layers WHERE po_number = ? AND sku_id = ? LIMIT 1").get(poNumber, skuId);
+function layerExists(poNumber: string, skuId: string, shippingMethod: string): boolean {
+  // Key includes shipping_method so air + ocean shipments under the SAME PO
+  // number (with overlapping SKUs) don't collide — they're distinct layers at
+  // different landed costs. Callers should still prefer a unique poNumber per
+  // shipment (e.g. JAX100-AIR / JAX100-SEA) for clarity.
+  return !!sqlite.prepare(
+    "SELECT id FROM inventory_cost_layers WHERE po_number = ? AND sku_id = ? AND shipping_method = ? LIMIT 1",
+  ).get(poNumber, skuId, shippingMethod);
 }
 
 /**
@@ -83,7 +89,7 @@ export function createLayersForShipment(s: ShipmentInput, opts: { apply: boolean
 
     const skuId = resolveSkuId(l.sku);
     if (!skuId) { res.unmapped.push(l.sku); continue; }
-    if (layerExists(s.poNumber, skuId)) { res.skipped++; continue; }
+    if (layerExists(s.poNumber, skuId, s.mode)) { res.skipped++; continue; }
     if (!opts.apply || blockWrite) { res.created++; continue; } // would-create
 
     try {

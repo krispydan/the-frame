@@ -4,7 +4,7 @@
     {
       "factory": "TAGA",
       "mode": "air",
-      "poNumber": "JAX100",
+      "poNumber": "JAX100-AIR",
       "invoiceNumber": "CI2604020",
       "receivedAt": "2026-04-30",
       "freightTotal": 1114.08,
@@ -193,7 +193,7 @@
     {
       "factory": "TAGA",
       "mode": "ocean",
-      "poNumber": "JAX100",
+      "poNumber": "JAX100-SEA",
       "invoiceNumber": "CI2604021",
       "receivedAt": "2026-05-28",
       "freightTotal": 579.35,
@@ -382,7 +382,7 @@
     {
       "factory": "HD",
       "mode": "air",
-      "poNumber": "JAX200",
+      "poNumber": "JAX200-AIR",
       "invoiceNumber": "HYT26010-1",
       "receivedAt": "2026-04-30",
       "freightTotal": 1203.46,
@@ -516,7 +516,7 @@
     {
       "factory": "HD",
       "mode": "ocean",
-      "poNumber": "JAX200",
+      "poNumber": "JAX200-SEA",
       "invoiceNumber": "HYT26010-2",
       "receivedAt": "2026-05-28",
       "freightTotal": 371.6,
@@ -650,7 +650,7 @@
     {
       "factory": "Geya",
       "mode": "air",
-      "poNumber": "JAX300",
+      "poNumber": "JAX300-AIR",
       "invoiceNumber": "26GY1024",
       "receivedAt": "2026-04-30",
       "freightTotal": 780.51,
@@ -784,7 +784,7 @@
     {
       "factory": "Geya",
       "mode": "ocean",
-      "poNumber": "JAX300",
+      "poNumber": "JAX300-SEA",
       "invoiceNumber": "26GY1025",
       "receivedAt": "2026-05-28",
       "freightTotal": 513.3,
@@ -918,7 +918,7 @@
     {
       "factory": "Brilliant",
       "mode": "air",
-      "poNumber": "WP26BZ016",
+      "poNumber": "WP26BZ016-AIR",
       "invoiceNumber": "WP26BZ016",
       "receivedAt": "2026-05-16",
       "freightTotal": 1183.42,
@@ -1052,7 +1052,7 @@
     {
       "factory": "Brilliant",
       "mode": "air",
-      "poNumber": "WP26BZ017",
+      "poNumber": "WP26BZ017-AIR",
       "invoiceNumber": "WP26BZ017",
       "receivedAt": "2026-05-23",
       "freightTotal": 556.27,
@@ -1106,7 +1106,7 @@
     {
       "factory": "Brilliant",
       "mode": "ocean",
-      "poNumber": "WP26BZ018",
+      "poNumber": "WP26BZ018-SEA",
       "invoiceNumber": "WP26BZ018",
       "receivedAt": "2026-06-12",
       "freightTotal": 551.0,
