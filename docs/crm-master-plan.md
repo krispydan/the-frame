@@ -41,8 +41,10 @@ this master plan supersedes it on any conflict).
 - **Account lifecycle (sticky) ≠ opportunities (recurring).** A customer can get
   new opportunities (reorder, upsell, reactivation) with no status change — how
   AJM reactivation is expressible (§3.1).
-- **Every wholesale order becomes a deal** (one per order, backdated); history is
-  backfilled; refunds/cancellations reconciled (needs new events — §9.1).
+- **Every wholesale order becomes a Won deal**, backdated. **If the org has an
+  open (non-closed) deal, the order is reported under that deal** (it wins it)
+  instead of spawning a standalone deal; otherwise a new Won deal is created in
+  Customers. History is backfilled; refunds/cancellations reconciled (§9.1).
 - **Build = five phases.** Phase 0 (AJM import) and Phase 1 (foundations) can
   start first; Phase 2 depends on Phase 1.
 
@@ -270,7 +272,7 @@ round-robin or territory by `companies.state` (config, not a rewrite).
 |--------|--------|
 | Frame → interested | create/refresh open outreach deal (per company+pipeline), owner = Christina |
 | Frame → catalog_sent (Instantly catalog-send event) | move deal to Catalog Sent |
-| Frame → customer (real order) | order-deal Won in Customers |
+| Frame → customer (real order) | **win the org's open deal if one exists** (report the order under it); else create a Won order-deal in Customers |
 | Pipedrive → Catalog Sent stage | advisory; **authoritative `catalog_sent` is the Instantly send event** |
 | **Pipedrive outreach deal Won** | **advisory / velocity only — does NOT set `customer`.** `customer` is reached solely via a real wholesale order (keystone #3) |
 | Pipedrive deal Lost | map by **lost_reason** → `not_interested` / `ghosted` / `revisit_later` (default `not_interested`) |
@@ -303,12 +305,19 @@ later observed Pipedrive state wins for stage.
 
 - **Live:** `order.created` fires with `{orderId, companyId, total}` only — **it
   does not carry channel**, so `createDealForOrder(orderId)` re-reads the order
-  row (`orders.channel` is indexed). If `shopify_wholesale`: resolve/create Org +
-  Person → create **Won** deal in Customers, value = total, dated to `placedAt`,
-  set `frame_order_id`, stamp `pipedrive_deal_id`. If an open outreach deal
-  exists, mark it Won — a genuine **conversion win for velocity reporting only**;
-  it carries no separate revenue (revenue is the order, counted once via
-  `orders`).
+  row (`orders.channel` is indexed). If `shopify_wholesale`, resolve/create Org +
+  Person, then **either attach to an open deal or create a new one**:
+  - **If the org has an open (non-closed) deal** (any pipeline — typically the
+    AJM/Catalog outreach deal): **win that deal with the order** — set it Won,
+    value = order total, `won_time = placedAt`, stamp `frame_order_id` +
+    `pipedrive_deal_id`. The order is reported *under* that deal; no standalone
+    deal is created. (If multiple are open, pick the most recently active
+    outreach deal.)
+  - **Else:** create a new **Won** deal in the Customers pipeline, value = total,
+    dated to `placedAt`, `frame_order_id` + `pipedrive_deal_id` set.
+  Either way the order is represented by exactly **one** Won deal. Revenue is
+  still counted once from `orders` (deal value is display-only — keystone #2), so
+  attaching vs. creating never double-counts.
 - **Refunds/cancellations need new events.** The Shopify handlers for
   `orders/updated`, `refunds/create`, `orders/cancelled` currently mutate the
   `orders` row but **emit nothing** — only `order.created` and `order.shipped`
