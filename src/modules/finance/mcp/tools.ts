@@ -6,7 +6,7 @@ import { calculateCashFlow } from "@/modules/finance/lib/cash-flow";
 import { syncSettlementToXero, isXeroConfigured, getXeroSetupInstructions } from "@/modules/finance/lib/xero-client";
 import { createLayersForShipment } from "@/modules/finance/lib/cogs-ingest";
 import { runDailyCogsPosting } from "@/modules/finance/lib/daily-cogs";
-import { runCogsBackfill } from "@/modules/finance/lib/cogs-backfill";
+import { runCogsBackfill, correctCogsForDate } from "@/modules/finance/lib/cogs-backfill";
 import { stripCogsFromOldRecognitions } from "@/modules/finance/lib/cogs-remediation";
 
 export function registerFinanceMcpTools() {
@@ -214,6 +214,24 @@ export function registerFinanceMcpTools() {
     }),
     async (args) => {
       const result = await stripCogsFromOldRecognitions({ dryRun: args.dryRun, limit: args.limit });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // ── finance.correct_cogs_date ──
+  // Reverse a day's posted COGS journal and re-post fresh from current layers
+  // (reverse-and-repost, never edit-in-place). Use after seeding/aliasing a SKU
+  // so a previously-excepted line gets costed, or after a landed-cost true-up.
+  // Locked-period aware (posts the reversal + fresh entry in the open period).
+  mcpRegistry.register(
+    "finance.correct_cogs_date",
+    "Correct a single day's COGS: reverse its posted Xero journal and re-post fresh from current cost layers (picks up newly-seeded/aliased SKUs, applies landed-cost true-ups). Reverse-and-repost — never edits in place. Returns the reversed + new journal ids.",
+    z.object({
+      date: z.string().describe("Day to correct, YYYY-MM-DD"),
+      reason: z.string().optional().describe("Audit note for the correction"),
+    }),
+    async (args) => {
+      const result = await correctCogsForDate(args.date, { reason: args.reason });
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
   );
