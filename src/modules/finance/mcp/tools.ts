@@ -7,6 +7,7 @@ import { syncSettlementToXero, isXeroConfigured, getXeroSetupInstructions } from
 import { createLayersForShipment } from "@/modules/finance/lib/cogs-ingest";
 import { runDailyCogsPosting } from "@/modules/finance/lib/daily-cogs";
 import { runCogsBackfill } from "@/modules/finance/lib/cogs-backfill";
+import { stripCogsFromOldRecognitions } from "@/modules/finance/lib/cogs-remediation";
 
 export function registerFinanceMcpTools() {
   // ── finance.get_pnl ──
@@ -196,6 +197,24 @@ export function registerFinanceMcpTools() {
         "INSERT OR REPLACE INTO catalog_sku_aliases (alias, sku_id, canonical_sku, note) VALUES (?, ?, ?, ?)",
       ).run(args.alias, row.id, args.canonicalSku, args.note ?? null);
       return { content: [{ type: "text", text: JSON.stringify({ ok: true, alias: args.alias, canonicalSku: args.canonicalSku }) }] };
+    }
+  );
+
+  // ── finance.strip_old_recognition_cogs ──
+  // One-off remediation: re-post the old Stage-2 per-order recognition journals
+  // revenue-only (remove the duplicated DR 5000 / CR 1400 COGS pair now handled
+  // by the FIFO daily job). Idempotent. DEFAULTS TO DRY RUN — pass dryRun:false
+  // to actually edit Xero. Run dryRun first and review.
+  mcpRegistry.register(
+    "finance.strip_old_recognition_cogs",
+    "Remediation: strip the duplicated COGS pair (5000/1400) from the old Stage-2 revenue-recognition Manual Journals, re-posting each revenue-only. Defaults to dryRun (GETs only). Pass dryRun:false to edit Xero. Idempotent; zeroes cogs_amount after each strip.",
+    z.object({
+      dryRun: z.boolean().optional().describe("Preview only — GET journals, report what would change, no Xero edits (default TRUE)"),
+      limit: z.number().optional().describe("Cap number of journals processed (for a staged first batch)"),
+    }),
+    async (args) => {
+      const result = await stripCogsFromOldRecognitions({ dryRun: args.dryRun, limit: args.limit });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
   );
 
