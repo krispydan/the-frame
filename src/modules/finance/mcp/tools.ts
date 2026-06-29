@@ -176,6 +176,29 @@ export function registerFinanceMcpTools() {
     }
   );
 
+  // ── finance.add_sku_alias ──
+  // Map a sales/order SKU string with no catalog row (e.g. a size-variant like
+  // JX4004-S-BLK) to a canonical catalog SKU, so it costs against that SKU's
+  // FIFO layers instead of raising an unmapped_sku exception. Re-run the
+  // affected COGS day(s) afterward (finance.run_daily_cogs force / correct).
+  mcpRegistry.register(
+    "finance.add_sku_alias",
+    "Alias a non-catalog order SKU to a canonical catalog SKU for COGS costing. Use when an unmapped_sku exception is really a mis-formatted/size variant of an existing SKU. After adding, re-cost the affected day(s).",
+    z.object({
+      alias: z.string().describe("The order/sales SKU string as it appears on orders (e.g. JX4004-S-BLK)"),
+      canonicalSku: z.string().describe("Existing catalog SKU to cost against (e.g. JX4004-BLK)"),
+      note: z.string().optional(),
+    }),
+    async (args) => {
+      const row = sqlite.prepare("SELECT id FROM catalog_skus WHERE sku = ? LIMIT 1").get(args.canonicalSku) as { id: string } | undefined;
+      if (!row) return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: `canonical SKU ${args.canonicalSku} not in catalog` }) }] };
+      sqlite.prepare(
+        "INSERT OR REPLACE INTO catalog_sku_aliases (alias, sku_id, canonical_sku, note) VALUES (?, ?, ?, ?)",
+      ).run(args.alias, row.id, args.canonicalSku, args.note ?? null);
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true, alias: args.alias, canonicalSku: args.canonicalSku }) }] };
+    }
+  );
+
   // ── finance.run_daily_cogs ──
   mcpRegistry.register(
     "finance.run_daily_cogs",

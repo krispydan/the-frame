@@ -580,6 +580,17 @@ try {
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cogs_exceptions_type ON cogs_exceptions(type)`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cogs_exceptions_order ON cogs_exceptions(order_id)`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_cogs_exceptions_order_item ON cogs_exceptions(order_item_id)`);
+
+  // SKU aliases: map a sales/order SKU string that has no catalog row (e.g. a
+  // mis-formatted size variant "JX4004-S-BLK") to a canonical catalog SKU so it
+  // costs against that SKU's FIFO layers instead of raising an unmapped_sku.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS catalog_sku_aliases (
+    alias TEXT PRIMARY KEY NOT NULL,
+    sku_id TEXT NOT NULL,
+    canonical_sku TEXT,
+    note TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
 } catch (e) { console.error("[db] FIFO tables error:", e); }
 
 // Shopify category metafield sync: cached AI categorization per product

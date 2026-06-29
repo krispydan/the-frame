@@ -335,11 +335,27 @@ export function resolveDepletionTarget(opts: {
   const unitSku = unitSkuOf(opts.sku);
   let unitSkuId = opts.skuId ?? null;
 
+  // Pack SKU: resolve the bare unit SKU's catalog id (layers live on the unit).
   if (packSize > 1 && unitSku) {
     const row = sqlite.prepare(
       "SELECT id FROM catalog_skus WHERE sku = ? LIMIT 1"
     ).get(unitSku) as { id: string } | undefined;
     if (row) unitSkuId = row.id;
+  }
+
+  // No catalog id yet (order line's sku_id was null) — resolve by SKU string.
+  if (!unitSkuId && unitSku) {
+    const row = sqlite.prepare(
+      "SELECT id FROM catalog_skus WHERE sku = ? LIMIT 1"
+    ).get(unitSku) as { id: string } | undefined;
+    if (row) unitSkuId = row.id;
+  }
+
+  // Still unmapped — check the alias map (e.g. JX4004-S-BLK → JX4004-BLK).
+  if (!unitSkuId) {
+    const a = (sqlite.prepare("SELECT sku_id FROM catalog_sku_aliases WHERE alias = ? LIMIT 1").get(opts.sku ?? "")
+      ?? (unitSku ? sqlite.prepare("SELECT sku_id FROM catalog_sku_aliases WHERE alias = ? LIMIT 1").get(unitSku) : undefined)) as { sku_id: string } | undefined;
+    if (a) unitSkuId = a.sku_id;
   }
 
   return { unitSkuId, units, packSize, unitSku };
