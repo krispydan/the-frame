@@ -103,25 +103,43 @@ Christina**, custom field `frame_company_id` set for dedup.
 
 ## 5. Execution flow (upload via API)
 
-1. **Receive `Sheet4`** → validate columns vs the 59-column master; report row
-   count (expect ~1,173) and the §2 reason-bucket breakdown for sign-off.
-2. **Prep:** `scripts/prep-ajm-import.py` transforms the CSV → import JSONL,
-   applying the §2 reason→status mapping and §4 skip rules. Output a **dry-run
-   summary** (created / merged / skipped / would-be Won vs reactivation).
-3. **Daniel sign-off** on the dry-run counts.
-4. **Import to the frame:** `POST /api/admin/sales/import-ajm` (idempotent).
-   Acceptance per master-plan §9.4 (field-mapping + dedup validation + 20-row
-   hand audit).
-5. **Create Pipedrive deals:** `POST /api/v1/integrations/pipedrive/preview`
-   (dry-run) → then push: for each imported AJM company, create the AJM
-   Reactivation deal (owner = Christina) at the stage from §2; already-customer
-   rows created **Won**. Backdate Won deals to `ajm_last_order` where present.
-6. **Verify:** deal count matches imported rows minus skips; spot-check Christina's
-   board; confirm ownership and stage placement.
+**Tooling is built:** `scripts/prep-ajm-import.py` (new) turns the AJM CSV export
+into the `ajm_import.jsonl` the importer expects, applying the §2 reason→status
+mapping and §4 skip rules, and prints a dry-run summary. The import endpoint
+(`POST /api/admin/sales/import-ajm`, `key=jaxy2026`, accepts a JSONL file) already
+existed; the prep script was the missing half.
+
+Steps:
+
+1. **Get `Sheet4` as a CSV file** on disk (the earlier upload arrived empty;
+   re-export and re-upload).
+2. **Prep + dry-run summary:**
+   ```
+   python3 scripts/prep-ajm-import.py Sheet4.csv ajm_import.jsonl
+   ```
+   Prints rows read, emit count, and the split (already-customer / reactivation /
+   invalid-email / skipped) for Daniel's sign-off, and writes the JSONL.
+3. **Import to the frame (dry run first):**
+   ```
+   curl -F key=jaxy2026 -F dryRun=true -F file=@ajm_import.jsonl <host>/api/admin/sales/import-ajm
+   curl -F key=jaxy2026 -F file=@ajm_import.jsonl               <host>/api/admin/sales/import-ajm
+   ```
+   Idempotent. Acceptance per master-plan §9.4 (field-mapping + dedup validation +
+   20-row hand audit).
+4. **Create Pipedrive deals (Phase 3):** for each imported AJM company, create the
+   AJM Reactivation deal (**owner = Christina**); already-customer (`cohort =
+   ajm_already_customer`) rows → **Won**, backdated to `ajm_last_order`;
+   reactivation rows → open deal at the first stage. Dry-run preview first.
+
+> **Validation run (master file, 13,821 rows)** confirmed the script and mapping:
+> 13,620 emit (123 already-customer → Won, 13,485 reactivation, 12 call-only),
+> 201 skipped (closed/duplicate/Non-US). Running it on the curated **Sheet4**
+> (~1,173 rows) yields the actual import set. Note ~64% of master rows are
+> phone-only (no valid email) — call-first leads for Christina.
 
 > Prereqs (from master-plan §13): Pipedrive API token + subdomain + **staging**
 > company, the AJM pipeline + stage IDs, and **Christina's Pipedrive user/owner
-> ID**. Run step 5 against staging first.
+> ID**. Run step 4 against staging first.
 
 ---
 
@@ -139,7 +157,10 @@ context.
 
 ## 7. Open items for this import
 
-- [ ] Re-upload `Sheet4` (last attempt 0 bytes)
-- [ ] Confirm AJM pipeline gets a `To Contact` stage (§2) vs. starting at Interested
-- [ ] Confirm Non-US rows are skipped (current assumption)
-- [ ] Christina's Pipedrive owner ID + AJM pipeline/stage IDs
+- [ ] **Re-upload `Sheet4` as a CSV file** — the only blocker to running the
+      import; the prep script + endpoint are ready. (Last upload was 0 bytes; the
+      list was pasted as text, which can't be processed programmatically.)
+- [x] Prep tooling built & validated — `scripts/prep-ajm-import.py` (§5)
+- [x] Reason→status mapping confirmed (§2)
+- [x] Non-US skipped only when the reason says so (Canadian Jaxy customers kept)
+- [ ] Christina's Pipedrive owner ID + AJM pipeline/stage IDs (for Phase 3 push)
