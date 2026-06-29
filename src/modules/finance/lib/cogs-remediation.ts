@@ -19,6 +19,23 @@ import { xeroAdminFetch, xeroAdminPost } from "./xero-client";
 /** Account codes that make up the duplicated COGS pair in the old journals. */
 export const COGS_PAIR_CODES = ["5000", "1400"];
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Run a Xero call, backing off on 429 (Xero's 60 calls/min limit). Fixed
+ *  escalating delays since xeroAdminFetch/Post don't surface Retry-After. */
+async function withRetry<T extends { success: boolean; error?: string }>(
+  fn: () => Promise<T>,
+  attempts = 5,
+): Promise<T> {
+  let last!: T;
+  for (let i = 0; i < attempts; i++) {
+    last = await fn();
+    if (last.success || !/(^|\D)429(\D|$)/.test(last.error || "")) return last;
+    await sleep([3000, 8000, 15000, 25000][i] ?? 25000);
+  }
+  return last;
+}
+
 interface XeroJournalLine {
   LineAmount: number;
   AccountCode: string;
@@ -65,7 +82,9 @@ export async function stripCogsFromOldRecognitions(
 
   for (const r of rows) {
     try {
-      const get = await xeroAdminFetch(`/api.xro/2.0/ManualJournals/${r.journalId}`);
+      // Throttle to stay under Xero's 60 calls/min (2 calls/journal → ~54/min).
+      await sleep(2200);
+      const get = await withRetry(() => xeroAdminFetch(`/api.xro/2.0/ManualJournals/${r.journalId}`));
       if (!get.success) { res.errors.push({ orderId: r.orderId, journalId: r.journalId, error: get.error }); continue; }
       const mj = (get.data as { ManualJournals?: Array<Record<string, unknown>> }).ManualJournals?.[0];
       if (!mj) { res.errors.push({ orderId: r.orderId, journalId: r.journalId, error: "journal not found in Xero" }); continue; }
@@ -87,7 +106,7 @@ export async function stripCogsFromOldRecognitions(
       // ManualJournalID updates in place; signs/tracking are preserved verbatim.
       const narration = String(mj.Narration || "").replace(/\s*\|\s*COGS[^|]*/i, "").trim()
         || `Revenue recognition (COGS moved to FIFO subledger)`;
-      const update = await xeroAdminPost("/api.xro/2.0/ManualJournals", {
+      const update = await withRetry(() => xeroAdminPost("/api.xro/2.0/ManualJournals", {
         ManualJournals: [{
           ManualJournalID: r.journalId,
           Narration: narration,
@@ -100,7 +119,7 @@ export async function stripCogsFromOldRecognitions(
             ...(l.Tracking ? { Tracking: l.Tracking } : {}),
           })),
         }],
-      });
+      }));
       if (!update.success) { res.errors.push({ orderId: r.orderId, journalId: r.journalId, error: update.error }); continue; }
 
       sqlite.prepare("UPDATE order_revenue_recognitions SET cogs_amount = 0 WHERE order_id = ?").run(r.orderId);
