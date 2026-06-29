@@ -146,7 +146,7 @@ Day 5  ─  Order ships
               <AccountRow code="5455" name="Faire Fees — Payment Processing" type="EXPENSE" role="3.5% + $0.30 per Faire order." healthy="≈ 3.5% of Faire GMV." />
               <AccountRow code="5460" name="Faire Fees — Shipping Labels" type="EXPENSE" role="Net shipping cost: actual UPS label cost minus Faire's reimbursement." healthy="Should be small or near-zero when we ship-on-your-own (Faire reimburses)." />
               <AccountRow code="5000" name="COGS — Product" type="EXPENSE" role="Recognized at shipment via FIFO unit cost × quantity." healthy="Roughly proportional to recognized Sales." />
-              <AccountRow code="1400" name="Inventory — Sunglasses" type="CURRENT_ASSET" role="Reduced at shipment matching COGS." healthy="Tracks on-hand inventory dollar value." />
+              <AccountRow code="1400" name="Inventory" type="CURRENT_ASSET" role="Reduced at shipment matching COGS." healthy="Tracks on-hand inventory dollar value (single account — all product types)." />
             </tbody>
           </table>
         </div>
