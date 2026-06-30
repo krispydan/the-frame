@@ -162,6 +162,10 @@ let _stampAttemptStmt: Statement | null = null;
 
 function updateCompanyStmt(): Statement {
   if (!_updateCompanyStmt) {
+    // enrichment_status has a CHECK constraint limiting it to
+    // ('not_enriched','queued','enriched','failed'). The provider
+    // identity lives in enrichment_source — set it to 'apify_gmaps'
+    // so we can distinguish from outscraper / manual / etc.
     _updateCompanyStmt = sqlite.prepare(`
       UPDATE companies
          SET google_place_id   = COALESCE(google_place_id, ?),
@@ -169,7 +173,8 @@ function updateCompanyStmt(): Statement {
              google_review_count = COALESCE(google_review_count, ?),
              address           = COALESCE(NULLIF(address, ''), ?),
              business_hours    = COALESCE(business_hours, ?),
-             enrichment_status = 'enriched_via_apify',
+             enrichment_status = 'enriched',
+             enrichment_source = 'apify_gmaps',
              enriched_at       = datetime('now'),
              updated_at        = datetime('now')
        WHERE id = ?
