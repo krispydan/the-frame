@@ -31,7 +31,7 @@ import { syncSettlementsAllShops } from "@/modules/finance/lib/shopify-settlemen
 import { runShipmentRevenueRecognition } from "@/modules/finance/lib/shipment-revenue-recognition";
 import { runDailyCogsPosting } from "@/modules/finance/lib/daily-cogs";
 import { syncFairePayouts } from "@/modules/integrations/lib/faire/payout-sync";
-import { runOrderDealSweep } from "@/modules/sales/lib/pipedrive-sync";
+import { runOrderDealSweep, runActivitySweep } from "@/modules/sales/lib/pipedrive-sync";
 
 export type CronJob = {
   id: string;                         // stable, kebab-case
@@ -234,6 +234,14 @@ export const CRON_JOBS: CronJob[] = [
     // Off by default so connecting Pipedrive doesn't auto-create deals before
     // Daniel runs the dry-run backfill + sign-off (docs §9.3). Enable in the
     // cron settings UI when ready.
+    defaultEnabled: false,
+  },
+  {
+    id: "pipedrive-activity-sweep",
+    schedule: "*/20 * * * *",  // every 20 min during business hours
+    description: "Push recent Instantly/PhoneBurner engagement (emails, replies, calls) into Pipedrive as logged activities on the org/person/deal. No-ops until Pipedrive auto-sync is enabled.",
+    handler: () => runActivitySweep(300),
+    guard: () => isDuringBusinessHours(),
     defaultEnabled: false,
   },
   {

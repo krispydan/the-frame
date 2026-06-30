@@ -6,6 +6,7 @@ import {
   seedAjmToPipedrive,
   backfillInterested,
   backfillOrderDeals,
+  syncActivitiesToPipedrive,
   ensureCustomFields,
   PipedriveNotReadyError,
 } from "@/modules/sales/lib/pipedrive-sync";
@@ -57,6 +58,10 @@ export async function POST(req: NextRequest) {
       }
       case "backfill-orders": {
         const r = await backfillOrderDeals({ dryRun, limit: body.limit, backfillRunId: body.backfillRunId });
+        return NextResponse.json({ ok: true, ...r });
+      }
+      case "sync-activities": {
+        const r = await syncActivitiesToPipedrive({ dryRun, limit: body.limit });
         return NextResponse.json({ ok: true, ...r });
       }
       default:
