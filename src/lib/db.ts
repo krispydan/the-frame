@@ -174,6 +174,11 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN youtube_followers INTEGER");
 // tried but didn't get a high-confidence match.
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN gmaps_enrichment_attempted_at TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN gmaps_skip_reason TEXT"); } catch { /* exists */ }
+// Preserve the original name when Apify enrichment updates it to the
+// canonical Google-formatted title. Stamped once (the first time the
+// name is updated by Apify); subsequent updates leave it alone so
+// we always have the "what the scraper originally captured" record.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN original_name TEXT"); } catch { /* exists */ }
 // Run-by-run history of Apify enrichment batches. The work runs
 // fire-and-forget for batches > 100, so the operator can't read the
 // HTTP response — they read these rows instead. One row per

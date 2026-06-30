@@ -259,9 +259,19 @@ function updateCompanyStmt(): Statement {
     // ('not_enriched','queued','enriched','failed'). The provider
     // identity lives in enrichment_source — set it to 'apify_gmaps'
     // so we can distinguish from outscraper / manual / etc.
+    //
+    // Name update behavior: when Apify returns a canonical title
+    // (e.g. "Southern Pine Boutique" vs our scraper's
+    // "SouthernPineBoutique"), adopt the Google-formatted name.
+    // Stash the pre-update name in original_name on first update
+    // (COALESCE — only stamped once) so the original is preserved.
+    // The caller passes nameToUse — null/empty preserves the
+    // existing name.
     _updateCompanyStmt = sqlite.prepare(`
       UPDATE companies
-         SET google_place_id   = COALESCE(google_place_id, ?),
+         SET original_name     = COALESCE(original_name, name),
+             name              = COALESCE(NULLIF(?, ''), name),
+             google_place_id   = COALESCE(google_place_id, ?),
              google_rating     = COALESCE(google_rating, ?),
              google_review_count = COALESCE(google_review_count, ?),
              address           = COALESCE(NULLIF(address, ''), ?),
@@ -612,7 +622,26 @@ export async function enrichViaGoogleMaps(opts: {
         : null;
       if (hoursJson) result.hours_updated++;
 
+      // Adopt Apify's canonical title as the new company name when:
+      //   - place.title is non-empty
+      //   - AND the names differ in something more than just casing
+      //     or whitespace (avoid pointless writes for identical names)
+      // Only runs on accepted matches because the match-acceptance
+      // gate above already confirmed this place corresponds to our
+      // company. Stash the original name in companies.original_name
+      // (handled by COALESCE in the prepared statement).
+      const apifyTitle = String(place.title || "").trim();
+      const compress = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const nameDiffersMeaningfully =
+        apifyTitle.length > 0 &&
+        compress(apifyTitle) !== "" &&
+        compress(apifyTitle) !== compress(company.name);
+      // Pass empty string to skip the name update (NULLIF in the
+      // prepared statement preserves the existing name).
+      const nameToWrite = nameDiffersMeaningfully ? apifyTitle : "";
+
       updateCompanyStmt().run(
+        nameToWrite,
         place.placeId || null,
         place.totalScore ?? null,
         place.reviewsCount ?? null,
