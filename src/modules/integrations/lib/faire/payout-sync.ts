@@ -36,13 +36,15 @@ import {
 import { settlements, settlementLineItems } from "@/modules/finance/schema";
 import { orders } from "@/modules/orders/schema";
 import { eq, and, inArray } from "drizzle-orm";
-import { postManualJournal, postBankTransactionReceive } from "@/modules/finance/lib/xero-client";
+import { postManualJournal, postBankTransactionReceive, postSettlementInvoice } from "@/modules/finance/lib/xero-client";
 import {
   listFaireOrdersPage,
   summarizeFairePayout,
   fairePayoutBalanceDelta,
   type FairePayoutSummary,
 } from "./payouts";
+import { getPayoutRevenueModel } from "@/modules/integrations/lib/xero/payout-revenue-model";
+import { buildSettlementInvoice, fairePayoutToComponents } from "@/modules/integrations/lib/xero/settlement-invoice-builder";
 
 const PLATFORM = "faire";
 // Faire orders physically live on the Shopify wholesale store, but the
@@ -76,7 +78,8 @@ interface ChannelXeroConfig {
    *  items deducted from payout) route here instead of 5460. */
   inventoryAdjustmentsAccount: string | null;
   bankClearingAccount: string;     // 101x (BANK type)
-  deferredRevenueAccount: string;  // 2050 (shared)
+  deferredRevenueAccount: string;  // 2050 (shared) — legacy deferred model
+  salesAccount: string;            // 4040 Sales - Faire Wholesale (invoice model)
   receivablesHoldingAccount: string; // 1100 (shared)
   trackingCategoryId: string | null;
   trackingCategoryName: string | null;
@@ -149,7 +152,11 @@ export async function syncFairePayouts(opts: { maxPages?: number } = {}): Promis
       if (existing) { result.skipped++; continue; }
 
       try {
-        await processFairePayout({ runId, summary, cfg });
+        if (getPayoutRevenueModel() === "invoice") {
+          await postFaireInvoice({ runId, summary, cfg });
+        } else {
+          await processFairePayout({ runId, summary, cfg });
+        }
         result.posted++;
         // Xero rate-limits orgs to ~60 req/min. Each payout fires 2 calls
         // (ManualJournal + BankTransaction), so we throttle to ~30 payouts/min.
@@ -427,6 +434,108 @@ async function processFairePayout(opts: {
   }
 }
 
+/**
+ * Settlement-date model: post ONE ACCREC invoice for a Faire payout (gross
+ * order total to 4040, commission + processing as negative lines, documented
+ * payout-delta plug), then write the synthetic settlement so COGS/reporting
+ * stay consistent. No deferred journal, no bank sweep — the deposit reconciles
+ * 1:1 against the invoice.
+ */
+async function postFaireInvoice(opts: {
+  runId: string;
+  summary: FairePayoutSummary;
+  cfg: ChannelXeroConfig;
+}): Promise<void> {
+  const { runId, summary, cfg } = opts;
+  if (summary.totalPayout <= 0) {
+    throw new Error(`Net-negative Faire payout ${summary.displayId} (${summary.totalPayout.toFixed(2)}) — needs a manual credit note`);
+  }
+
+  const invoiceNumber = `FAIRE-${summary.payoutKey.replace(/^.*_/, "").toUpperCase()}`;
+  const built = buildSettlementInvoice({
+    channel: "faire",
+    contactName: "Faire",
+    invoiceNumber,
+    reference: `Faire order ${summary.displayId} — ${summary.paymentInitiatedAt.slice(0, 10)}`,
+    date: summary.paymentInitiatedAt.slice(0, 10),
+    netPayout: summary.totalPayout,
+    components: fairePayoutToComponents(
+      { displayId: summary.displayId, netOrderTotal: summary.netOrderTotal, commission: summary.commission, paymentFee: summary.paymentFee, totalPayout: summary.totalPayout },
+      { sales: cfg.salesAccount, commission: cfg.commissionAccount, paymentProcessing: cfg.paymentFeeAccount, shippingLabels: cfg.shippingLabelsAccount, shippingIncome: cfg.shippingIncomeAccount ?? undefined, inventoryAdjustments: cfg.inventoryAdjustmentsAccount ?? undefined },
+    ),
+    tracking: cfg.trackingCategoryId
+      ? { trackingCategoryId: cfg.trackingCategoryId, trackingCategoryName: cfg.trackingCategoryName, trackingOptionId: "", trackingOptionName: cfg.trackingOptionName }
+      : null,
+  });
+  if (!built.ok) throw new Error(built.error);
+
+  const post = await postSettlementInvoice(built.payload);
+  if (!post.success) throw new Error(`Invoice failed: ${post.error}`);
+
+  await db.insert(xeroPayoutSyncs).values({
+    sourcePlatform: PLATFORM,
+    sourcePayoutId: summary.payoutKey,
+    amount: summary.totalPayout,
+    currency: summary.currency,
+    paidAt: summary.paymentInitiatedAt.slice(0, 10),
+    xeroObjectType: "invoice",
+    xeroObjectId: post.invoiceId,
+    syncRunId: runId,
+  });
+  await db.insert(xeroJournalLog).values({
+    syncRunId: runId,
+    sourcePlatform: PLATFORM,
+    sourceId: summary.payoutKey,
+    xeroObjectType: "invoice",
+    xeroObjectId: post.invoiceId,
+    status: "success",
+    amount: summary.totalPayout,
+    currency: summary.currency,
+    payload: JSON.stringify({ kind: "settlement_invoice", summary, invoice: built.payload, warnings: built.warnings, existed: post.existed }),
+    response: JSON.stringify({ invoiceId: post.invoiceId, existed: post.existed }),
+  });
+
+  ensureFaireSettlement(summary);
+}
+
+/** Write the synthetic settlement + line items for a Faire payout (idempotent
+ *  by external_id). Shared by the deferred and invoice paths so the settlements
+ *  table — which COGS + reporting read — stays complete. */
+function ensureFaireSettlement(summary: FairePayoutSummary): void {
+  const externalId = `faire_payout_${summary.payoutKey}`;
+  const existing = sqlite.prepare("SELECT id FROM settlements WHERE external_id = ? LIMIT 1").get(externalId) as { id: string } | undefined;
+  if (existing) return;
+
+  const settlementId = crypto.randomUUID();
+  const periodEnd = summary.paymentInitiatedAt.slice(0, 10);
+  const periodStart = new Date(periodEnd);
+  periodStart.setUTCDate(periodStart.getUTCDate() - 7);
+  db.insert(settlements).values({
+    id: settlementId,
+    channel: SETTLEMENT_CHANNEL,
+    periodStart: periodStart.toISOString().slice(0, 10),
+    periodEnd,
+    grossAmount: summary.netOrderTotal,
+    fees: summary.paymentFee + summary.commission,
+    adjustments: summary.shippingReimbursement,
+    netAmount: summary.totalPayout,
+    currency: summary.currency,
+    externalId,
+    status: "received",
+    receivedAt: periodEnd,
+  }).run();
+
+  const localOrder = db.select({ id: orders.id }).from(orders).where(eq(orders.orderNumber, `#${summary.displayId}`)).get();
+  db.insert(settlementLineItems).values({
+    settlementId, orderId: localOrder?.id ?? null, type: "sale",
+    description: `Faire order ${summary.displayId} (gross ${summary.currency} ${summary.netOrderTotal.toFixed(2)})`,
+    amount: summary.netOrderTotal,
+  }).run();
+  if (summary.paymentFee > 0) db.insert(settlementLineItems).values({ settlementId, type: "fee", description: "Faire payment processing fee", amount: -summary.paymentFee }).run();
+  if (summary.commission > 0) db.insert(settlementLineItems).values({ settlementId, type: "fee", description: "Faire commission", amount: -summary.commission }).run();
+  if (summary.shippingReimbursement > 0) db.insert(settlementLineItems).values({ settlementId, type: "adjustment", description: "Shipping label reimbursement", amount: summary.shippingReimbursement }).run();
+}
+
 // ── Helpers ──
 
 async function loadFaireConfig(): Promise<ChannelXeroConfig> {
@@ -492,6 +601,7 @@ async function loadFaireConfig(): Promise<ChannelXeroConfig> {
     inventoryAdjustmentsAccount: cfg.inventoryAdjustmentsAccount ?? null,
     bankClearingAccount: cfg.bankClearingAccount!,
     deferredRevenueAccount: cfg.deferredRevenueAccount!,
+    salesAccount: byCategory.get("sales") ?? "4040",
     receivablesHoldingAccount: cfg.receivablesHoldingAccount!,
     trackingCategoryId: tk?.trackingCategoryId ?? null,
     trackingCategoryName: tk?.trackingCategoryName ?? null,

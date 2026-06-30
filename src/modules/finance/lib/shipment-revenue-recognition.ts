@@ -86,6 +86,15 @@ export async function runShipmentRevenueRecognition(): Promise<RecognitionRunRes
     details: [],
   };
 
+  // Under the settlement-date invoice model, revenue is recognized at payout
+  // (the ACCREC invoice), so this Stage-2 deferred→sales recognition must NOT
+  // run — it would double-count. No-op when the invoice model is active.
+  const { getPayoutRevenueModel } = await import("@/modules/integrations/lib/xero/payout-revenue-model");
+  if (getPayoutRevenueModel() === "invoice") {
+    result.details.push({ orderNumber: "-", status: "skipped", reason: "settlement-invoice model active — Stage-2 recognition disabled" });
+    return result;
+  }
+
   // Pull every candidate order: shipped + unrecognized + payout was synced.
   // The join through settlement_line_items → settlements lets us find which
   // payout the order belonged to; the join through xero_payout_syncs confirms
