@@ -291,6 +291,10 @@ export async function createOrganization(input: {
   return pdRequest<PdCreated>("POST", "/organizations", input);
 }
 
+export async function updateOrganization(id: number, input: Record<string, unknown>): Promise<PdCreated> {
+  return pdRequest<PdCreated>("PUT", `/organizations/${id}`, input);
+}
+
 export async function createPerson(input: {
   name: string;
   org_id?: number;
