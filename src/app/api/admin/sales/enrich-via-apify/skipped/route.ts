@@ -115,27 +115,85 @@ export async function GET(req: NextRequest) {
 /**
  * POST /api/admin/sales/enrich-via-apify/skipped/clear
  *
- * Clears the skip stamps for the given company IDs so they re-enter
- * the enrichment pool on the next enrich-via-apify call.
+ * Clears the skip stamps for companies so they re-enter the
+ * enrichment pool on the next enrich-via-apify call.
  *
- * Body: { company_ids: string[] }
+ * Body — pass ONE of:
+ *   { company_ids: string[] }
+ *       Clear stamps for the listed company IDs (targeted, manual).
+ *
+ *   { reason_pattern: "batch_error" | "name_similarity_too_low" | "city_mismatch" | "no_match" }
+ *       Bulk-clear every company whose gmaps_skip_reason starts
+ *       with this string. Useful after fixing a matcher threshold
+ *       or after the timeout fix landed.
+ *
+ *   { reason_pattern: "...", dryRun: true }
+ *       Return the count without actually clearing.
  */
 export async function POST(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  let body: { company_ids?: string[] } = {};
+  let body: {
+    company_ids?: string[];
+    reason_pattern?: string;
+    dryRun?: boolean;
+  } = {};
   try {
     body = await req.json();
   } catch {
     /* empty body fine */
   }
+
+  // Pattern-based bulk clear path
+  if (body.reason_pattern) {
+    const pattern = `${body.reason_pattern}%`;
+    const countRow = sqlite
+      .prepare(
+        `SELECT COUNT(*) AS n FROM companies
+          WHERE gmaps_skip_reason LIKE ?
+            AND google_place_id IS NULL`,
+      )
+      .get(pattern) as { n: number };
+
+    if (body.dryRun) {
+      return NextResponse.json({
+        ok: true,
+        dry_run: true,
+        would_clear: countRow.n,
+        reason_pattern: body.reason_pattern,
+      });
+    }
+
+    const r = sqlite
+      .prepare(
+        `UPDATE companies
+            SET gmaps_enrichment_attempted_at = NULL,
+                gmaps_skip_reason = NULL,
+                updated_at = datetime('now')
+          WHERE gmaps_skip_reason LIKE ?
+            AND google_place_id IS NULL`,
+      )
+      .run(pattern);
+
+    return NextResponse.json({
+      ok: true,
+      cleared: r.changes,
+      reason_pattern: body.reason_pattern,
+    });
+  }
+
+  // ID-list path
   const ids = Array.isArray(body.company_ids)
     ? body.company_ids.filter((x) => typeof x === "string" && x.length > 0)
     : [];
   if (ids.length === 0) {
     return NextResponse.json(
-      { ok: false, error: "company_ids[] required" },
+      {
+        ok: false,
+        error:
+          "Pass either company_ids[] for targeted clear or reason_pattern for bulk clear.",
+      },
       { status: 400 },
     );
   }

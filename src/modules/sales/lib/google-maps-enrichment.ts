@@ -130,10 +130,24 @@ function buildSearchString(c: CandidateCompany): string {
 /**
  * Match an Apify-returned place back to the source company.
  *
- * Acceptance: name similarity ≥ 0.6 AND (city case-insensitive match OR
- * Apify returned the same searchString we sent). Lower threshold than
- * we'd use for, say, a merge — Apify's search is already filtering by
- * locality, so the disambiguation has happened upstream.
+ * Apify's search is already locality-filtered (we send "Name, City,
+ * State" — Apify's geo-disambiguation does the heavy lifting). So the
+ * matcher's only job is to catch egregious false positives.
+ *
+ * Acceptance (loosened 2026-06-30 after overnight data showed 451 of
+ * 1000 low-confidence rejects where Apify had returned a reasonable
+ * match):
+ *   - sim ≥ 0.7  AND cities not explicitly different  → accept
+ *   - sim ≥ 0.5  AND both cities present + exact match → accept
+ *     (lower bar when city is a strong corroboration)
+ *
+ * Missing city on either side is treated as benign — we don't reject
+ * just because our DB or Apify omitted the city field.
+ *
+ * Rejection cases:
+ *   - sim < 0.5  → name doesn't match at all
+ *   - sim < 0.7  AND no city corroboration (both present, exact match)
+ *   - cities explicitly different (both present, not equal) AND sim < 0.85
  */
 function matchesCompany(place: GoogleMapsPlace, company: CandidateCompany): {
   ok: boolean;
@@ -143,14 +157,42 @@ function matchesCompany(place: GoogleMapsPlace, company: CandidateCompany): {
   const sim = nameSimilarity(place.title || "", company.name);
   const placeCity = (place.city || "").toLowerCase().trim();
   const companyCity = (company.city || "").toLowerCase().trim();
-  const cityMatches = !!placeCity && !!companyCity && placeCity === companyCity;
-  if (sim >= 0.6 && (cityMatches || sim >= 0.85)) {
-    return { ok: true, reason: "matched", similarity: sim };
+  const bothCitiesPresent = !!placeCity && !!companyCity;
+  const cityMatches = bothCitiesPresent && placeCity === companyCity;
+  const cityExplicitlyDifferent = bothCitiesPresent && placeCity !== companyCity;
+
+  // Override: strong name match (0.85+) accepts regardless of city
+  if (sim >= 0.85) {
+    return { ok: true, reason: "matched_strong_name", similarity: sim };
   }
-  if (sim < 0.6) {
-    return { ok: false, reason: `name_similarity_too_low (${sim.toFixed(2)})`, similarity: sim };
+  // Strong city corroboration lowers the name bar
+  if (cityMatches && sim >= 0.5) {
+    return { ok: true, reason: "matched_name_and_city", similarity: sim };
   }
-  return { ok: false, reason: `city_mismatch (place=${placeCity}, company=${companyCity})`, similarity: sim };
+  // Otherwise: moderate name match accepted if city isn't explicitly different
+  if (sim >= 0.7 && !cityExplicitlyDifferent) {
+    return { ok: true, reason: "matched_moderate", similarity: sim };
+  }
+
+  if (sim < 0.5) {
+    return {
+      ok: false,
+      reason: `name_similarity_too_low (${sim.toFixed(2)})`,
+      similarity: sim,
+    };
+  }
+  if (cityExplicitlyDifferent) {
+    return {
+      ok: false,
+      reason: `city_mismatch (place=${placeCity}, company=${companyCity})`,
+      similarity: sim,
+    };
+  }
+  return {
+    ok: false,
+    reason: `name_similarity_too_low (${sim.toFixed(2)})`,
+    similarity: sim,
+  };
 }
 
 // Lazy-prepared statements. Top-level sqlite.prepare(...) runs at
