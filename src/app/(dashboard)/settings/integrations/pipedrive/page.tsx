@@ -486,6 +486,11 @@ function PipedriveIntegrationsPageInner() {
                           ✓ {Object.entries(rs.summary).filter(([, v]) => typeof v === "number").map(([k, v]) => `${k}:${v}`).join(" · ")}
                         </span>
                       )}
+                      {rs?.state === "done" && Array.isArray((rs.summary as { errors?: unknown[] })?.errors) && ((rs.summary as { errors: unknown[] }).errors.length > 0) && (
+                        <span className="text-xs text-destructive w-full">
+                          ⚠ {(rs.summary as { errors: unknown[] }).errors.length} errored — e.g. {String((((rs.summary as { errors: Array<{ error?: string }> }).errors)[0])?.error || "").slice(0, 200)}
+                        </span>
+                      )}
                       {rs?.state === "error" && <span className="text-xs text-destructive">✗ {rs.error}</span>}
                     </div>
                   );
