@@ -15,6 +15,7 @@
 import { sqlite } from "@/lib/db";
 import {
   buildSettlementInvoice,
+  shopifyPayoutUrl,
   type InvoiceComponent,
   type XeroInvoicePayload,
 } from "@/modules/integrations/lib/xero/settlement-invoice-builder";
@@ -174,11 +175,13 @@ export function previewSettlementInvoices(opts: { from?: string; to?: string; sa
     const comps = componentsForSettlement(s);
     const plugComp = comps.find((c) => c.category === "settlement_delta");
     if (plugComp) res.plugTotal = round2(res.plugTotal + (plugComp.kind === "revenue" ? plugComp.amount : -plugComp.amount));
+    const payoutUrl = shopifyPayoutUrl(s.channel, (s.externalId ?? "").replace(/^shopify_payout_/, ""));
+    const reference = payoutUrl ? `${s.externalId} — ${payoutUrl}` : (s.externalId ?? s.id);
     const built = buildSettlementInvoice({
       channel: s.channel,
       contactName: CONTACT[s.channel] ?? s.channel,
       invoiceNumber: invoiceNumberFor(s),
-      reference: s.externalId ?? s.id,
+      reference,
       date: s.periodEnd,
       netPayout: round2(s.netAmount),
       components: comps,
