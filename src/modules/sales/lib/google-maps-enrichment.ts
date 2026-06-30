@@ -497,6 +497,40 @@ export async function enrichViaGoogleMaps(opts: {
         });
         continue;
       }
+
+      // Detect degenerate Apify output: when it can't find the
+      // specific business it sometimes returns just the city name
+      // ("Lubbock", "Jackson"). Reclassify these as no_match — they
+      // contain no actionable data, and treating them as low-conf
+      // skips would mark companies as "tried" when really Apify
+      // had nothing for them.
+      const placeTitleLower = (place.title || "").toLowerCase().trim();
+      const companyCityLower = (company.city || "").toLowerCase().trim();
+      const placeAddress = (place.address || "").trim();
+      const looksLikeCity =
+        !!placeTitleLower &&
+        !!companyCityLower &&
+        (placeTitleLower === companyCityLower ||
+          placeTitleLower.includes(companyCityLower)) &&
+        !placeAddress; // real businesses always have an address
+      if (looksLikeCity) {
+        result.no_match++;
+        stampAttemptStmt().run(
+          `apify_returned_city_only (got '${placeTitleLower}')`,
+          company.id,
+        );
+        logMatch({
+          companyId: company.id,
+          runId,
+          searchString: query,
+          company,
+          place,
+          similarity: 0,
+          decision: "no_match",
+          decisionReason: `apify_returned_city_only (got '${placeTitleLower}')`,
+        });
+        continue;
+      }
       const m = matchesCompany(place, company);
 
       // Permanently-closed is a binary signal — worth catching even

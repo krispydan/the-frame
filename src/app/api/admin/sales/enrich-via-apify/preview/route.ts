@@ -262,6 +262,39 @@ export async function POST(req: NextRequest) {
         apify: null,
       };
     }
+    // Degenerate Apify output: just the city name ("Lubbock") with
+    // no address. Reclassify as no_match — Apify had nothing actual.
+    const placeTitleLower = String(place.title || "").toLowerCase().trim();
+    const companyCityLower = (input.city || "").toLowerCase().trim();
+    const placeAddress = String(place.address || "").trim();
+    if (
+      placeTitleLower &&
+      companyCityLower &&
+      (placeTitleLower === companyCityLower ||
+        placeTitleLower.includes(companyCityLower)) &&
+      !placeAddress
+    ) {
+      return {
+        decision: "no_match",
+        decision_reason: `apify_returned_city_only (got '${placeTitleLower}')`,
+        similarity: 0,
+        input,
+        search_string: query,
+        apify: {
+          title: place.title,
+          address: place.address || null,
+          city: place.city,
+          state: place.state,
+          phone: null,
+          place_id: place.placeId,
+          rating: null,
+          review_count: null,
+          permanently_closed: false,
+          temporarily_closed: false,
+          url: place.url,
+        },
+      };
+    }
     const m = matchesCompany(place, input);
     const closedFlagged = !!place.permanentlyClosed && m.similarity >= 0.5;
     let decision: string;
