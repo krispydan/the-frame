@@ -185,6 +185,33 @@ Jaxy match import as `customer`; unmatched rows import as `qualified_lead`. The
 `qualified_lead` sub-cohort behaves like a cold lead — and if it ends `ghosted`
 then later responds, it needs `reQualify` (§3.1.1).
 
+### 3.3 Backfill: existing interested leads (Instantly + PhoneBurner) → Pipedrive
+
+**Work item (requested 2026-06-27):** push the *current* backlog of interested
+leads into Pipedrive — not just go-forward. Today the frame already flips a
+company to `status = 'interested'` from Instantly `lead_interested` events and
+PhoneBurner "Set Appointment" dispositions; many such companies predate the
+Pipedrive integration and have no deal yet. One-time backfill:
+
+- **Selection:** `companies.status IN ('interested','catalog_sent')`. Channel
+  attribution (Instantly vs PhoneBurner) comes from `campaign_leads`
+  (`instantly_lead_id` vs `phoneburner_contact_id`).
+- **Routing — and the AJM overlap (flagged by Daniel):** *some interested
+  Instantly leads are also on the AJM list.* An interested company that is an AJM
+  contact (`source = 'ajm_2025_import'` / `ajm_2025` tag) must **not** spawn a
+  second org/deal. Resolve by `frame_company_id` first (the standard Pipedrive
+  dedup): if it already has an AJM Reactivation deal (from the §3.2 seed),
+  **advance that deal to Interested** rather than creating a Catalog-Interested
+  one. Non-AJM interested leads → **Catalog Interested** pipeline. *(Open
+  decision: should an AJM contact that shows interest stay in AJM Reactivation,
+  or move to Catalog Interested? Default = stay in AJM — keeps the cohort
+  together.)*
+- **Dedup is identity-based, not channel-based:** the same physical lead can be
+  interested via *both* email and a call; one company → one open outreach deal
+  (§3.1 idempotency key).
+- Owner = Christina; this is part of Phase 3/4 (the two-way Pipedrive sync), and
+  reuses the same push path as the go-forward interest edge.
+
 ---
 
 ## 4. Data model & identity
@@ -580,6 +607,8 @@ the remaining inputs/confirmations needed to execute.)
 - [ ] Confirm Customers-pipeline shape (ledger vs. fulfilment view)
 - [ ] Verify Faire-via-Shopify orders classify as wholesale
 - [ ] Define the precise "wants catalog" signal(s) + human-confirm rule
+- [ ] Confirm overlap routing (§3.3): an AJM contact that shows interest stays in
+      AJM Reactivation (default) vs. moves to Catalog Interested
 - [ ] Confirm partial-refund handling approach (persist net amount)
 - [ ] Confirm backup classifier (Daniel) + coverage policy
 - [ ] Confirm Pipedrive plan/seat cost + API rate tier for backfill
