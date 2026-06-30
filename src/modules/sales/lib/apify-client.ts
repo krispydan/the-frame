@@ -15,7 +15,6 @@
  * per CU; batched runs amortize the overhead).
  */
 
-import { logger } from "@/modules/core/lib/logger";
 
 const APIFY_BASE = "https://api.apify.com/v2";
 const ACTOR_GMAPS = "compass~google-maps-scraper";
@@ -153,7 +152,7 @@ class ApifyClient {
 
         if (res.status === 429) {
           const wait = (attempt + 1) * 2000;
-          logger.info(`[apify] 429, backing off ${wait}ms (attempt ${attempt + 1})`);
+          console.log(`[apify] 429, backing off ${wait}ms (attempt ${attempt + 1})`);
           await new Promise((r) => setTimeout(r, wait));
           continue;
         }

@@ -20,7 +20,6 @@
  */
 
 import { sqlite } from "@/lib/db";
-import { logger } from "@/modules/core/lib/logger";
 import { apifyClient, type GoogleMapsPlace } from "./apify-client";
 import { addCompanyPhone } from "./company-phones";
 
@@ -216,7 +215,7 @@ export async function enrichViaGoogleMaps(opts: {
       });
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
-      logger.error(`[gmaps-enrich] batch failed: ${reason}`);
+      console.error(`[gmaps-enrich] batch failed: ${reason}`);
       for (const c of batch) {
         result.errors.push({ company_id: c.id, reason });
       }
@@ -240,7 +239,7 @@ export async function enrichViaGoogleMaps(opts: {
       const m = matchesCompany(place, company);
       if (!m.ok) {
         result.low_confidence_skipped++;
-        logger.info(
+        console.log(
           `[gmaps-enrich] skipped ${company.id} ${company.name}: ${m.reason}`,
         );
         continue;
