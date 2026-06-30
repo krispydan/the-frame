@@ -107,25 +107,29 @@ export async function postPhoneBurnerCallDigest(): Promise<{
     )
     .all(startIso, endIso) as { agent: string; n: number; connected: number }[];
 
-  // Top 10 contacts called (by company name where available)
-  const topContacts = sqlite
+  // Interested leads — every call in the window whose disposition is a
+  // "Set Appointment" (they requested the catalog). These are the wins
+  // the team cares about; replaces the old "most recent calls" list.
+  const interestedLeads = sqlite
     .prepare(
       `SELECT COALESCE(co.name, l.phoneburner_contact_id, l.id) AS who,
-              l.disposition_label,
-              l.connected,
-              l.called_at
+              co.id    AS company_id,
+              co.phone AS phone,
+              co.website AS website,
+              l.disposition_label AS disposition
          FROM phoneburner_call_log l
          LEFT JOIN companies co ON co.id = l.company_id
         WHERE datetime(l.called_at) >= datetime(?) AND datetime(l.called_at) < datetime(?)
-        ORDER BY l.called_at DESC
-        LIMIT 10`,
+          AND lower(l.disposition_label) LIKE 'set appointment%'
+        ORDER BY l.called_at DESC`,
     )
-    .all(startIso, endIso) as {
+    .all(startIso, endIso) as Array<{
       who: string;
-      disposition_label: string | null;
-      connected: number;
-      called_at: string;
-    }[];
+      company_id: string | null;
+      phone: string | null;
+      website: string | null;
+      disposition: string | null;
+    }>;
 
   // Build Slack blocks
   const headerText = `📞 PhoneBurner — ${ptDate}`;
@@ -168,16 +172,35 @@ export async function postPhoneBurnerCallDigest(): Promise<{
     });
   }
 
-  if (topContacts.length) {
-    const contactLines = topContacts
-      .map(
-        (c) =>
-          `• ${c.who} — ${c.disposition_label ?? "—"}${c.connected ? " ✓" : ""}`,
-      )
-      .join("\n");
+  // Interested leads — the headline of the cold-calling digest.
+  const appBase = (
+    process.env.SHOPIFY_APP_URL ||
+    process.env.APP_BASE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    "https://theframe.getjaxy.com"
+  ).replace(/\/$/, "");
+
+  if (interestedLeads.length === 0) {
     blocks.push({
       type: "section",
-      text: { type: "mrkdwn", text: `*Most recent calls*\n${contactLines}` },
+      text: { type: "mrkdwn", text: `*🎯 Interested leads*\n_None today — keep dialing._` },
+    });
+  } else {
+    const lines = interestedLeads.map((c) => {
+      const name = c.company_id
+        ? `<${appBase}/prospects/${c.company_id}|${c.who}>`
+        : c.who;
+      const extras: string[] = [];
+      if (c.phone) extras.push(c.phone);
+      if (c.website) extras.push(`<${c.website}|site>`);
+      return `• *${name}*${extras.length ? ` — ${extras.join(" · ")}` : ""}`;
+    });
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*🎯 Interested leads (${interestedLeads.length})*\n${lines.join("\n")}`,
+      },
     });
   }
 
@@ -186,7 +209,7 @@ export async function postPhoneBurnerCallDigest(): Promise<{
     elements: [
       {
         type: "mrkdwn",
-        text: `Window: ${startIso} → ${endIso} · See the prospect page for any contact for full detail.`,
+        text: `Window: ${startIso} → ${endIso} · ${interestedLeads.length} appointment${interestedLeads.length === 1 ? "" : "s"} set`,
       },
     ],
   });

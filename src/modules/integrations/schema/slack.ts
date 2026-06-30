@@ -107,5 +107,5 @@ export const SLACK_TOPICS: { topic: SlackTopic; label: string; defaultChannel: s
   // Digests
   { topic: "digest.daily",            label: "Daily morning digest",          defaultChannel: "jaxy-daily-digest",  group: "Digests",      description: "Yesterday's orders, fulfillment, inventory at 7am PT." },
   { topic: "digest.weekly",           label: "Weekly Monday digest",          defaultChannel: "jaxy-weekly-review", group: "Digests",      description: "Last week's revenue, top SKUs, slow movers, margin." },
-  { topic: "digest.phoneburner",      label: "Daily PhoneBurner call summary", defaultChannel: "jaxy-daily-digest", group: "Digests",      description: "Yesterday's call activity: total dials, connect rate, top dispositions, top contacts. Skipped on zero-call days." },
+  { topic: "digest.phoneburner",      label: "Daily PhoneBurner call summary", defaultChannel: "cold-calling", group: "Digests",      description: "Yesterday's cold-calling activity: total dials, connect rate, top dispositions, and the list of interested leads (Set Appointment). Skipped on zero-call days." },
 ];

@@ -568,6 +568,54 @@ function callExists(callId: string): boolean {
   return !!row;
 }
 
+/**
+ * Normalize a PhoneBurner timestamp to a UTC ISO-8601 string.
+ *
+ * PB sends call timestamps as naive Central-Time strings:
+ *   "2026-06-18 13:48:00"   (= 18:48:00 UTC during CDT, 19:48 during CST)
+ *
+ * If we store that raw, two bugs hit the digests:
+ *   1. String comparison: "2026-06-19 12:.." sorts BELOW the ISO bound
+ *      "2026-06-19T07:..Z" (space 0x20 < 'T' 0x54) → rows excluded,
+ *      digest shows 0 calls.
+ *   2. Even if compared correctly, the time is off by the CT offset
+ *      vs the PT day-bounds the digest computes.
+ *
+ * Strings that already carry a 'Z' / explicit offset are returned as-is
+ * (they came from the old polling path which stored real UTC ISO).
+ */
+export function pbTimeToUtcIso(raw: string | null | undefined): string {
+  if (!raw) return new Date().toISOString();
+  const s = raw.trim();
+  // Already ISO-UTC or has an explicit offset → trust it.
+  if (/[zZ]$/.test(s) || /[+-]\d{2}:?\d{2}$/.test(s)) {
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+  }
+  // Parse "YYYY-MM-DD HH:MM:SS" (or with 'T') as America/Chicago.
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) {
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+  }
+  const [, yy, mm, dd, hh, mi, ss] = m;
+  const Y = Number(yy), Mo = Number(mm), Da = Number(dd);
+  const Ho = Number(hh), Mi = Number(mi), Se = Number(ss ?? "0");
+  // Discover the Central offset for THAT date (DST-safe): format a noon-UTC
+  // instant of that day as Chicago local hour; the diff vs 12 is the offset.
+  const noonUtc = new Date(Date.UTC(Y, Mo - 1, Da, 12));
+  const ctHourAtNoonUtc = parseInt(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Chicago", hourCycle: "h23", hour: "2-digit",
+    }).format(noonUtc),
+    10,
+  );
+  const offsetHours = ctHourAtNoonUtc - 12; // -5 (CDT) or -6 (CST)
+  // Local Central time → UTC = subtract the (negative) offset, i.e. add |offset|.
+  const utc = new Date(Date.UTC(Y, Mo - 1, Da, Ho - offsetHours, Mi, Se));
+  return utc.toISOString();
+}
+
 function resolveCall(call: PbCall): ResolveResult | null {
   const userId = call.user_id ?? null; // our campaign_lead.id, round-tripped
   const r1 = resolveByCampaignLeadId(userId);
@@ -604,8 +652,9 @@ export function ingestOneCall(
   const disposition =
     call.disposition_label ?? call.disposition ?? null;
   const dispositionId = call.disposition_id ?? null;
-  const calledAt =
-    call.called_at ?? call.timestamp ?? new Date().toISOString();
+  // Normalize PB's naive-Central timestamp to UTC ISO so the digest's
+  // PT-day-bounds comparison works. ISO-with-Z inputs pass through.
+  const calledAt = pbTimeToUtcIso(call.called_at ?? call.timestamp);
 
   sqlite
     .prepare(
