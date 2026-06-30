@@ -246,6 +246,22 @@ try {
 } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_apify_match_log_decision ON apify_match_log (decision, created_at DESC)"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_apify_match_log_company ON apify_match_log (company_id)"); } catch { /* exists */ }
+
+// Side-effect-free preview runs. The POST /preview endpoint inserts a
+// pending row, fires Apify in the background, and returns the id.
+// The GET /preview/:id endpoint fetches the result.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS apify_preview_runs (
+    id TEXT PRIMARY KEY NOT NULL,
+    inputs_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running',
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT,
+    result_json TEXT,
+    error_message TEXT
+  )`);
+} catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_apify_preview_started ON apify_preview_runs (started_at DESC)"); } catch { /* exists */ }
 // e.g. "shopify" / "woocommerce" / "magento" / "bigcommerce" / "custom".
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN ecom_platform TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_storeleads_id ON companies (storeleads_id)"); } catch { /* exists */ }

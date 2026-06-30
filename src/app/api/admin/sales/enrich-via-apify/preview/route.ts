@@ -1,5 +1,4 @@
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
@@ -8,35 +7,30 @@ import { apifyClient } from "@/modules/sales/lib/apify-client";
 /**
  * POST /api/admin/sales/enrich-via-apify/preview
  *
- * Dry-run preview of what the enrichment would decide for a small
- * sample. Calls Apify ONCE for a batch of search strings, then for
- * each result runs the matcher and returns the decision — without
- * writing ANY data (no company_phones, no companies.status changes,
- * no apify_match_log rows, no skip stamps).
+ * Dispatches a side-effect-free Apify preview run and returns a
+ * `preview_id` immediately. The Apify call (which often takes 1-3
+ * minutes) continues in the background and writes the result to
+ * apify_preview_runs.
  *
- * Lets you validate matcher tuning before unleashing the cron on
- * the full cohort. Cost is one small Apify run (~$0.05).
+ * To fetch the result, poll:
+ *   GET /api/admin/sales/enrich-via-apify/preview?id=<preview_id>
  *
  * Body — pass ONE of:
  *   { company_ids: ["abc","def"] }
- *       Run on specific companies (great for known cases — pull
- *       a row from the skip log and test what it would now decide).
+ *       Test specific companies (pull from skip log to verify a
+ *       case now matches correctly).
  *
  *   { searches: [{name, city, state}, ...] }
- *       Run on arbitrary search strings — no DB row needed. Useful
- *       for testing edge cases like 'SouthernPineBoutique' vs
- *       'Southern Pine Boutique'.
+ *       Test arbitrary search strings — no DB row needed. Useful
+ *       for synthetic edge cases.
  *
- *   { limit: 20, tier?: "A,B" }
- *       Random sample of N companies from the cohort.
+ *   { limit: 5, tier?: "A,B" }
+ *       Random sample N from the cohort (default 5, max 10).
  *
- * Hard limit: 5 inputs per call (Apify is occasionally slow; bigger
- * batches hit Cloudflare's ~100s edge timeout). To test more than 5
- * cases, run multiple preview calls back-to-back.
+ * Hard limit: 10 inputs per call.
  *
- * Returns: a structured comparison for each input — what we asked,
- * what Apify returned, the similarity score, and the matcher's
- * decision (accepted | skipped | marked_closed | no_match).
+ * NO DATABASE WRITES to companies/contacts/etc. — only the preview's
+ * own audit row in apify_preview_runs.
  */
 export async function POST(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
@@ -54,7 +48,6 @@ export async function POST(req: NextRequest) {
     /* empty body fine */
   }
 
-  // Resolve the inputs to a list of {name, city, state, company_id?}
   type Input = {
     name: string;
     city: string | null;
@@ -64,7 +57,7 @@ export async function POST(req: NextRequest) {
   let inputs: Input[] = [];
 
   if (Array.isArray(body.company_ids) && body.company_ids.length > 0) {
-    const ids = body.company_ids.slice(0, 5);
+    const ids = body.company_ids.slice(0, 10);
     const placeholders = ids.map(() => "?").join(",");
     inputs = (
       sqlite
@@ -84,15 +77,14 @@ export async function POST(req: NextRequest) {
       state: r.state,
     }));
   } else if (Array.isArray(body.searches) && body.searches.length > 0) {
-    inputs = body.searches.slice(0, 5).map((s) => ({
+    inputs = body.searches.slice(0, 10).map((s) => ({
       company_id: null,
       name: String(s.name || ""),
       city: s.city ? String(s.city) : null,
       state: s.state ? String(s.state) : null,
     }));
   } else {
-    // Random cohort sample
-    const limit = Math.min(5, Math.max(1, body.limit ?? 5));
+    const limit = Math.min(10, Math.max(1, body.limit ?? 5));
     const tier = body.tier
       ? body.tier.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean)
       : null;
@@ -135,49 +127,129 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Build search strings + remember mapping
+  // Insert pending row + dispatch async — return preview_id NOW so
+  // Cloudflare doesn't kill the response while Apify takes 2-3 min.
+  const previewId = `prev_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  sqlite
+    .prepare(
+      `INSERT INTO apify_preview_runs (id, inputs_json, status)
+       VALUES (?, ?, 'running')`,
+    )
+    .run(previewId, JSON.stringify(inputs));
+
+  // Fire-and-forget the actual Apify call. .catch swallows so the
+  // unhandled-rejection trap doesn't fire.
+  void runPreview(previewId, inputs).catch((e) => {
+    console.error(`[apify-preview ${previewId}] threw:`, e);
+  });
+
+  return NextResponse.json({
+    ok: true,
+    preview_id: previewId,
+    status: "running",
+    inputs_count: inputs.length,
+    cost_estimate_usd: (inputs.length * 0.003).toFixed(3),
+    poll_url: `/api/admin/sales/enrich-via-apify/preview?id=${previewId}`,
+    note: "Poll the preview_id via GET to fetch the result. Typical wait: 1-3 minutes.",
+  });
+}
+
+/**
+ * GET /api/admin/sales/enrich-via-apify/preview?id=<preview_id>
+ *
+ * Fetch the result of a previously-dispatched preview run.
+ * Returns {status: 'running'} while in flight, full result body
+ * when completed, or {status: 'failed', error_message} on Apify
+ * failure.
+ */
+export async function GET(req: NextRequest) {
+  if (req.headers.get("x-admin-key") !== "jaxy2026") {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const url = new URL(req.url);
+  const id = url.searchParams.get("id");
+  if (!id) {
+    return NextResponse.json(
+      { error: "?id=<preview_id> required" },
+      { status: 400 },
+    );
+  }
+  const row = sqlite
+    .prepare(
+      `SELECT id, status, started_at, completed_at, result_json, error_message
+         FROM apify_preview_runs WHERE id = ?`,
+    )
+    .get(id) as
+    | {
+        id: string;
+        status: string;
+        started_at: string;
+        completed_at: string | null;
+        result_json: string | null;
+        error_message: string | null;
+      }
+    | undefined;
+  if (!row) {
+    return NextResponse.json(
+      { error: `unknown preview id: ${id}` },
+      { status: 404 },
+    );
+  }
+  const result = row.result_json ? JSON.parse(row.result_json) : null;
+  return NextResponse.json({
+    ok: true,
+    id: row.id,
+    status: row.status,
+    started_at: row.started_at,
+    completed_at: row.completed_at,
+    error_message: row.error_message,
+    ...result,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Background runner — invoked via void from POST, so its errors
+// don't escape but its DB writes do.
+// ─────────────────────────────────────────────────────────────────
+
+type PreviewInput = {
+  name: string;
+  city: string | null;
+  state: string | null;
+  company_id: string | null;
+};
+
+async function runPreview(previewId: string, inputs: PreviewInput[]): Promise<void> {
   const queries = inputs.map((i) => {
     const parts = [i.name];
     if (i.city) parts.push(i.city);
     if (i.state) parts.push(i.state);
     return parts.join(", ");
   });
-  const queryToInput = new Map<string, Input>();
-  for (let i = 0; i < inputs.length; i++) queryToInput.set(queries[i], inputs[i]);
 
-  // ONE Apify call with a short timeout so we return partial results
-  // within Cloudflare's ~100s edge window. 85s leaves a buffer for
-  // the response payload to come back through. The Apify actor
-  // returns whatever it's resolved when its timeout fires, so
-  // partial results are fine for preview.
   let places;
   try {
     places = await apifyClient.runGoogleMapsScraper(queries, {
       maxPerSearch: 1,
-      timeoutSecs: 85,
+      timeoutSecs: 240,
     });
   } catch (e) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "Apify call failed",
-        message: e instanceof Error ? e.message : String(e),
-        inputs_attempted: inputs.length,
-      },
-      { status: 502 },
-    );
+    sqlite
+      .prepare(
+        `UPDATE apify_preview_runs
+            SET status = 'failed',
+                completed_at = datetime('now'),
+                error_message = ?
+          WHERE id = ?`,
+      )
+      .run(
+        e instanceof Error ? e.message.slice(0, 1000) : String(e).slice(0, 1000),
+        previewId,
+      );
+    return;
   }
 
-  // Re-import the helpers we need for the dry-run match (without
-  // touching the DB). nameSimilarity + matchesCompany live in
-  // google-maps-enrichment.ts but they're internal — we duplicate
-  // the LOGIC here to keep this endpoint side-effect-free and
-  // import-safe at build time.
-  //
-  // Source of truth: keep these in sync with
-  // src/modules/sales/lib/google-maps-enrichment.ts. If matcher
-  // tuning lands there, mirror it here too. (A small price for
-  // a side-effect-free preview.)
+  // ─── matcher logic mirrors google-maps-enrichment.ts ─────────────
   const nameSimilarity = (a: string, b: string): number => {
     if (!a || !b) return 0;
     const normWords = (s: string) =>
@@ -222,33 +294,60 @@ export async function POST(req: NextRequest) {
     return union > 0 ? inter / union : 0;
   };
 
-  const matchesCompany = (place: Record<string, unknown>, input: Input) => {
-    const sim = nameSimilarity(
-      String(place.title || ""),
-      input.name,
-    );
+  const matchesCompany = (
+    place: Record<string, unknown>,
+    input: PreviewInput,
+  ) => {
+    const sim = nameSimilarity(String(place.title || ""), input.name);
     const placeCity = String((place.city as string) || "").toLowerCase().trim();
     const companyCity = (input.city || "").toLowerCase().trim();
     const bothCitiesPresent = !!placeCity && !!companyCity;
     const cityMatches = bothCitiesPresent && placeCity === companyCity;
     const cityExplicitlyDifferent =
       bothCitiesPresent && placeCity !== companyCity;
-    if (sim >= 0.85) return { ok: true, reason: "matched_strong_name", similarity: sim };
-    if (cityMatches && sim >= 0.5) return { ok: true, reason: "matched_name_and_city", similarity: sim };
-    if (sim >= 0.7 && !cityExplicitlyDifferent) return { ok: true, reason: "matched_moderate", similarity: sim };
-    if (sim < 0.5) return { ok: false, reason: `name_similarity_too_low (${sim.toFixed(2)})`, similarity: sim };
-    if (cityExplicitlyDifferent) return { ok: false, reason: `city_mismatch (place=${placeCity}, company=${companyCity})`, similarity: sim };
-    return { ok: false, reason: `name_similarity_too_low (${sim.toFixed(2)})`, similarity: sim };
+    if (sim >= 0.85)
+      return { ok: true, reason: "matched_strong_name", similarity: sim };
+    if (cityMatches && sim >= 0.5)
+      return { ok: true, reason: "matched_name_and_city", similarity: sim };
+    if (sim >= 0.7 && !cityExplicitlyDifferent)
+      return { ok: true, reason: "matched_moderate", similarity: sim };
+    if (sim < 0.5)
+      return {
+        ok: false,
+        reason: `name_similarity_too_low (${sim.toFixed(2)})`,
+        similarity: sim,
+      };
+    if (cityExplicitlyDifferent)
+      return {
+        ok: false,
+        reason: `city_mismatch (place=${placeCity}, company=${companyCity})`,
+        similarity: sim,
+      };
+    return {
+      ok: false,
+      reason: `name_similarity_too_low (${sim.toFixed(2)})`,
+      similarity: sim,
+    };
   };
 
-  // Index Apify results by searchString
+  const ICP_DISQUALIFY = [
+    { pattern: "bridal", reason: "out_of_scope_bridal_shop" },
+    { pattern: "wedding dress", reason: "out_of_scope_wedding_shop" },
+    { pattern: "maternity", reason: "out_of_scope_maternity_store" },
+    { pattern: "children's clothing", reason: "out_of_scope_kids_store" },
+    { pattern: "baby store", reason: "out_of_scope_kids_store" },
+    { pattern: "baby clothing", reason: "out_of_scope_kids_store" },
+    { pattern: "kids clothing", reason: "out_of_scope_kids_store" },
+    { pattern: "toddler", reason: "out_of_scope_kids_store" },
+    { pattern: "infant", reason: "out_of_scope_kids_store" },
+  ];
+
   const placeByQuery = new Map<string, Record<string, unknown>>();
   for (const p of places) {
     const s = (p as Record<string, unknown>).searchString;
     if (typeof s === "string") placeByQuery.set(s, p as Record<string, unknown>);
   }
 
-  // Build the comparison for each input
   const results = inputs.map((input, idx) => {
     const query = queries[idx];
     const place = placeByQuery.get(query) || null;
@@ -262,8 +361,6 @@ export async function POST(req: NextRequest) {
         apify: null,
       };
     }
-    // Degenerate Apify output: just the city name ("Lubbock") with
-    // no address. Reclassify as no_match — Apify had nothing actual.
     const placeTitleLower = String(place.title || "").toLowerCase().trim();
     const companyCityLower = (input.city || "").toLowerCase().trim();
     const placeAddress = String(place.address || "").trim();
@@ -297,18 +394,6 @@ export async function POST(req: NextRequest) {
     }
     const m = matchesCompany(place, input);
     const closedFlagged = !!place.permanentlyClosed && m.similarity >= 0.5;
-    // ICP disqualification by category
-    const ICP_DISQUALIFY_PATTERNS = [
-      { pattern: "bridal", reason: "out_of_scope_bridal_shop" },
-      { pattern: "wedding dress", reason: "out_of_scope_wedding_shop" },
-      { pattern: "maternity", reason: "out_of_scope_maternity_store" },
-      { pattern: "children's clothing", reason: "out_of_scope_kids_store" },
-      { pattern: "baby store", reason: "out_of_scope_kids_store" },
-      { pattern: "baby clothing", reason: "out_of_scope_kids_store" },
-      { pattern: "kids clothing", reason: "out_of_scope_kids_store" },
-      { pattern: "toddler", reason: "out_of_scope_kids_store" },
-      { pattern: "infant", reason: "out_of_scope_kids_store" },
-    ];
     const categoryHaystack = [
       String(place.categoryName || ""),
       ...((Array.isArray(place.categories) ? place.categories : []) as string[]),
@@ -317,15 +402,12 @@ export async function POST(req: NextRequest) {
       .filter(Boolean)
       .join(" | ")
       .toLowerCase();
-    const disqualifyMatch = ICP_DISQUALIFY_PATTERNS.find((p) =>
+    const disqualifyMatch = ICP_DISQUALIFY.find((p) =>
       categoryHaystack.includes(p.pattern),
     );
-
     let decision: string;
     let decisionReason: string;
     if (disqualifyMatch && m.ok) {
-      // Out-of-scope categories override the accept — we still
-      // enrich the data but mark as not_qualified in real runs.
       decision = "accepted_but_disqualified";
       decisionReason = `${m.reason}; would mark not_qualified: ${disqualifyMatch.reason}`;
     } else if (closedFlagged) {
@@ -370,20 +452,27 @@ export async function POST(req: NextRequest) {
     };
   });
 
-  // Aggregates
   const totals = results.reduce<Record<string, number>>((acc, r) => {
     acc[r.decision] = (acc[r.decision] || 0) + 1;
     return acc;
   }, {});
 
-  return NextResponse.json({
-    ok: true,
-    dry_run: true,
-    cost_estimate_usd: (results.length * 0.003).toFixed(3),
-    inputs_count: inputs.length,
-    apify_returned: places.length,
-    decision_totals: totals,
-    note: "NO database writes — this is a preview only. Re-running on the same inputs produces fresh Apify calls; iterate locally on matcher logic and re-test before committing.",
-    results,
-  });
+  sqlite
+    .prepare(
+      `UPDATE apify_preview_runs
+          SET status = 'completed',
+              completed_at = datetime('now'),
+              result_json = ?
+        WHERE id = ?`,
+    )
+    .run(
+      JSON.stringify({
+        decision_totals: totals,
+        inputs_count: inputs.length,
+        apify_returned: places.length,
+        cost_estimate_usd: (results.length * 0.003).toFixed(3),
+        results,
+      }),
+      previewId,
+    );
 }
