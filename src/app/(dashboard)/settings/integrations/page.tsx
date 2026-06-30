@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plug, ChevronRight, ShoppingBag, DollarSign, Warehouse, MessageSquare, Store, Package, Sparkles, CheckCircle, AlertCircle, Circle } from "lucide-react";
+import { Plug, ChevronRight, ShoppingBag, DollarSign, Warehouse, MessageSquare, Store, Package, Sparkles, Users, CheckCircle, AlertCircle, Circle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ApiKeyCard } from "./api-key-card";
@@ -38,6 +38,13 @@ type StoreLeadsStatus = {
   enrichedCount: number;
 };
 
+type PipedriveStatus = {
+  configured: boolean;
+  connected: boolean;
+  companyName?: string;
+  ping?: { ok: boolean };
+};
+
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
@@ -61,6 +68,7 @@ export default function IntegrationsIndexPage() {
   const [shiphero, setShiphero] = useState<ShipHeroStatus | null>(null);
   const [slack, setSlack] = useState<SlackStatus | null>(null);
   const [storeleads, setStoreleads] = useState<StoreLeadsStatus | null>(null);
+  const [pipedrive, setPipedrive] = useState<PipedriveStatus | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/integrations/shopify")
@@ -96,6 +104,10 @@ export default function IntegrationsIndexPage() {
         });
       })
       .catch(() => setStoreleads({ configured: false, sourcedCount: 0, enrichedCount: 0 }));
+    fetch("/api/v1/integrations/pipedrive/status")
+      .then((r) => r.json())
+      .then((d) => setPipedrive(d))
+      .catch(() => setPipedrive({ configured: false, connected: false }));
   }, []);
 
   const shopifyActive = shopifyShops?.filter((s) => s.isActive) ?? [];
@@ -120,6 +132,19 @@ export default function IntegrationsIndexPage() {
     !xero.configured ? "Not configured" :
     !xero.connected ? "Not connected" :
     `Connected: ${xero.tenantName || "Xero"}`;
+
+  const pipedriveStatusKind: "ok" | "warn" | "off" =
+    pipedrive === null ? "off" :
+    !pipedrive.configured ? "off" :
+    !pipedrive.connected ? "off" :
+    pipedrive.ping && !pipedrive.ping.ok ? "warn" :
+    "ok";
+  const pipedriveLabel =
+    pipedrive === null ? "Loading" :
+    !pipedrive.configured ? "Not configured" :
+    !pipedrive.connected ? "Not connected" :
+    pipedrive.ping && !pipedrive.ping.ok ? "Auth failed" :
+    `Connected: ${pipedrive.companyName || "Pipedrive"}`;
 
   const slackRouted = slack?.routing.filter((r) => r.channelId).length ?? 0;
   const slackStatusKind: "ok" | "warn" | "off" =
@@ -279,6 +304,26 @@ export default function IntegrationsIndexPage() {
                     : "Not configured"
                 }
               />
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link href="/settings/integrations/pipedrive" className="block group cursor-pointer">
+          <Card className="transition-all group-hover:shadow-md group-hover:border-primary/40">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center justify-between text-base">
+                <span className="flex items-center gap-2">
+                  <Users className="h-5 w-5" />
+                  Pipedrive
+                </span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </CardTitle>
+              <CardDescription>
+                CRM for high-intent leads. AJM reactivation, catalog-interested, and wholesale customer pipelines; two-way deal sync.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <StatusBadge kind={pipedriveStatusKind} label={pipedriveLabel} />
             </CardContent>
           </Card>
         </Link>
