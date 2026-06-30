@@ -1,0 +1,336 @@
+/**
+ * Pipedrive integration — OAuth2 client + typed API helpers.
+ *
+ * Mirrors the Xero client pattern (src/modules/finance/lib/xero-client.ts):
+ * env-based app credentials, DB-stored tokens in the `settings` k/v table,
+ * and transparent refresh. Pipedrive returns an `api_domain` on token
+ * exchange (e.g. https://jaxy.pipedrive.com) which is the base for all API
+ * calls, so we persist and reuse it.
+ *
+ * Auth model: a private OAuth app in the Pipedrive Developer Hub. The user
+ * connects once via /api/auth/pipedrive; tokens are stored and auto-refreshed.
+ *
+ * Docs: https://developers.pipedrive.com/docs/api/v1/Oauth
+ */
+
+import { db } from "@/lib/db";
+import { settings } from "@/modules/core/schema";
+import { eq } from "drizzle-orm";
+
+const AUTH_URL = "https://oauth.pipedrive.com/oauth/authorize";
+const TOKEN_URL = "https://oauth.pipedrive.com/oauth/token";
+
+interface PipedriveConfig {
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
+}
+
+function getConfig(): PipedriveConfig | null {
+  const clientId = process.env.PIPEDRIVE_CLIENT_ID;
+  const clientSecret = process.env.PIPEDRIVE_CLIENT_SECRET;
+  const appUrl =
+    process.env.PIPEDRIVE_APP_URL ||
+    process.env.SHOPIFY_APP_URL ||
+    "http://localhost:3000";
+  const redirectUri =
+    process.env.PIPEDRIVE_REDIRECT_URI ||
+    `${appUrl.replace(/\/$/, "")}/api/auth/pipedrive/callback`;
+  if (!clientId || !clientSecret) return null;
+  return { clientId, clientSecret, redirectUri };
+}
+
+export function isPipedriveConfigured(): boolean {
+  return getConfig() !== null;
+}
+
+export function getPipedriveRedirectUri(): string | null {
+  return getConfig()?.redirectUri ?? null;
+}
+
+// ── settings helpers ──────────────────────────────────────────────────────
+
+function getSetting(key: string): string | null {
+  return db.select().from(settings).where(eq(settings.key, key)).get()?.value ?? null;
+}
+
+function setSetting(key: string, value: string): void {
+  db.insert(settings)
+    .values({ key, value, type: "string" as const, module: "sales" })
+    .onConflictDoUpdate({ target: settings.key, set: { value, updatedAt: new Date().toISOString() } })
+    .run();
+}
+
+// ── OAuth ──────────────────────────────────────────────────────────────────
+
+/** Build the consent URL. Caller injects its own CSRF `state`. */
+export function getPipedriveAuthUrl(state: string): string | null {
+  const config = getConfig();
+  if (!config) return null;
+  const params = new URLSearchParams({
+    client_id: config.clientId,
+    redirect_uri: config.redirectUri,
+    state,
+  });
+  // Scopes are defined on the app in the Developer Hub; only send if pinned.
+  if (process.env.PIPEDRIVE_SCOPES) params.set("scope", process.env.PIPEDRIVE_SCOPES);
+  return `${AUTH_URL}?${params.toString()}`;
+}
+
+interface TokenResponse {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+  api_domain: string;
+}
+
+/** Exchange an authorization code for tokens and persist them. */
+export async function exchangePipedriveCode(
+  code: string,
+): Promise<{ success: boolean; apiDomain?: string; error?: string }> {
+  const config = getConfig();
+  if (!config) return { success: false, error: "Pipedrive not configured (set PIPEDRIVE_CLIENT_ID/SECRET)" };
+
+  const res = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64")}`,
+    },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: config.redirectUri,
+    }),
+  });
+  if (!res.ok) {
+    return { success: false, error: `Token exchange failed: ${(await res.text()).slice(0, 300)}` };
+  }
+  const data = (await res.json()) as TokenResponse;
+  persistTokens(data);
+
+  // Capture company/user label for the connection card (best-effort).
+  try {
+    const me = await fetch(`${data.api_domain}/v1/users/me`, {
+      headers: { Authorization: `Bearer ${data.access_token}` },
+    });
+    if (me.ok) {
+      const j = await me.json();
+      const name = j?.data?.company_name || j?.data?.name || "";
+      if (name) setSetting("pipedrive_company_name", String(name));
+    }
+  } catch {
+    /* non-fatal */
+  }
+
+  return { success: true, apiDomain: data.api_domain };
+}
+
+function persistTokens(data: TokenResponse): void {
+  setSetting("pipedrive_access_token", data.access_token);
+  setSetting("pipedrive_refresh_token", data.refresh_token);
+  setSetting("pipedrive_token_expires_at", String(Date.now() + data.expires_in * 1000));
+  setSetting("pipedrive_api_domain", data.api_domain.replace(/\/$/, ""));
+  setSetting("pipedrive_connected_at", new Date().toISOString());
+}
+
+/** Load tokens, refreshing if within 2 min of expiry. Returns null if not connected. */
+async function getAuth(): Promise<{ token: string; apiDomain: string } | null> {
+  const access = getSetting("pipedrive_access_token");
+  const refresh = getSetting("pipedrive_refresh_token");
+  const apiDomain = getSetting("pipedrive_api_domain");
+  if (!access || !refresh || !apiDomain) return null;
+
+  const expiresAt = parseInt(getSetting("pipedrive_token_expires_at") || "0", 10);
+  if (Date.now() < expiresAt - 120_000) return { token: access, apiDomain };
+
+  // Refresh
+  const config = getConfig();
+  if (!config) return null;
+  const res = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64")}`,
+    },
+    body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: refresh }),
+  });
+  if (!res.ok) {
+    console.error("[pipedrive] token refresh failed:", res.status, (await res.text()).slice(0, 200));
+    return null;
+  }
+  const data = (await res.json()) as TokenResponse;
+  // Pipedrive may not re-send api_domain on refresh; keep the existing one.
+  if (!data.api_domain) data.api_domain = apiDomain;
+  persistTokens(data);
+  return { token: data.access_token, apiDomain: data.api_domain.replace(/\/$/, "") };
+}
+
+export function getPipedriveConnectionStatus(): {
+  connected: boolean;
+  companyName?: string;
+  apiDomain?: string;
+  connectedAt?: string;
+} {
+  return {
+    connected: !!getSetting("pipedrive_access_token"),
+    companyName: getSetting("pipedrive_company_name") || undefined,
+    apiDomain: getSetting("pipedrive_api_domain") || undefined,
+    connectedAt: getSetting("pipedrive_connected_at") || undefined,
+  };
+}
+
+export function disconnectPipedrive(): void {
+  for (const k of [
+    "pipedrive_access_token", "pipedrive_refresh_token", "pipedrive_token_expires_at",
+    "pipedrive_api_domain", "pipedrive_connected_at", "pipedrive_company_name",
+  ]) {
+    db.delete(settings).where(eq(settings.key, k)).run();
+  }
+}
+
+// ── Core request helper ─────────────────────────────────────────────────────
+
+export class PipedriveError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "PipedriveError";
+    this.status = status;
+  }
+}
+
+/**
+ * Authenticated request against the Pipedrive API (v1 by default).
+ * Retries once on 401 (forces a token refresh) and respects 429 Retry-After.
+ * Returns the parsed `data` field (Pipedrive wraps responses in {success,data}).
+ */
+export async function pdRequest<T = unknown>(
+  method: "GET" | "POST" | "PUT" | "DELETE",
+  path: string,
+  body?: unknown,
+  opts: { version?: "v1" | "v2"; retriesLeft?: number } = {},
+): Promise<T> {
+  const auth = await getAuth();
+  if (!auth) throw new PipedriveError("Pipedrive not connected", 401);
+
+  const version = opts.version ?? "v1";
+  const url = path.startsWith("http") ? path : `${auth.apiDomain}/${version}${path}`;
+  const res = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${auth.token}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+  if (res.status === 429) {
+    const retry = parseInt(res.headers.get("retry-after") || "2", 10);
+    const left = opts.retriesLeft ?? 3;
+    if (left > 0) {
+      await new Promise((r) => setTimeout(r, Math.min(retry, 10) * 1000));
+      return pdRequest<T>(method, path, body, { ...opts, retriesLeft: left - 1 });
+    }
+  }
+  if (res.status === 401 && (opts.retriesLeft ?? 1) > 0) {
+    // Force-expire and retry once.
+    setSetting("pipedrive_token_expires_at", "0");
+    return pdRequest<T>(method, path, body, { ...opts, retriesLeft: 0 });
+  }
+  if (!res.ok) {
+    throw new PipedriveError(`Pipedrive ${method} ${path} → ${res.status}: ${(await res.text()).slice(0, 400)}`, res.status);
+  }
+  const json = await res.json();
+  return (json?.data ?? json) as T;
+}
+
+/** Lightweight auth probe for the settings/integration card. */
+export async function pingPipedrive(): Promise<{ ok: boolean; companyName?: string; error?: string }> {
+  try {
+    const me = await pdRequest<{ company_name?: string; name?: string }>("GET", "/users/me");
+    return { ok: true, companyName: me?.company_name || me?.name };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// ── Resource helpers (used by pipedrive-sync) ───────────────────────────────
+
+export interface PdPipeline { id: number; name: string }
+export interface PdStage { id: number; name: string; pipeline_id: number; order_nr: number }
+
+export async function listPipelines(): Promise<PdPipeline[]> {
+  return (await pdRequest<PdPipeline[]>("GET", "/pipelines")) || [];
+}
+export async function listStages(): Promise<PdStage[]> {
+  return (await pdRequest<PdStage[]>("GET", "/stages")) || [];
+}
+
+export interface PdCreated { id: number }
+
+export async function createOrganization(input: {
+  name: string;
+  owner_id?: number;
+  address?: string;
+  [k: string]: unknown;
+}): Promise<PdCreated> {
+  return pdRequest<PdCreated>("POST", "/organizations", input);
+}
+
+export async function createPerson(input: {
+  name: string;
+  org_id?: number;
+  owner_id?: number;
+  email?: string[];
+  phone?: string[];
+  [k: string]: unknown;
+}): Promise<PdCreated> {
+  return pdRequest<PdCreated>("POST", "/persons", input);
+}
+
+export async function createDeal(input: {
+  title: string;
+  org_id?: number;
+  person_id?: number;
+  pipeline_id?: number;
+  stage_id?: number;
+  owner_id?: number;
+  value?: number;
+  currency?: string;
+  status?: "open" | "won" | "lost";
+  won_time?: string;      // "YYYY-MM-DD HH:MM:SS"
+  add_time?: string;
+  [k: string]: unknown;
+}): Promise<PdCreated> {
+  return pdRequest<PdCreated>("POST", "/deals", input);
+}
+
+export async function updateDeal(id: number, input: Record<string, unknown>): Promise<PdCreated> {
+  return pdRequest<PdCreated>("PUT", `/deals/${id}`, input);
+}
+
+export async function createActivity(input: {
+  subject: string;
+  type?: string;
+  org_id?: number;
+  person_id?: number;
+  deal_id?: number;
+  owner_id?: number;
+  due_date?: string;
+  note?: string;
+  [k: string]: unknown;
+}): Promise<PdCreated> {
+  return pdRequest<PdCreated>("POST", "/activities", input);
+}
+
+/** Search persons by email/term; returns the first matching person id, or null. */
+export async function findPersonIdByEmail(email: string): Promise<number | null> {
+  if (!email) return null;
+  const r = await pdRequest<{ items?: Array<{ item?: { id?: number } }> }>(
+    "GET",
+    `/persons/search?term=${encodeURIComponent(email)}&fields=email&exact_match=true&limit=1`,
+  );
+  return r?.items?.[0]?.item?.id ?? null;
+}
