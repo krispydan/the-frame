@@ -202,10 +202,10 @@ Pipedrive integration and have no deal yet. One-time backfill:
   second org/deal. Resolve by `frame_company_id` first (the standard Pipedrive
   dedup): if it already has an AJM Reactivation deal (from the §3.2 seed),
   **advance that deal to Interested** rather than creating a Catalog-Interested
-  one. Non-AJM interested leads → **Catalog Interested** pipeline. *(Open
-  decision: should an AJM contact that shows interest stay in AJM Reactivation,
-  or move to Catalog Interested? Default = stay in AJM — keeps the cohort
-  together.)*
+  one. Non-AJM interested leads → **Catalog Interested** pipeline.
+  **Decision (locked 2026-06-27): an AJM contact that shows interest stays in AJM
+  Reactivation** regardless of channel — keeps the cohort together; its existing
+  deal advances to Interested.
 - **Dedup is identity-based, not channel-based:** the same physical lead can be
   interested via *both* email and a call; one company → one open outreach deal
   (§3.1 idempotency key).
@@ -607,8 +607,8 @@ the remaining inputs/confirmations needed to execute.)
 - [ ] Confirm Customers-pipeline shape (ledger vs. fulfilment view)
 - [ ] Verify Faire-via-Shopify orders classify as wholesale
 - [ ] Define the precise "wants catalog" signal(s) + human-confirm rule
-- [ ] Confirm overlap routing (§3.3): an AJM contact that shows interest stays in
-      AJM Reactivation (default) vs. moves to Catalog Interested
+- [x] Overlap routing (§3.3): AJM contact that shows interest stays in AJM
+      Reactivation (locked 2026-06-27)
 - [ ] Confirm partial-refund handling approach (persist net amount)
 - [ ] Confirm backup classifier (Daniel) + coverage policy
 - [ ] Confirm Pipedrive plan/seat cost + API rate tier for backfill
