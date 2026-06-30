@@ -8,7 +8,7 @@ import {
   ArrowLeft, ArrowRight, Building2, Globe, Phone, Mail, MapPin, Tag, Star,
   Edit, UserPlus, MessageSquare, Clock, ExternalLink, Plus, Save, X,
   Briefcase, Sparkles, Loader2, CheckCircle2, XCircle, AlertCircle, Search, Store, Eye,
-  Send, Megaphone,
+  Send, Megaphone, ShoppingCart,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -57,7 +57,6 @@ interface Company {
   google_rating: number; google_review_count: number;
   enrichment_status: string;
   google_place_id: string;
-  owner_name: string;
   business_hours: Record<string, string>;
   facebook_url: string;
   instagram_url: string;
@@ -149,6 +148,19 @@ interface Contact {
   email: string; phone: string; is_primary: boolean; notes: string;
 }
 
+interface Order {
+  id: string; order_number: string; channel: string; status: string;
+  total: number; currency: string;
+  placed_at: string | null; created_at: string | null; shipped_at: string | null;
+  tracking_number: string | null; tracking_carrier: string | null;
+  pipedrive_deal_id: number | null;
+}
+
+interface OrderSummary {
+  order_count: number; total_revenue: number;
+  last_order_at: string | null; first_order_at: string | null;
+}
+
 interface Activity {
   id: string; event_type: string; module: string;
   entity_type: string; entity_id: string;
@@ -177,6 +189,8 @@ export default function CompanyDetailPage() {
   const [company, setCompany] = useState<Company | null>(null);
   const [stores, setStores] = useState<Store[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [orderSummary, setOrderSummary] = useState<OrderSummary | null>(null);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [campaigns, setCampaigns] = useState<Array<{
     lead_id: string;
@@ -337,6 +351,8 @@ export default function CompanyDetailPage() {
         setCompany(data.company);
         setStores(data.stores || []);
         setContacts(data.contacts || []);
+        setOrders(data.orders || []);
+        setOrderSummary(data.orderSummary || null);
         setActivities(data.activities || []);
         setCampaigns(data.campaigns || []);
         setLoading(false);
@@ -1587,6 +1603,49 @@ export default function CompanyDetailPage() {
                   )}
                 </div>
               )}
+            </CardContent>
+          </Card>
+          )}
+
+          {/* Orders — a prospect that has ordered is in practice a customer. */}
+          {orders.length > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <ShoppingCart className="w-4 h-4 text-green-600" />
+                  Orders ({orderSummary?.order_count ?? orders.length})
+                </CardTitle>
+                {orderSummary && (
+                  <span className="text-sm font-semibold text-green-700 dark:text-green-400">
+                    ${Number(orderSummary.total_revenue || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} total
+                  </span>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {orders.map((o) => {
+                  const date = o.placed_at || o.created_at;
+                  return (
+                    <div key={o.id} className="flex items-center justify-between gap-2 rounded-md border p-2 text-sm">
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">
+                          #{o.order_number}
+                          <span className="ml-2 text-xs font-normal text-gray-500">{o.channel?.replace(/_/g, " ")}</span>
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {date ? new Date(date).toLocaleDateString() : "—"} · {o.status}
+                          {o.pipedrive_deal_id ? " · ✓ in Pipedrive" : ""}
+                        </div>
+                      </div>
+                      <div className="text-right font-medium whitespace-nowrap">
+                        ${Number(o.total || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </CardContent>
           </Card>
           )}
