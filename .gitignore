@@ -54,3 +54,9 @@ scripts/*-report.json
 # Local DB backups
 backups/
 COG Invoices/
+
+# AJM import data artifacts — contain customer PII, keep local only
+ajm_*.jsonl
+ajm_push.jsonl
+Sheet4*.csv
+*WHOLESALE*LIST*.csv

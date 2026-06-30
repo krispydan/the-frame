@@ -20,6 +20,7 @@
 
 import { sqlite } from "@/lib/db";
 import { searchDomains, type StoreLeadsDomain } from "./client";
+import { addCompanyEmail } from "../company-emails";
 
 export interface CustomerProfile {
   totalCustomers: number;
@@ -302,7 +303,7 @@ export function mergeLookalikesIntoCompanies(opts: {
   );
   const insertNew = sqlite.prepare(
     `INSERT INTO companies (
-       id, name, type, domain, website, phone, email,
+       id, name, type, domain, website,
        city, state, country,
        category, industry, status, source, source_type,
        storeleads_id, storeleads_last_synced_at,
@@ -313,7 +314,7 @@ export function mergeLookalikesIntoCompanies(opts: {
        enriched_at, enrichment_source, enrichment_fetched_at,
        created_at, updated_at
      ) VALUES (
-       ?, ?, 'online', ?, ?, ?, ?,
+       ?, ?, 'online', ?, ?,
        ?, ?, ?,
        ?, ?, 'new', ?, 'storeleads',
        ?, ?,
@@ -324,6 +325,11 @@ export function mergeLookalikesIntoCompanies(opts: {
        ?, 'storeleads', ?,
        ?, ?
      )`,
+  );
+  // companies.phone/email dropped 2026-06-19 — phone -> company_phones, email -> contacts.
+  const insertCompanyPhone = sqlite.prepare(
+    `INSERT OR IGNORE INTO company_phones (id, company_id, phone, source, is_primary, created_at, updated_at)
+     VALUES (?, ?, ?, 'storeleads', 1, ?, ?)`,
   );
 
   const txn = sqlite.transaction(() => {
@@ -348,13 +354,12 @@ export function mergeLookalikesIntoCompanies(opts: {
         const industry = categoryRaw
           ? categoryRaw.split("/").map((s) => s.trim()).filter(Boolean).pop() ?? null
           : null;
+        const newId = crypto.randomUUID();
         insertNew.run(
-          crypto.randomUUID(),
+          newId,
           d.merchant_name ?? domain,
           domain,
           `https://${domain}`,
-          first("phone"),
-          first("email"),
           d.city ?? null,
           d.state ?? null,
           d.country_code ?? null,
@@ -379,6 +384,10 @@ export function mergeLookalikesIntoCompanies(opts: {
           now,
           now,
         );
+        const ph = first("phone");
+        if (ph) insertCompanyPhone.run(crypto.randomUUID(), newId, ph, now, now);
+        const em = first("email");
+        if (em) addCompanyEmail(newId, em, "storeleads");
         stats.created++;
       } catch {
         stats.errors++;
