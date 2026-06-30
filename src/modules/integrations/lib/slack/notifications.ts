@@ -370,6 +370,64 @@ export async function notifyFaireMappingNeeded(opts: {
   });
 }
 
+/**
+ * A worked prospect just placed their first wholesale order — celebrate the
+ * conversion. Mirrors the Overjoy "you converted a lead" alert.
+ */
+export async function notifyLeadConverted(opts: {
+  companyName: string | null;
+  prospectUrl?: string | null;
+  contactEmail?: string | null;
+  firstContactAt?: string | null;
+  orderTotal: number;
+  currency: string;
+  channel: string;
+  isFirstOrder: boolean;
+  duplicate?: { name: string; url?: string | null } | null;
+}) {
+  const who = opts.companyName || "A prospect";
+  const total = money(opts.orderTotal, opts.currency);
+  const lines: string[] = [];
+  if (opts.firstContactAt) lines.push(`First contacted: ${new Date(opts.firstContactAt).toLocaleDateString()}`);
+  if (opts.contactEmail) lines.push(`Contact: ${opts.contactEmail}`);
+  lines.push(`${opts.isFirstOrder ? "Opening order" : "Order"}: ${total}`);
+  if (opts.prospectUrl) lines.push(`<${opts.prospectUrl}|Open in the frame>`);
+
+  const blocks: SlackBlock[] = [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `🎉 *Lead converted!* *${who}* just placed ${opts.isFirstOrder ? "their first" : "a"} wholesale order — ${total} 🥳`,
+      },
+    },
+    { type: "context", elements: [{ type: "mrkdwn", text: lines.join("  ·  ") }] },
+  ];
+  if (opts.duplicate) {
+    blocks.push({
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: `🔗 Looks like the same store as existing prospect *${opts.duplicate.name}*${opts.duplicate.url ? ` — <${opts.duplicate.url}|review & merge>` : ""}`,
+        },
+      ],
+    });
+  }
+  if (/faire/i.test(opts.channel)) {
+    blocks.push({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: "⚠️ Ordered on Faire — make sure you don't pay commission!" }],
+    });
+  }
+
+  await postSlack({
+    topic: "orders.wholesale",
+    text: `🎉 Lead converted: ${who} placed a wholesale order (${total})`,
+    blocks,
+  });
+}
+
 export async function notifyConnectedStore(opts: {
   service: string;        // "Shopify" / "Xero" / "Slack"
   identifier: string;     // shop_domain or tenantName or workspace
