@@ -21,7 +21,7 @@ import { jobQueue } from "@/modules/core/lib/job-queue";
 import { registerJobHandler } from "@/modules/core/lib/job-handler-registry";
 import type { CompanyStatus } from "./status-progression";
 
-export type StatusChangeSource = "instantly" | "phoneburner" | "ui" | "system";
+export type StatusChangeSource = "instantly" | "phoneburner" | "pipedrive" | "ui" | "system";
 
 /**
  * companies.status → Instantly `interest_value`. null = reset to base
@@ -68,6 +68,9 @@ export function fanOutStatusChange(
   if (source !== "phoneburner") {
     enqueuePhoneBurnerSync(companyId, status);
   }
+  if (source !== "pipedrive") {
+    enqueuePipedriveSync(companyId, status);
+  }
 }
 
 function enqueueInstantlySync(companyId: string, status: CompanyStatus): void {
@@ -82,6 +85,15 @@ function enqueueInstantlySync(companyId: string, status: CompanyStatus): void {
 function enqueuePhoneBurnerSync(companyId: string, status: CompanyStatus): void {
   void jobQueue.enqueue(
     "sales.sync_status_to_phoneburner",
+    "sales",
+    { companyId, status },
+    { priority: 3 },
+  );
+}
+
+function enqueuePipedriveSync(companyId: string, status: CompanyStatus): void {
+  void jobQueue.enqueue(
+    "sales.sync_status_to_pipedrive",
     "sales",
     { companyId, status },
     { priority: 3 },
@@ -176,5 +188,15 @@ registerJobHandler(
     });
 
     return { ok: true, pb_contact_id: row.phoneburner_contact_id, status };
+  },
+);
+
+registerJobHandler(
+  "sales.sync_status_to_pipedrive",
+  async (input): Promise<Record<string, unknown>> => {
+    const companyId = String(input.companyId);
+    const status = String(input.status) as CompanyStatus;
+    const { syncStatusToPipedrive } = await import("./pipedrive-sync");
+    return syncStatusToPipedrive(companyId, status);
   },
 );

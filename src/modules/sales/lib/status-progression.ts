@@ -95,7 +95,7 @@ function shouldProgress(from: string | null, to: CompanyStatus): boolean {
 export function progressCompanyStatus(
   companyId: string,
   to: CompanyStatus,
-  opts?: { source?: "instantly" | "phoneburner" | "ui" | "system" },
+  opts?: { source?: "instantly" | "phoneburner" | "pipedrive" | "ui" | "system" },
 ): { updated: boolean; from: string | null; to: CompanyStatus } {
   const row = sqlite
     .prepare("SELECT status FROM companies WHERE id = ?")

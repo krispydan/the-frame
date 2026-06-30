@@ -274,6 +274,63 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN ajm_category TEXT"); } catch
 try { sqlite.exec("CREATE INDEX idx_companies_ajm_spend ON companies (ajm_total_spend)"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_ajm_last_order ON companies (ajm_last_order)"); } catch { /* exists */ }
 
+// Pipedrive CRM sync: cross-system identity stamps. Org/Person live on
+// the company; the deal id is stamped on the order (Customers pipeline)
+// and on the deals projection (outreach pipelines). See
+// docs/crm-master-plan.md §4 and src/modules/sales/lib/pipedrive-sync.ts.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN pipedrive_org_id INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN pipedrive_person_id INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN pipedrive_synced_at TEXT"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_companies_pipedrive_org ON companies (pipedrive_org_id)"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE orders ADD COLUMN pipedrive_deal_id INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_orders_pipedrive_deal ON orders (pipedrive_deal_id)"); } catch { /* exists */ }
+
+// Pipedrive deal projection (read-only mirror of Pipedrive deals). Kept in
+// its own table rather than overloading `deals` so the existing internal
+// kanban isn't flooded with seeded/backfilled CRM rows (the kanban-vs-
+// projection question is a deliberate product call — docs §4.1/§13). This
+// table is the dedup store: the one-open-deal-per-(company,pipeline) key and
+// the order→deal link both resolve against it before any Pipedrive create.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS pipedrive_deals (
+    id TEXT PRIMARY KEY NOT NULL,
+    pipedrive_deal_id INTEGER UNIQUE,
+    company_id TEXT,
+    order_id TEXT,
+    pipeline TEXT,
+    stage TEXT,
+    status TEXT DEFAULT 'open',
+    is_open INTEGER DEFAULT 1,
+    value REAL,
+    title TEXT,
+    backfill_run_id TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_pd_deals_company ON pipedrive_deals (company_id, pipeline, is_open)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_pd_deals_order ON pipedrive_deals (order_id)");
+} catch (e) { console.error("[db] pipedrive_deals table error:", e); }
+
+// Pipedrive inbound-webhook audit + idempotency. dedup_key is a UNIQUE
+// hash of the delivery so a double-delivered webhook is recorded once and
+// the handler can skip reprocessing.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS pipedrive_webhook_events (
+    id TEXT PRIMARY KEY NOT NULL,
+    dedup_key TEXT UNIQUE,
+    event TEXT,
+    object TEXT,
+    action TEXT,
+    pipedrive_id INTEGER,
+    company_id TEXT,
+    payload TEXT,
+    status TEXT DEFAULT 'received',
+    error TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_pd_webhook_object ON pipedrive_webhook_events (object, pipedrive_id)");
+} catch (e) { console.error("[db] pipedrive_webhook_events table error:", e); }
+
 // Image upload system: new columns on catalog_images
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN url TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN file_size INTEGER"); } catch { /* exists */ }
