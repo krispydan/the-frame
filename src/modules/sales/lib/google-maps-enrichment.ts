@@ -22,6 +22,7 @@
 import { sqlite } from "@/lib/db";
 import { apifyClient, type GoogleMapsPlace } from "./apify-client";
 import { addCompanyPhone } from "./company-phones";
+import { verifyApifyMatch } from "./apify-match-verifier";
 
 // Search strings per Apify actor run. Reduced from 10 → 5 after
 // observing widespread 300s timeouts on 10-place batches on
@@ -684,18 +685,97 @@ export async function enrichViaGoogleMaps(opts: {
       }
 
       if (!m.ok) {
+        // Borderline cases get a second opinion from Claude Haiku.
+        // The fuzzy matcher rejected, but cases like "TresChicTexas"
+        // vs "Tres Chic Boutique" or "Tootsies Rockridge" vs
+        // "Tootsie's Boutique Inc." are real matches the heuristic
+        // can't see.
+        //
+        // Conditions for the AI check:
+        //   - Apify returned a real place (not a city-only result —
+        //     those are already short-circuited above)
+        //   - The place has a real address (not just a state/zip)
+        //   - There's at least some name overlap (sim > 0.05) so we
+        //     don't waste LLM calls on obviously-different businesses
+        const apifyAddressTrim = (place.address || "").trim();
+        const apifyHasRealAddress =
+          apifyAddressTrim.length > 0 &&
+          /\d/.test(apifyAddressTrim); // real addresses have a street number
+        const worthVerifying =
+          apifyHasRealAddress && m.similarity >= 0.05 && !!place.title;
+
+        if (worthVerifying) {
+          const verdict = await verifyApifyMatch({
+            companyName: company.name,
+            companyCity: company.city,
+            companyState: company.state,
+            apifyTitle: String(place.title || ""),
+            apifyAddress: place.address || null,
+            apifyCity: place.city || null,
+            apifyState: place.state || null,
+            apifyCategories: [
+              place.categoryName || "",
+              ...(Array.isArray(place.categories) ? place.categories : []),
+              ...(Array.isArray(place.subTypes) ? place.subTypes : []),
+            ]
+              .filter(Boolean)
+              .join(", ") || null,
+          });
+
+          if (verdict.decision === "yes") {
+            // LLM rescued this case. Fall through to the accept path
+            // by mutating the matcher decision — set the reason so
+            // it's traceable.
+            m.ok = true;
+            m.reason = `ai_verified (${verdict.reason})`;
+            console.log(
+              `[gmaps-enrich] ai-verified ${company.id} ${company.name}: ${verdict.reason}`,
+            );
+            // continue past this if-block to write the data
+          } else {
+            // "no" or "uncertain" — keep the skip but record what the
+            // LLM said in the log row.
+            result.low_confidence_skipped++;
+            stampAttemptStmt().run(
+              `${m.reason} | ai_${verdict.decision}: ${verdict.reason}`,
+              company.id,
+            );
+            logMatch({
+              companyId: company.id,
+              runId,
+              searchString: query,
+              company,
+              place,
+              similarity: m.similarity,
+              decision: "skipped",
+              decisionReason: `${m.reason} | ai_${verdict.decision}: ${verdict.reason}`,
+            });
+            continue;
+          }
+        } else {
+          // Below the AI-check threshold — keep the original skip.
+          result.low_confidence_skipped++;
+          stampAttemptStmt().run(m.reason, company.id);
+          logMatch({
+            companyId: company.id,
+            runId,
+            searchString: query,
+            company,
+            place,
+            similarity: m.similarity,
+            decision: "skipped",
+            decisionReason: m.reason,
+          });
+          console.log(
+            `[gmaps-enrich] skipped ${company.id} ${company.name}: ${m.reason}`,
+          );
+          continue;
+        }
+      }
+      if (!m.ok) {
+        // Defensive — shouldn't be reachable after the if-block above
+        // since either we accepted via LLM or we continued.
         result.low_confidence_skipped++;
-        stampAttemptStmt().run(m.reason, company.id);
-        logMatch({
-          companyId: company.id,
-          runId,
-          searchString: query,
-          company,
-          place,
-          similarity: m.similarity,
-          decision: "skipped",
-          decisionReason: m.reason,
-        });
         console.log(
           `[gmaps-enrich] skipped ${company.id} ${company.name}: ${m.reason}`,
         );
