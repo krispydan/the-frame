@@ -201,11 +201,14 @@ Pipedrive integration and have no deal yet. One-time backfill:
   contact (`source = 'ajm_2025_import'` / `ajm_2025` tag) must **not** spawn a
   second org/deal. Resolve by `frame_company_id` first (the standard Pipedrive
   dedup): if it already has an AJM Reactivation deal (from the §3.2 seed),
-  **advance that deal to Interested** rather than creating a Catalog-Interested
+  **leave that deal at "To Contact"** rather than creating a Catalog-Interested
   one. Non-AJM interested leads → **Catalog Interested** pipeline.
   **Decision (locked 2026-06-27): an AJM contact that shows interest stays in AJM
-  Reactivation** regardless of channel — keeps the cohort together; its existing
-  deal advances to Interested.
+  Reactivation** regardless of channel — keeps the cohort together.
+  **Decision (updated 2026-06-30): AJM Reactivation is a call queue — its deals
+  stay at "To Contact" and are NOT auto-advanced to Interested** by the sync
+  (seed, backfill, or go-forward); Christina advances them manually as she works
+  the list. (Supersedes the earlier "advance to Interested" behaviour.)
 - **Dedup is identity-based, not channel-based:** the same physical lead can be
   interested via *both* email and a call; one company → one open outreach deal
   (§3.1 idempotency key).

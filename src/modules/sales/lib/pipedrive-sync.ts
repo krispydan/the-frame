@@ -630,8 +630,10 @@ export async function backfillInterested(opts: { dryRun?: boolean } = {}): Promi
     try {
       const isAjm = isAjmCompany(c);
       const pipeline: "ajm" | "catalog" = isAjm ? "ajm" : "catalog";
-      // catalog_sent companies land at "Catalog Sent"; interested at "Interested".
-      const stageName = c.status === "catalog_sent" ? "Catalog Sent" : "Interested";
+      // AJM reactivation is a call queue — its deals stay at "To Contact"
+      // (Christina advances them manually), never auto-bumped to Interested.
+      // Non-AJM: catalog_sent → "Catalog Sent", else "Interested".
+      const stageName = isAjm ? "To Contact" : c.status === "catalog_sent" ? "Catalog Sent" : "Interested";
       const r = await ensureOutreachDeal(c.id, pipeline, stageName, { dryRun });
       if (r.action === "created") {
         if (isAjm) result.ajmAdvanced++;
@@ -929,8 +931,11 @@ export async function syncStatusToPipedrive(
   if (!c) return { skipped: "company not found" };
 
   if (status === "interested" || status === "catalog_sent") {
-    const pipeline: "ajm" | "catalog" = isAjmCompany(c) ? "ajm" : "catalog";
-    const stageName = status === "catalog_sent" ? "Catalog Sent" : "Interested";
+    const isAjm = isAjmCompany(c);
+    const pipeline: "ajm" | "catalog" = isAjm ? "ajm" : "catalog";
+    // AJM reactivation deals stay at "To Contact" (call queue) — never
+    // auto-advanced. Non-AJM advance with the frame status.
+    const stageName = isAjm ? "To Contact" : status === "catalog_sent" ? "Catalog Sent" : "Interested";
     const r = await ensureOutreachDeal(companyId, pipeline, stageName);
     return { ...r };
   }
