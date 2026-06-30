@@ -8,7 +8,7 @@ import { createLayersForShipment } from "@/modules/finance/lib/cogs-ingest";
 import { runDailyCogsPosting } from "@/modules/finance/lib/daily-cogs";
 import { runCogsBackfill, correctCogsForDate } from "@/modules/finance/lib/cogs-backfill";
 import { stripCogsFromOldRecognitions } from "@/modules/finance/lib/cogs-remediation";
-import { previewSettlementInvoices } from "@/modules/finance/lib/settlement-revenue";
+import { previewSettlementInvoices, restateDeferredToSales } from "@/modules/finance/lib/settlement-revenue";
 
 export function registerFinanceMcpTools() {
   // ── finance.preview_settlement_invoices ──
@@ -24,6 +24,31 @@ export function registerFinanceMcpTools() {
     }),
     async (args) => {
       const result = previewSettlementInvoices(args);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // ── finance.restate_deferred_to_sales ──
+  // Historical cleanup Entry 1: recognize revenue stranded in Deferred Revenue
+  // by posting DR 2050 / CR sales (target gross − current Xero balance). DEFAULTS
+  // to dryRun; pass dryRun:false to actually post. Caller supplies current Xero
+  // Sales balances per account.
+  mcpRegistry.register(
+    "finance.restate_deferred_to_sales",
+    "Historical cleanup (Entry 1): post one adjusting journal DR 2050 Deferred Revenue / CR 4030|4040|4000 Sales to recognize revenue stranded under the old deferred model. Amount per channel = target gross (from settlements) − currentSales (supplied from the live Xero P&L). DEFAULTS to dryRun — pass dryRun:false to post.",
+    z.object({
+      currentSales: z.record(z.string(), z.number()).describe('Current Xero Sales balances by account code, e.g. {"4040":71732,"4030":607.85,"4000":0}'),
+      date: z.string().describe("Journal date (YYYY-MM-DD), e.g. period end"),
+      deferredAccount: z.string().optional().describe("Deferred Revenue account (default 2050)"),
+      dryRun: z.boolean().optional().describe("Default true. Pass false to actually post."),
+    }),
+    async (args) => {
+      const result = await restateDeferredToSales({
+        currentSales: args.currentSales,
+        date: args.date,
+        deferredAccount: args.deferredAccount,
+        dryRun: args.dryRun !== false,
+      });
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
   );
