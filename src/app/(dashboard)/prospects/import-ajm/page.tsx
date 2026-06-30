@@ -18,6 +18,9 @@ export default function ImportAjmPage() {
   const [preview, setPreview] = useState<{ stats?: Stats; summary?: Summary } | null>(null);
   const [result, setResult] = useState<{ stats: Stats; summary: Summary } | null>(null);
   const [error, setError] = useState<string>("");
+  const [enrichBusy, setEnrichBusy] = useState(false);
+  const [enrichResult, setEnrichResult] = useState<Record<string, unknown> | null>(null);
+  const [enrichError, setEnrichError] = useState<string>("");
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -90,6 +93,25 @@ export default function ImportAjmPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function runEnrichBatch() {
+    setEnrichBusy(true);
+    setEnrichError("");
+    try {
+      const res = await fetch("/api/v1/sales/enrich-ajm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 25 }),
+      });
+      const r = await res.json();
+      if (r.ok) setEnrichResult(r);
+      else setEnrichError(r.error || "Enrichment failed");
+    } catch (e) {
+      setEnrichError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setEnrichBusy(false);
     }
   }
 
@@ -172,11 +194,44 @@ export default function ImportAjmPage() {
               <div className="text-destructive">{result.summary.errors.length} row error(s)</div>
             )}
             <p className="text-xs text-muted-foreground pt-2 border-t">
-              Next: enrich these with website / hours / open-status via Google Maps from the enrichment tools.
+              Next: enrich these with website / hours / open-status via Google Maps (below).
             </p>
           </CardContent>
         </Card>
       )}
+
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle className="text-base">2. Enrich via Google Maps (Apify)</CardTitle>
+          <CardDescription>
+            Fills website + business hours, adds Google rating, and marks permanently-closed stores for the AJM
+            cohort. Enable the <code>ajm-gmaps-enrich</code> cron to run automatically (~40/run), or run a batch now.
+            Apify cost ≈ $2-3 per 1,000.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Button variant="outline" onClick={runEnrichBatch} disabled={enrichBusy}>
+            {enrichBusy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+            Run a batch of 25 now
+          </Button>
+          {enrichResult && (
+            <div className="text-sm">
+              <span className="text-muted-foreground">Last batch:</span>{" "}
+              {Object.entries(enrichResult)
+                .filter(([k, v]) => typeof v === "number" && k !== "companies_attempted")
+                .map(([k, v]) => `${k}: ${v}`)
+                .join(" · ") || "no matches"}
+              {typeof enrichResult.companies_attempted === "number" ? ` (of ${enrichResult.companies_attempted} attempted)` : ""}
+            </div>
+          )}
+          {enrichError && (
+            <div className="text-sm text-destructive flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+              {enrichError}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
