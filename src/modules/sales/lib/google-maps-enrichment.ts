@@ -283,30 +283,41 @@ function logMatch(args: {
   decision: "accepted" | "skipped" | "marked_closed" | "no_match";
   decisionReason: string;
 }): void {
-  const p = args.place;
-  logMatchStmt().run(
-    `m_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-    args.companyId,
-    args.runId,
-    args.searchString,
-    args.company.name,
-    args.company.city,
-    args.company.state,
-    p?.title ?? null,
-    p?.address ?? null,
-    p?.city ?? null,
-    p?.state ?? null,
-    p?.phone || p?.phoneUnformatted || null,
-    p?.placeId ?? null,
-    p?.totalScore ?? null,
-    p?.reviewsCount ?? null,
-    p?.permanentlyClosed ? 1 : 0,
-    p?.temporarilyClosed ? 1 : 0,
-    p?.url ?? null,
-    args.similarity,
-    args.decision,
-    args.decisionReason,
-  );
+  // Wrap in try/catch so a logging failure never crashes the
+  // enrichment run. Observed 2026-06-30: a logMatch crash silently
+  // stranded multiple runs in 'running' status because the function
+  // bailed out before reaching the completion stamp.
+  try {
+    const p = args.place;
+    logMatchStmt().run(
+      `m_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+      args.companyId,
+      args.runId,
+      args.searchString,
+      args.company.name,
+      args.company.city,
+      args.company.state,
+      p?.title ?? null,
+      p?.address ?? null,
+      p?.city ?? null,
+      p?.state ?? null,
+      p?.phone || p?.phoneUnformatted || null,
+      p?.placeId ?? null,
+      p?.totalScore != null ? Number(p.totalScore) : null,
+      p?.reviewsCount != null ? Number(p.reviewsCount) : null,
+      p?.permanentlyClosed ? 1 : 0,
+      p?.temporarilyClosed ? 1 : 0,
+      p?.url ?? null,
+      args.similarity,
+      args.decision,
+      args.decisionReason,
+    );
+  } catch (e) {
+    console.error(
+      `[gmaps-enrich] logMatch failed for company ${args.companyId}:`,
+      e instanceof Error ? e.message : String(e),
+    );
+  }
 }
 
 /**
@@ -364,6 +375,11 @@ export async function enrichViaGoogleMaps(opts: {
       cohort.length,
     );
 
+  // Track whether we reached normal completion so the finally block
+  // can stamp the runs table correctly even if something throws.
+  let crashed: Error | null = null;
+
+  try {
   // Index by searchString so we can route results back to companies.
   // Multiple companies could in theory produce the same search string
   // (rare — same name in same city); the map stores the first hit
@@ -526,35 +542,42 @@ export async function enrichViaGoogleMaps(opts: {
       );
     }
   }
-
-  // Stamp completion in the runs table so the operator can read the
-  // final stats via /enrich-via-apify/runs.
-  sqlite
-    .prepare(
-      `UPDATE apify_enrichment_runs
-          SET status = 'completed',
-              completed_at = datetime('now'),
-              phones_added = ?,
-              permanently_closed_marked = ?,
-              hours_updated = ?,
-              no_match = ?,
-              low_confidence_skipped = ?,
-              errors_count = ?,
-              errors_sample = ?
-        WHERE id = ?`,
-    )
-    .run(
-      result.phones_added,
-      result.permanently_closed_marked,
-      result.hours_updated,
-      result.no_match,
-      result.low_confidence_skipped,
-      result.errors.length,
-      result.errors.length > 0
-        ? JSON.stringify(result.errors.slice(0, 5))
-        : null,
-      runId,
-    );
+  } catch (e) {
+    crashed = e instanceof Error ? e : new Error(String(e));
+    console.error(`[gmaps-enrich] run ${runId} crashed:`, crashed.message);
+  } finally {
+    // ALWAYS stamp the runs row so it never strands in 'running'.
+    // status = 'failed' if we crashed; 'completed' otherwise.
+    sqlite
+      .prepare(
+        `UPDATE apify_enrichment_runs
+            SET status = ?,
+                completed_at = datetime('now'),
+                phones_added = ?,
+                permanently_closed_marked = ?,
+                hours_updated = ?,
+                no_match = ?,
+                low_confidence_skipped = ?,
+                errors_count = ?,
+                errors_sample = ?,
+                error_message = ?
+          WHERE id = ?`,
+      )
+      .run(
+        crashed ? "failed" : "completed",
+        result.phones_added,
+        result.permanently_closed_marked,
+        result.hours_updated,
+        result.no_match,
+        result.low_confidence_skipped,
+        result.errors.length,
+        result.errors.length > 0
+          ? JSON.stringify(result.errors.slice(0, 5))
+          : null,
+        crashed ? crashed.message.slice(0, 500) : null,
+        runId,
+      );
+  }
 
   return result;
 }
