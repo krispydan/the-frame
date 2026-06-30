@@ -27,6 +27,7 @@ import {
   kickBackgroundRun,
   getAllRunStates,
   resetPipedriveSyncState,
+  isAnyRunInFlight,
   type RunTarget,
   PipedriveNotReadyError,
 } from "@/modules/sales/lib/pipedrive-sync";
@@ -128,6 +129,14 @@ export async function POST(req: NextRequest) {
         // Switching Pipedrive accounts (e.g. sandbox → production): drop tokens
         // AND all account-specific sync state so a fresh push targets the new
         // account instead of skipping everything as already-synced.
+        // Refuse while a push is in flight (it would race the reset and leave
+        // stale stamps) unless explicitly forced.
+        if (isAnyRunInFlight() && !(body as { force?: boolean }).force) {
+          return NextResponse.json(
+            { ok: false, running: true, error: "A push is still running — wait for it to finish, or force." },
+            { status: 409 },
+          );
+        }
         disconnectPipedrive();
         const cleared = resetPipedriveSyncState();
         return NextResponse.json({ ok: true, cleared });
