@@ -169,6 +169,11 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN tiktok_url TEXT"); } catch {
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN tiktok_followers INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN youtube_url TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN youtube_followers INTEGER"); } catch { /* exists */ }
+// Apify Google Maps enrichment tracking — set on every attempt so we
+// can build a "needs manual review" queue from the rows where we
+// tried but didn't get a high-confidence match.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN gmaps_enrichment_attempted_at TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN gmaps_skip_reason TEXT"); } catch { /* exists */ }
 // e.g. "shopify" / "woocommerce" / "magento" / "bigcommerce" / "custom".
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN ecom_platform TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_storeleads_id ON companies (storeleads_id)"); } catch { /* exists */ }

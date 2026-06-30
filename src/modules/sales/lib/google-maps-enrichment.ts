@@ -84,10 +84,12 @@ function loadCohort(opts: {
     `((c.city IS NOT NULL AND TRIM(c.city) <> '' AND c.state IS NOT NULL AND TRIM(c.state) <> '') OR (c.address IS NOT NULL AND TRIM(c.address) <> ''))`,
   ];
   if (!opts.force) {
-    // Skip companies we've already attempted (place_id set means we
-    // matched, place_id explicitly NULL after an attempt could be
-    // tracked separately if needed — for now we only skip matched ones).
+    // Skip companies we've already attempted, regardless of outcome.
+    // - google_place_id IS NOT NULL = matched, no need to re-query
+    // - gmaps_enrichment_attempted_at IS NOT NULL = tried and skipped,
+    //   needs human review via /enrich-via-apify/skipped before re-attempting
     wheres.push(`c.google_place_id IS NULL`);
+    wheres.push(`c.gmaps_enrichment_attempted_at IS NULL`);
   }
   const params: unknown[] = [];
   if (opts.tier && opts.tier.length > 0) {
@@ -163,6 +165,14 @@ const markClosedStmt = sqlite.prepare(`
    WHERE id = ?
 `);
 
+const stampAttemptStmt = sqlite.prepare(`
+  UPDATE companies
+     SET gmaps_enrichment_attempted_at = datetime('now'),
+         gmaps_skip_reason = ?,
+         updated_at = datetime('now')
+   WHERE id = ?
+`);
+
 /**
  * Run an enrichment batch. Returns aggregate counts.
  *
@@ -234,16 +244,21 @@ export async function enrichViaGoogleMaps(opts: {
       const place = placeByQuery.get(query);
       if (!place) {
         result.no_match++;
+        stampAttemptStmt.run("no_match", company.id);
         continue;
       }
       const m = matchesCompany(place, company);
       if (!m.ok) {
         result.low_confidence_skipped++;
+        stampAttemptStmt.run(m.reason, company.id);
         console.log(
           `[gmaps-enrich] skipped ${company.id} ${company.name}: ${m.reason}`,
         );
         continue;
       }
+      // Match accepted — clear any previous skip reason (in case this
+      // is a force=true re-run after fixing the company's name/city).
+      stampAttemptStmt.run(null, company.id);
 
       // Phone — the prize
       if (place.phoneUnformatted || place.phone) {
