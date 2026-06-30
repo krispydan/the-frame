@@ -21,7 +21,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  let body: { list?: string; dryRun?: boolean } = {};
+  let body: { list?: string; dryRun?: boolean; createMissing?: boolean } = {};
   try {
     body = await req.json();
   } catch {
@@ -35,10 +35,10 @@ export async function POST(req: NextRequest) {
   if (rows.length === 0) return NextResponse.json({ ok: false, error: "no emails found in the list" }, { status: 400 });
 
   if (body.dryRun) {
-    const preview = await backfillCatalogInterest(rows, { dryRun: true });
+    const preview = await backfillCatalogInterest(rows, { dryRun: true, createMissing: body.createMissing });
     return NextResponse.json({ ok: true, dryRun: true, preview });
   }
 
-  const r = startCatalogBackfill(rows);
+  const r = startCatalogBackfill(rows, { createMissing: body.createMissing });
   return NextResponse.json({ ok: r.started, ...r, parsed: rows.length });
 }

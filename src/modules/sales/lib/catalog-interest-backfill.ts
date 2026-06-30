@@ -15,6 +15,7 @@
  * the background (many Pipedrive calls); progress is polled via settings.
  */
 
+import crypto from "crypto";
 import { sqlite } from "@/lib/db";
 import { addCompanyEmail } from "./company-emails";
 import { progressCompanyStatus } from "./status-progression";
@@ -119,6 +120,7 @@ async function putPersonEmail(personId: number, email: string): Promise<void> {
 export interface CatalogBackfillResult {
   total: number;
   matched: number;
+  created: number;
   emailAdded: number;
   alreadyHadEmail: number;
   pushed: number;
@@ -127,43 +129,71 @@ export interface CatalogBackfillResult {
   dryRun: boolean;
 }
 
+/** Add email (if new) + mark interested + push to Pipedrive for one company. */
+async function processCompany(
+  companyId: string,
+  email: string,
+  ajm: boolean,
+  haveEmail: boolean,
+  canPush: boolean,
+  result: CatalogBackfillResult,
+): Promise<void> {
+  if (!haveEmail) addCompanyEmail(companyId, email, "phoneburner_catalog");
+  progressCompanyStatus(companyId, "interested", { source: "system" });
+  if (!canPush) return;
+  try {
+    const r = await ensureOutreachDeal(companyId, ajm ? "ajm" : "catalog", ajm ? "To Contact" : "Interested");
+    if (r.dealId) result.pushed++;
+    const personId = (sqlite.prepare("SELECT pipedrive_person_id AS p FROM companies WHERE id = ?").get(companyId) as { p: number | null } | undefined)?.p;
+    if (personId) await putPersonEmail(personId, email);
+  } catch {
+    /* per-row best-effort; frame state already updated */
+  }
+}
+
 export async function backfillCatalogInterest(
   rows: CatalogRow[],
-  opts: { dryRun?: boolean } = {},
+  opts: { dryRun?: boolean; createMissing?: boolean } = {},
 ): Promise<CatalogBackfillResult> {
   const dryRun = opts.dryRun ?? false;
+  const createMissing = opts.createMissing ?? false;
   const canPush = getPipedriveConnectionStatus().connected && !!getPipelineConfig();
   const result: CatalogBackfillResult = {
-    total: rows.length, matched: 0, emailAdded: 0, alreadyHadEmail: 0, pushed: 0, unmatched: 0, unmatchedSamples: [], dryRun,
+    total: rows.length, matched: 0, created: 0, emailAdded: 0, alreadyHadEmail: 0, pushed: 0, unmatched: 0, unmatchedSamples: [], dryRun,
   };
 
   for (const row of rows) {
     const m = matchCompany(row.email);
-    if (!m) {
-      result.unmatched++;
-      if (result.unmatchedSamples.length < 40) result.unmatchedSamples.push(row.email);
+    if (m) {
+      result.matched++;
+      if (m.haveEmail) result.alreadyHadEmail++;
+      else result.emailAdded++;
+      if (!dryRun) await processCompany(m.companyId, row.email, isAjm(m), m.haveEmail, canPush, result);
       continue;
     }
-    result.matched++;
-    if (m.haveEmail) result.alreadyHadEmail++;
-    else result.emailAdded++;
 
-    if (dryRun) continue;
-
-    if (!m.haveEmail) addCompanyEmail(m.companyId, row.email, "phoneburner_catalog");
-    progressCompanyStatus(m.companyId, "interested", { source: "system" });
-
-    if (canPush) {
-      try {
-        const ajm = isAjm(m);
-        const r = await ensureOutreachDeal(m.companyId, ajm ? "ajm" : "catalog", ajm ? "To Contact" : "Interested");
-        if (r.dealId) result.pushed++;
-        const personId = (sqlite.prepare("SELECT pipedrive_person_id AS p FROM companies WHERE id = ?").get(m.companyId) as { p: number | null } | undefined)?.p;
-        if (personId) await putPersonEmail(personId, row.email);
-      } catch {
-        /* per-row best-effort; frame state already updated */
+    // No match. Optionally create a new company for a business-domain email.
+    const domain = (row.email.split("@")[1] || "").toLowerCase();
+    const businessDomain = !!domain && !FREE_DOMAINS.has(domain) && /^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain);
+    if (createMissing && businessDomain) {
+      result.created++;
+      result.matched++;
+      result.emailAdded++;
+      if (!dryRun) {
+        const id = crypto.randomUUID();
+        sqlite
+          .prepare(
+            `INSERT INTO companies (id, name, website, status, source, created_at, updated_at)
+             VALUES (?, ?, ?, 'interested', 'catalog_lead', datetime('now'), datetime('now'))`,
+          )
+          .run(id, domain, `https://${domain}`);
+        await processCompany(id, row.email, false, false, canPush, result);
       }
+      continue;
     }
+
+    result.unmatched++;
+    if (result.unmatchedSamples.length < 40) result.unmatchedSamples.push(row.email);
   }
   return result;
 }
@@ -193,13 +223,16 @@ export function readCatalogBackfillState(): Record<string, unknown> | null {
 }
 
 /** Kick the backfill in the background; returns immediately. */
-export function startCatalogBackfill(rows: CatalogRow[]): { started: boolean; alreadyRunning?: boolean } {
+export function startCatalogBackfill(
+  rows: CatalogRow[],
+  opts: { createMissing?: boolean } = {},
+): { started: boolean; alreadyRunning?: boolean } {
   if (inFlight) return { started: false, alreadyRunning: true };
   inFlight = true;
   writeState({ state: "running", total: rows.length });
   void (async () => {
     try {
-      const r = await backfillCatalogInterest(rows, { dryRun: false });
+      const r = await backfillCatalogInterest(rows, { dryRun: false, createMissing: opts.createMissing });
       writeState({ state: "done", ...r });
     } catch (e) {
       writeState({ state: "error", error: e instanceof Error ? e.message : String(e) });

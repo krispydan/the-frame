@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 export default function CatalogInterestPage() {
   const [list, setList] = useState("");
+  const [createMissing, setCreateMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<Record<string, unknown> | null>(null);
   const [runState, setRunState] = useState<Record<string, unknown> | null>(null);
@@ -26,7 +27,7 @@ export default function CatalogInterestPage() {
     setError("");
     setPreview(null);
     try {
-      const r = await post({ list, dryRun: true });
+      const r = await post({ list, dryRun: true, createMissing });
       if (r.ok) setPreview(r.preview);
       else setError(r.error || "Preview failed");
     } catch (e) {
@@ -53,7 +54,7 @@ export default function CatalogInterestPage() {
     setBusy(true);
     setError("");
     try {
-      const r = await post({ list });
+      const r = await post({ list, createMissing });
       if (!r.ok && !r.alreadyRunning) {
         setError(r.error || "Failed to start");
         setBusy(false);
@@ -101,6 +102,11 @@ export default function CatalogInterestPage() {
             value={list}
             onChange={(e) => setList(e.target.value)}
           />
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={createMissing} onChange={(e) => setCreateMissing(e.target.checked)} />
+            Also create new prospects for unmatched business-domain emails (name + website from the domain)
+          </label>
+
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={runPreview} disabled={busy || !list.trim()}>
               {busy && !runState ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
