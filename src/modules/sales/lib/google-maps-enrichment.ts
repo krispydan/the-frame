@@ -23,7 +23,12 @@ import { sqlite } from "@/lib/db";
 import { apifyClient, type GoogleMapsPlace } from "./apify-client";
 import { addCompanyPhone } from "./company-phones";
 
-const BATCH_SIZE = 25; // search strings per Apify actor run
+// Search strings per Apify actor run. Reduced from 25 → 10 after
+// observing intermittent 10-min timeouts on 24/25-result runs in
+// the overnight cron — Apify hits a slow path with certain search
+// strings that doesn't reliably finish. Smaller batches mean shorter
+// individual runs and less wasted wall-clock on stuck queries.
+const BATCH_SIZE = 10;
 
 interface CandidateCompany {
   id: string;
@@ -284,8 +289,16 @@ export async function enrichViaGoogleMaps(opts: {
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
       console.error(`[gmaps-enrich] batch failed: ${reason}`);
+      // Stamp each company in the failed batch so they don't keep
+      // getting retried tick after tick. The skip_reason carries the
+      // error so we can revisit via the /skipped review endpoint and
+      // clear them with force=true if the underlying issue is fixed.
+      const shortReason =
+        reason.length > 200 ? reason.slice(0, 200) + "…" : reason;
+      const errorReason = `batch_error: ${shortReason}`;
       for (const c of batch) {
         result.errors.push({ company_id: c.id, reason });
+        stampAttemptStmt().run(errorReason, c.id);
       }
       continue;
     }

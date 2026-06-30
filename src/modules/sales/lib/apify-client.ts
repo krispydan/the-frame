@@ -135,7 +135,13 @@ class ApifyClient {
     }
     if (searchStrings.length === 0) return [];
 
-    const url = `${APIFY_BASE}/acts/${ACTOR_GMAPS}/run-sync-get-dataset-items?token=${token}&timeout=${opts.timeoutSecs ?? 600}`;
+    // Apify timeout: 180s (was 600). Observed overnight: ~half of
+    // 25-place batches hit the 10-min client timeout exactly because
+    // Apify hits a slow path on certain search strings. 3 min is
+    // plenty for a 10-place batch — succeeded runs in the logs were
+    // 13-42s — and fails fast on stuck batches so the cron tick
+    // moves on. Caller can override via opts.timeoutSecs.
+    const url = `${APIFY_BASE}/acts/${ACTOR_GMAPS}/run-sync-get-dataset-items?token=${token}&timeout=${opts.timeoutSecs ?? 180}`;
     const body = {
       searchStringsArray: searchStrings,
       // Search-result tuning
