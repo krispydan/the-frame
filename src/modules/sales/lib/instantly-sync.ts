@@ -6,6 +6,7 @@
 import { sqlite } from "@/lib/db";
 import { instantlyClient, type InstantlyLead } from "./instantly-client";
 import { progressCompanyStatus } from "./status-progression";
+import { addCompanyEmail } from "./company-emails";
 import { logger } from "@/modules/core/lib/logger";
 
 export interface SyncResult {
@@ -499,18 +500,21 @@ export async function importLeadsFromInstantly(): Promise<ImportLeadsStats> {
 
   if (synced.length === 0) return stats;
 
+  // companies.email was dropped 2026-06-19 — email is canonical in contacts.
   const findCompanyByEmail = sqlite.prepare(
-    `SELECT id FROM companies WHERE LOWER(email) = LOWER(?) LIMIT 1`,
+    `SELECT c.id FROM contacts ct
+       JOIN companies c ON c.id = ct.company_id
+      WHERE LOWER(TRIM(ct.email)) = LOWER(TRIM(?)) LIMIT 1`,
   );
   const findLink = sqlite.prepare(
     `SELECT id FROM campaign_leads WHERE campaign_id = ? AND company_id = ? LIMIT 1`,
   );
   const insertCompany = sqlite.prepare(
     `INSERT INTO companies (
-       id, name, type, email, status, source, source_type,
+       id, name, type, status, source, source_type,
        created_at, updated_at
      ) VALUES (
-       ?, ?, 'online', ?, 'new', 'instantly_pull', 'instantly_pull',
+       ?, ?, 'online', 'new', 'instantly_pull', 'instantly_pull',
        datetime('now'), datetime('now')
      )`,
   );
@@ -548,7 +552,8 @@ export async function importLeadsFromInstantly(): Promise<ImportLeadsStats> {
               ? String(lead.company_name).trim()
               : [lead.first_name, lead.last_name].filter(Boolean).join(" ").trim() || email;
           const newId = crypto.randomUUID();
-          insertCompany.run(newId, name, email);
+          insertCompany.run(newId, name);
+          addCompanyEmail(newId, email, "instantly_pull");
           row = { id: newId };
           stats.companiesCreated++;
         }

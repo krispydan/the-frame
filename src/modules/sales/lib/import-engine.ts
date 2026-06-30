@@ -118,8 +118,13 @@ export async function importProspectsFromCSV(
 
   // Prepare raw statements for max performance
   const insertCompany = sqlite.prepare(`
-    INSERT INTO companies (id, name, type, website, domain, phone, city, state, zip, country, source, icp_score, status, tags, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    INSERT INTO companies (id, name, type, website, domain, city, state, zip, country, source, icp_score, status, tags, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+  `);
+  // companies.phone was dropped 2026-06-19; phones live in company_phones.
+  const insertCompanyPhone = sqlite.prepare(`
+    INSERT OR IGNORE INTO company_phones (id, company_id, phone, source, is_primary, created_at, updated_at)
+    VALUES (?, ?, ?, 'import', 1, datetime('now'), datetime('now'))
   `);
 
   const insertStore = sqlite.prepare(`
@@ -180,8 +185,7 @@ export async function importProspectsFromCSV(
             mapCategory(row.category),
             website,
             domain,
-            phone,
-            // email no longer on companies — written to contacts below
+            // phone -> company_phones (below); email -> contacts (below)
             row.city?.trim() || null,
             state || null,
             row.zip?.trim() || null,
@@ -192,6 +196,7 @@ export async function importProspectsFromCSV(
             tags.length > 0 ? JSON.stringify(tags) : null,
           );
           stats.companiesCreated++;
+          if (phone) insertCompanyPhone.run(crypto.randomUUID(), companyId, phone);
 
           insertStore.run(
             storeId,
