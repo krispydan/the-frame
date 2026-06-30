@@ -157,9 +157,11 @@ async function findOrCreateCompany(order: ShopifyOrder, shopDomain?: string): Pr
     order.customer?.default_address?.company || order.shipping_address?.company || null;
 
   // 1. Email match — case-insensitive against contacts (canonical email
-  // store). Skip relay.faire.com here: a unique-per-retailer relay address
-  // can't match an existing contact anyway, and we never want it to.
-  if (email && !isRelayEmail(email)) {
+  // store). Includes Faire relay addresses on purpose: Faire issues one
+  // Shopify customer (one stable relay email) per store, so matching the full
+  // relay address groups a store's repeat orders. (The collapse bug was the
+  // DOMAIN match in step 3 — relay.faire.com is excluded there, not here.)
+  if (email) {
     const emailMatch = sqlite
       .prepare(
         `SELECT ct.company_id AS id FROM contacts ct
@@ -210,6 +212,23 @@ async function findOrCreateCompany(order: ShopifyOrder, shopDomain?: string): Pr
     // relay addresses so they never surface as a real contact email.
     if (email) {
       addCompanyEmail(newCompany.id, email, "shopify_webhook");
+    }
+    // Anonymized Faire customer (relay email, no real website) → alert the team
+    // to map a real email/website on the prospect page. Fire-and-forget.
+    if (isRelayEmail(email) && !businessDomain) {
+      void (async () => {
+        try {
+          const { notifyFaireMappingNeeded } = await import("@/modules/integrations/lib/slack/notifications");
+          const base = (process.env.SHOPIFY_APP_URL || process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
+          await notifyFaireMappingNeeded({
+            companyName: newCompany.name,
+            orderNumber: order.name || null,
+            prospectUrl: base ? `${base}/prospects/${newCompany.id}` : null,
+          });
+        } catch (e) {
+          console.error("[shopify-webhook] faire mapping alert failed:", e);
+        }
+      })();
     }
     return newCompany.id;
   }
