@@ -1058,6 +1058,11 @@ export function getAllRunStates(): Record<string, unknown> {
   return out;
 }
 
+/** True if any background push (seed/backfill/activity/remediation) is running. */
+export function isAnyRunInFlight(): boolean {
+  return RUN_TARGETS.some((t) => inFlight.has(t));
+}
+
 /**
  * Kick a real (non-dry) push as a detached background task. Returns
  * immediately; progress/result land in settings (poll via getRunState). The

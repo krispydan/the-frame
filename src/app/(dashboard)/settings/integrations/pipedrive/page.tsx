@@ -143,7 +143,22 @@ function PipedriveIntegrationsPageInner() {
     )) return;
     setBusy(true);
     try {
-      const r = (await post({ action: "reset-sync-state" })) as { ok?: boolean; cleared?: Record<string, number> };
+      let r = (await post({ action: "reset-sync-state" })) as {
+        ok?: boolean;
+        running?: boolean;
+        cleared?: Record<string, number>;
+        error?: string;
+      };
+      if (r.running) {
+        if (!confirm(
+          "A push is still running. Resetting now can leave a few stale links (re-run reset after it stops to be safe). Force reset anyway?",
+        )) {
+          setBanner({ kind: "error", title: "Reset skipped", message: "A push is still running — wait for it to finish, then reset." });
+          setBusy(false);
+          return;
+        }
+        r = (await post({ action: "reset-sync-state", force: true })) as typeof r;
+      }
       await reload();
       if (r.ok) {
         const c = r.cleared || {};
@@ -152,6 +167,8 @@ function PipedriveIntegrationsPageInner() {
           title: "Reset complete — ready for a new account",
           message: `Cleared ${c.companies_cleared ?? 0} org/person links, ${c.orders_cleared ?? 0} order links, ${c.projection_cleared ?? 0} projected deals, ${c.settings_cleared ?? 0} settings. Now connect the real account.`,
         });
+      } else if (r.error) {
+        setBanner({ kind: "error", title: "Reset failed", message: r.error });
       }
     } finally {
       setBusy(false);
