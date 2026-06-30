@@ -30,7 +30,9 @@ import { apifyClient } from "@/modules/sales/lib/apify-client";
  *   { limit: 20, tier?: "A,B" }
  *       Random sample of N companies from the cohort.
  *
- * Hard limit: 25 inputs per call. Don't burn credits on big previews.
+ * Hard limit: 5 inputs per call (Apify is occasionally slow; bigger
+ * batches hit Cloudflare's ~100s edge timeout). To test more than 5
+ * cases, run multiple preview calls back-to-back.
  *
  * Returns: a structured comparison for each input — what we asked,
  * what Apify returned, the similarity score, and the matcher's
@@ -62,7 +64,7 @@ export async function POST(req: NextRequest) {
   let inputs: Input[] = [];
 
   if (Array.isArray(body.company_ids) && body.company_ids.length > 0) {
-    const ids = body.company_ids.slice(0, 25);
+    const ids = body.company_ids.slice(0, 5);
     const placeholders = ids.map(() => "?").join(",");
     inputs = (
       sqlite
@@ -82,7 +84,7 @@ export async function POST(req: NextRequest) {
       state: r.state,
     }));
   } else if (Array.isArray(body.searches) && body.searches.length > 0) {
-    inputs = body.searches.slice(0, 25).map((s) => ({
+    inputs = body.searches.slice(0, 5).map((s) => ({
       company_id: null,
       name: String(s.name || ""),
       city: s.city ? String(s.city) : null,
@@ -90,7 +92,7 @@ export async function POST(req: NextRequest) {
     }));
   } else {
     // Random cohort sample
-    const limit = Math.min(25, Math.max(1, body.limit ?? 10));
+    const limit = Math.min(5, Math.max(1, body.limit ?? 5));
     const tier = body.tier
       ? body.tier.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean)
       : null;
@@ -143,11 +145,16 @@ export async function POST(req: NextRequest) {
   const queryToInput = new Map<string, Input>();
   for (let i = 0; i < inputs.length; i++) queryToInput.set(queries[i], inputs[i]);
 
-  // ONE Apify call, no retries beyond the client's existing 429 logic
+  // ONE Apify call with a short timeout so we return partial results
+  // within Cloudflare's ~100s edge window. 85s leaves a buffer for
+  // the response payload to come back through. The Apify actor
+  // returns whatever it's resolved when its timeout fires, so
+  // partial results are fine for preview.
   let places;
   try {
     places = await apifyClient.runGoogleMapsScraper(queries, {
       maxPerSearch: 1,
+      timeoutSecs: 85,
     });
   } catch (e) {
     return NextResponse.json(
