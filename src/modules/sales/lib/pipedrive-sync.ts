@@ -255,6 +255,54 @@ export function setSyncEnabled(on: boolean): void {
   setSetting("pipedrive_sync_enabled", on ? "true" : "false");
 }
 
+/**
+ * Wipe all Pipedrive-account-specific sync state so the integration can be
+ * pointed at a different account (e.g. sandbox → production). Clears the stamped
+ * org/person/deal/activity ids, the deal projection, and the
+ * pipeline/custom-field/owner/webhook/run settings. Does NOT touch tokens
+ * (caller disconnects), the frame's own data, or the AJM tags. After this,
+ * connect the new account, re-provision pipelines + owner + custom fields, and
+ * re-run the pushes — everything resolves fresh against the new account.
+ */
+export function resetPipedriveSyncState(): Record<string, number> {
+  const companies = sqlite
+    .prepare(
+      "UPDATE companies SET pipedrive_org_id = NULL, pipedrive_person_id = NULL, pipedrive_synced_at = NULL WHERE pipedrive_org_id IS NOT NULL OR pipedrive_person_id IS NOT NULL",
+    )
+    .run().changes;
+  const orders = sqlite
+    .prepare("UPDATE orders SET pipedrive_deal_id = NULL WHERE pipedrive_deal_id IS NOT NULL")
+    .run().changes;
+  const activities = sqlite
+    .prepare("UPDATE activity_feed SET pipedrive_activity_id = NULL WHERE pipedrive_activity_id IS NOT NULL")
+    .run().changes;
+  const projection = sqlite.prepare("DELETE FROM pipedrive_deals").run().changes;
+  const settingsKeys = [
+    "pipedrive_pipelines",
+    "pipedrive_custom_fields",
+    "pipedrive_owner_id",
+    "pipedrive_owner_name",
+    "pipedrive_webhook_user",
+    "pipedrive_webhook_password",
+    "pipedrive_sync_enabled",
+    "ajm_enrich_state",
+    "pipedrive_run_seed-ajm",
+    "pipedrive_run_backfill-interested",
+    "pipedrive_run_backfill-orders",
+    "pipedrive_run_sync-activities",
+    "pipedrive_run_remediate-faire",
+  ];
+  let settingsCleared = 0;
+  for (const k of settingsKeys) settingsCleared += sqlite.prepare("DELETE FROM settings WHERE key = ?").run(k).changes;
+  return {
+    companies_cleared: companies,
+    orders_cleared: orders,
+    activities_cleared: activities,
+    projection_cleared: projection,
+    settings_cleared: settingsCleared,
+  };
+}
+
 function requireConfig(): { config: PipelineConfig; ownerId: number | undefined } {
   if (!getPipedriveConnectionStatus().connected) {
     throw new PipedriveNotReadyError("Pipedrive is not connected");

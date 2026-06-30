@@ -137,6 +137,27 @@ function PipedriveIntegrationsPageInner() {
     }
   }
 
+  async function resetForNewAccount() {
+    if (!confirm(
+      "Switch Pipedrive account?\n\nThis disconnects the current (sandbox) account AND clears all sync state — stamped org/person/deal ids, the deal projection, pipelines, custom fields, owner, and webhook creds. Your frame data (companies, orders, AJM tags) is untouched.\n\nAfter this: connect the real account, create pipelines, set the owner, register the webhook, then run the pushes fresh.",
+    )) return;
+    setBusy(true);
+    try {
+      const r = (await post({ action: "reset-sync-state" })) as { ok?: boolean; cleared?: Record<string, number> };
+      await reload();
+      if (r.ok) {
+        const c = r.cleared || {};
+        setBanner({
+          kind: "success",
+          title: "Reset complete — ready for a new account",
+          message: `Cleared ${c.companies_cleared ?? 0} org/person links, ${c.orders_cleared ?? 0} order links, ${c.projection_cleared ?? 0} projected deals, ${c.settings_cleared ?? 0} settings. Now connect the real account.`,
+        });
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function setupPipelines() {
     setBusy(true);
     try {
@@ -341,7 +362,15 @@ function PipedriveIntegrationsPageInner() {
                 <Trash2 className="h-4 w-4 mr-2" />
                 Disconnect
               </Button>
+              <Button variant="outline" onClick={resetForNewAccount} disabled={busy} className="text-destructive">
+                <Trash2 className="h-4 w-4 mr-2" />
+                Switch account (reset sync)
+              </Button>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Use “Switch account (reset sync)” to move from the sandbox to your real Pipedrive: it clears all stamped
+              ids + config so a fresh push targets the new account. Frame data is untouched.
+            </p>
           </CardContent>
         </Card>
       )}
