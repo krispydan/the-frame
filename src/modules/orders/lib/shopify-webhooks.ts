@@ -136,15 +136,30 @@ const FREE_EMAIL_DOMAINS = new Set([
   "proton.me", "protonmail.com", "gmx.com", "mail.com", "comcast.net",
   "verizon.net", "att.net", "sbcglobal.net", "bellsouth.net",
   "cox.net", "earthlink.net", "frontier.com",
+  // Faire anonymizes the buyer email as a unique <token>@relay.faire.com
+  // address. It is NOT a business domain — treating it as one collapsed every
+  // Faire retailer into the first one created (they all shared domain
+  // 'relay.faire.com'). Listed here so domain-matching skips it and it's never
+  // stored as a company domain. Faire orders are matched by store name instead.
+  "relay.faire.com",
 ]);
+
+/** Faire's per-retailer anonymized relay address — never an identity key. */
+function isRelayEmail(email: string | null | undefined): boolean {
+  return !!email && email.toLowerCase().includes("@relay.faire.com");
+}
 
 async function findOrCreateCompany(order: ShopifyOrder, shopDomain?: string): Promise<string | null> {
   const email = order.email || order.customer?.email;
-  const companyName = order.customer?.default_address?.company;
+  // Faire passes the retailer's store name through the address even when it
+  // anonymizes the email — it's the reliable identity for these orders.
+  const companyName =
+    order.customer?.default_address?.company || order.shipping_address?.company || null;
 
-  // 1. Email match — case-insensitive against contacts (canonical
-  // email store). Same fix as faire-sync for the case-sensitivity bug.
-  if (email) {
+  // 1. Email match — case-insensitive against contacts (canonical email
+  // store). Skip relay.faire.com here: a unique-per-retailer relay address
+  // can't match an existing contact anyway, and we never want it to.
+  if (email && !isRelayEmail(email)) {
     const emailMatch = sqlite
       .prepare(
         `SELECT ct.company_id AS id FROM contacts ct
@@ -182,12 +197,17 @@ async function findOrCreateCompany(order: ShopifyOrder, shopDomain?: string): Pr
   if (channel === "shopify_wholesale" && (companyName || email)) {
     const rawDomain = email ? email.split("@")[1]?.toLowerCase() : null;
     const businessDomain = rawDomain && !FREE_EMAIL_DOMAINS.has(rawDomain) ? rawDomain : null;
+    // Name the company after the retailer's store name — never the anonymized
+    // relay email (which would create a junk "...@relay.faire.com" company).
     const newCompany = db.insert(companies).values({
-      name: companyName || email || "Unknown",
+      name: companyName || deriveShipToName(order) || (isRelayEmail(email) ? "Faire retailer" : email) || "Unknown",
       domain: businessDomain,
       source: "shopify",
     }).returning().get();
-    // Email lands in contacts (canonical), not on the company row.
+    // Email lands in contacts (canonical), not on the company row. The relay
+    // address is still stored — it's stable per retailer, so a repeat Faire
+    // order from the same store matches it in step 1. Pipedrive sync skips
+    // relay addresses so they never surface as a real contact email.
     if (email) {
       addCompanyEmail(newCompany.id, email, "shopify_webhook");
     }
