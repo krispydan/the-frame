@@ -262,6 +262,23 @@ try {
   )`);
 } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_apify_preview_started ON apify_preview_runs (started_at DESC)"); } catch { /* exists */ }
+
+// Tracks every Apify-enriched company we've pushed to a PhoneBurner
+// folder. Lets us skip already-pushed leads on subsequent runs without
+// asking PB. UNIQUE(company_id, folder_id) makes re-pushes a no-op.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS phoneburner_folder_pushes (
+    id TEXT PRIMARY KEY NOT NULL,
+    company_id TEXT NOT NULL,
+    folder_id TEXT NOT NULL,
+    pb_contact_id TEXT,
+    phone_pushed TEXT NOT NULL,
+    pushed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    error TEXT
+  )`);
+} catch { /* exists */ }
+try { sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_pb_folder_pushes ON phoneburner_folder_pushes (company_id, folder_id)"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_pb_folder_pushes_folder ON phoneburner_folder_pushes (folder_id, pushed_at DESC)"); } catch { /* exists */ }
 // e.g. "shopify" / "woocommerce" / "magento" / "bigcommerce" / "custom".
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN ecom_platform TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_storeleads_id ON companies (storeleads_id)"); } catch { /* exists */ }
