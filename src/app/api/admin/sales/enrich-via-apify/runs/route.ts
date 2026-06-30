@@ -72,7 +72,15 @@ export async function GET(req: NextRequest) {
   }
 
   // Quick aggregate over the returned window
-  const totals = rows.reduce(
+  type Totals = {
+    attempted: number;
+    phones_added: number;
+    closed: number;
+    no_match: number;
+    low_conf: number;
+    errors: number;
+  };
+  const totals = rows.reduce<Totals>(
     (acc, r) => ({
       attempted: acc.attempted + Number(r.companies_attempted || 0),
       phones_added: acc.phones_added + Number(r.phones_added || 0),

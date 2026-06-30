@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
     status?: string;
     force?: boolean;
     dryRun?: boolean;
+    async?: boolean;
   } = {};
   try {
     body = await req.json();
