@@ -103,11 +103,20 @@ export function getXeroAuthUrl(): string | null {
   //                                 "Faire Payouts" contacts referenced by
   //                                 BankTransactions (granular + broad use
   //                                 the same scope name).
+  //   accounting.invoices         - read + write ACCREC Invoices + CreditNotes
+  //                                 for the settlement-date revenue model
+  //                                 (one ACCREC invoice per payout). Granular
+  //                                 scope named after the /Invoices resource.
+  //                                 REQUIRED once payout_revenue_model=invoice;
+  //                                 without it Xero returns 401
+  //                                 AuthorizationUnsuccessful on POST /Invoices.
   //   accounting.settings.read    - chart of accounts (Phase 1 mapping UI)
   //   files                       - attach payout CSVs to journals
   // Override via XERO_SCOPES env var if Xero adds or renames scopes.
+  // NOTE: adding a scope requires the user to RE-AUTHORIZE Xero (reconnect)
+  // so the new consent is granted — existing tokens won't gain it on refresh.
   const scopes = process.env.XERO_SCOPES ||
-    "openid profile email offline_access accounting.manualjournals accounting.banktransactions accounting.contacts accounting.settings.read files";
+    "openid profile email offline_access accounting.manualjournals accounting.banktransactions accounting.contacts accounting.invoices accounting.settings.read files";
   const state = crypto.randomUUID();
 
   return `https://login.xero.com/identity/connect/authorize?response_type=code&client_id=${config.clientId}&redirect_uri=${encodeURIComponent(config.redirectUri)}&scope=${encodeURIComponent(scopes)}&state=${state}`;
