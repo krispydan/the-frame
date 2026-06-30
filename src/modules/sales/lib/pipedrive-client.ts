@@ -308,7 +308,7 @@ export async function createDeal(input: {
   person_id?: number;
   pipeline_id?: number;
   stage_id?: number;
-  owner_id?: number;
+  user_id?: number; // deals use user_id for the owner (orgs/persons use owner_id)
   value?: number;
   currency?: string;
   status?: "open" | "won" | "lost";

@@ -34,6 +34,7 @@ import {
   findPersonIdByEmail,
   getPipedriveConnectionStatus,
   PipedriveError,
+  type PdCreated,
 } from "./pipedrive-client";
 import { getPipelineConfig, getPipedriveOwner, type PipelineConfig } from "./pipedrive-setup";
 
@@ -59,6 +60,7 @@ function setSetting(key: string, value: string): void {
 
 export interface CustomFieldKeys {
   orgFrameCompanyId: string;
+  orgWebsite: string;
   dealFrameCompanyId: string;
   dealFrameOrderId: string;
   dealBackfillRunId: string;
@@ -99,8 +101,15 @@ export async function ensureCustomFields(): Promise<CustomFieldKeys> {
   if (cached) {
     try {
       const k = JSON.parse(cached) as CustomFieldKeys;
-      // Re-resolve only if we've never recorded a value for every field.
-      if ("orgFrameCompanyId" in k && "dealFrameCompanyId" in k && "dealFrameOrderId" in k && "dealBackfillRunId" in k) {
+      // Re-resolve only if we've never recorded a value for every field
+      // (new fields like orgWebsite trigger a one-time re-provision).
+      if (
+        "orgFrameCompanyId" in k &&
+        "orgWebsite" in k &&
+        "dealFrameCompanyId" in k &&
+        "dealFrameOrderId" in k &&
+        "dealBackfillRunId" in k
+      ) {
         return k;
       }
     } catch {
@@ -109,6 +118,7 @@ export async function ensureCustomFields(): Promise<CustomFieldKeys> {
   }
   const keys: CustomFieldKeys = {
     orgFrameCompanyId: await ensureField("/organizationFields", "frame_company_id"),
+    orgWebsite: await ensureField("/organizationFields", "website"),
     dealFrameCompanyId: await ensureField("/dealFields", "frame_company_id"),
     dealFrameOrderId: await ensureField("/dealFields", "frame_order_id"),
     dealBackfillRunId: await ensureField("/dealFields", "backfill_run_id"),
@@ -127,15 +137,50 @@ interface CompanyRow {
   source: string | null;
   tags: string | null;
   status: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  website: string | null;
 }
 
 function getCompany(companyId: string): CompanyRow | undefined {
   return sqlite
     .prepare(
-      `SELECT id, name, pipedrive_org_id, pipedrive_person_id, source, tags, status
+      `SELECT id, name, pipedrive_org_id, pipedrive_person_id, source, tags, status,
+              address, city, state, zip, website
          FROM companies WHERE id = ?`,
     )
     .get(companyId) as CompanyRow | undefined;
+}
+
+const FREE_EMAIL_DOMAINS = new Set([
+  "gmail.com", "yahoo.com", "hotmail.com", "aol.com", "comcast.net", "msn.com",
+  "outlook.com", "icloud.com", "sbcglobal.net", "verizon.net", "cox.net", "me.com",
+  "bellsouth.net", "earthlink.net", "mac.com", "ymail.com", "live.com", "att.net",
+  "q.com", "centurylink.net", "protonmail.com", "ATTGLOBAL.NET".toLowerCase(),
+]);
+
+/** Compose a single-line address from the company's parts (Pipedrive org.address). */
+function composeAddress(c: CompanyRow): string | null {
+  const parts = [c.address, c.city, c.state, c.zip].map((s) => (s || "").trim()).filter(Boolean);
+  return parts.length ? parts.join(", ") : null;
+}
+
+/**
+ * Pick a website for the org: the company's website if set, else derive it
+ * from a non-free primary-email domain (a business email domain is the site).
+ */
+function deriveWebsite(c: CompanyRow, primaryEmail: string | null): string | null {
+  if (c.website && c.website.trim()) return c.website.trim();
+  if (primaryEmail) {
+    const at = primaryEmail.lastIndexOf("@");
+    const domain = at >= 0 ? primaryEmail.slice(at + 1).toLowerCase().trim() : "";
+    if (domain && !FREE_EMAIL_DOMAINS.has(domain) && !domain.endsWith("relay.faire.com")) {
+      return `https://${domain}`;
+    }
+  }
+  return null;
 }
 
 function getPrimaryEmail(companyId: string): string | null {
@@ -250,6 +295,15 @@ export async function resolveOrg(companyId: string, ownerId?: number): Promise<n
 
   const body: Record<string, unknown> = { name: name || "Unknown company" };
   if (keys.orgFrameCompanyId) body[keys.orgFrameCompanyId] = companyId;
+  // Address (native Pipedrive org field) + website (custom field, since orgs
+  // have no native website). Website derives from a business email domain
+  // when not explicitly set.
+  const address = composeAddress(c);
+  if (address) body.address = address;
+  if (keys.orgWebsite) {
+    const website = deriveWebsite(c, getPrimaryEmail(companyId));
+    if (website) body[keys.orgWebsite] = website;
+  }
   if (ownerId) body.owner_id = ownerId;
   const created = await createOrganization(body as { name: string });
   stampOrg(companyId, created.id);
@@ -376,6 +430,33 @@ function pipelineMeta(config: PipelineConfig, key: "ajm" | "catalog" | "customer
   };
 }
 
+/**
+ * Create a deal, retrying once without our custom fields if the first attempt
+ * fails — so a custom-field rejection (e.g. unknown deal-field key, or a field
+ * the token can't write) can't block every deal. The stamped ids on the frame
+ * records remain the primary dedup key, so dropping the custom fields only
+ * weakens the secondary search-based linkage.
+ */
+async function createDealSafe(body: Record<string, unknown>, customFieldKeys: string[]): Promise<PdCreated> {
+  try {
+    return await createDeal(body as { title: string });
+  } catch (e) {
+    const cf = customFieldKeys.filter(Boolean);
+    if (cf.length === 0) throw e;
+    const stripped = { ...body };
+    let had = false;
+    for (const k of cf) {
+      if (k in stripped) {
+        delete stripped[k];
+        had = true;
+      }
+    }
+    if (!had) throw e;
+    console.warn("[pipedrive-sync] deal create failed with custom fields, retrying without:", e instanceof Error ? e.message : e);
+    return await createDeal(stripped as { title: string });
+  }
+}
+
 // ── outreach deal (interest edge) ───────────────────────────────────────────
 
 export interface OutreachResult {
@@ -437,8 +518,8 @@ export async function ensureOutreachDeal(
   };
   if (keys.dealFrameCompanyId) body[keys.dealFrameCompanyId] = companyId;
   if (personId) body.person_id = personId;
-  if (ownerId) body.owner_id = ownerId;
-  const created = await createDeal(body as { title: string });
+  if (ownerId) body.user_id = ownerId; // deals use user_id for the owner (not owner_id)
+  const created = await createDealSafe(body, [keys.dealFrameCompanyId]);
   upsertProjection({
     pipedriveDealId: created.id,
     companyId,
@@ -662,9 +743,9 @@ export async function createDealForOrder(
   if (keys.dealFrameCompanyId) body[keys.dealFrameCompanyId] = order.company_id;
   if (keys.dealFrameOrderId) body[keys.dealFrameOrderId] = orderId;
   if (personId) body.person_id = personId;
-  if (ownerId) body.owner_id = ownerId;
+  if (ownerId) body.user_id = ownerId; // deals use user_id for the owner (not owner_id)
   if (opts.backfillRunId && keys.dealBackfillRunId) body[keys.dealBackfillRunId] = opts.backfillRunId;
-  const created = await createDeal(body as { title: string });
+  const created = await createDealSafe(body, [keys.dealFrameCompanyId, keys.dealFrameOrderId, keys.dealBackfillRunId]);
   upsertProjection({
     pipedriveDealId: created.id,
     companyId: order.company_id,

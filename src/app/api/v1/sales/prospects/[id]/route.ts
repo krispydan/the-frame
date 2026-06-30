@@ -75,12 +75,35 @@ export async function GET(
     ORDER BY cl.created_at DESC
   `).all(id) as Array<Record<string, unknown>>;
 
+  // Orders this prospect/company has placed. A prospect that ordered is in
+  // practice a customer — surface the order history (and revenue) on the page.
+  const orderRows = sqlite.prepare(`
+    SELECT id, order_number, channel, status, total, currency,
+           placed_at, created_at, shipped_at, tracking_number, tracking_carrier,
+           pipedrive_deal_id
+    FROM orders
+    WHERE company_id = ?
+    ORDER BY COALESCE(placed_at, created_at) DESC
+  `).all(id) as Array<Record<string, unknown>>;
+
+  const orderSummary = sqlite.prepare(`
+    SELECT
+      COUNT(*) AS order_count,
+      COALESCE(SUM(CASE WHEN status != 'cancelled' THEN total ELSE 0 END), 0) AS total_revenue,
+      MAX(COALESCE(placed_at, created_at)) AS last_order_at,
+      MIN(COALESCE(placed_at, created_at)) AS first_order_at
+    FROM orders
+    WHERE company_id = ?
+  `).get(id) as Record<string, unknown>;
+
   return NextResponse.json({
     company: {
       ...company,
       tags: company.tags ? JSON.parse(company.tags as string) : [],
     },
     stores: storeRows,
+    orders: orderRows,
+    orderSummary,
     contacts: contactRows.map(c => ({
       ...c,
       is_primary: Boolean(c.is_primary),
