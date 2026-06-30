@@ -256,6 +256,59 @@ function stampAttemptStmt(): Statement {
   return _stampAttemptStmt;
 }
 
+let _logMatchStmt: Statement | null = null;
+function logMatchStmt(): Statement {
+  if (!_logMatchStmt) {
+    _logMatchStmt = sqlite.prepare(`
+      INSERT INTO apify_match_log (
+        id, company_id, run_id, search_string,
+        company_name, company_city, company_state,
+        apify_title, apify_address, apify_city, apify_state,
+        apify_phone, apify_place_id, apify_rating, apify_review_count,
+        apify_permanently_closed, apify_temporarily_closed, apify_url,
+        similarity_score, decision, decision_reason
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+  }
+  return _logMatchStmt;
+}
+
+function logMatch(args: {
+  companyId: string;
+  runId: string | null;
+  searchString: string;
+  company: CandidateCompany;
+  place: GoogleMapsPlace | null;
+  similarity: number;
+  decision: "accepted" | "skipped" | "marked_closed" | "no_match";
+  decisionReason: string;
+}): void {
+  const p = args.place;
+  logMatchStmt().run(
+    `m_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    args.companyId,
+    args.runId,
+    args.searchString,
+    args.company.name,
+    args.company.city,
+    args.company.state,
+    p?.title ?? null,
+    p?.address ?? null,
+    p?.city ?? null,
+    p?.state ?? null,
+    p?.phone || p?.phoneUnformatted || null,
+    p?.placeId ?? null,
+    p?.totalScore ?? null,
+    p?.reviewsCount ?? null,
+    p?.permanentlyClosed ? 1 : 0,
+    p?.temporarilyClosed ? 1 : 0,
+    p?.url ?? null,
+    args.similarity,
+    args.decision,
+    args.decisionReason,
+  );
+}
+
 /**
  * Run an enrichment batch. Returns aggregate counts.
  *
@@ -358,6 +411,16 @@ export async function enrichViaGoogleMaps(opts: {
       if (!place) {
         result.no_match++;
         stampAttemptStmt().run("no_match", company.id);
+        logMatch({
+          companyId: company.id,
+          runId,
+          searchString: query,
+          company,
+          place: null,
+          similarity: 0,
+          decision: "no_match",
+          decisionReason: "apify_returned_no_place_for_this_query",
+        });
         continue;
       }
       const m = matchesCompany(place, company);
@@ -367,12 +430,6 @@ export async function enrichViaGoogleMaps(opts: {
       // Apify's permanentlyClosed flag is high-trust; if Apify says it's
       // closed AND there's at least weak name resemblance (sim ≥ 0.5),
       // mark the company closed so Sandra doesn't waste a call.
-      //
-      // We do NOT accept phone/hours from a rejected match, just the
-      // close status. The phone of a still-open same-named boutique in
-      // another city would be wrong; the close flag of one is at least
-      // a hint that the searched name corresponds to a closed business
-      // somewhere.
       if (place.permanentlyClosed && m.similarity >= 0.5) {
         markClosedStmt().run(company.id);
         result.permanently_closed_marked++;
@@ -380,14 +437,34 @@ export async function enrichViaGoogleMaps(opts: {
           m.ok ? null : `${m.reason} (but marked closed)`,
           company.id,
         );
-        // Skip the rest — we don't want phone/hours from a low-conf
-        // closed place, and we already stamped the closed status.
+        logMatch({
+          companyId: company.id,
+          runId,
+          searchString: query,
+          company,
+          place,
+          similarity: m.similarity,
+          decision: "marked_closed",
+          decisionReason: m.ok
+            ? `${m.reason} + permanently_closed`
+            : `${m.reason} (low-conf but permanently_closed)`,
+        });
         if (!m.ok) continue;
       }
 
       if (!m.ok) {
         result.low_confidence_skipped++;
         stampAttemptStmt().run(m.reason, company.id);
+        logMatch({
+          companyId: company.id,
+          runId,
+          searchString: query,
+          company,
+          place,
+          similarity: m.similarity,
+          decision: "skipped",
+          decisionReason: m.reason,
+        });
         console.log(
           `[gmaps-enrich] skipped ${company.id} ${company.name}: ${m.reason}`,
         );
@@ -396,6 +473,16 @@ export async function enrichViaGoogleMaps(opts: {
       // Match accepted — clear any previous skip reason (in case this
       // is a force=true re-run after fixing the company's name/city).
       stampAttemptStmt().run(null, company.id);
+      logMatch({
+        companyId: company.id,
+        runId,
+        searchString: query,
+        company,
+        place,
+        similarity: m.similarity,
+        decision: "accepted",
+        decisionReason: m.reason,
+      });
 
       // Phone — the prize
       if (place.phoneUnformatted || place.phone) {

@@ -201,6 +201,40 @@ try {
   )`);
 } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_apify_runs_started ON apify_enrichment_runs (started_at DESC)"); } catch { /* exists */ }
+
+// Per-match audit log. Every (company, apify-returned-place) pair
+// gets a row recording what we sent, what Apify returned, the fuzzy
+// similarity score, and what we decided. Used to spot-check the
+// matcher and tune thresholds — exportable as CSV for spreadsheet
+// review.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS apify_match_log (
+    id TEXT PRIMARY KEY NOT NULL,
+    company_id TEXT NOT NULL,
+    run_id TEXT,
+    search_string TEXT,
+    company_name TEXT,
+    company_city TEXT,
+    company_state TEXT,
+    apify_title TEXT,
+    apify_address TEXT,
+    apify_city TEXT,
+    apify_state TEXT,
+    apify_phone TEXT,
+    apify_place_id TEXT,
+    apify_rating REAL,
+    apify_review_count INTEGER,
+    apify_permanently_closed INTEGER,
+    apify_temporarily_closed INTEGER,
+    apify_url TEXT,
+    similarity_score REAL,
+    decision TEXT,
+    decision_reason TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+} catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_apify_match_log_decision ON apify_match_log (decision, created_at DESC)"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_apify_match_log_company ON apify_match_log (company_id)"); } catch { /* exists */ }
 // e.g. "shopify" / "woocommerce" / "magento" / "bigcommerce" / "custom".
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN ecom_platform TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_storeleads_id ON companies (storeleads_id)"); } catch { /* exists */ }
