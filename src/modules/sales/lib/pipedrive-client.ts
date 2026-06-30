@@ -27,8 +27,15 @@ interface PipedriveConfig {
 }
 
 function getConfig(): PipedriveConfig | null {
-  const clientId = process.env.PIPEDRIVE_CLIENT_ID;
-  const clientSecret = process.env.PIPEDRIVE_CLIENT_SECRET;
+  // Canonical names are PIPEDRIVE_CLIENT_ID / PIPEDRIVE_CLIENT_SECRET, but
+  // accept common variants so a lowercase/short env name still works.
+  const clientId =
+    process.env.PIPEDRIVE_CLIENT_ID || process.env.pipedrive_client_id;
+  const clientSecret =
+    process.env.PIPEDRIVE_CLIENT_SECRET ||
+    process.env.PIPEDRIVE_SECRET ||
+    process.env.pipedrive_client_secret ||
+    process.env.pipedrive_secret;
   const appUrl =
     process.env.PIPEDRIVE_APP_URL ||
     process.env.SHOPIFY_APP_URL ||
@@ -266,6 +273,11 @@ export async function listPipelines(): Promise<PdPipeline[]> {
 }
 export async function listStages(): Promise<PdStage[]> {
   return (await pdRequest<PdStage[]>("GET", "/stages")) || [];
+}
+
+export interface PdUser { id: number; name: string; email: string; active_flag: boolean }
+export async function listUsers(): Promise<PdUser[]> {
+  return (await pdRequest<PdUser[]>("GET", "/users")) || [];
 }
 
 export interface PdCreated { id: number }
