@@ -23,6 +23,9 @@ import {
   backfillOrderDeals,
   isSyncEnabled,
   setSyncEnabled,
+  kickBackgroundRun,
+  getAllRunStates,
+  type RunTarget,
   PipedriveNotReadyError,
 } from "@/modules/sales/lib/pipedrive-sync";
 import { registerInboundWebhook, isInboundWebhookConfigured } from "@/modules/sales/lib/pipedrive-webhooks";
@@ -68,6 +71,7 @@ export async function GET() {
     pipelineConfig: getPipelineConfig(),
     owner: getPipedriveOwner(),
     syncStats: syncStats(),
+    runs: getAllRunStates(),
   };
 
   if (status.connected) {
@@ -139,6 +143,15 @@ export async function POST(req: NextRequest) {
       case "set-sync-enabled": {
         setSyncEnabled(!!(body as { enabled?: boolean }).enabled);
         return NextResponse.json({ ok: true, syncEnabled: isSyncEnabled() });
+      }
+
+      case "run": {
+        const target = (body as { target?: string }).target as RunTarget | undefined;
+        if (!target || !["seed-ajm", "backfill-interested", "backfill-orders"].includes(target)) {
+          return NextResponse.json({ ok: false, error: `Unknown run target: ${target}` }, { status: 400 });
+        }
+        const r = kickBackgroundRun(target);
+        return NextResponse.json({ ok: r.started, ...r });
       }
 
       case "preview": {
