@@ -275,6 +275,11 @@ export async function listStages(): Promise<PdStage[]> {
   return (await pdRequest<PdStage[]>("GET", "/stages")) || [];
 }
 
+export interface PdUser { id: number; name: string; email: string; active_flag: boolean }
+export async function listUsers(): Promise<PdUser[]> {
+  return (await pdRequest<PdUser[]>("GET", "/users")) || [];
+}
+
 export interface PdCreated { id: number }
 
 export async function createOrganization(input: {
