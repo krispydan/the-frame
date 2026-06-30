@@ -1,0 +1,283 @@
+/**
+ * Google Maps enrichment via the Apify scraper.
+ *
+ * Pulls a batch of companies that need phone numbers, sends their
+ * "{name}, {city}, {state}" as search strings to Apify's Google Maps
+ * actor, matches each returned place back to the source company
+ * (using fuzzy-name + city match for safety), and writes:
+ *
+ *   - Phone → company_phones (via addCompanyPhone helper, source='gmaps')
+ *   - Business hours → companies.business_hours (JSON)
+ *   - Address → companies.address (only if currently empty)
+ *   - Rating + review count → companies.google_rating, .google_review_count
+ *   - Google place id → companies.google_place_id (so we never re-query)
+ *   - Permanently closed → companies.status = 'not_qualified',
+ *                          disqualify_reason = 'permanently_closed'
+ *
+ * Skips any company whose google_place_id is already set (assumes
+ * we've enriched once and don't need to again — re-run with
+ * `force: true` to override).
+ */
+
+import { sqlite } from "@/lib/db";
+import { logger } from "@/modules/core/lib/logger";
+import { apifyClient, type GoogleMapsPlace } from "./apify-client";
+import { addCompanyPhone } from "./company-phones";
+
+const BATCH_SIZE = 25; // search strings per Apify actor run
+
+interface CandidateCompany {
+  id: string;
+  name: string;
+  city: string | null;
+  state: string | null;
+  address: string | null;
+}
+
+export interface EnrichmentResult {
+  companies_attempted: number;
+  phones_added: number;
+  permanently_closed_marked: number;
+  hours_updated: number;
+  no_match: number;
+  low_confidence_skipped: number;
+  errors: Array<{ company_id: string; reason: string }>;
+}
+
+/**
+ * Lightweight fuzzy compare — normalized Levenshtein-like ratio
+ * via character-set overlap. Fast enough for hundreds of comparisons
+ * per second without a dependency.
+ */
+function nameSimilarity(a: string, b: string): number {
+  const norm = (s: string) =>
+    s.toLowerCase()
+      .replace(/&/g, "and")
+      .replace(/[^a-z0-9 ]/g, " ")
+      .replace(/\b(the|a|an|co|llc|inc|ltd|company)\b/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  const na = norm(a);
+  const nb = norm(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  // Token-set overlap — handles word reordering and minor noise.
+  const aTok = new Set(na.split(" "));
+  const bTok = new Set(nb.split(" "));
+  let inter = 0;
+  for (const t of aTok) if (bTok.has(t)) inter++;
+  const union = aTok.size + bTok.size - inter;
+  return union > 0 ? inter / union : 0;
+}
+
+function loadCohort(opts: {
+  limit: number;
+  tier?: string[];
+  status?: string[];
+  force?: boolean;
+}): CandidateCompany[] {
+  const wheres: string[] = [
+    // In any Instantly campaign — same definition as the cohort endpoint
+    `EXISTS (SELECT 1 FROM campaign_leads cl WHERE cl.company_id = c.id AND cl.instantly_lead_id IS NOT NULL)`,
+    // No phone yet
+    `NOT EXISTS (SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id)`,
+    // Enough location data to ask Google
+    `((c.city IS NOT NULL AND TRIM(c.city) <> '' AND c.state IS NOT NULL AND TRIM(c.state) <> '') OR (c.address IS NOT NULL AND TRIM(c.address) <> ''))`,
+  ];
+  if (!opts.force) {
+    // Skip companies we've already attempted (place_id set means we
+    // matched, place_id explicitly NULL after an attempt could be
+    // tracked separately if needed — for now we only skip matched ones).
+    wheres.push(`c.google_place_id IS NULL`);
+  }
+  const params: unknown[] = [];
+  if (opts.tier && opts.tier.length > 0) {
+    wheres.push(`c.icp_tier IN (${opts.tier.map(() => "?").join(",")})`);
+    params.push(...opts.tier);
+  }
+  if (opts.status && opts.status.length > 0) {
+    wheres.push(`c.status IN (${opts.status.map(() => "?").join(",")})`);
+    params.push(...opts.status);
+  }
+
+  const sql = `
+    SELECT id, name, city, state, address
+      FROM companies c
+     WHERE ${wheres.join(" AND ")}
+     ORDER BY c.icp_score DESC NULLS LAST
+     LIMIT ?
+  `;
+  return sqlite.prepare(sql).all(...params, opts.limit) as CandidateCompany[];
+}
+
+function buildSearchString(c: CandidateCompany): string {
+  const parts = [c.name];
+  if (c.city) parts.push(c.city);
+  if (c.state) parts.push(c.state);
+  return parts.join(", ");
+}
+
+/**
+ * Match an Apify-returned place back to the source company.
+ *
+ * Acceptance: name similarity ≥ 0.6 AND (city case-insensitive match OR
+ * Apify returned the same searchString we sent). Lower threshold than
+ * we'd use for, say, a merge — Apify's search is already filtering by
+ * locality, so the disambiguation has happened upstream.
+ */
+function matchesCompany(place: GoogleMapsPlace, company: CandidateCompany): {
+  ok: boolean;
+  reason: string;
+  similarity: number;
+} {
+  const sim = nameSimilarity(place.title || "", company.name);
+  const placeCity = (place.city || "").toLowerCase().trim();
+  const companyCity = (company.city || "").toLowerCase().trim();
+  const cityMatches = !!placeCity && !!companyCity && placeCity === companyCity;
+  if (sim >= 0.6 && (cityMatches || sim >= 0.85)) {
+    return { ok: true, reason: "matched", similarity: sim };
+  }
+  if (sim < 0.6) {
+    return { ok: false, reason: `name_similarity_too_low (${sim.toFixed(2)})`, similarity: sim };
+  }
+  return { ok: false, reason: `city_mismatch (place=${placeCity}, company=${companyCity})`, similarity: sim };
+}
+
+const updateCompanyStmt = sqlite.prepare(`
+  UPDATE companies
+     SET google_place_id   = COALESCE(google_place_id, ?),
+         google_rating     = COALESCE(google_rating, ?),
+         google_review_count = COALESCE(google_review_count, ?),
+         address           = COALESCE(NULLIF(address, ''), ?),
+         business_hours    = COALESCE(business_hours, ?),
+         enrichment_status = 'enriched_via_apify',
+         enriched_at       = datetime('now'),
+         updated_at        = datetime('now')
+   WHERE id = ?
+`);
+
+const markClosedStmt = sqlite.prepare(`
+  UPDATE companies
+     SET status = 'not_qualified',
+         disqualify_reason = 'permanently_closed',
+         updated_at = datetime('now')
+   WHERE id = ?
+`);
+
+/**
+ * Run an enrichment batch. Returns aggregate counts.
+ *
+ * Called from the admin endpoint with a configurable limit. Safe to
+ * call repeatedly — already-matched companies are skipped via
+ * google_place_id IS NULL.
+ */
+export async function enrichViaGoogleMaps(opts: {
+  limit: number;
+  tier?: string[];
+  status?: string[];
+  force?: boolean;
+  dryRun?: boolean;
+}): Promise<EnrichmentResult> {
+  const cohort = loadCohort({
+    limit: opts.limit,
+    tier: opts.tier,
+    status: opts.status,
+    force: opts.force,
+  });
+
+  const result: EnrichmentResult = {
+    companies_attempted: cohort.length,
+    phones_added: 0,
+    permanently_closed_marked: 0,
+    hours_updated: 0,
+    no_match: 0,
+    low_confidence_skipped: 0,
+    errors: [],
+  };
+
+  if (cohort.length === 0 || opts.dryRun) return result;
+
+  // Index by searchString so we can route results back to companies.
+  // Multiple companies could in theory produce the same search string
+  // (rare — same name in same city); the map stores the first hit
+  // for now.
+  for (let i = 0; i < cohort.length; i += BATCH_SIZE) {
+    const batch = cohort.slice(i, i + BATCH_SIZE);
+    const queries = batch.map(buildSearchString);
+    const queryToCompany = new Map<string, CandidateCompany>();
+    for (let j = 0; j < batch.length; j++) {
+      queryToCompany.set(queries[j], batch[j]);
+    }
+
+    let places: GoogleMapsPlace[];
+    try {
+      places = await apifyClient.runGoogleMapsScraper(queries, {
+        maxPerSearch: 1,
+      });
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      logger.error(`[gmaps-enrich] batch failed: ${reason}`);
+      for (const c of batch) {
+        result.errors.push({ company_id: c.id, reason });
+      }
+      continue;
+    }
+
+    // Build a lookup: searchString → place. Apify echoes the original
+    // searchString on each returned place.
+    const placeByQuery = new Map<string, GoogleMapsPlace>();
+    for (const p of places) {
+      if (p.searchString) placeByQuery.set(p.searchString, p);
+    }
+
+    for (const company of batch) {
+      const query = buildSearchString(company);
+      const place = placeByQuery.get(query);
+      if (!place) {
+        result.no_match++;
+        continue;
+      }
+      const m = matchesCompany(place, company);
+      if (!m.ok) {
+        result.low_confidence_skipped++;
+        logger.info(
+          `[gmaps-enrich] skipped ${company.id} ${company.name}: ${m.reason}`,
+        );
+        continue;
+      }
+
+      // Phone — the prize
+      if (place.phoneUnformatted || place.phone) {
+        addCompanyPhone(
+          company.id,
+          place.phoneUnformatted || place.phone || null,
+          "gmaps",
+        );
+        result.phones_added++;
+      }
+
+      // Permanently closed → drop from outreach
+      if (place.permanentlyClosed) {
+        markClosedStmt.run(company.id);
+        result.permanently_closed_marked++;
+      }
+
+      // Hours as JSON
+      const hoursJson = place.openingHours
+        ? JSON.stringify(place.openingHours)
+        : null;
+      if (hoursJson) result.hours_updated++;
+
+      updateCompanyStmt.run(
+        place.placeId || null,
+        place.totalScore ?? null,
+        place.reviewsCount ?? null,
+        place.address || null,
+        hoursJson,
+        company.id,
+      );
+    }
+  }
+
+  return result;
+}
