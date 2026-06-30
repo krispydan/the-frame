@@ -56,6 +56,15 @@ export interface GoogleMapsPlace {
   /** Google's categorization. */
   categoryName?: string;
   categories?: string[];
+  /** Granular sub-types per Google ("Bridal shop", "Maternity store",
+   *  "Children's clothing store") — finer-grained than `categories`
+   *  and what we key off of for ICP-disqualification. Field name has
+   *  varied across actor revisions; we read whichever is present. */
+  subTypes?: string[];
+  subtitle?: string;
+  /** Optional business description Google has on file. Many boutiques
+   *  don't have one; nullable. */
+  description?: string;
   /** Star rating + review count = ICP signal. */
   totalScore?: number;
   reviewsCount?: number;

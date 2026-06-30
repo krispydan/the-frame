@@ -179,6 +179,12 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN gmaps_skip_reason TEXT"); } 
 // name is updated by Apify); subsequent updates leave it alone so
 // we always have the "what the scraper originally captured" record.
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN original_name TEXT"); } catch { /* exists */ }
+// More Apify-derived fields. URL for one-click Google Maps lookup,
+// subtypes for category-based disqualification (bridal/maternity/
+// kids stores aren't Jaxy ICP), description for surface context.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN gmaps_url TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN gmaps_subtypes TEXT"); } catch { /* exists */ } // JSON array
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN gmaps_description TEXT"); } catch { /* exists */ }
 // Run-by-run history of Apify enrichment batches. The work runs
 // fire-and-forget for batches > 100, so the operator can't read the
 // HTTP response — they read these rows instead. One row per

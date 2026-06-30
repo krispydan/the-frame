@@ -297,9 +297,38 @@ export async function POST(req: NextRequest) {
     }
     const m = matchesCompany(place, input);
     const closedFlagged = !!place.permanentlyClosed && m.similarity >= 0.5;
+    // ICP disqualification by category
+    const ICP_DISQUALIFY_PATTERNS = [
+      { pattern: "bridal", reason: "out_of_scope_bridal_shop" },
+      { pattern: "wedding dress", reason: "out_of_scope_wedding_shop" },
+      { pattern: "maternity", reason: "out_of_scope_maternity_store" },
+      { pattern: "children's clothing", reason: "out_of_scope_kids_store" },
+      { pattern: "baby store", reason: "out_of_scope_kids_store" },
+      { pattern: "baby clothing", reason: "out_of_scope_kids_store" },
+      { pattern: "kids clothing", reason: "out_of_scope_kids_store" },
+      { pattern: "toddler", reason: "out_of_scope_kids_store" },
+      { pattern: "infant", reason: "out_of_scope_kids_store" },
+    ];
+    const categoryHaystack = [
+      String(place.categoryName || ""),
+      ...((Array.isArray(place.categories) ? place.categories : []) as string[]),
+      ...((Array.isArray(place.subTypes) ? place.subTypes : []) as string[]),
+    ]
+      .filter(Boolean)
+      .join(" | ")
+      .toLowerCase();
+    const disqualifyMatch = ICP_DISQUALIFY_PATTERNS.find((p) =>
+      categoryHaystack.includes(p.pattern),
+    );
+
     let decision: string;
     let decisionReason: string;
-    if (closedFlagged) {
+    if (disqualifyMatch && m.ok) {
+      // Out-of-scope categories override the accept — we still
+      // enrich the data but mark as not_qualified in real runs.
+      decision = "accepted_but_disqualified";
+      decisionReason = `${m.reason}; would mark not_qualified: ${disqualifyMatch.reason}`;
+    } else if (closedFlagged) {
       decision = "marked_closed";
       decisionReason = m.ok
         ? `${m.reason} + permanently_closed`
@@ -322,13 +351,21 @@ export async function POST(req: NextRequest) {
         address: place.address,
         city: place.city,
         state: place.state,
+        postal_code: place.postalCode,
+        country_code: place.countryCode,
         phone: place.phone || place.phoneUnformatted || null,
+        website: place.website,
+        url: place.url,
         place_id: place.placeId,
         rating: place.totalScore,
         review_count: place.reviewsCount,
+        category_name: place.categoryName,
+        categories: place.categories,
+        sub_types: place.subTypes,
+        description: place.description,
         permanently_closed: !!place.permanentlyClosed,
         temporarily_closed: !!place.temporarilyClosed,
-        url: place.url,
+        would_disqualify: disqualifyMatch?.reason || null,
       },
     };
   });

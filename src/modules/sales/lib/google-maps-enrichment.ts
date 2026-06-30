@@ -255,18 +255,14 @@ let _stampAttemptStmt: Statement | null = null;
 
 function updateCompanyStmt(): Statement {
   if (!_updateCompanyStmt) {
-    // enrichment_status has a CHECK constraint limiting it to
-    // ('not_enriched','queued','enriched','failed'). The provider
-    // identity lives in enrichment_source — set it to 'apify_gmaps'
-    // so we can distinguish from outscraper / manual / etc.
+    // enrichment_status has a CHECK constraint — must be one of
+    // ('not_enriched','queued','enriched','failed'). Provider identity
+    // lives in enrichment_source ('apify_gmaps') to distinguish from
+    // outscraper / manual / etc.
     //
-    // Name update behavior: when Apify returns a canonical title
-    // (e.g. "Southern Pine Boutique" vs our scraper's
-    // "SouthernPineBoutique"), adopt the Google-formatted name.
-    // Stash the pre-update name in original_name on first update
-    // (COALESCE — only stamped once) so the original is preserved.
-    // The caller passes nameToUse — null/empty preserves the
-    // existing name.
+    // All Apify-derived fields use COALESCE so we never overwrite
+    // data that's already populated. original_name captures the
+    // pre-Apify name on first overwrite for audit.
     _updateCompanyStmt = sqlite.prepare(`
       UPDATE companies
          SET original_name     = COALESCE(original_name, name),
@@ -275,6 +271,12 @@ function updateCompanyStmt(): Statement {
              google_rating     = COALESCE(google_rating, ?),
              google_review_count = COALESCE(google_review_count, ?),
              address           = COALESCE(NULLIF(address, ''), ?),
+             zip               = COALESCE(NULLIF(zip, ''), ?),
+             country           = COALESCE(NULLIF(country, ''), ?),
+             website           = COALESCE(NULLIF(website, ''), ?),
+             gmaps_url         = COALESCE(gmaps_url, ?),
+             gmaps_subtypes    = COALESCE(gmaps_subtypes, ?),
+             gmaps_description = COALESCE(gmaps_description, ?),
              business_hours    = COALESCE(business_hours, ?),
              enrichment_status = 'enriched',
              enrichment_source = 'apify_gmaps',
@@ -284,6 +286,62 @@ function updateCompanyStmt(): Statement {
     `);
   }
   return _updateCompanyStmt;
+}
+
+let _markOutOfScopeStmt: Statement | null = null;
+function markOutOfScopeStmt(): Statement {
+  if (!_markOutOfScopeStmt) {
+    _markOutOfScopeStmt = sqlite.prepare(`
+      UPDATE companies
+         SET status = 'not_qualified',
+             disqualify_reason = ?,
+             updated_at = datetime('now')
+       WHERE id = ?
+    `);
+  }
+  return _markOutOfScopeStmt;
+}
+
+/**
+ * Category patterns that disqualify a boutique from Jaxy's ICP.
+ * Match is case-insensitive substring against the joined Apify
+ * categories + subTypes + categoryName.
+ *
+ * First match wins. Extend conservatively — false-positives here
+ * pull customers out of outreach, which is more costly than the
+ * occasional wrong-ICP call.
+ */
+const ICP_DISQUALIFY_PATTERNS: Array<{ pattern: string; reason: string }> = [
+  { pattern: "bridal", reason: "out_of_scope_bridal_shop" },
+  { pattern: "wedding dress", reason: "out_of_scope_wedding_shop" },
+  { pattern: "maternity", reason: "out_of_scope_maternity_store" },
+  { pattern: "children's clothing", reason: "out_of_scope_kids_store" },
+  { pattern: "baby store", reason: "out_of_scope_kids_store" },
+  { pattern: "baby clothing", reason: "out_of_scope_kids_store" },
+  { pattern: "kids clothing", reason: "out_of_scope_kids_store" },
+  { pattern: "toddler", reason: "out_of_scope_kids_store" },
+  { pattern: "infant", reason: "out_of_scope_kids_store" },
+];
+
+/**
+ * Inspect Apify's category fields against the disqualify list.
+ * Returns the matching disqualify reason or null if the company
+ * is in-scope.
+ */
+function detectOutOfScope(place: GoogleMapsPlace): string | null {
+  const haystack = [
+    place.categoryName ?? "",
+    ...(Array.isArray(place.categories) ? place.categories : []),
+    ...(Array.isArray(place.subTypes) ? place.subTypes : []),
+  ]
+    .filter(Boolean)
+    .join(" | ")
+    .toLowerCase();
+  if (!haystack) return null;
+  for (const { pattern, reason } of ICP_DISQUALIFY_PATTERNS) {
+    if (haystack.includes(pattern)) return reason;
+  }
+  return null;
 }
 
 function markClosedStmt(): Statement {
@@ -640,15 +698,47 @@ export async function enrichViaGoogleMaps(opts: {
       // prepared statement preserves the existing name).
       const nameToWrite = nameDiffersMeaningfully ? apifyTitle : "";
 
+      // Decomposed address parts for mailing — only used by the
+      // COALESCE in the UPDATE so existing values aren't overwritten.
+      // Note: street goes into companies.address only if currently
+      // empty (handled in the UPDATE). We don't have separate
+      // street/city/state columns; address is the full single-line.
+      const subTypes = Array.isArray(place.subTypes)
+        ? place.subTypes
+        : Array.isArray(place.categories)
+          ? place.categories
+          : [];
+      const subTypesJson = subTypes.length > 0 ? JSON.stringify(subTypes) : null;
+
       updateCompanyStmt().run(
         nameToWrite,
         place.placeId || null,
         place.totalScore ?? null,
         place.reviewsCount ?? null,
         place.address || null,
+        place.postalCode || null,
+        place.countryCode || null,
+        place.website || null,
+        place.url || null,
+        subTypesJson,
+        place.description || null,
         hoursJson,
         company.id,
       );
+
+      // ICP disqualification — bridal / maternity / kids stores are
+      // out of scope for Jaxy. Check after the basic data write so
+      // the rich fields (place_id, hours, etc.) are captured before
+      // the row gets dropped from outreach.
+      const outOfScope = detectOutOfScope(place);
+      if (outOfScope) {
+        markOutOfScopeStmt().run(outOfScope, company.id);
+        // No new counter for this (would need a schema field on
+        // EnrichmentResult); console-log so it's visible in Railway.
+        console.log(
+          `[gmaps-enrich] disqualified ${company.id} ${company.name}: ${outOfScope}`,
+        );
+      }
     }
   }
   } catch (e) {
