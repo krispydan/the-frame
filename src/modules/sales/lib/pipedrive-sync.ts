@@ -28,6 +28,7 @@ import { sqlite } from "@/lib/db";
 import {
   pdRequest,
   createOrganization,
+  updateOrganization,
   createPerson,
   createDeal,
   updateDeal,
@@ -264,9 +265,32 @@ function requireConfig(): { config: PipelineConfig; ownerId: number | undefined 
 export async function resolveOrg(companyId: string, ownerId?: number): Promise<number> {
   const c = getCompany(companyId);
   if (!c) throw new Error(`company ${companyId} not found`);
-  if (c.pipedrive_org_id) return c.pipedrive_org_id;
 
   const keys = await ensureCustomFields();
+
+  // Address (native field) + website (custom field — orgs have no native
+  // website; derive from a business email domain when not explicitly set).
+  const enrich: Record<string, unknown> = {};
+  const address = composeAddress(c);
+  if (address) enrich.address = address;
+  if (keys.orgWebsite) {
+    const website = deriveWebsite(c, getPrimaryEmail(companyId));
+    if (website) enrich[keys.orgWebsite] = website;
+  }
+
+  // Already linked → enrich the existing org with address/website (best-effort)
+  // so orgs created before this data was available still get it, then return.
+  if (c.pipedrive_org_id) {
+    if (Object.keys(enrich).length) {
+      try {
+        await updateOrganization(c.pipedrive_org_id, enrich);
+      } catch (e) {
+        console.warn("[pipedrive-sync] org enrich failed (non-fatal):", e instanceof Error ? e.message : e);
+      }
+    }
+    return c.pipedrive_org_id;
+  }
+
   const name = (c.name || "").trim();
 
   // Recover from a crash-between-create-and-stamp: an org we already made
@@ -293,17 +317,8 @@ export async function resolveOrg(companyId: string, ownerId?: number): Promise<n
     }
   }
 
-  const body: Record<string, unknown> = { name: name || "Unknown company" };
+  const body: Record<string, unknown> = { name: name || "Unknown company", ...enrich };
   if (keys.orgFrameCompanyId) body[keys.orgFrameCompanyId] = companyId;
-  // Address (native Pipedrive org field) + website (custom field, since orgs
-  // have no native website). Website derives from a business email domain
-  // when not explicitly set.
-  const address = composeAddress(c);
-  if (address) body.address = address;
-  if (keys.orgWebsite) {
-    const website = deriveWebsite(c, getPrimaryEmail(companyId));
-    if (website) body[keys.orgWebsite] = website;
-  }
   if (ownerId) body.owner_id = ownerId;
   const created = await createOrganization(body as { name: string });
   stampOrg(companyId, created.id);
