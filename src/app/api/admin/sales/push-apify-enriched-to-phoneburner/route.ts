@@ -46,6 +46,22 @@ interface CandidateRow {
 }
 
 export async function POST(req: NextRequest) {
+  try {
+    return await handlePush(req);
+  } catch (e) {
+    console.error("[push-apify-enriched-to-phoneburner] crashed:", e);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+        stack: e instanceof Error ? e.stack?.split("\n").slice(0, 6) : undefined,
+      },
+      { status: 500 },
+    );
+  }
+}
+
+async function handlePush(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
