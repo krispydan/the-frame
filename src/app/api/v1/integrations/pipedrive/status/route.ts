@@ -26,6 +26,7 @@ import {
   setSyncEnabled,
   kickBackgroundRun,
   getAllRunStates,
+  resetPipedriveSyncState,
   type RunTarget,
   PipedriveNotReadyError,
 } from "@/modules/sales/lib/pipedrive-sync";
@@ -122,6 +123,15 @@ export async function POST(req: NextRequest) {
       case "disconnect":
         disconnectPipedrive();
         return NextResponse.json({ ok: true });
+
+      case "reset-sync-state": {
+        // Switching Pipedrive accounts (e.g. sandbox → production): drop tokens
+        // AND all account-specific sync state so a fresh push targets the new
+        // account instead of skipping everything as already-synced.
+        disconnectPipedrive();
+        const cleared = resetPipedriveSyncState();
+        return NextResponse.json({ ok: true, cleared });
+      }
 
       case "setup-pipelines": {
         const config = await ensurePipelines();
