@@ -148,34 +148,61 @@ function matchesCompany(place: GoogleMapsPlace, company: CandidateCompany): {
   return { ok: false, reason: `city_mismatch (place=${placeCity}, company=${companyCity})`, similarity: sim };
 }
 
-const updateCompanyStmt = sqlite.prepare(`
-  UPDATE companies
-     SET google_place_id   = COALESCE(google_place_id, ?),
-         google_rating     = COALESCE(google_rating, ?),
-         google_review_count = COALESCE(google_review_count, ?),
-         address           = COALESCE(NULLIF(address, ''), ?),
-         business_hours    = COALESCE(business_hours, ?),
-         enrichment_status = 'enriched_via_apify',
-         enriched_at       = datetime('now'),
-         updated_at        = datetime('now')
-   WHERE id = ?
-`);
+// Lazy-prepared statements. Top-level sqlite.prepare(...) runs at
+// module-load time, which during Next.js build-phase page-data
+// collection executes against a fresh in-memory DB before the boot
+// block has materialized the `companies` table — same crash we hit
+// in company-phones.ts and company-emails.ts. Defer until first
+// call so the real DB is fully initialized.
+import type { Statement } from "better-sqlite3";
 
-const markClosedStmt = sqlite.prepare(`
-  UPDATE companies
-     SET status = 'not_qualified',
-         disqualify_reason = 'permanently_closed',
-         updated_at = datetime('now')
-   WHERE id = ?
-`);
+let _updateCompanyStmt: Statement | null = null;
+let _markClosedStmt: Statement | null = null;
+let _stampAttemptStmt: Statement | null = null;
 
-const stampAttemptStmt = sqlite.prepare(`
-  UPDATE companies
-     SET gmaps_enrichment_attempted_at = datetime('now'),
-         gmaps_skip_reason = ?,
-         updated_at = datetime('now')
-   WHERE id = ?
-`);
+function updateCompanyStmt(): Statement {
+  if (!_updateCompanyStmt) {
+    _updateCompanyStmt = sqlite.prepare(`
+      UPDATE companies
+         SET google_place_id   = COALESCE(google_place_id, ?),
+             google_rating     = COALESCE(google_rating, ?),
+             google_review_count = COALESCE(google_review_count, ?),
+             address           = COALESCE(NULLIF(address, ''), ?),
+             business_hours    = COALESCE(business_hours, ?),
+             enrichment_status = 'enriched_via_apify',
+             enriched_at       = datetime('now'),
+             updated_at        = datetime('now')
+       WHERE id = ?
+    `);
+  }
+  return _updateCompanyStmt;
+}
+
+function markClosedStmt(): Statement {
+  if (!_markClosedStmt) {
+    _markClosedStmt = sqlite.prepare(`
+      UPDATE companies
+         SET status = 'not_qualified',
+             disqualify_reason = 'permanently_closed',
+             updated_at = datetime('now')
+       WHERE id = ?
+    `);
+  }
+  return _markClosedStmt;
+}
+
+function stampAttemptStmt(): Statement {
+  if (!_stampAttemptStmt) {
+    _stampAttemptStmt = sqlite.prepare(`
+      UPDATE companies
+         SET gmaps_enrichment_attempted_at = datetime('now'),
+             gmaps_skip_reason = ?,
+             updated_at = datetime('now')
+       WHERE id = ?
+    `);
+  }
+  return _stampAttemptStmt;
+}
 
 /**
  * Run an enrichment batch. Returns aggregate counts.
@@ -248,13 +275,13 @@ export async function enrichViaGoogleMaps(opts: {
       const place = placeByQuery.get(query);
       if (!place) {
         result.no_match++;
-        stampAttemptStmt.run("no_match", company.id);
+        stampAttemptStmt().run("no_match", company.id);
         continue;
       }
       const m = matchesCompany(place, company);
       if (!m.ok) {
         result.low_confidence_skipped++;
-        stampAttemptStmt.run(m.reason, company.id);
+        stampAttemptStmt().run(m.reason, company.id);
         console.log(
           `[gmaps-enrich] skipped ${company.id} ${company.name}: ${m.reason}`,
         );
@@ -262,7 +289,7 @@ export async function enrichViaGoogleMaps(opts: {
       }
       // Match accepted — clear any previous skip reason (in case this
       // is a force=true re-run after fixing the company's name/city).
-      stampAttemptStmt.run(null, company.id);
+      stampAttemptStmt().run(null, company.id);
 
       // Phone — the prize
       if (place.phoneUnformatted || place.phone) {
@@ -276,7 +303,7 @@ export async function enrichViaGoogleMaps(opts: {
 
       // Permanently closed → drop from outreach
       if (place.permanentlyClosed) {
-        markClosedStmt.run(company.id);
+        markClosedStmt().run(company.id);
         result.permanently_closed_marked++;
       }
 
@@ -286,7 +313,7 @@ export async function enrichViaGoogleMaps(opts: {
         : null;
       if (hoursJson) result.hours_updated++;
 
-      updateCompanyStmt.run(
+      updateCompanyStmt().run(
         place.placeId || null,
         place.totalScore ?? null,
         place.reviewsCount ?? null,
