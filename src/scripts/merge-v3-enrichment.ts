@@ -11,6 +11,7 @@ const dbPath = path.join(process.cwd(), "data", "the-frame.db");
 process.env.DATABASE_URL = dbPath;
 
 import { db, sqlite } from "@/lib/db";
+import { addCompanyEmail } from "@/modules/sales/lib/company-emails";
 
 const CSV_PATH = path.resolve(
   process.env.HOME || "~",
@@ -93,7 +94,6 @@ async function main() {
 
   const updateCompany = sqlite.prepare(`
     UPDATE companies SET
-      email = COALESCE(NULLIF(email, ''), ?),
       google_rating = COALESCE(?, google_rating),
       google_review_count = COALESCE(?, google_review_count),
       google_place_id = COALESCE(NULLIF(google_place_id, ''), ?),
@@ -121,11 +121,16 @@ async function main() {
   );
 
   const insertCompany = sqlite.prepare(`
-    INSERT INTO companies (id, name, website, domain, phone, email, address, city, state, zip,
+    INSERT INTO companies (id, name, website, domain, address, city, state, zip,
       google_place_id, google_rating, google_review_count, source, source_type, segment, category,
       status, enrichment_status, enriched_at, enrichment_source, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outscraper-v3', 'outscraper', ?, ?, 'new',
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'outscraper-v3', 'outscraper', ?, ?, 'new',
       'enriched', datetime('now'), 'outscraper-v3', datetime('now'), datetime('now'))
+  `);
+  // companies.phone/email dropped 2026-06-19 — phone -> company_phones, email -> contacts.
+  const insertCompanyPhone = sqlite.prepare(`
+    INSERT OR IGNORE INTO company_phones (id, company_id, phone, source, is_primary, created_at, updated_at)
+    VALUES (?, ?, ?, 'outscraper-v3', 1, datetime('now'), datetime('now'))
   `);
 
   const insertStore = sqlite.prepare(`
@@ -172,8 +177,9 @@ async function main() {
 
       if (existing) {
         // Update company
-        updateCompany.run(email, rating, reviews, placeId, segment, category, existing.id);
+        updateCompany.run(rating, reviews, placeId, segment, category, existing.id);
         updateStore.run(placeId, rating, email, existing.id);
+        if (email) addCompanyEmail(existing.id, email, "outscraper-v3");
 
         // Add email_2 as secondary contact if present
         if (email2) {
@@ -189,9 +195,10 @@ async function main() {
         const storeId = crypto.randomUUID();
 
         insertCompany.run(companyId, name, row.website?.trim() || null, domain,
-          row.phone?.trim() || null, email, row.address?.trim() || null,
+          row.address?.trim() || null,
           row.city?.trim() || null, state || null, row.zip?.trim() || null,
           placeId, rating, reviews, segment, category);
+        if (row.phone?.trim()) insertCompanyPhone.run(crypto.randomUUID(), companyId, row.phone.trim());
 
         insertStore.run(storeId, companyId, name, row.address?.trim() || null,
           row.city?.trim() || null, state || null, row.zip?.trim() || null,

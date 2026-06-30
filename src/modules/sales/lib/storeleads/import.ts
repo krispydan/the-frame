@@ -26,6 +26,7 @@ import Papa from "papaparse";
 import fs from "fs";
 import { sqlite } from "@/lib/db";
 import { extractDomain } from "../import-engine";
+import { addCompanyEmail } from "../company-emails";
 
 // ─── CSV row + import stats ───────────────────────────────────────────────
 
@@ -194,7 +195,7 @@ export async function importStoreLeadsCsv(
   // We build the UPDATE dynamically per row (only filling NULLs); see merge() below.
   const insertNew = sqlite.prepare(
     `INSERT INTO companies (
-       id, name, type, domain, website, phone, email,
+       id, name, type, domain, website,
        address, city, state, country,
        category, industry, status, source, source_type, source_query,
        storeleads_id, storeleads_last_synced_at,
@@ -206,7 +207,7 @@ export async function importStoreLeadsCsv(
        enriched_at, enrichment_source, enrichment_fetched_at,
        created_at, updated_at
      ) VALUES (
-       ?, ?, ?, ?, ?, ?, ?,
+       ?, ?, ?, ?, ?,
        ?, ?, ?, ?,
        ?, ?, 'new', ?, 'storeleads', ?,
        ?, ?,
@@ -218,6 +219,11 @@ export async function importStoreLeadsCsv(
        ?, 'storeleads', ?,
        ?, ?
      )`,
+  );
+  // companies.phone/email dropped 2026-06-19 — phone -> company_phones, email -> contacts.
+  const insertCompanyPhone = sqlite.prepare(
+    `INSERT OR IGNORE INTO company_phones (id, company_id, phone, source, is_primary, created_at, updated_at)
+     VALUES (?, ?, ?, 'storeleads', 1, ?, ?)`,
   );
 
   const txn = sqlite.transaction(() => {
@@ -254,15 +260,14 @@ export async function importStoreLeadsCsv(
           });
           stats.mergedByDomain++;
         } else {
+          const newId = crypto.randomUUID();
           insertNew.run(
-            crypto.randomUUID(),
+            newId,
             fields.merchantName,
             // catalog "type" enum; "online" is most accurate for a Shopify shop
             "online",
             domain,
             fields.website,
-            fields.phone,
-            fields.email,
             fields.address,
             fields.city,
             fields.state,
@@ -292,6 +297,8 @@ export async function importStoreLeadsCsv(
             now, // created_at
             now, // updated_at
           );
+          if (fields.phone) insertCompanyPhone.run(crypto.randomUUID(), newId, fields.phone, now, now);
+          if (fields.email) addCompanyEmail(newId, fields.email, "storeleads");
           stats.created++;
         }
 
@@ -405,8 +412,6 @@ function mergeRow(opts: {
   // (csv column on companies, value to fill if null)
   const fillCandidates: Array<[string, unknown]> = [
     ["website", fields.website],
-    ["phone", fields.phone],
-    ["email", fields.email],
     ["address", fields.address],
     ["city", fields.city],
     ["state", fields.state],
@@ -464,6 +469,17 @@ function mergeRow(opts: {
   vals.push(now);
   sets.push("updated_at = ?");
   vals.push(now);
+
+  // phone/email are no longer columns on companies — route to canonical
+  // tables. INSERT OR IGNORE + addCompanyEmail both no-op on duplicates,
+  // preserving the "fill, never clobber" intent.
+  if (fields.phone) {
+    sqlite.prepare(
+      `INSERT OR IGNORE INTO company_phones (id, company_id, phone, source, is_primary, created_at, updated_at)
+       VALUES (?, ?, ?, 'storeleads', 0, ?, ?)`,
+    ).run(crypto.randomUUID(), id, fields.phone, now, now);
+  }
+  if (fields.email) addCompanyEmail(id, fields.email as string, "storeleads");
 
   if (sets.length === 0) return;
   vals.push(id);
