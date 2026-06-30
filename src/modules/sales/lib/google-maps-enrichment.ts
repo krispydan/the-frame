@@ -23,12 +23,12 @@ import { sqlite } from "@/lib/db";
 import { apifyClient, type GoogleMapsPlace } from "./apify-client";
 import { addCompanyPhone } from "./company-phones";
 
-// Search strings per Apify actor run. Reduced from 25 → 10 after
-// observing intermittent 10-min timeouts on 24/25-result runs in
-// the overnight cron — Apify hits a slow path with certain search
-// strings that doesn't reliably finish. Smaller batches mean shorter
-// individual runs and less wasted wall-clock on stuck queries.
-const BATCH_SIZE = 10;
+// Search strings per Apify actor run. Reduced from 10 → 5 after
+// observing widespread 300s timeouts on 10-place batches on
+// 2026-06-30. Apify hits a slow path on certain boutique-shaped
+// queries; 5 places per batch keeps each run within Apify's
+// resolution window.
+const BATCH_SIZE = 5;
 
 interface CandidateCompany {
   id: string;
@@ -49,25 +49,71 @@ export interface EnrichmentResult {
 }
 
 /**
- * Lightweight fuzzy compare — normalized Levenshtein-like ratio
- * via character-set overlap. Fast enough for hundreds of comparisons
- * per second without a dependency.
+ * Lightweight fuzzy name compare. Returns max of two similarity
+ * signals so we catch:
+ *
+ *   - Token-set overlap (handles word reordering, dropped noise words)
+ *   - Compressed string compare (catches "SouthernPineBoutique" vs
+ *     "Southern Pine Boutique" — common when our DB stores domain-
+ *     style names with no spaces)
+ *
+ * Both signals normalize by lowercasing, stripping & → and, removing
+ * common suffixes (LLC, Inc, .com, .co, .net, Online, Shop, Store),
+ * and dropping noise words.
  */
 function nameSimilarity(a: string, b: string): number {
-  const norm = (s: string) =>
+  if (!a || !b) return 0;
+
+  // Step 1: tokenized normalization (word-level)
+  const normWords = (s: string) =>
     s.toLowerCase()
+      .replace(/\.com\b|\.co\b|\.net\b|\.org\b|\.shop\b|\.online\b/gi, " ")
       .replace(/&/g, "and")
       .replace(/[^a-z0-9 ]/g, " ")
-      .replace(/\b(the|a|an|co|llc|inc|ltd|company)\b/g, " ")
+      .replace(/\b(the|a|an|co|llc|inc|ltd|company|online|shop|store|boutique|.com)\b/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-  const na = norm(a);
-  const nb = norm(b);
-  if (!na || !nb) return 0;
-  if (na === nb) return 1;
-  // Token-set overlap — handles word reordering and minor noise.
-  const aTok = new Set(na.split(" "));
-  const bTok = new Set(nb.split(" "));
+
+  // Step 2: compressed normalization (character-level — strip all
+  // non-alphanumeric, lowercase). Handles "SouthernPineBoutique" ↔
+  // "Southern Pine Boutique" both collapsing to "southernpineboutique".
+  // Also strips common suffixes first.
+  const normCompressed = (s: string) =>
+    s.toLowerCase()
+      .replace(/\.com\b|\.co\b|\.net\b|\.org\b|\.shop\b|\.online\b/gi, "")
+      .replace(/&/g, "and")
+      .replace(/[^a-z0-9]/g, "");
+
+  const aTokens = normWords(a);
+  const bTokens = normWords(b);
+  const aCompressed = normCompressed(a);
+  const bCompressed = normCompressed(b);
+
+  // Compressed exact match wins immediately
+  if (aCompressed && bCompressed && aCompressed === bCompressed) return 1;
+
+  // Substring containment after compression — strong signal that one
+  // is a subset/extended-form of the other.
+  if (aCompressed && bCompressed) {
+    const shorter = aCompressed.length < bCompressed.length ? aCompressed : bCompressed;
+    const longer = aCompressed.length < bCompressed.length ? bCompressed : aCompressed;
+    if (shorter.length >= 5 && longer.includes(shorter)) {
+      // Score based on length ratio — longer overlap = stronger match
+      const ratio = shorter.length / longer.length;
+      // Floor at 0.7 so substring containment always passes the
+      // "matched_moderate" threshold (sim ≥ 0.7) when there's any
+      // city info; the caller's matcher logic handles edge cases.
+      return Math.max(0.7, ratio);
+    }
+  }
+
+  // Token-set overlap fallback (handles word reordering, dropped
+  // noise words)
+  if (!aTokens || !bTokens) return 0;
+  if (aTokens === bTokens) return 1;
+  const aTok = new Set(aTokens.split(" ").filter(Boolean));
+  const bTok = new Set(bTokens.split(" ").filter(Boolean));
+  if (aTok.size === 0 || bTok.size === 0) return 0;
   let inter = 0;
   for (const t of aTok) if (bTok.has(t)) inter++;
   const union = aTok.size + bTok.size - inter;

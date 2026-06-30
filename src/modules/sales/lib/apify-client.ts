@@ -135,13 +135,12 @@ class ApifyClient {
     }
     if (searchStrings.length === 0) return [];
 
-    // Apify timeout: 300s. Observed history:
-    //   - 5-place batches finish in ~40s
-    //   - 50-place batches sometimes finish in 13s
-    //   - Some place lookups hit a 10-min slow path Apify won't shake
-    // 5 min gives breathing room when 1-2 places are slow without
-    // burning forever on truly stuck batches. Caller can override.
-    const url = `${APIFY_BASE}/acts/${ACTOR_GMAPS}/run-sync-get-dataset-items?token=${token}&timeout=${opts.timeoutSecs ?? 300}`;
+    // Apify timeout: 600s. Observed 2026-06-30: 300s wasn't enough
+    // for batches of 10 — actor hit Apify-side 408 "run-timeout-
+    // exceeded" on many runs. Combined with the batch-size drop to
+    // 5, this gives each place ~2 min average to resolve. Caller
+    // can still override via opts.timeoutSecs.
+    const url = `${APIFY_BASE}/acts/${ACTOR_GMAPS}/run-sync-get-dataset-items?token=${token}&timeout=${opts.timeoutSecs ?? 600}`;
     const body = {
       searchStringsArray: searchStrings,
       // Search-result tuning
