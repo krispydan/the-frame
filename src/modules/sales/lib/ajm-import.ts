@@ -32,6 +32,7 @@ export interface AjmRow {
   name: string;
   email: string | null;
   phone: string | null;
+  website: string | null;
   address: string | null;
   address2: string | null;
   city: string | null;
@@ -348,6 +349,7 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
        city = COALESCE(city, NULLIF(?, '')),
        state = COALESCE(state, NULLIF(?, '')),
        zip = COALESCE(zip, NULLIF(?, '')),
+       website = COALESCE(website, NULLIF(?, '')),
        country = COALESCE(NULLIF(country, ''), 'United States'),
        ajm_total_spend = COALESCE(ajm_total_spend, ?),
        ajm_total_orders = COALESCE(ajm_total_orders, ?),
@@ -360,12 +362,12 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
   );
   const insertNew = sqlite.prepare(
     `INSERT INTO companies (
-       id, name, address, city, state, zip, country,
+       id, name, address, city, state, zip, country, website,
        status, source, source_type, tags,
        ajm_total_spend, ajm_total_orders, ajm_first_order, ajm_last_order,
        ajm_status, ajm_category,
        created_at, updated_at
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
   );
   const insertPhone = sqlite.prepare(
     `INSERT OR IGNORE INTO company_phones
@@ -412,6 +414,7 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
             row.city ?? "",
             row.state ?? "",
             row.zip ?? "",
+            row.website ?? "",
             row.ajm_total_spend,
             row.ajm_total_orders,
             row.ajm_first_order,
@@ -454,6 +457,7 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
             row.state ?? null,
             row.zip ?? null,
             row.country || "United States",
+            row.website ?? null,
             row.status,
             row.source,
             "ajm_legacy",
