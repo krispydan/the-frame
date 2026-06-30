@@ -58,6 +58,53 @@ export async function POST(req: NextRequest) {
     ? body.status.split(",").map((s) => s.trim()).filter(Boolean)
     : undefined;
 
+  // For batches > 100, Cloudflare's ~100s edge timeout will 524 the
+  // HTTP response even though Node keeps executing. Default to
+  // fire-and-forget for big batches so the caller gets a clean 200
+  // and can monitor progress via the cohort-needing-phone-enrichment
+  // endpoint.
+  const asyncRequested = body.async === true;
+  const asyncMode = asyncRequested || (limit > 100 && body.async !== false);
+
+  if (asyncMode) {
+    // Dispatch without awaiting — the work continues in the Node
+    // process while we return immediately. Any error gets logged
+    // but doesn't crash the request.
+    void enrichViaGoogleMaps({
+      limit,
+      tier,
+      status,
+      force: body.force === true,
+      dryRun: body.dryRun === true,
+    })
+      .then((r) => {
+        console.log(
+          `[enrich-via-apify] dispatched batch completed: ` +
+            `attempted=${r.companies_attempted} ` +
+            `phones=${r.phones_added} closed=${r.permanently_closed_marked} ` +
+            `no_match=${r.no_match} low_conf=${r.low_confidence_skipped} ` +
+            `errors=${r.errors.length}`,
+        );
+      })
+      .catch((e) => {
+        console.error(
+          `[enrich-via-apify] dispatched batch threw:`,
+          e instanceof Error ? e.message : String(e),
+        );
+      });
+
+    return NextResponse.json({
+      ok: true,
+      dispatched: true,
+      message:
+        `Enrichment dispatched in the background for up to ${limit} companies. ` +
+        `Poll GET /api/admin/sales/cohort-needing-phone-enrichment to watch ` +
+        `the cohort shrink as phones are added, or check Railway logs for the ` +
+        `final '[enrich-via-apify] dispatched batch completed' line.`,
+      estimated_runtime_seconds: Math.ceil(limit / 25) * 60,
+    });
+  }
+
   try {
     const result = await enrichViaGoogleMaps({
       limit,
