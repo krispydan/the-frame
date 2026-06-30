@@ -7,6 +7,7 @@ import {
   pingPipedrive,
   listPipelines,
   listStages,
+  listUsers,
 } from "@/modules/sales/lib/pipedrive-client";
 
 /**
@@ -29,9 +30,12 @@ export async function GET() {
     out.ping = ping;
     if (ping.ok) {
       try {
-        const [pipelines, stages] = await Promise.all([listPipelines(), listStages()]);
+        const [pipelines, stages, users] = await Promise.all([listPipelines(), listStages(), listUsers()]);
         out.pipelines = pipelines.map((p) => ({ id: p.id, name: p.name }));
         out.stages = stages.map((s) => ({ id: s.id, name: s.name, pipeline_id: s.pipeline_id }));
+        out.users = users
+          .filter((u) => u.active_flag)
+          .map((u) => ({ id: u.id, name: u.name, email: u.email }));
       } catch (e) {
         out.stagesError = e instanceof Error ? e.message : String(e);
       }
