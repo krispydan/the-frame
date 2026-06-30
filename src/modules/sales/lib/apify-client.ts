@@ -135,13 +135,13 @@ class ApifyClient {
     }
     if (searchStrings.length === 0) return [];
 
-    // Apify timeout: 180s (was 600). Observed overnight: ~half of
-    // 25-place batches hit the 10-min client timeout exactly because
-    // Apify hits a slow path on certain search strings. 3 min is
-    // plenty for a 10-place batch — succeeded runs in the logs were
-    // 13-42s — and fails fast on stuck batches so the cron tick
-    // moves on. Caller can override via opts.timeoutSecs.
-    const url = `${APIFY_BASE}/acts/${ACTOR_GMAPS}/run-sync-get-dataset-items?token=${token}&timeout=${opts.timeoutSecs ?? 180}`;
+    // Apify timeout: 300s. Observed history:
+    //   - 5-place batches finish in ~40s
+    //   - 50-place batches sometimes finish in 13s
+    //   - Some place lookups hit a 10-min slow path Apify won't shake
+    // 5 min gives breathing room when 1-2 places are slow without
+    // burning forever on truly stuck batches. Caller can override.
+    const url = `${APIFY_BASE}/acts/${ACTOR_GMAPS}/run-sync-get-dataset-items?token=${token}&timeout=${opts.timeoutSecs ?? 300}`;
     const body = {
       searchStringsArray: searchStrings,
       // Search-result tuning
@@ -158,43 +158,39 @@ class ApifyClient {
       scrapePlaceDetailPage: true,
     };
 
-    let lastError: Error | null = null;
+    // Retry policy: 429 (rate-limit) gets backed off and retried up
+    // to maxRetries. EVERYTHING ELSE fails fast — a timeout retried
+    // 3 times is just 3 timeouts, wasting wall-clock. The enrichment
+    // loader stamps failed batches as 'batch_error' so they don't
+    // come back next tick.
     for (let attempt = 0; attempt < this.maxRetries; attempt++) {
-      try {
-        const res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
 
-        if (res.status === 429) {
-          const wait = (attempt + 1) * 2000;
-          console.log(`[apify] 429, backing off ${wait}ms (attempt ${attempt + 1})`);
-          await new Promise((r) => setTimeout(r, wait));
-          continue;
-        }
-
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          throw new Error(
-            `Apify HTTP ${res.status}: ${text.slice(0, 500)}`,
-          );
-        }
-
-        const data = (await res.json()) as GoogleMapsPlace[];
-        if (!Array.isArray(data)) {
-          throw new Error(
-            `Apify returned non-array: ${JSON.stringify(data).slice(0, 300)}`,
-          );
-        }
-        return data;
-      } catch (e) {
-        lastError = e instanceof Error ? e : new Error(String(e));
-        if (attempt === this.maxRetries - 1) break;
-        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      if (res.status === 429) {
+        const wait = (attempt + 1) * 2000;
+        console.log(`[apify] 429, backing off ${wait}ms (attempt ${attempt + 1})`);
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
       }
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Apify HTTP ${res.status}: ${text.slice(0, 500)}`);
+      }
+
+      const data = (await res.json()) as GoogleMapsPlace[];
+      if (!Array.isArray(data)) {
+        throw new Error(
+          `Apify returned non-array: ${JSON.stringify(data).slice(0, 300)}`,
+        );
+      }
+      return data;
     }
-    throw lastError ?? new Error("Apify request failed after retries");
+    throw new Error("Apify request failed after rate-limit retries");
   }
 }
 
