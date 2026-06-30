@@ -174,6 +174,33 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN youtube_followers INTEGER");
 // tried but didn't get a high-confidence match.
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN gmaps_enrichment_attempted_at TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN gmaps_skip_reason TEXT"); } catch { /* exists */ }
+// Run-by-run history of Apify enrichment batches. The work runs
+// fire-and-forget for batches > 100, so the operator can't read the
+// HTTP response — they read these rows instead. One row per
+// enrichViaGoogleMaps() call, started on entry and updated on exit.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS apify_enrichment_runs (
+    id TEXT PRIMARY KEY NOT NULL,
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT,
+    status TEXT NOT NULL DEFAULT 'running',
+    limit_requested INTEGER,
+    tier_filter TEXT,
+    status_filter TEXT,
+    force_flag INTEGER NOT NULL DEFAULT 0,
+    dry_run INTEGER NOT NULL DEFAULT 0,
+    companies_attempted INTEGER,
+    phones_added INTEGER,
+    permanently_closed_marked INTEGER,
+    hours_updated INTEGER,
+    no_match INTEGER,
+    low_confidence_skipped INTEGER,
+    errors_count INTEGER,
+    errors_sample TEXT,
+    error_message TEXT
+  )`);
+} catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_apify_runs_started ON apify_enrichment_runs (started_at DESC)"); } catch { /* exists */ }
 // e.g. "shopify" / "woocommerce" / "magento" / "bigcommerce" / "custom".
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN ecom_platform TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_storeleads_id ON companies (storeleads_id)"); } catch { /* exists */ }

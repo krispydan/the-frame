@@ -242,6 +242,28 @@ export async function enrichViaGoogleMaps(opts: {
 
   if (cohort.length === 0 || opts.dryRun) return result;
 
+  // Record the run in apify_enrichment_runs so the operator can read
+  // the result via the /runs admin endpoint instead of scrolling
+  // Railway logs. Inserted only after the early-return checks so
+  // we never leave a "running" row for empty/dry-run calls.
+  const runId = `apify_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  sqlite
+    .prepare(
+      `INSERT INTO apify_enrichment_runs
+        (id, status, limit_requested, tier_filter, status_filter,
+         force_flag, dry_run, companies_attempted)
+       VALUES (?, 'running', ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      runId,
+      opts.limit,
+      opts.tier ? opts.tier.join(",") : null,
+      opts.status ? opts.status.join(",") : null,
+      opts.force ? 1 : 0,
+      0,
+      cohort.length,
+    );
+
   // Index by searchString so we can route results back to companies.
   // Multiple companies could in theory produce the same search string
   // (rare — same name in same city); the map stores the first hit
@@ -328,6 +350,35 @@ export async function enrichViaGoogleMaps(opts: {
       );
     }
   }
+
+  // Stamp completion in the runs table so the operator can read the
+  // final stats via /enrich-via-apify/runs.
+  sqlite
+    .prepare(
+      `UPDATE apify_enrichment_runs
+          SET status = 'completed',
+              completed_at = datetime('now'),
+              phones_added = ?,
+              permanently_closed_marked = ?,
+              hours_updated = ?,
+              no_match = ?,
+              low_confidence_skipped = ?,
+              errors_count = ?,
+              errors_sample = ?
+        WHERE id = ?`,
+    )
+    .run(
+      result.phones_added,
+      result.permanently_closed_marked,
+      result.hours_updated,
+      result.no_match,
+      result.low_confidence_skipped,
+      result.errors.length,
+      result.errors.length > 0
+        ? JSON.stringify(result.errors.slice(0, 5))
+        : null,
+      runId,
+    );
 
   return result;
 }
