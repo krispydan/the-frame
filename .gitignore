@@ -58,5 +58,6 @@ COG Invoices/
 # AJM import data artifacts — contain customer PII, keep local only
 ajm_*.jsonl
 ajm_push.jsonl
+ajm_part_*
 Sheet4*.csv
 *WHOLESALE*LIST*.csv
