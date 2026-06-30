@@ -32,6 +32,7 @@ import { runShipmentRevenueRecognition } from "@/modules/finance/lib/shipment-re
 import { runDailyCogsPosting } from "@/modules/finance/lib/daily-cogs";
 import { syncFairePayouts } from "@/modules/integrations/lib/faire/payout-sync";
 import { runOrderDealSweep, runActivitySweep } from "@/modules/sales/lib/pipedrive-sync";
+import { enrichViaGoogleMaps } from "@/modules/sales/lib/google-maps-enrichment";
 
 export type CronJob = {
   id: string;                         // stable, kebab-case
@@ -189,6 +190,30 @@ export const CRON_JOBS: CronJob[] = [
     description: "Pull current inventory levels from ShipHero into local inventory table",
     handler: syncShipHeroInventory,
     guard: () => isDuringBusinessHours(),
+  },
+  {
+    // Drains the phone-less qualified-in-Instantly cohort overnight
+    // (or whenever this runs). Each tick processes a small batch via
+    // the Apify Google Maps actor — phones, hours, ratings, and
+    // permanently-closed status. Cohort filter already excludes
+    // dead-end statuses (not_interested / rejected / etc.) and any
+    // company already enriched, so this stops being a no-op when the
+    // cohort drains.
+    //
+    // Cost: ~$0.05-0.10 per tick. Bounded by total cohort size, not
+    // by tick count.
+    //
+    // Disable by toggling `enabled` to false in cron_job_state once
+    // we're satisfied with the cohort coverage:
+    //   curl -X POST .../api/admin/cron/jobs/apify-gmaps-enrichment \
+    //        -H "x-admin-key: jaxy2026" -d '{"enabled": false}'
+    id: "apify-gmaps-enrichment",
+    schedule: "*/10 * * * *",  // every 10 min
+    description: "Enrich phone-less prospects via Apify Google Maps in chunks of 50",
+    handler: () => enrichViaGoogleMaps({ limit: 50 }),
+    // fire-and-forget — each batch takes ~30-90s × up to 2 batches = 1-3 min
+    // server-side, well under cron-tick's CF timeout when async-dispatched.
+    fireAndForget: true,
   },
 
   // ── PhoneBurner ──
