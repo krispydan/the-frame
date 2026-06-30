@@ -27,8 +27,15 @@ interface PipedriveConfig {
 }
 
 function getConfig(): PipedriveConfig | null {
-  const clientId = process.env.PIPEDRIVE_CLIENT_ID;
-  const clientSecret = process.env.PIPEDRIVE_CLIENT_SECRET;
+  // Canonical names are PIPEDRIVE_CLIENT_ID / PIPEDRIVE_CLIENT_SECRET, but
+  // accept common variants so a lowercase/short env name still works.
+  const clientId =
+    process.env.PIPEDRIVE_CLIENT_ID || process.env.pipedrive_client_id;
+  const clientSecret =
+    process.env.PIPEDRIVE_CLIENT_SECRET ||
+    process.env.PIPEDRIVE_SECRET ||
+    process.env.pipedrive_client_secret ||
+    process.env.pipedrive_secret;
   const appUrl =
     process.env.PIPEDRIVE_APP_URL ||
     process.env.SHOPIFY_APP_URL ||
