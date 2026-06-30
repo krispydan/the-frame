@@ -119,6 +119,12 @@ export async function importFaireOrders(csvRows: FaireCsvRow[]): Promise<{ impor
     if (company?.id) {
       try { ensureCustomerAccount(company.id); } catch (e) { console.error("[Faire CSV] ensureCustomerAccount:", e); }
     }
+    void (async () => {
+      try {
+        const { detectWholesaleConversion } = await import("./wholesale-conversion");
+        await detectWholesaleConversion(newOrder.id);
+      } catch (e) { console.error("[Faire CSV] conversion detection:", e); }
+    })();
     imported++;
   }
 
@@ -260,6 +266,12 @@ function syncFaireOrder(faireOrder: FaireOrder): { action: "created" | "updated"
   try { ensureCustomerAccount(companyId); } catch (e) { console.error("[Faire Sync] ensureCustomerAccount:", e); }
 
   eventBus.emit("order.created", { orderId: newOrder.id, companyId, total });
+  void (async () => {
+    try {
+      const { detectWholesaleConversion } = await import("./wholesale-conversion");
+      await detectWholesaleConversion(newOrder.id);
+    } catch (e) { console.error("[Faire Sync] conversion detection:", e); }
+  })();
   return { action: "created" };
 }
 

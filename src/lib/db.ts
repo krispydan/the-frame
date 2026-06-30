@@ -365,6 +365,17 @@ try { sqlite.exec("CREATE INDEX idx_orders_pipedrive_deal ON orders (pipedrive_d
 // Stamp the Pipedrive activity id so each engagement event pushes once.
 try { sqlite.exec("ALTER TABLE activity_feed ADD COLUMN pipedrive_activity_id INTEGER"); } catch { /* exists */ }
 
+// One "lead converted to wholesale customer" alert per order (idempotency).
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS lead_conversion_alerts (
+    order_id TEXT PRIMARY KEY NOT NULL,
+    company_id TEXT,
+    matched_company_id TEXT,
+    kind TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+} catch (e) { console.error("[db] lead_conversion_alerts table error:", e); }
+
 // Pipedrive deal projection (read-only mirror of Pipedrive deals). Kept in
 // its own table rather than overloading `deals` so the existing internal
 // kanban isn't flooded with seeded/backfilled CRM rows (the kanban-vs-

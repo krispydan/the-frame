@@ -382,6 +382,17 @@ export async function handleOrderCreate(order: ShopifyOrder, shopDomain?: string
     } catch (e) {
       console.error("[Shopify Webhook] Slack wholesale alert failed:", e);
     }
+
+    // Lead → customer conversion detection (worked prospect ordered, or a new
+    // customer that fuzzy-matches an existing prospect). Best-effort.
+    void (async () => {
+      try {
+        const { detectWholesaleConversion } = await import("./wholesale-conversion");
+        await detectWholesaleConversion(newOrder.id);
+      } catch (e) {
+        console.error("[Shopify Webhook] conversion detection failed:", e);
+      }
+    })();
   }
 }
 
