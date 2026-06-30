@@ -30,6 +30,13 @@ import { addCompanyPhone } from "./company-phones";
 // resolution window.
 const BATCH_SIZE = 5;
 
+// Number of Apify batches we fire concurrently per wave. The Apify
+// call dominates time (30s–4min per batch) while DB writes are
+// near-instant via better-sqlite3. Concurrency=3 roughly triples
+// throughput vs sequential. Apify's rate limit is ~100 actor runs/sec
+// per account so we're not close to it.
+const CONCURRENT_BATCHES = 3;
+
 interface CandidateCompany {
   id: string;
   name: string;
@@ -506,25 +513,45 @@ export async function enrichViaGoogleMaps(opts: {
   let crashed: Error | null = null;
 
   try {
-  // Index by searchString so we can route results back to companies.
-  // Multiple companies could in theory produce the same search string
-  // (rare — same name in same city); the map stores the first hit
-  // for now.
+  // Split the cohort into BATCH_SIZE-sized batches up front, then
+  // run CONCURRENT_BATCHES Apify calls in parallel waves. The Apify
+  // call is the dominant cost (30s–4min per batch); DB writes are
+  // fast and serial via better-sqlite3. With concurrency=3 we get
+  // ~3x throughput at the same total Apify cost.
+  const allBatches: CandidateCompany[][] = [];
   for (let i = 0; i < cohort.length; i += BATCH_SIZE) {
-    const batch = cohort.slice(i, i + BATCH_SIZE);
-    const queries = batch.map(buildSearchString);
-    const queryToCompany = new Map<string, CandidateCompany>();
-    for (let j = 0; j < batch.length; j++) {
-      queryToCompany.set(queries[j], batch[j]);
-    }
+    allBatches.push(cohort.slice(i, i + BATCH_SIZE));
+  }
 
-    let places: GoogleMapsPlace[];
+  type FetchOutcome =
+    | { batch: CandidateCompany[]; queries: string[]; places: GoogleMapsPlace[]; error: null }
+    | { batch: CandidateCompany[]; queries: string[]; places: null; error: string };
+
+  async function fetchBatch(batch: CandidateCompany[]): Promise<FetchOutcome> {
+    const queries = batch.map(buildSearchString);
     try {
-      places = await apifyClient.runGoogleMapsScraper(queries, {
+      const places = await apifyClient.runGoogleMapsScraper(queries, {
         maxPerSearch: 1,
       });
+      return { batch, queries, places, error: null };
     } catch (e) {
-      const reason = e instanceof Error ? e.message : String(e);
+      return {
+        batch,
+        queries,
+        places: null,
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+  }
+
+  for (let waveStart = 0; waveStart < allBatches.length; waveStart += CONCURRENT_BATCHES) {
+    const wave = allBatches.slice(waveStart, waveStart + CONCURRENT_BATCHES);
+    const outcomes = await Promise.all(wave.map(fetchBatch));
+
+    for (const outcome of outcomes) {
+    const { batch, queries } = outcome;
+    if (outcome.error !== null) {
+      const reason = outcome.error;
       console.error(`[gmaps-enrich] batch failed: ${reason}`);
       // Stamp each company in the failed batch so they don't keep
       // getting retried tick after tick. The skip_reason carries the
@@ -536,8 +563,6 @@ export async function enrichViaGoogleMaps(opts: {
       for (const c of batch) {
         result.errors.push({ company_id: c.id, reason });
         stampAttemptStmt().run(errorReason, c.id);
-        // Log batch errors so they show up in the match-log CSV
-        // alongside no_match / skipped / accepted rows.
         logMatch({
           companyId: c.id,
           runId,
@@ -550,6 +575,12 @@ export async function enrichViaGoogleMaps(opts: {
         });
       }
       continue;
+    }
+    const places = outcome.places;
+    // queryToCompany lookup for this batch (used downstream)
+    const queryToCompany = new Map<string, CandidateCompany>();
+    for (let j = 0; j < batch.length; j++) {
+      queryToCompany.set(queries[j], batch[j]);
     }
 
     // Build a lookup: searchString → place. Apify echoes the original
@@ -752,7 +783,8 @@ export async function enrichViaGoogleMaps(opts: {
         );
       }
     }
-  }
+    } // close: for (const outcome of outcomes)
+  } // close: for (let waveStart...) — wave loop
   } catch (e) {
     crashed = e instanceof Error ? e : new Error(String(e));
     console.error(`[gmaps-enrich] run ${runId} crashed:`, crashed.message);
