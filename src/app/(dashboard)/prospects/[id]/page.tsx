@@ -1058,6 +1058,12 @@ export default function CompanyDetailPage() {
                   {faireSaving ? "Saving…" : "Save mapping"}
                 </Button>
               </div>
+              <Link
+                href="/prospects/faire-mapping"
+                className="inline-block mt-2 text-xs text-amber-800 dark:text-amber-300 hover:underline"
+              >
+                See all Faire customers to map →
+              </Link>
             </div>
           </div>
         </div>
