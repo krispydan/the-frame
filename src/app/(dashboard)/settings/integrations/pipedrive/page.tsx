@@ -469,6 +469,7 @@ function PipedriveIntegrationsPageInner() {
                   { target: "backfill-interested", label: "Interested backfill", warn: "Creates deals for the interested / catalog_sent backlog (AJM overlap advances its AJM deal; rest → Catalog Interested)." },
                   { target: "backfill-orders", label: "Order backfill (all history)", warn: "Creates a Won deal for EVERY historical wholesale order (tagged for rollback)." },
                   { target: "sync-activities", label: "Activity sync", warn: "Logs Instantly/PhoneBurner engagement (emails, replies, calls) onto Pipedrive orgs/persons/deals." },
+                  { target: "remediate-faire", label: "Fix collapsed Faire orders", warn: "Splits Faire orders mis-grouped under one company (relay.faire.com bug) back to the real retailer by store name, and moves their Pipedrive deals to the correct org." },
                 ].map((a) => {
                   const rs = status.runs?.[a.target];
                   const running = rs?.inFlight || rs?.state === "running";
