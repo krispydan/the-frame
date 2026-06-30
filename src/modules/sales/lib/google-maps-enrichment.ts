@@ -361,6 +361,30 @@ export async function enrichViaGoogleMaps(opts: {
         continue;
       }
       const m = matchesCompany(place, company);
+
+      // Permanently-closed is a binary signal — worth catching even
+      // when the matcher rejected the place for normal data acceptance.
+      // Apify's permanentlyClosed flag is high-trust; if Apify says it's
+      // closed AND there's at least weak name resemblance (sim ≥ 0.5),
+      // mark the company closed so Sandra doesn't waste a call.
+      //
+      // We do NOT accept phone/hours from a rejected match, just the
+      // close status. The phone of a still-open same-named boutique in
+      // another city would be wrong; the close flag of one is at least
+      // a hint that the searched name corresponds to a closed business
+      // somewhere.
+      if (place.permanentlyClosed && m.similarity >= 0.5) {
+        markClosedStmt().run(company.id);
+        result.permanently_closed_marked++;
+        stampAttemptStmt().run(
+          m.ok ? null : `${m.reason} (but marked closed)`,
+          company.id,
+        );
+        // Skip the rest — we don't want phone/hours from a low-conf
+        // closed place, and we already stamped the closed status.
+        if (!m.ok) continue;
+      }
+
       if (!m.ok) {
         result.low_confidence_skipped++;
         stampAttemptStmt().run(m.reason, company.id);
@@ -383,11 +407,9 @@ export async function enrichViaGoogleMaps(opts: {
         result.phones_added++;
       }
 
-      // Permanently closed → drop from outreach
-      if (place.permanentlyClosed) {
-        markClosedStmt().run(company.id);
-        result.permanently_closed_marked++;
-      }
+      // Note: permanently_closed handling now lives ABOVE the
+      // matcher-reject check so we catch it even for low-confidence
+      // matches. The marker is set there and not re-set here.
 
       // Hours as JSON
       const hoursJson = place.openingHours
