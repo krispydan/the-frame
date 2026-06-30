@@ -186,10 +186,14 @@ function deriveWebsite(c: CompanyRow, primaryEmail: string | null): string | nul
 }
 
 function getPrimaryEmail(companyId: string): string | null {
+  // Exclude Faire's anonymized relay addresses — they're unique per retailer
+  // and useless as a real contact email or dedup key. A company whose only
+  // email is a relay address resolves to no email (person created by name).
   const r = sqlite
     .prepare(
       `SELECT email FROM contacts
         WHERE company_id = ? AND TRIM(COALESCE(email,'')) <> ''
+          AND LOWER(email) NOT LIKE '%@relay.faire.com%'
         ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
     )
     .get(companyId) as { email: string } | undefined;
@@ -984,8 +988,8 @@ export async function runActivitySweep(limit = 300): Promise<unknown> {
 
 // ── background runner (click-to-run from the settings page) ─────────────────
 
-export type RunTarget = "seed-ajm" | "backfill-interested" | "backfill-orders" | "sync-activities";
-const RUN_TARGETS: RunTarget[] = ["seed-ajm", "backfill-interested", "backfill-orders", "sync-activities"];
+export type RunTarget = "seed-ajm" | "backfill-interested" | "backfill-orders" | "sync-activities" | "remediate-faire";
+const RUN_TARGETS: RunTarget[] = ["seed-ajm", "backfill-interested", "backfill-orders", "sync-activities", "remediate-faire"];
 const inFlight = new Set<string>();
 
 function setRunState(target: string, state: Record<string, unknown>): void {
@@ -1027,7 +1031,10 @@ export function kickBackgroundRun(target: RunTarget): { started: boolean; alread
       if (target === "seed-ajm") summary = await seedAjmToPipedrive({});
       else if (target === "backfill-interested") summary = await backfillInterested({});
       else if (target === "sync-activities") summary = await syncActivitiesToPipedrive({});
-      else summary = await backfillOrderDeals({ backfillRunId: new Date().toISOString().slice(0, 10) });
+      else if (target === "remediate-faire") {
+        const { remediateFaireOrders } = await import("@/modules/orders/lib/faire-remediation");
+        summary = await remediateFaireOrders({ dryRun: false, fixPipedrive: true });
+      } else summary = await backfillOrderDeals({ backfillRunId: new Date().toISOString().slice(0, 10) });
       setRunState(target, { state: "done", summary });
     } catch (e) {
       setRunState(target, { state: "error", error: e instanceof Error ? e.message : String(e) });

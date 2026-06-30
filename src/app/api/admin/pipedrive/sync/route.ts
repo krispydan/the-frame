@@ -64,6 +64,11 @@ export async function POST(req: NextRequest) {
         const r = await syncActivitiesToPipedrive({ dryRun, limit: body.limit });
         return NextResponse.json({ ok: true, ...r });
       }
+      case "remediate-faire": {
+        const { remediateFaireOrders } = await import("@/modules/orders/lib/faire-remediation");
+        const r = await remediateFaireOrders({ dryRun, fixPipedrive: true });
+        return NextResponse.json({ ok: true, ...r });
+      }
       default:
         return NextResponse.json(
           { error: `Unknown action "${body.action}". Use ensure-custom-fields | seed-ajm | backfill-interested | backfill-orders` },
