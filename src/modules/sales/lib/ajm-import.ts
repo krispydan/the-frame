@@ -312,6 +312,19 @@ export interface ImportOpts {
   dryRun?: boolean;
   /** Optional progress callback (every 100 rows). */
   onProgress?: (processed: number, total: number) => void;
+  /**
+   * Clean up existing matched records: re-case an ALL-CAPS company name /
+   * address / city to the row's title-cased value, and set the primary
+   * contact's name from ATTN when blank. Off by default (normal imports only
+   * fill nulls); the AJM CSV upload turns it on.
+   */
+  recase?: boolean;
+}
+
+/** True when s is all-caps (has upper-case letters and no lower-case ones). */
+function isAllCaps(s: string | null | undefined): boolean {
+  if (!s) return false;
+  return s === s.toUpperCase() && s !== s.toLowerCase();
 }
 
 export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportSummary {
@@ -384,6 +397,18 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
   const contactExists = sqlite.prepare(
     `SELECT 1 FROM contacts WHERE company_id = ? AND LOWER(COALESCE(email,'')) = LOWER(COALESCE(?,'')) LIMIT 1`,
   );
+  // Recase support: read current values, overwrite ALL-CAPS ones, set blank
+  // contact names. Only used when opts.recase is on (AJM CSV upload).
+  const getBasics = sqlite.prepare(
+    `SELECT name, address, city FROM companies WHERE id = ?`,
+  );
+  const recaseUpdate = sqlite.prepare(
+    `UPDATE companies SET name = ?, address = ?, city = ?, updated_at = ? WHERE id = ?`,
+  );
+  const setBlankContactName = sqlite.prepare(
+    `UPDATE contacts SET first_name = ?, updated_at = ?
+       WHERE company_id = ? AND TRIM(COALESCE(first_name,'')) = ''`,
+  );
 
   rows.forEach((row, i) => {
     try {
@@ -427,6 +452,23 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
           // Email lands in contacts (canonical), not on companies.
           if (row.email) {
             addCompanyEmail(existing.id, row.email, "ajm_import");
+          }
+          // Clean up existing ALL-CAPS data + blank contact names.
+          if (opts.recase) {
+            const cur = getBasics.get(existing.id) as
+              | { name: string | null; address: string | null; city: string | null }
+              | undefined;
+            if (cur) {
+              const newName = isAllCaps(cur.name) && row.name ? row.name : cur.name;
+              const newAddr = isAllCaps(cur.address) && row.address ? row.address : cur.address;
+              const newCity = isAllCaps(cur.city) && row.city ? row.city : cur.city;
+              if (newName !== cur.name || newAddr !== cur.address || newCity !== cur.city) {
+                recaseUpdate.run(newName, newAddr, newCity, now, existing.id);
+              }
+            }
+            if (row.contact_first_name) {
+              setBlankContactName.run(row.contact_first_name, now, existing.id);
+            }
           }
           if (phoneNorm && !phoneExists.get(existing.id, phoneNorm)) {
             insertPhone.run(
