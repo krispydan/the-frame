@@ -41,6 +41,15 @@ type PipedriveStatus = {
     openDeals: number;
     wonDeals: number;
   };
+  runs?: Record<string, RunState | null>;
+};
+
+type RunState = {
+  state?: "running" | "done" | "error";
+  inFlight?: boolean;
+  error?: string;
+  at?: string;
+  summary?: Record<string, unknown>;
 };
 
 function Stat({ label, value }: { label: string; value: number }) {
@@ -80,6 +89,32 @@ function PipedriveIntegrationsPageInner() {
   useEffect(() => {
     reload();
   }, []);
+
+  // Poll while any background run is in flight so counts + state stay live.
+  useEffect(() => {
+    const anyRunning = Object.values(status?.runs || {}).some((r) => r?.inFlight || r?.state === "running");
+    if (!anyRunning) return;
+    const t = setTimeout(reload, 4000);
+    return () => clearTimeout(t);
+  }, [status]);
+
+  async function runReal(target: string, label: string, warn: string) {
+    if (!confirm(`${warn}\n\nThis writes to Pipedrive. Continue?`)) return;
+    setBusy(true);
+    try {
+      const r = (await post({ action: "run", target })) as { ok?: boolean; alreadyRunning?: boolean; error?: string };
+      if (r.alreadyRunning) {
+        setBanner({ kind: "error", title: "Already running", message: `${label} is already in progress.` });
+      } else if (r.ok) {
+        setBanner({ kind: "success", title: `${label} started`, message: "Running in the background — counts update live below." });
+      } else {
+        setBanner({ kind: "error", title: `${label} failed to start`, message: r.error || "Could not start run." });
+      }
+      await reload();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function post(body: Record<string, unknown>): Promise<{ ok?: boolean; error?: string }> {
     const res = await fetch("/api/v1/integrations/pipedrive/status", {
@@ -399,8 +434,8 @@ function PipedriveIntegrationsPageInner() {
                 CRM sync
               </CardTitle>
               <CardDescription>
-                Push leads + orders into Pipedrive and receive deal changes back. Previews are dry runs (no writes);
-                the actual seed/backfill writes are run deliberately via the admin endpoint so a long run can&apos;t time out.
+                Push leads + orders into Pipedrive and receive deal changes back. Preview (dry run) first, then run for
+                real — runs execute in the background so a long job can&apos;t time out.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -428,16 +463,33 @@ function PipedriveIntegrationsPageInner() {
                 </div>
               )}
 
-              <div className="flex flex-wrap gap-2 pt-1">
-                <Button variant="outline" onClick={() => runPreview("seed-ajm", "AJM seed")} disabled={busy}>
-                  Preview AJM seed
-                </Button>
-                <Button variant="outline" onClick={() => runPreview("backfill-interested", "Interested backfill")} disabled={busy}>
-                  Preview interested backfill
-                </Button>
-                <Button variant="outline" onClick={() => runPreview("backfill-orders", "Order backfill")} disabled={busy}>
-                  Preview order backfill
-                </Button>
+              <div className="space-y-2 pt-1">
+                {[
+                  { target: "seed-ajm", label: "AJM seed", warn: "Seeds the ajm_pipedrive_push cohort into AJM Reactivation (To Contact), owned by Christina." },
+                  { target: "backfill-interested", label: "Interested backfill", warn: "Creates deals for the interested / catalog_sent backlog (AJM overlap advances its AJM deal; rest → Catalog Interested)." },
+                  { target: "backfill-orders", label: "Order backfill (all history)", warn: "Creates a Won deal for EVERY historical wholesale order (tagged for rollback)." },
+                ].map((a) => {
+                  const rs = status.runs?.[a.target];
+                  const running = rs?.inFlight || rs?.state === "running";
+                  return (
+                    <div key={a.target} className="flex flex-wrap items-center gap-2 rounded-md border p-2">
+                      <span className="text-sm font-medium min-w-[12rem]">{a.label}</span>
+                      <Button variant="outline" size="sm" onClick={() => runPreview(a.target, a.label)} disabled={busy || running}>
+                        Preview
+                      </Button>
+                      <Button size="sm" onClick={() => runReal(a.target, a.label, a.warn)} disabled={busy || running}>
+                        {running ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
+                        {running ? "Running…" : "Run for real"}
+                      </Button>
+                      {rs?.state === "done" && rs.summary && (
+                        <span className="text-xs text-green-700">
+                          ✓ {Object.entries(rs.summary).filter(([, v]) => typeof v === "number").map(([k, v]) => `${k}:${v}`).join(" · ")}
+                        </span>
+                      )}
+                      {rs?.state === "error" && <span className="text-xs text-destructive">✗ {rs.error}</span>}
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="flex flex-wrap items-center gap-2 pt-2 border-t">
@@ -453,10 +505,8 @@ function PipedriveIntegrationsPageInner() {
               </div>
 
               <p className="text-xs text-muted-foreground">
-                Run the real writes with the key-gated endpoint, dry-run first, e.g.:
-                <code className="block mt-1 bg-muted p-2 rounded">
-                  POST /api/admin/pipedrive/sync &#123;&quot;action&quot;:&quot;seed-ajm&quot;,&quot;dryRun&quot;:false&#125;
-                </code>
+                Previews are dry runs (no writes). &quot;Run for real&quot; executes in the background — counts above update live.
+                The AJM seed needs its cohort tagged first (one-time tagging step).
               </p>
             </CardContent>
           </Card>

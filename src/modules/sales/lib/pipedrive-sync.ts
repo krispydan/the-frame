@@ -746,6 +746,61 @@ export async function runOrderDealSweep(sinceDays = 14): Promise<unknown> {
   return backfillOrderDeals({ sinceDays });
 }
 
+// ── background runner (click-to-run from the settings page) ─────────────────
+
+export type RunTarget = "seed-ajm" | "backfill-interested" | "backfill-orders";
+const RUN_TARGETS: RunTarget[] = ["seed-ajm", "backfill-interested", "backfill-orders"];
+const inFlight = new Set<string>();
+
+function setRunState(target: string, state: Record<string, unknown>): void {
+  setSetting(`pipedrive_run_${target}`, JSON.stringify({ ...state, at: new Date().toISOString() }));
+}
+export function getRunState(target: string): Record<string, unknown> | null {
+  const raw = getSetting(`pipedrive_run_${target}`);
+  if (!raw) return null;
+  try {
+    return { ...(JSON.parse(raw) as Record<string, unknown>), inFlight: inFlight.has(target) };
+  } catch {
+    return null;
+  }
+}
+export function getAllRunStates(): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const t of RUN_TARGETS) out[t] = getRunState(t);
+  return out;
+}
+
+/**
+ * Kick a real (non-dry) push as a detached background task. Returns
+ * immediately; progress/result land in settings (poll via getRunState). The
+ * Node process keeps running the work after the HTTP response — the same
+ * fire-and-forget approach the long cron jobs use. Idempotent functions mean a
+ * mid-run restart is recovered by clicking again.
+ */
+export function kickBackgroundRun(target: RunTarget): { started: boolean; alreadyRunning?: boolean; error?: string } {
+  if (inFlight.has(target)) return { started: false, alreadyRunning: true };
+  if (!getPipedriveConnectionStatus().connected || !getPipelineConfig()) {
+    setRunState(target, { state: "error", error: "pipedrive not configured" });
+    return { started: false, error: "pipedrive not configured" };
+  }
+  inFlight.add(target);
+  setRunState(target, { state: "running" });
+  void (async () => {
+    try {
+      let summary: unknown;
+      if (target === "seed-ajm") summary = await seedAjmToPipedrive({});
+      else if (target === "backfill-interested") summary = await backfillInterested({});
+      else summary = await backfillOrderDeals({ backfillRunId: new Date().toISOString().slice(0, 10) });
+      setRunState(target, { state: "done", summary });
+    } catch (e) {
+      setRunState(target, { state: "error", error: e instanceof Error ? e.message : String(e) });
+    } finally {
+      inFlight.delete(target);
+    }
+  })();
+  return { started: true };
+}
+
 // ── status fan-out job (go-forward interest edge) ───────────────────────────
 
 /**
