@@ -21,6 +21,7 @@ import {
   seedAjmToPipedrive,
   backfillInterested,
   backfillOrderDeals,
+  syncActivitiesToPipedrive,
   isSyncEnabled,
   setSyncEnabled,
   kickBackgroundRun,
@@ -147,7 +148,7 @@ export async function POST(req: NextRequest) {
 
       case "run": {
         const target = (body as { target?: string }).target as RunTarget | undefined;
-        if (!target || !["seed-ajm", "backfill-interested", "backfill-orders"].includes(target)) {
+        if (!target || !["seed-ajm", "backfill-interested", "backfill-orders", "sync-activities"].includes(target)) {
           return NextResponse.json({ ok: false, error: `Unknown run target: ${target}` }, { status: 400 });
         }
         const r = kickBackgroundRun(target);
@@ -163,6 +164,9 @@ export async function POST(req: NextRequest) {
         }
         if (body.target === "backfill-orders") {
           return NextResponse.json({ ok: true, preview: await backfillOrderDeals({ dryRun: true }) });
+        }
+        if (body.target === "sync-activities") {
+          return NextResponse.json({ ok: true, preview: await syncActivitiesToPipedrive({ dryRun: true }) });
         }
         return NextResponse.json({ ok: false, error: `Unknown preview target: ${body.target}` }, { status: 400 });
       }

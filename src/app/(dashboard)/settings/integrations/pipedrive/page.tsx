@@ -468,6 +468,7 @@ function PipedriveIntegrationsPageInner() {
                   { target: "seed-ajm", label: "AJM seed", warn: "Seeds the ajm_pipedrive_push cohort into AJM Reactivation (To Contact), owned by Christina." },
                   { target: "backfill-interested", label: "Interested backfill", warn: "Creates deals for the interested / catalog_sent backlog (AJM overlap advances its AJM deal; rest → Catalog Interested)." },
                   { target: "backfill-orders", label: "Order backfill (all history)", warn: "Creates a Won deal for EVERY historical wholesale order (tagged for rollback)." },
+                  { target: "sync-activities", label: "Activity sync", warn: "Logs Instantly/PhoneBurner engagement (emails, replies, calls) onto Pipedrive orgs/persons/deals." },
                 ].map((a) => {
                   const rs = status.runs?.[a.target];
                   const running = rs?.inFlight || rs?.state === "running";

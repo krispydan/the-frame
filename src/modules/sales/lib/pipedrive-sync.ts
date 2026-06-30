@@ -32,6 +32,7 @@ import {
   createPerson,
   createDeal,
   updateDeal,
+  createActivity,
   findPersonIdByEmail,
   getPipedriveConnectionStatus,
   PipedriveError,
@@ -855,10 +856,136 @@ export async function runOrderDealSweep(sinceDays = 14): Promise<unknown> {
   return backfillOrderDeals({ sinceDays });
 }
 
+// ── activity sync (Instantly / PhoneBurner engagement → Pipedrive) ──────────
+
+interface ActivityRow {
+  id: string;
+  event_type: string;
+  entity_id: string;
+  data: string | null;
+  created_at: string | null;
+}
+
+/** Map a frame activity_feed event to a Pipedrive activity {type, subject}. */
+function mapActivity(eventType: string, data: Record<string, unknown>): { type: string; subject: string } {
+  const e = eventType.toLowerCase();
+  if (e.startsWith("phoneburner_")) {
+    const disp = (data.disposition || data.last_call_disposition || data.status || "") as string;
+    return { type: "call", subject: disp ? `Call — ${disp}` : "Call" };
+  }
+  // instantly_*
+  const subj = (data.email_subject as string) || "";
+  if (e.includes("reply") || e.includes("replied")) return { type: "email", subject: "Email reply received" };
+  if (e.includes("interested") && !e.includes("not")) return { type: "email", subject: "Marked interested (Instantly)" };
+  if (e.includes("not_interested")) return { type: "email", subject: "Marked not interested (Instantly)" };
+  if (e.includes("open")) return { type: "email", subject: subj ? `Email opened: ${subj}` : "Email opened" };
+  if (e.includes("sent") || e.includes("email")) return { type: "email", subject: subj ? `Email sent: ${subj}` : "Email sent" };
+  return { type: "task", subject: eventType.replace(/_/g, " ") };
+}
+
+function activityNote(data: Record<string, unknown>): string | undefined {
+  const bits = [
+    data.campaign_name ? `Campaign: ${data.campaign_name}` : "",
+    data.reply_snippet ? `Reply: ${data.reply_snippet}` : "",
+    data.notes ? `Notes: ${data.notes}` : "",
+    data.agent_email ? `Agent: ${data.agent_email}` : "",
+  ].filter(Boolean);
+  return bits.length ? bits.join("\n") : undefined;
+}
+
+export interface ActivitySyncResult {
+  scanned: number;
+  pushed: number;
+  skipped: number;
+  errors: Array<{ activityId: string; error: string }>;
+  dryRun: boolean;
+}
+
+/**
+ * Push Instantly/PhoneBurner engagement (activity_feed rows) into Pipedrive as
+ * logged activities on the company's org/person/open-deal, so the rep sees the
+ * email + call history on the Pipedrive timeline. Idempotent via
+ * activity_feed.pipedrive_activity_id. Only companies already in Pipedrive
+ * (pipedrive_org_id set) are considered.
+ */
+export async function syncActivitiesToPipedrive(
+  opts: { dryRun?: boolean; limit?: number } = {},
+): Promise<ActivitySyncResult> {
+  requireConfig();
+  const dryRun = opts.dryRun ?? false;
+  const limit = opts.limit ?? 500;
+  const rows = sqlite
+    .prepare(
+      `SELECT af.id, af.event_type, af.entity_id, af.data, af.created_at
+         FROM activity_feed af
+         JOIN companies c ON c.id = af.entity_id AND c.pipedrive_org_id IS NOT NULL
+        WHERE af.pipedrive_activity_id IS NULL
+          AND af.entity_type = 'company'
+          AND (af.event_type LIKE 'instantly_%' OR af.event_type LIKE 'phoneburner_%')
+        ORDER BY af.created_at ASC
+        LIMIT ?`,
+    )
+    .all(Math.max(1, Math.floor(limit))) as ActivityRow[];
+
+  const result: ActivitySyncResult = { scanned: rows.length, pushed: 0, skipped: 0, errors: [], dryRun };
+  const stamp = sqlite.prepare("UPDATE activity_feed SET pipedrive_activity_id = ? WHERE id = ?");
+
+  for (const r of rows) {
+    try {
+      const c = getCompany(r.entity_id);
+      if (!c?.pipedrive_org_id) {
+        result.skipped++;
+        continue;
+      }
+      if (dryRun) {
+        result.pushed++;
+        continue;
+      }
+      let data: Record<string, unknown> = {};
+      try {
+        data = r.data ? (JSON.parse(r.data) as Record<string, unknown>) : {};
+      } catch {
+        /* leave empty */
+      }
+      const { type, subject } = mapActivity(r.event_type, data);
+      const open = findAnyOpenDeal(r.entity_id);
+      const due = (r.created_at || "").slice(0, 10) || undefined;
+      const body: Record<string, unknown> = {
+        subject,
+        type,
+        done: 1,
+        org_id: c.pipedrive_org_id,
+      };
+      if (c.pipedrive_person_id) body.person_id = c.pipedrive_person_id;
+      if (open?.pipedrive_deal_id) body.deal_id = open.pipedrive_deal_id;
+      if (due) body.due_date = due;
+      const note = activityNote(data);
+      if (note) body.note = note;
+
+      const created = await createActivity(body as { subject: string });
+      stamp.run(created.id, r.id);
+      result.pushed++;
+    } catch (e) {
+      if (e instanceof PipedriveNotReadyError) throw e;
+      result.errors.push({ activityId: r.id, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return result;
+}
+
+/** Cron entry: push recent engagement to Pipedrive. No-ops unless sync is on. */
+export async function runActivitySweep(limit = 300): Promise<unknown> {
+  if (!isSyncEnabled()) return { skipped: "pipedrive sync disabled" };
+  if (!getPipedriveConnectionStatus().connected || !getPipelineConfig()) {
+    return { skipped: "pipedrive not configured" };
+  }
+  return syncActivitiesToPipedrive({ limit });
+}
+
 // ── background runner (click-to-run from the settings page) ─────────────────
 
-export type RunTarget = "seed-ajm" | "backfill-interested" | "backfill-orders";
-const RUN_TARGETS: RunTarget[] = ["seed-ajm", "backfill-interested", "backfill-orders"];
+export type RunTarget = "seed-ajm" | "backfill-interested" | "backfill-orders" | "sync-activities";
+const RUN_TARGETS: RunTarget[] = ["seed-ajm", "backfill-interested", "backfill-orders", "sync-activities"];
 const inFlight = new Set<string>();
 
 function setRunState(target: string, state: Record<string, unknown>): void {
@@ -899,6 +1026,7 @@ export function kickBackgroundRun(target: RunTarget): { started: boolean; alread
       let summary: unknown;
       if (target === "seed-ajm") summary = await seedAjmToPipedrive({});
       else if (target === "backfill-interested") summary = await backfillInterested({});
+      else if (target === "sync-activities") summary = await syncActivitiesToPipedrive({});
       else summary = await backfillOrderDeals({ backfillRunId: new Date().toISOString().slice(0, 10) });
       setRunState(target, { state: "done", summary });
     } catch (e) {

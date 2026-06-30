@@ -284,6 +284,9 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN pipedrive_synced_at TEXT"); 
 try { sqlite.exec("CREATE INDEX idx_companies_pipedrive_org ON companies (pipedrive_org_id)"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE orders ADD COLUMN pipedrive_deal_id INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_orders_pipedrive_deal ON orders (pipedrive_deal_id)"); } catch { /* exists */ }
+// Instantly/PhoneBurner activity_feed rows mirrored to Pipedrive activities.
+// Stamp the Pipedrive activity id so each engagement event pushes once.
+try { sqlite.exec("ALTER TABLE activity_feed ADD COLUMN pipedrive_activity_id INTEGER"); } catch { /* exists */ }
 
 // Pipedrive deal projection (read-only mirror of Pipedrive deals). Kept in
 // its own table rather than overloading `deals` so the existing internal
