@@ -96,21 +96,39 @@ export default function ImportAjmPage() {
     }
   }
 
-  async function runEnrichBatch() {
+  const pollEnrich = async () => {
+    try {
+      const res = await fetch("/api/v1/sales/enrich-ajm");
+      const r = await res.json();
+      setEnrichResult((r.state as Record<string, unknown>) || null);
+      if (r.inFlight || (r.state && r.state.state === "running")) {
+        setTimeout(pollEnrich, 5000);
+      } else {
+        setEnrichBusy(false);
+      }
+    } catch {
+      setEnrichBusy(false);
+    }
+  };
+
+  async function startEnrich() {
     setEnrichBusy(true);
     setEnrichError("");
     try {
       const res = await fetch("/api/v1/sales/enrich-ajm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ limit: 25 }),
+        body: JSON.stringify({}),
       });
       const r = await res.json();
-      if (r.ok) setEnrichResult(r);
-      else setEnrichError(r.error || "Enrichment failed");
+      if (!r.ok && !r.alreadyRunning) {
+        setEnrichError(r.error || "Failed to start enrichment");
+        setEnrichBusy(false);
+        return;
+      }
+      pollEnrich();
     } catch (e) {
       setEnrichError(e instanceof Error ? e.message : String(e));
-    } finally {
       setEnrichBusy(false);
     }
   }
@@ -210,18 +228,18 @@ export default function ImportAjmPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <Button variant="outline" onClick={runEnrichBatch} disabled={enrichBusy}>
+          <Button variant="outline" onClick={startEnrich} disabled={enrichBusy}>
             {enrichBusy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-            Run a batch of 25 now
+            {enrichBusy ? "Enriching… (runs in background)" : "Enrich AJM now"}
           </Button>
           {enrichResult && (
             <div className="text-sm">
-              <span className="text-muted-foreground">Last batch:</span>{" "}
+              <span className="text-muted-foreground">{String(enrichResult.state ?? "")}:</span>{" "}
               {Object.entries(enrichResult)
-                .filter(([k, v]) => typeof v === "number" && k !== "companies_attempted")
-                .map(([k, v]) => `${k}: ${v}`)
-                .join(" · ") || "no matches"}
-              {typeof enrichResult.companies_attempted === "number" ? ` (of ${enrichResult.companies_attempted} attempted)` : ""}
+                .filter(([k, v]) => typeof v === "number")
+                .map(([k, v]) => `${k}: ${(v as number).toLocaleString()}`)
+                .join(" · ") || "—"}
+              {enrichResult.error ? ` · ${String(enrichResult.error)}` : ""}
             </div>
           )}
           {enrichError && (
