@@ -45,6 +45,17 @@ const CONTACT: Record<string, string> = {
 const ADJ_INCOME_ACCOUNT = "4060"; // shipping income / passthrough (positive)
 const ADJ_EXPENSE_ACCOUNT = "5900"; // inventory adjustments & shrinkage (negative)
 
+/**
+ * Per-payout "delta plug" — the gap between (gross − fees + adjustments) and the
+ * actual net deposit, caused by deductions the historical `settlements` rows
+ * don't itemize (Faire promotions / damaged-missing / shipping labels, some
+ * Shopify refunds). Booked so the invoice still ties to the deposit 1:1, flagged
+ * for the bookkeeper to recategorize. The forward live flow itemizes these from
+ * the APIs, so the plug is a historical-only artifact.
+ */
+const PLUG_NEG_ACCOUNT = "4300"; // net deposit LOWER than lines → contra-revenue (refunds/promos)
+const PLUG_POS_ACCOUNT = "4060"; // net deposit HIGHER than lines → income (overpayment/passthrough)
+
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 type SettlementRow = {
@@ -74,6 +85,12 @@ export function componentsForSettlement(s: SettlementRow): InvoiceComponent[] {
   const adj = round2(s.adjustments);
   if (adj > 0) comps.push({ category: "adjustments", accountCode: ADJ_INCOME_ACCOUNT, amount: adj, kind: "revenue", description: `Balance adjustment (+) — ${ref}` });
   else if (adj < 0) comps.push({ category: "adjustments", accountCode: ADJ_EXPENSE_ACCOUNT, amount: Math.abs(adj), kind: "contra", description: `Balance adjustment (−) — ${ref}` });
+
+  // Delta plug so the invoice ties to the actual net deposit (see PLUG_* note).
+  const lineTotal = comps.reduce((sum, c) => sum + (c.kind === "revenue" ? c.amount : -c.amount), 0);
+  const plug = round2(round2(s.netAmount) - round2(lineTotal));
+  if (plug > 0.01) comps.push({ category: "settlement_delta", accountCode: PLUG_POS_ACCOUNT, amount: plug, kind: "revenue", description: `Settlement delta (+) — ${ref} (REVIEW: unitemized passthrough/overpayment)` });
+  else if (plug < -0.01) comps.push({ category: "settlement_delta", accountCode: PLUG_NEG_ACCOUNT, amount: Math.abs(plug), kind: "contra", description: `Settlement delta (−) — ${ref} (REVIEW: unitemized refunds/promos/deductions)` });
   return comps;
 }
 
@@ -112,6 +129,10 @@ export type SettlementPreviewResult = {
   byChannel: Record<string, { count: number; gross: number; fees: number; adjustments: number; net: number }>;
   /** Payouts whose invoice lines don't tie to net (need review). */
   deltaCount: number;
+  /** Total of all plug lines booked (the unitemized deduction gap). */
+  plugTotal: number;
+  /** Net-negative payouts — become credit notes, not invoices. */
+  creditNotes: Array<{ settlementId: string; channel: string; invoiceNumber: string; net: number }>;
   /** A few rendered invoices for eyeballing. */
   samples: SettlementInvoicePreview[];
 };
@@ -137,12 +158,20 @@ export function previewSettlementInvoices(opts: { from?: string; to?: string; sa
   const res: SettlementPreviewResult = {
     range: { from: opts.from ?? null, to: opts.to ?? null },
     count: 0, revenueByAccount: {}, feesByAccount: {}, restatedRevenueTotal: 0,
-    feesTotal: 0, netToBankTotal: 0, byChannel: {}, deltaCount: 0, samples: [],
+    feesTotal: 0, netToBankTotal: 0, byChannel: {}, deltaCount: 0, plugTotal: 0,
+    creditNotes: [], samples: [],
   };
   const sampleSize = opts.sampleSize ?? 5;
 
   for (const s of rows) {
+    // Net-negative payout (refunds/chargebacks exceeded sales) → credit note, not an ACCREC invoice.
+    if (round2(s.netAmount) <= 0) {
+      res.creditNotes.push({ settlementId: s.id, channel: s.channel, invoiceNumber: invoiceNumberFor(s), net: round2(s.netAmount) });
+      continue;
+    }
     const comps = componentsForSettlement(s);
+    const plugComp = comps.find((c) => c.category === "settlement_delta");
+    if (plugComp) res.plugTotal = round2(res.plugTotal + (plugComp.kind === "revenue" ? plugComp.amount : -plugComp.amount));
     const built = buildSettlementInvoice({
       channel: s.channel,
       contactName: CONTACT[s.channel] ?? s.channel,
