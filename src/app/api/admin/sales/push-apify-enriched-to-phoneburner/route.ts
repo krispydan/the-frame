@@ -136,14 +136,25 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Resolve owner_id once (PB requires it on every create).
+  // Resolve owner_id once (PB requires it on every create). Settings
+  // cache first — discoverOwnerId() is unauthenticated against PB's
+  // /me-less API and can 401 in some workspaces.
   let ownerId: string;
   try {
-    const discovered = await phoneBurnerClient.discoverOwnerId();
-    if (!discovered) {
-      throw new Error("PhoneBurner discoverOwnerId returned null");
+    const cached = sqlite
+      .prepare("SELECT value FROM settings WHERE key = 'phoneburner_owner_id' LIMIT 1")
+      .get() as { value: string | null } | undefined;
+    if (cached?.value) {
+      ownerId = cached.value;
+    } else {
+      const discovered = await phoneBurnerClient.discoverOwnerId();
+      if (!discovered) {
+        throw new Error(
+          "PhoneBurner owner_id not cached in settings and discoverOwnerId returned null",
+        );
+      }
+      ownerId = discovered;
     }
-    ownerId = discovered;
   } catch (e) {
     return NextResponse.json(
       {
