@@ -9,15 +9,22 @@ Christina**. This is Phase 0 + the AJM slice of Phase 3 of
 
 ---
 
-## 1. Source file & scope
+## 1. Scope — import all to the frame, push only the curated 1,173 to Pipedrive
 
-- **Curated list:** the `Sheet4` export — the pre-filtered subset (~**1,173**
-  rows) Daniel earmarked for import. *This is the list we import.*
-- **Not** the full merged master (`…Email_and_No_Email…`, 13,821 rows) — that file
-  is the union of an email list + a 9,314-row "No-email list" and is the source
-  the curated subset was filtered from. We import only the curated subset.
-- **Action needed:** re-upload `Sheet4` (last upload was 0 bytes). Column
-  structure is assumed identical to the master (59 columns); validated on receipt.
+Decision (2026-06-27): the frame is the system of record, so it imports the
+**full AJM cohort** (the master export, ~13,620 after skips). Pipedrive stays
+curated — only the **~1,173-row `Sheet4`** subset Daniel earmarked is pushed.
+
+- **Full master** (`…Email_and_No_Email…`, 13,821 rows; union of an email list +
+  a 9,314-row "No-email list") → imported to the frame.
+- **Curated `Sheet4`** (~1,173) → the same rows, re-prepped with
+  `--push-tag ajm_pipedrive_push`, so those companies carry a tag the Pipedrive
+  push selects on. Because the importer dedupes and **merges tags**, this second
+  pass just adds the tag to companies already imported by the master pass — no
+  duplicates.
+- **Pipedrive selection** = `companies` whose `tags` contain `ajm_pipedrive_push`.
+- **Action needed:** re-upload `Sheet4` as a CSV file (last upload was 0 bytes).
+  Column structure assumed identical to the master (59 cols); validated on receipt.
 
 ---
 
@@ -111,31 +118,36 @@ existed; the prep script was the missing half.
 
 Steps:
 
-1. **Get `Sheet4` as a CSV file** on disk (the earlier upload arrived empty;
+1. **Pass 1 — import the full cohort to the frame:**
+   ```
+   python3 scripts/prep-ajm-import.py master.csv ajm_all.jsonl
+   curl -F key=jaxy2026 -F dryRun=true -F file=@ajm_all.jsonl <host>/api/admin/sales/import-ajm
+   curl -F key=jaxy2026             -F file=@ajm_all.jsonl <host>/api/admin/sales/import-ajm
+   ```
+   (We have the master on disk already.) Idempotent. Acceptance per master-plan
+   §9.4 (field-mapping + dedup validation + 20-row hand audit).
+2. **Get `Sheet4` as a CSV file** on disk (the earlier upload arrived empty;
    re-export and re-upload).
-2. **Prep + dry-run summary:**
+3. **Pass 2 — tag the curated subset for Pipedrive:**
    ```
-   python3 scripts/prep-ajm-import.py Sheet4.csv ajm_import.jsonl
+   python3 scripts/prep-ajm-import.py Sheet4.csv ajm_push.jsonl --push-tag ajm_pipedrive_push
+   curl -F key=jaxy2026 -F file=@ajm_push.jsonl <host>/api/admin/sales/import-ajm
    ```
-   Prints rows read, emit count, and the split (already-customer / reactivation /
-   invalid-email / skipped) for Daniel's sign-off, and writes the JSONL.
-3. **Import to the frame (dry run first):**
-   ```
-   curl -F key=jaxy2026 -F dryRun=true -F file=@ajm_import.jsonl <host>/api/admin/sales/import-ajm
-   curl -F key=jaxy2026 -F file=@ajm_import.jsonl               <host>/api/admin/sales/import-ajm
-   ```
-   Idempotent. Acceptance per master-plan §9.4 (field-mapping + dedup validation +
-   20-row hand audit).
-4. **Create Pipedrive deals (Phase 3):** for each imported AJM company, create the
-   AJM Reactivation deal (**owner = Christina**); already-customer (`cohort =
-   ajm_already_customer`) rows → **Won**, backdated to `ajm_last_order`;
-   reactivation rows → open deal at the first stage. Dry-run preview first.
+   Prints the ~1,173 split for sign-off; the re-import merges `ajm_pipedrive_push`
+   onto those companies (no duplicates).
+4. **Create Pipedrive deals (Phase 3)** for companies tagged
+   `ajm_pipedrive_push` only — create the AJM Reactivation deal (**owner =
+   Christina**); already-customer (`cohort = ajm_already_customer`) rows → **Won**,
+   backdated to `ajm_last_order`; reactivation rows → open deal at the first stage.
+   Dry-run preview first. The untagged remainder stays in the frame and only
+   reaches Pipedrive later if it shows interest via Instantly/PhoneBurner.
 
 > **Validation run (master file, 13,821 rows)** confirmed the script and mapping:
 > 13,620 emit (123 already-customer → Won, 13,485 reactivation, 12 call-only),
-> 201 skipped (closed/duplicate/Non-US). Running it on the curated **Sheet4**
-> (~1,173 rows) yields the actual import set. Note ~64% of master rows are
-> phone-only (no valid email) — call-first leads for Christina.
+> 201 skipped (closed/duplicate/Non-US) — this is the **frame** import (pass 1).
+> The **Sheet4** pass (~1,173, pass 2) re-tags that subset for the **Pipedrive**
+> push. Note ~64% of master rows are phone-only (no valid email) — call-first
+> leads.
 
 > Prereqs (from master-plan §13): Pipedrive API token + subdomain + **staging**
 > company, the AJM pipeline + stage IDs, and **Christina's Pipedrive user/owner

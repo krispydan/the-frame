@@ -166,9 +166,18 @@ SoR**, the key is checked against Pipedrive before create: an open deal on the O
 
 | # | Bucket | Definition | Pipeline | Gate |
 |---|--------|-----------|----------|------|
-| 1 | AJM reactivation | Former AJM buyers (`source = 'ajm_2025_import'`) who respond | AJM Reactivation | Interest → new deal |
+| 1 | AJM reactivation | Curated AJM subset, tagged `ajm_pipedrive_push` (~1,173) | AJM Reactivation | **Seeded directly** (deliberate) |
 | 2 | Catalog-interested | Cold non-AJM leads who want a catalog | Catalog Interested | Interest |
 | 3 | Customers | B2B wholesale buyers (`channel = 'shopify_wholesale'`) | Customers | Order |
+
+**AJM: full cohort in the frame, curated subset to Pipedrive.** The frame
+imports *all* AJM contacts (`source = 'ajm_2025_import'`, ~13.6k) as the system of
+record. Only the curated subset tagged `ajm_pipedrive_push` (~1,173) is **seeded
+directly** into the AJM Reactivation pipeline (assigned to Christina) — this is
+the one deliberate, non-interest-gated entry into Pipedrive, because importing
+them *is* the decision to work them. The untagged remainder stays frame-only and
+reaches Pipedrive only if it later shows interest via Instantly/PhoneBurner
+(the normal Bucket-2-style gate). See [`ajm-import-plan.md`](./ajm-import-plan.md).
 
 **AJM has two sub-cohorts** (verified in `ajm-import.ts`): rows with a verified
 Jaxy match import as `customer`; unmatched rows import as `qualified_lead`. The

@@ -3,9 +3,16 @@
 Prep the AJM wholesale customer spreadsheet into ajm_import.jsonl for the
 frame's importer (POST /api/admin/sales/import-ajm, key=jaxy2026).
 
-  python3 scripts/prep-ajm-import.py <input.csv> [output.jsonl]
+  python3 scripts/prep-ajm-import.py <input.csv> [output.jsonl] [--push-tag TAG]
 
 If output.jsonl is omitted, prints the dry-run summary only (no file written).
+
+The frame imports the FULL AJM cohort (system of record); only the curated
+subset is pushed to Pipedrive. To mark that subset, prep it with
+`--push-tag ajm_pipedrive_push`; the Pipedrive push then selects companies
+carrying that tag. Two passes (importer is idempotent, merges tags):
+  1. prep the full master      -> import everyone to the frame
+  2. prep the curated Sheet4 with --push-tag -> re-import merges the tag on the subset
 
 Implements the segmentation agreed in docs/ajm-import-plan.md, driven by the
 "Dont send postcard to reason" column:
@@ -87,7 +94,7 @@ def classify(reason):
     return ("reactivation", "qualified_lead", "ajm_reactivation")
 
 
-def build_row(d):
+def build_row(d, push_tag=None):
     reason = norm(d.get("Dont send postcard to reason"))
     bucket, status, cohort = classify(reason)
     if bucket == "skip":
@@ -101,6 +108,13 @@ def build_row(d):
     cat = norm(d.get("AJM_Category"))
     if cat:
         tags.append(cat)
+    # When prepping the curated subset (Sheet4), tag rows so the Pipedrive push
+    # can select exactly this list. The frame still imports the full cohort;
+    # only tagged companies are pushed to Pipedrive. The importer merges tags
+    # (set union), so re-running the subset over an already-imported full
+    # cohort just adds this tag to the matching companies.
+    if push_tag:
+        tags.append(push_tag)
 
     row = {
         "name": norm(d.get("CUS_NM")),
@@ -133,11 +147,18 @@ def build_row(d):
 
 
 def main():
-    if len(sys.argv) < 2:
+    args = [a for a in sys.argv[1:]]
+    push_tag = None
+    if "--push-tag" in args:
+        i = args.index("--push-tag")
+        push_tag = args[i + 1]
+        del args[i:i + 2]
+    positional = [a for a in args if not a.startswith("--")]
+    if not positional:
         print(__doc__)
         sys.exit(1)
-    inp = sys.argv[1]
-    outp = sys.argv[2] if len(sys.argv) > 2 else None
+    inp = positional[0]
+    outp = positional[1] if len(positional) > 1 else None
 
     counts = Counter()
     pipeline = Counter()   # which Pipedrive pipeline the row will seed
@@ -147,7 +168,7 @@ def main():
     with open(inp, newline="", encoding="utf-8-sig", errors="replace") as fh:
         for d in csv.DictReader(fh):
             counts["total"] += 1
-            row, bucket = build_row(d)
+            row, bucket = build_row(d, push_tag=push_tag)
             counts[bucket] += 1
             if row is None:
                 continue
@@ -170,9 +191,13 @@ def main():
     print(f"  contactability of emitted rows:")
     print(f"       with email:      {emails['with_email']:>6}")
     print(f"       call-only:       {emails['no_email_call_only']:>6}")
-    print(f"  Pipedrive seeding (owner = Christina):")
-    for k, v in pipeline.most_common():
-        print(f"       {k:<28}{v:>6}")
+    if push_tag:
+        print(f"  push tag applied:     {push_tag!r}  (these rows -> Pipedrive)")
+        print(f"  Pipedrive seeding (owner = Christina):")
+        for k, v in pipeline.most_common():
+            print(f"       {k:<28}{v:>6}")
+    else:
+        print(f"  push tag:             none (frame-only import; not pushed to Pipedrive)")
 
     if outp:
         with open(outp, "w", encoding="utf-8") as f:
