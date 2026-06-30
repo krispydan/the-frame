@@ -228,6 +228,84 @@ function mergeTags(existingJson: string | null, incoming: string[]): string {
   return JSON.stringify(dedupeTagsArray([...existing, ...incoming]));
 }
 
+export interface TagPushSummary {
+  total_rows: number;
+  matched: number;
+  tagged: number;
+  already_tagged: number;
+  unmatched: number;
+  matched_by: { email: number; domain: number; name_state: number; phone: number };
+  sample_unmatched: string[];
+  dryRun: boolean;
+}
+
+/**
+ * Add a tag (default `ajm_pipedrive_push`) to existing frame companies that
+ * match the given rows, using the *same* dedupe matcher the AJM import used —
+ * so every row that was imported resolves to its company. Idempotent: a
+ * company that already carries the tag is counted but not rewritten, and
+ * multiple rows resolving to one company tag it once.
+ *
+ * Used to mark the curated wholesale subset (Sheet7) for the Pipedrive seed.
+ */
+export function tagAjmPushRows(
+  rows: Array<{ name?: string | null; email?: string | null; phone?: string | null; state?: string | null }>,
+  tag = "ajm_pipedrive_push",
+  opts: { dryRun?: boolean } = {},
+): TagPushSummary {
+  const dryRun = !!opts.dryRun;
+  const now = new Date().toISOString();
+  const idx = buildDedupeIndex();
+  const update = sqlite.prepare("UPDATE companies SET tags = ?, updated_at = ? WHERE id = ?");
+
+  const summary: TagPushSummary = {
+    total_rows: rows.length,
+    matched: 0,
+    tagged: 0,
+    already_tagged: 0,
+    unmatched: 0,
+    matched_by: { email: 0, domain: 0, name_state: 0, phone: 0 },
+    sample_unmatched: [],
+    dryRun,
+  };
+  const handled = new Set<string>(); // company ids already processed this run
+
+  for (const r of rows) {
+    const probe = { name: r.name || "", email: r.email ?? null, phone: r.phone ?? null, state: r.state ?? null };
+    const match = findExistingCompany(probe as AjmRow, idx);
+    if (!match) {
+      summary.unmatched++;
+      if (summary.sample_unmatched.length < 25) summary.sample_unmatched.push(r.name || r.email || r.phone || "?");
+      continue;
+    }
+    summary.matched++;
+    summary.matched_by[match.matched_by]++;
+    if (handled.has(match.id)) continue;
+    handled.add(match.id);
+
+    const current = idx.byId.get(match.id)?.tags ?? match.tags;
+    let hasTag = false;
+    if (current) {
+      try {
+        const arr = JSON.parse(current);
+        hasTag = Array.isArray(arr) && arr.some((t) => String(t).toLowerCase() === tag.toLowerCase());
+      } catch {
+        hasTag = current.toLowerCase().includes(tag.toLowerCase());
+      }
+    }
+    if (hasTag) {
+      summary.already_tagged++;
+      continue;
+    }
+    const merged = mergeTags(current, [tag]);
+    if (!dryRun) update.run(merged, now, match.id);
+    const meta = idx.byId.get(match.id);
+    if (meta) meta.tags = merged; // keep index live for later rows
+    summary.tagged++;
+  }
+  return summary;
+}
+
 export interface ImportOpts {
   /** When true, compute every action but make zero writes. */
   dryRun?: boolean;
