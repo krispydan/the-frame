@@ -262,6 +262,14 @@ export const CRON_JOBS: CronJob[] = [
     defaultEnabled: false,
   },
   {
+    id: "ajm-gmaps-enrich",
+    schedule: "*/10 * * * *",  // every 10 min during business hours
+    description: "Enrich the AJM cohort (ajm_2025) via Apify Google Maps — website, hours, rating, permanently-closed. Chips away ~40/run. Opt-in (Apify cost ~$2-3/1000).",
+    handler: () => enrichViaGoogleMaps({ ajm: true, limit: 40 }) as Promise<unknown>,
+    guard: () => isDuringBusinessHours(),
+    defaultEnabled: false,
+  },
+  {
     id: "pipedrive-activity-sweep",
     schedule: "*/20 * * * *",  // every 20 min during business hours
     description: "Push recent Instantly/PhoneBurner engagement (emails, replies, calls) into Pipedrive as logged activities on the org/person/deal. No-ops until Pipedrive auto-sync is enabled.",

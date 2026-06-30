@@ -125,19 +125,29 @@ function loadCohort(opts: {
   tier?: string[];
   status?: string[];
   force?: boolean;
+  ajm?: boolean;
 }): CandidateCompany[] {
-  const wheres: string[] = [
-    // In any Instantly campaign — same definition as the cohort endpoint
-    `EXISTS (SELECT 1 FROM campaign_leads cl WHERE cl.company_id = c.id AND cl.instantly_lead_id IS NOT NULL)`,
-    // No phone yet
-    `NOT EXISTS (SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id)`,
-    // Enough location data to ask Google
-    `((c.city IS NOT NULL AND TRIM(c.city) <> '' AND c.state IS NOT NULL AND TRIM(c.state) <> '') OR (c.address IS NOT NULL AND TRIM(c.address) <> ''))`,
-    // Exclude dead-end statuses — never enrich a lead Sandra can't call.
-    // Includes Instantly "not interested" replies (hub-and-spoke status
-    // sync rolls these into companies.status = 'not_interested').
-    `c.status NOT IN ('not_interested', 'ghosted', 'not_qualified', 'rejected', 'customer')`,
-  ];
+  const wheres: string[] = opts.ajm
+    ? [
+        // AJM cohort: tagged ajm_2025 (or imported from AJM). Enrich website /
+        // hours / open-status regardless of phone or Instantly membership, and
+        // include customers (reactivation) — just need location data.
+        `(c.tags LIKE '%ajm_2025%' OR c.source = 'ajm_2025_import')`,
+        `((c.city IS NOT NULL AND TRIM(c.city) <> '' AND c.state IS NOT NULL AND TRIM(c.state) <> '') OR (c.address IS NOT NULL AND TRIM(c.address) <> ''))`,
+        `c.status NOT IN ('not_qualified', 'rejected')`,
+      ]
+    : [
+        // In any Instantly campaign — same definition as the cohort endpoint
+        `EXISTS (SELECT 1 FROM campaign_leads cl WHERE cl.company_id = c.id AND cl.instantly_lead_id IS NOT NULL)`,
+        // No phone yet
+        `NOT EXISTS (SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id)`,
+        // Enough location data to ask Google
+        `((c.city IS NOT NULL AND TRIM(c.city) <> '' AND c.state IS NOT NULL AND TRIM(c.state) <> '') OR (c.address IS NOT NULL AND TRIM(c.address) <> ''))`,
+        // Exclude dead-end statuses — never enrich a lead Sandra can't call.
+        // Includes Instantly "not interested" replies (hub-and-spoke status
+        // sync rolls these into companies.status = 'not_interested').
+        `c.status NOT IN ('not_interested', 'ghosted', 'not_qualified', 'rejected', 'customer')`,
+      ];
   if (!opts.force) {
     // Skip companies we've already attempted, regardless of outcome.
     // - google_place_id IS NOT NULL = matched, no need to re-query
@@ -447,12 +457,14 @@ export async function enrichViaGoogleMaps(opts: {
   status?: string[];
   force?: boolean;
   dryRun?: boolean;
+  ajm?: boolean;
 }): Promise<EnrichmentResult> {
   const cohort = loadCohort({
     limit: opts.limit,
     tier: opts.tier,
     status: opts.status,
     force: opts.force,
+    ajm: opts.ajm,
   });
 
   const result: EnrichmentResult = {
