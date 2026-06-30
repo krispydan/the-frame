@@ -17,7 +17,18 @@
 
 
 const APIFY_BASE = "https://api.apify.com/v2";
-const ACTOR_GMAPS = "compass~google-maps-scraper";
+
+/**
+ * Apify Google Maps actor — the URL-encoded "username~actor-name" form.
+ * Override at deploy time via env if Apify renames or you want to
+ * point at a different actor.
+ *
+ * Verified working 2026-06-30: compass~crawler-google-places (actor
+ * ID nwua9Gu5YrADL7ZDj). The previous name (google-maps-scraper)
+ * returned 404 — Apify must have renamed or merged the listing.
+ */
+const ACTOR_GMAPS =
+  process.env.APIFY_GMAPS_ACTOR_ID || "compass~crawler-google-places";
 
 export interface GoogleMapsPlace {
   /** Stable Google place id. Store on the company. */
