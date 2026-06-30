@@ -610,20 +610,32 @@ export async function enrichViaGoogleMaps(opts: {
       }
 
       // Detect degenerate Apify output: when it can't find the
-      // specific business it sometimes returns just the city name
-      // ("Lubbock", "Jackson"). Reclassify these as no_match — they
-      // contain no actionable data, and treating them as low-conf
-      // skips would mark companies as "tried" when really Apify
-      // had nothing for them.
+      // specific business it returns just the city/locality name
+      // ("Tuscumbia", "Santa Ana", "Lake Stevens"). Common shapes:
+      //   - title="Lubbock" address=""                            (clean)
+      //   - title="Tuscumbia" address="Alabama 35674"             (state+zip)
+      //   - title="Wakeman" address="Wakeman Township, OH 44889"  (locality)
+      //   - title="Bronxville" address="Eastchester, NY 10708"    (adjacent locality)
+      //
+      // The reliable detector is title === city (case-insens) OR
+      // title looks like a locality with no actual business name.
+      // Address presence is unreliable — Apify sometimes attaches the
+      // locality's address to the city-only result. Just check the
+      // title shape.
       const placeTitleLower = (place.title || "").toLowerCase().trim();
       const companyCityLower = (company.city || "").toLowerCase().trim();
-      const placeAddress = (place.address || "").trim();
       const looksLikeCity =
         !!placeTitleLower &&
         !!companyCityLower &&
+        // Exact city match (Tuscumbia → Tuscumbia)
         (placeTitleLower === companyCityLower ||
-          placeTitleLower.includes(companyCityLower)) &&
-        !placeAddress; // real businesses always have an address
+          // Title is contained in our city (Lake Stevens → Lake Stevens)
+          companyCityLower.includes(placeTitleLower) ||
+          // Title contains our city + has no business-shape words
+          (placeTitleLower.includes(companyCityLower) &&
+            !/\b(boutique|shop|store|llc|inc|company|salon|cafe)\b/i.test(
+              place.title || "",
+            )));
       if (looksLikeCity) {
         result.no_match++;
         stampAttemptStmt().run(
