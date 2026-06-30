@@ -174,15 +174,26 @@ function composeAddress(c: CompanyRow): string | null {
  * from a non-free primary-email domain (a business email domain is the site).
  */
 function deriveWebsite(c: CompanyRow, primaryEmail: string | null): string | null {
-  if (c.website && c.website.trim()) return c.website.trim();
-  if (primaryEmail) {
+  let raw: string | null = null;
+  if (c.website && c.website.trim()) raw = c.website.trim();
+  else if (primaryEmail) {
     const at = primaryEmail.lastIndexOf("@");
     const domain = at >= 0 ? primaryEmail.slice(at + 1).toLowerCase().trim() : "";
-    if (domain && !FREE_EMAIL_DOMAINS.has(domain) && !domain.endsWith("relay.faire.com")) {
-      return `https://${domain}`;
-    }
+    if (domain && !FREE_EMAIL_DOMAINS.has(domain) && !domain.endsWith("relay.faire.com")) raw = domain;
   }
-  return null;
+  if (!raw) return null;
+  // Pipedrive's org website field is URL-validated — a bare domain like
+  // "store.com" is rejected. Normalize to a full URL.
+  let url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  // Sanity: must look like a hostname with a dot; otherwise drop it.
+  try {
+    const u = new URL(url);
+    if (!u.hostname.includes(".") || /\s/.test(url)) return null;
+    url = u.toString().replace(/\/$/, "");
+  } catch {
+    return null;
+  }
+  return url;
 }
 
 function getPrimaryEmail(companyId: string): string | null {
@@ -373,7 +384,28 @@ export async function resolveOrg(companyId: string, ownerId?: number): Promise<n
   const body: Record<string, unknown> = { name: name || "Unknown company", ...enrich };
   if (keys.orgFrameCompanyId) body[keys.orgFrameCompanyId] = companyId;
   if (ownerId) body.owner_id = ownerId;
-  const created = await createOrganization(body as { name: string });
+  // Resilient create: Pipedrive may reject a value (e.g. a website that fails
+  // its URL validation). Drop the offending optional fields and retry rather
+  // than failing the whole org. Stamped ids remain the primary dedup key.
+  let created: PdCreated;
+  try {
+    created = await createOrganization(body as { name: string });
+  } catch (e1) {
+    if (keys.orgWebsite && keys.orgWebsite in body) {
+      const noWebsite = { ...body };
+      delete noWebsite[keys.orgWebsite];
+      try {
+        created = await createOrganization(noWebsite as { name: string });
+      } catch {
+        const minimal: Record<string, unknown> = { name: name || "Unknown company" };
+        if (keys.orgFrameCompanyId) minimal[keys.orgFrameCompanyId] = companyId;
+        if (ownerId) minimal.owner_id = ownerId;
+        created = await createOrganization(minimal as { name: string });
+      }
+    } else {
+      throw e1;
+    }
+  }
   stampOrg(companyId, created.id);
   return created.id;
 }
