@@ -226,19 +226,25 @@ export async function resolveOrg(companyId: string, ownerId?: number): Promise<n
 
   // Recover from a crash-between-create-and-stamp: an org we already made
   // carries our frame_company_id. Match by exact name, verify the custom field.
-  if (name) {
-    const found = await pdRequest<{ items?: Array<{ item?: { id?: number } }> }>(
-      "GET",
-      `/organizations/search?term=${encodeURIComponent(name)}&fields=name&exact_match=true&limit=5`,
-    );
-    for (const it of found?.items ?? []) {
-      const id = it.item?.id;
-      if (!id) continue;
-      const detail = await pdRequest<Record<string, unknown>>("GET", `/organizations/${id}`);
-      if (String(detail?.[keys.orgFrameCompanyId] ?? "") === companyId) {
-        stampOrg(companyId, id);
-        return id;
+  // Search is only a dedup optimization — if it fails (e.g. search:read scope
+  // not granted), fall through to create rather than aborting the whole row.
+  if (name && keys.orgFrameCompanyId) {
+    try {
+      const found = await pdRequest<{ items?: Array<{ item?: { id?: number } }> }>(
+        "GET",
+        `/organizations/search?term=${encodeURIComponent(name)}&fields=name&exact_match=true&limit=5`,
+      );
+      for (const it of found?.items ?? []) {
+        const id = it.item?.id;
+        if (!id) continue;
+        const detail = await pdRequest<Record<string, unknown>>("GET", `/organizations/${id}`);
+        if (String(detail?.[keys.orgFrameCompanyId] ?? "") === companyId) {
+          stampOrg(companyId, id);
+          return id;
+        }
       }
+    } catch (e) {
+      console.warn("[pipedrive-sync] org search failed (non-fatal):", e instanceof Error ? e.message : e);
     }
   }
 
@@ -262,10 +268,15 @@ export async function resolvePerson(companyId: string, orgId: number, ownerId?: 
   if (!name && !email && !phone) return null;
 
   if (email) {
-    const existing = await findPersonIdByEmail(email);
-    if (existing) {
-      stampPerson(companyId, existing);
-      return existing;
+    // Non-fatal: search is a dedup optimization, not required to create.
+    try {
+      const existing = await findPersonIdByEmail(email);
+      if (existing) {
+        stampPerson(companyId, existing);
+        return existing;
+      }
+    } catch (e) {
+      console.warn("[pipedrive-sync] person search failed (non-fatal):", e instanceof Error ? e.message : e);
     }
   }
 
