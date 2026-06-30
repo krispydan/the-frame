@@ -8,8 +8,26 @@ import { createLayersForShipment } from "@/modules/finance/lib/cogs-ingest";
 import { runDailyCogsPosting } from "@/modules/finance/lib/daily-cogs";
 import { runCogsBackfill, correctCogsForDate } from "@/modules/finance/lib/cogs-backfill";
 import { stripCogsFromOldRecognitions } from "@/modules/finance/lib/cogs-remediation";
+import { previewSettlementInvoices } from "@/modules/finance/lib/settlement-revenue";
 
 export function registerFinanceMcpTools() {
+  // ── finance.preview_settlement_invoices ──
+  // READ-ONLY. Renders the settlement-date ACCREC invoices that REPLACE the
+  // deferred-revenue flow, and the restated revenue by account. Posts nothing.
+  mcpRegistry.register(
+    "finance.preview_settlement_invoices",
+    "READ-ONLY dry run of the new settlement-date revenue model: render the per-payout ACCREC invoice for each settlement and the restated revenue by Sales account (gross). Use this to see exact restated P&L numbers before any live cutover. Nothing is posted to Xero.",
+    z.object({
+      from: z.string().optional().describe("Only settlements with period_end >= this (YYYY-MM-DD)"),
+      to: z.string().optional().describe("Only settlements with period_end <= this (YYYY-MM-DD)"),
+      sampleSize: z.number().optional().describe("How many rendered invoices to include (default 5)"),
+    }),
+    async (args) => {
+      const result = previewSettlementInvoices(args);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
   // ── finance.get_pnl ──
   mcpRegistry.register(
     "finance.get_pnl",
