@@ -9,6 +9,7 @@ import { runDailyCogsPosting } from "@/modules/finance/lib/daily-cogs";
 import { runCogsBackfill, correctCogsForDate } from "@/modules/finance/lib/cogs-backfill";
 import { stripCogsFromOldRecognitions } from "@/modules/finance/lib/cogs-remediation";
 import { previewSettlementInvoices, restateDeferredToSales } from "@/modules/finance/lib/settlement-revenue";
+import { getPayoutRevenueModel, setPayoutRevenueModel } from "@/modules/integrations/lib/xero/payout-revenue-model";
 
 export function registerFinanceMcpTools() {
   // ── finance.preview_settlement_invoices ──
@@ -25,6 +26,24 @@ export function registerFinanceMcpTools() {
     async (args) => {
       const result = previewSettlementInvoices(args);
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // ── finance.set_payout_revenue_model ──
+  // The forward go-live switch. "invoice" = settlement-date ACCREC invoices
+  // (new model); "deferred" = legacy. Reversible.
+  mcpRegistry.register(
+    "finance.set_payout_revenue_model",
+    "Switch the payout revenue model. 'invoice' = settlement-date ACCREC invoices per payout (new model, one-click bank rec, no deferred revenue); 'deferred' = legacy deferred-revenue flow. This is the forward go-live switch and is reversible. Call with no model to read the current value.",
+    z.object({
+      model: z.enum(["invoice", "deferred"]).optional().describe("Omit to read current; set to flip."),
+    }),
+    async (args) => {
+      if (!args.model) {
+        return { content: [{ type: "text", text: JSON.stringify({ current: getPayoutRevenueModel() }, null, 2) }] };
+      }
+      setPayoutRevenueModel(args.model);
+      return { content: [{ type: "text", text: JSON.stringify({ previous: undefined, current: getPayoutRevenueModel(), changedTo: args.model }, null, 2) }] };
     }
   );
 
