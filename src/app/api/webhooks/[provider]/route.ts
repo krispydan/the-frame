@@ -6,10 +6,11 @@ import { webhookRegistry } from "@/modules/core/lib/webhooks";
 // the only path Next.js guarantees will be loaded for these providers.
 import "@/modules/sales/lib/instantly-webhooks";
 import "@/modules/sales/lib/phoneburner-webhooks";
+import "@/modules/sales/lib/pipedrive-webhooks";
 import { db } from "@/lib/db";
 import { reportingLogs } from "@/modules/core/schema";
 
-const SUPPORTED_PROVIDERS = ["shopify", "faire", "instantly", "phoneburner", "xero", "test"];
+const SUPPORTED_PROVIDERS = ["shopify", "faire", "instantly", "phoneburner", "pipedrive", "xero", "test"];
 
 export async function POST(
   request: NextRequest,

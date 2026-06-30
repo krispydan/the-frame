@@ -2,7 +2,7 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { Plug, AlertCircle, CheckCircle, Loader2, Trash2, ExternalLink, GitBranch, UserCheck } from "lucide-react";
+import { Plug, AlertCircle, CheckCircle, Loader2, Trash2, ExternalLink, GitBranch, UserCheck, Webhook, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,7 +31,26 @@ type PipedriveStatus = {
   pipelineConfig?: PipelineConfig | null;
   owner?: { id: number; name?: string } | null;
   stagesError?: string;
+  syncStats?: {
+    syncEnabled: boolean;
+    webhookConfigured: boolean;
+    ajmPushTagged: number;
+    interested: number;
+    wholesaleUnsynced: number;
+    syncedOrgs: number;
+    openDeals: number;
+    wonDeals: number;
+  };
 };
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md border p-3">
+      <div className="text-2xl font-semibold">{value.toLocaleString()}</div>
+      <div className="text-xs text-muted-foreground">{label}</div>
+    </div>
+  );
+}
 
 function PipedriveIntegrationsPageInner() {
   const search = useSearchParams();
@@ -110,6 +129,58 @@ function PipedriveIntegrationsPageInner() {
         setBanner({ kind: "success", title: "Owner saved", message: `Deals will be assigned to ${ownerName || "the selected user"}.` });
       } else {
         setBanner({ kind: "error", title: "Save failed", message: r.error || "Could not save owner." });
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function registerWebhook() {
+    if (!confirm("Register the inbound Pipedrive webhook? This creates a webhook in Pipedrive pointed at the-frame.")) return;
+    setBusy(true);
+    try {
+      const r = (await post({ action: "register-webhook" })) as { ok?: boolean; error?: string; subscriptionUrl?: string };
+      if (r.ok) {
+        await reload();
+        setBanner({ kind: "success", title: "Webhook registered", message: `Pipedrive will now POST changes to ${r.subscriptionUrl}.` });
+      } else {
+        setBanner({ kind: "error", title: "Webhook failed", message: r.error || "Could not register webhook." });
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runPreview(target: string, label: string) {
+    setBusy(true);
+    try {
+      const r = (await post({ action: "preview", target })) as { ok?: boolean; error?: string; preview?: Record<string, unknown> };
+      if (r.ok && r.preview) {
+        const p = r.preview;
+        const parts = Object.entries(p)
+          .filter(([k, v]) => k !== "dryRun" && typeof v === "number")
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(" · ");
+        setBanner({ kind: "success", title: `${label} — dry run`, message: parts || "No rows matched." });
+      } else {
+        setBanner({ kind: "error", title: `${label} failed`, message: r.error || "Preview failed." });
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleSync() {
+    const next = !status?.syncStats?.syncEnabled;
+    if (next && !confirm("Enable automatic Pipedrive sync? Interested leads and recent wholesale orders will start flowing into Pipedrive automatically.")) return;
+    setBusy(true);
+    try {
+      const r = await post({ action: "set-sync-enabled", enabled: next });
+      if (r.ok) {
+        await reload();
+        setBanner({ kind: "success", title: next ? "Sync enabled" : "Sync paused", message: next ? "Go-forward interest + order sync is now live." : "Automatic sync is paused. Manual/preview actions still work." });
+      } else {
+        setBanner({ kind: "error", title: "Failed", message: r.error || "Could not change sync state." });
       }
     } finally {
       setBusy(false);
@@ -317,6 +388,76 @@ function PipedriveIntegrationsPageInner() {
                   Current owner: <strong>{status.owner.name || `user #${status.owner.id}`}</strong>
                 </p>
               )}
+            </CardContent>
+          </Card>
+
+          {/* CRM sync */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <RefreshCw className="h-5 w-5" />
+                CRM sync
+              </CardTitle>
+              <CardDescription>
+                Push leads + orders into Pipedrive and receive deal changes back. Previews are dry runs (no writes);
+                the actual seed/backfill writes are run deliberately via the admin endpoint so a long run can&apos;t time out.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                {status.syncStats?.syncEnabled ? (
+                  <Badge className="bg-green-600 hover:bg-green-700"><CheckCircle className="h-3 w-3 mr-1" />Auto-sync ON</Badge>
+                ) : (
+                  <Badge variant="outline"><AlertCircle className="h-3 w-3 mr-1" />Auto-sync paused</Badge>
+                )}
+                <Button variant="outline" size="sm" onClick={toggleSync} disabled={busy}>
+                  {status.syncStats?.syncEnabled ? "Pause auto-sync" : "Enable auto-sync"}
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  Controls the go-forward interest fan-out + order sweep. Manual previews/backfills work regardless.
+                </span>
+              </div>
+              {status.syncStats && (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                  <Stat label="AJM push-tagged" value={status.syncStats.ajmPushTagged} />
+                  <Stat label="Interested / catalog" value={status.syncStats.interested} />
+                  <Stat label="Wholesale orders unsynced" value={status.syncStats.wholesaleUnsynced} />
+                  <Stat label="Orgs synced" value={status.syncStats.syncedOrgs} />
+                  <Stat label="Open deals" value={status.syncStats.openDeals} />
+                  <Stat label="Won deals" value={status.syncStats.wonDeals} />
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2 pt-1">
+                <Button variant="outline" onClick={() => runPreview("seed-ajm", "AJM seed")} disabled={busy}>
+                  Preview AJM seed
+                </Button>
+                <Button variant="outline" onClick={() => runPreview("backfill-interested", "Interested backfill")} disabled={busy}>
+                  Preview interested backfill
+                </Button>
+                <Button variant="outline" onClick={() => runPreview("backfill-orders", "Order backfill")} disabled={busy}>
+                  Preview order backfill
+                </Button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t">
+                <Button variant="outline" onClick={registerWebhook} disabled={busy}>
+                  <Webhook className="h-4 w-4 mr-2" />
+                  {status.syncStats?.webhookConfigured ? "Re-register inbound webhook" : "Register inbound webhook"}
+                </Button>
+                {status.syncStats?.webhookConfigured ? (
+                  <Badge className="bg-green-600 hover:bg-green-700"><CheckCircle className="h-3 w-3 mr-1" />Webhook configured</Badge>
+                ) : (
+                  <Badge variant="outline"><AlertCircle className="h-3 w-3 mr-1" />No inbound webhook</Badge>
+                )}
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Run the real writes with the key-gated endpoint, dry-run first, e.g.:
+                <code className="block mt-1 bg-muted p-2 rounded">
+                  POST /api/admin/pipedrive/sync &#123;&quot;action&quot;:&quot;seed-ajm&quot;,&quot;dryRun&quot;:false&#125;
+                </code>
+              </p>
             </CardContent>
           </Card>
 

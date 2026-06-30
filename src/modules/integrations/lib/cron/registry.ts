@@ -31,6 +31,7 @@ import { syncSettlementsAllShops } from "@/modules/finance/lib/shopify-settlemen
 import { runShipmentRevenueRecognition } from "@/modules/finance/lib/shipment-revenue-recognition";
 import { runDailyCogsPosting } from "@/modules/finance/lib/daily-cogs";
 import { syncFairePayouts } from "@/modules/integrations/lib/faire/payout-sync";
+import { runOrderDealSweep } from "@/modules/sales/lib/pipedrive-sync";
 
 export type CronJob = {
   id: string;                         // stable, kebab-case
@@ -223,6 +224,17 @@ export const CRON_JOBS: CronJob[] = [
     schedule: "0 15 * * 1",  // 15:00 UTC Monday ≈ 8am PT Monday
     description: "Post last week's revenue / top sellers / slow movers digest to #jaxy-weekly-review",
     handler: postWeeklyDigest,
+  },
+  {
+    id: "pipedrive-order-deal-sweep",
+    schedule: "30 * * * *",  // hourly at :30
+    description: "Represent recent wholesale orders as Won deals in Pipedrive (go-forward order→deal). No-ops until Pipedrive is connected. Opt-in: enable after the order-deal backfill is signed off.",
+    handler: () => runOrderDealSweep(14),
+    guard: () => isDuringBusinessHours(),
+    // Off by default so connecting Pipedrive doesn't auto-create deals before
+    // Daniel runs the dry-run backfill + sign-off (docs §9.3). Enable in the
+    // cron settings UI when ready.
+    defaultEnabled: false,
   },
   {
     id: "slack-stuck-orders",
