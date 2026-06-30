@@ -48,6 +48,18 @@ export async function GET(req: Request) {
        c.state IS NOT NULL AND TRIM(c.state) <> '')
       OR (c.address IS NOT NULL AND TRIM(c.address) <> '')
     )`,
+    // EXCLUDE leads in any dead-end state. The hub-and-spoke status
+    // sync rolls Instantly "not interested" replies into
+    // companies.status = 'not_interested', so this single filter
+    // covers Instantly-replied-no leads plus anyone manually
+    // marked as a no-go.
+    //   - not_interested  : replied "not interested" in Instantly
+    //                       OR manually marked
+    //   - ghosted         : stopped responding after engagement
+    //   - not_qualified   : ICP/manual disqualified
+    //   - rejected        : hard reject
+    //   - customer        : already a customer, don't cold-call
+    `c.status NOT IN ('not_interested', 'ghosted', 'not_qualified', 'rejected', 'customer')`,
   ];
   const params: unknown[] = [];
   if (statuses && statuses.length > 0) {

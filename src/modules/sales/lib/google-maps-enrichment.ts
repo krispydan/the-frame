@@ -82,6 +82,10 @@ function loadCohort(opts: {
     `NOT EXISTS (SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id)`,
     // Enough location data to ask Google
     `((c.city IS NOT NULL AND TRIM(c.city) <> '' AND c.state IS NOT NULL AND TRIM(c.state) <> '') OR (c.address IS NOT NULL AND TRIM(c.address) <> ''))`,
+    // Exclude dead-end statuses — never enrich a lead Sandra can't call.
+    // Includes Instantly "not interested" replies (hub-and-spoke status
+    // sync rolls these into companies.status = 'not_interested').
+    `c.status NOT IN ('not_interested', 'ghosted', 'not_qualified', 'rejected', 'customer')`,
   ];
   if (!opts.force) {
     // Skip companies we've already attempted, regardless of outcome.
