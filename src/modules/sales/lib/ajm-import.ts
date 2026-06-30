@@ -117,109 +117,90 @@ interface ExistingMatch {
   matched_by: "email" | "domain" | "name_state" | "phone";
 }
 
-function findExistingCompany(row: AjmRow): ExistingMatch | null {
+/**
+ * In-memory dedupe index. `contacts` has no indexes and `company_phones.phone`
+ * isn't independently indexed, so the old per-row email/phone/name-LIKE lookups
+ * were full scans — O(rows × table), which timed out on the full cohort. We
+ * build these maps once (a few full scans) and then match in O(1) per row.
+ * "First write wins" mirrors the old `LIMIT 1` queries.
+ */
+interface DedupeIndex {
+  byId: Map<string, { tags: string | null; status: string | null }>;
+  email: Map<string, string>;     // normEmail -> companyId
+  domain: Map<string, string>;    // domain -> companyId
+  nameState: Map<string, string>; // `${state}|${nameNorm}` -> companyId
+  phone: Map<string, string>;     // 10-digit -> companyId
+}
+
+function buildDedupeIndex(): DedupeIndex {
+  const idx: DedupeIndex = {
+    byId: new Map(),
+    email: new Map(),
+    domain: new Map(),
+    nameState: new Map(),
+    phone: new Map(),
+  };
+  const comps = sqlite
+    .prepare("SELECT id, name, state, domain, tags, status FROM companies")
+    .all() as Array<{ id: string; name: string | null; state: string | null; domain: string | null; tags: string | null; status: string | null }>;
+  for (const c of comps) {
+    idx.byId.set(c.id, { tags: c.tags, status: c.status });
+    if (c.domain) {
+      const d = c.domain.toLowerCase().trim();
+      if (d && !idx.domain.has(d)) idx.domain.set(d, c.id);
+    }
+    const n = normName(c.name);
+    const s = normState(c.state);
+    if (n.length >= 4 && s) {
+      const k = `${s}|${n}`;
+      if (!idx.nameState.has(k)) idx.nameState.set(k, c.id);
+    }
+  }
+  const cts = sqlite
+    .prepare("SELECT company_id, email FROM contacts WHERE email IS NOT NULL AND TRIM(email) <> ''")
+    .all() as Array<{ company_id: string; email: string }>;
+  for (const ct of cts) {
+    const e = normEmail(ct.email);
+    if (e && !idx.email.has(e)) idx.email.set(e, ct.company_id);
+  }
+  const phs = sqlite
+    .prepare("SELECT company_id, phone FROM company_phones")
+    .all() as Array<{ company_id: string; phone: string }>;
+  for (const p of phs) {
+    const ph = normPhone(p.phone);
+    if (ph && !idx.phone.has(ph)) idx.phone.set(ph, p.company_id);
+  }
+  return idx;
+}
+
+function findExistingCompany(row: AjmRow, idx: DedupeIndex): ExistingMatch | null {
   const email = normEmail(row.email);
   const phone = normPhone(row.phone);
   const nameNorm = normName(row.name);
   const stateNorm = normState(row.state);
+  const meta = (id: string) => idx.byId.get(id) ?? { tags: null, status: null };
 
-  // 1. email exact — case-insensitive against contacts (canonical).
+  // 1. email exact (canonical home is contacts)
   if (email) {
-    const r = sqlite
-      .prepare(
-        `SELECT c.id, c.tags, c.status, ct.email AS email, NULL AS phone
-           FROM contacts ct
-           JOIN companies c ON c.id = ct.company_id
-          WHERE LOWER(TRIM(ct.email)) = ?
-          LIMIT 1`,
-      )
-      .get(email) as
-      | { id: string; tags: string | null; status: string | null; email: string | null; phone: string | null }
-      | undefined;
-    if (r) return { ...r, matched_by: "email" };
+    const id = idx.email.get(email);
+    if (id) return { id, ...meta(id), email, phone: null, matched_by: "email" };
   }
-
-  // 2. domain
+  // 2. business domain (skip personal / Faire relay)
   const domain = extractDomain(email);
   if (domain && !domain.endsWith("@relay.faire.com") && !isPersonalDomain(domain)) {
-    const r = sqlite
-      .prepare(
-        `SELECT c.id, c.tags, c.status,
-                (SELECT ct.email FROM contacts ct
-                  WHERE ct.company_id = c.id
-                    AND TRIM(COALESCE(ct.email, '')) <> ''
-                  ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
-                NULL AS phone
-           FROM companies c
-          WHERE LOWER(c.domain) = ? LIMIT 1`,
-      )
-      .get(domain) as
-      | { id: string; tags: string | null; status: string | null; email: string | null; phone: string | null }
-      | undefined;
-    if (r) return { ...r, matched_by: "domain" };
+    const id = idx.domain.get(domain);
+    if (id) return { id, ...meta(id), email: null, phone: null, matched_by: "domain" };
   }
-
-  // 3. name + state (only if both populated and name has enough signal)
+  // 3. name + state (exact normalised)
   if (nameNorm && nameNorm.length >= 4 && stateNorm) {
-    const r = sqlite
-      .prepare(
-        `SELECT c.id, c.tags, c.status,
-                (SELECT ct.email FROM contacts ct
-                  WHERE ct.company_id = c.id
-                    AND TRIM(COALESCE(ct.email, '')) <> ''
-                  ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
-                NULL AS phone,
-                c.name, c.state
-           FROM companies c
-          WHERE c.state = ?
-            AND LOWER(c.name) LIKE ?
-          LIMIT 5`,
-      )
-      .all(stateNorm, `%${nameNorm.slice(0, 24)}%`) as Array<{
-      id: string;
-      tags: string | null;
-      status: string | null;
-      email: string | null;
-      phone: string | null;
-      name: string;
-      state: string;
-    }>;
-    for (const cand of r) {
-      if (normName(cand.name) === nameNorm) {
-        return {
-          id: cand.id,
-          tags: cand.tags,
-          status: cand.status,
-          email: cand.email,
-          phone: cand.phone,
-          matched_by: "name_state",
-        };
-      }
-    }
+    const id = idx.nameState.get(`${stateNorm}|${nameNorm}`);
+    if (id) return { id, ...meta(id), email: null, phone: null, matched_by: "name_state" };
   }
-
-  // 4. phone (10-digit, last resort — high false-positive risk so only
-  //    accept if no name+state was provided to compare against)
+  // 4. phone (10-digit, last resort)
   if (phone) {
-    const r = sqlite
-      .prepare(
-        `SELECT c.id, c.tags, c.status,
-                (SELECT ct.email FROM contacts ct
-                  WHERE ct.company_id = c.id
-                    AND TRIM(COALESCE(ct.email, '')) <> ''
-                  ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
-                cp.phone
-           FROM companies c
-           JOIN company_phones cp ON cp.company_id = c.id
-          WHERE cp.phone = ?
-          LIMIT 1`,
-      )
-      .get(phone) as
-      | { id: string; tags: string | null; status: string | null; email: string | null; phone: string | null }
-      | undefined;
-    if (r) return { ...r, matched_by: "phone" };
+    const id = idx.phone.get(phone);
+    if (id) return { id, ...meta(id), email: null, phone, matched_by: "phone" };
   }
-
   return null;
 }
 
@@ -271,6 +252,11 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
   const dryRun = !!opts.dryRun;
   const now = new Date().toISOString();
 
+  // Build the dedupe index once (O(table)) so per-row matching is O(1). Kept
+  // updated below as rows are created/merged so later rows in the same run
+  // still dedupe against earlier ones — matching the old live-query behaviour.
+  const idx = buildDedupeIndex();
+
   // Prepared statements (skip in dry-run — still useful for plan but we
   // don't execute them).
   // Email is no longer on the companies row — written via
@@ -321,7 +307,7 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
 
   rows.forEach((row, i) => {
     try {
-      const existing = findExistingCompany(row);
+      const existing = findExistingCompany(row, idx);
       const phoneNorm = normPhone(row.phone);
 
       if (existing) {
@@ -372,6 +358,11 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
             );
             summary.phones_added++;
           }
+          // keep the in-memory index in step with these writes
+          const me = normEmail(row.email);
+          if (me && !idx.email.has(me)) idx.email.set(me, existing.id);
+          if (phoneNorm && !idx.phone.has(phoneNorm)) idx.phone.set(phoneNorm, existing.id);
+          idx.byId.set(existing.id, { tags: mergedTags, status: newStatus || existing.status });
         }
       } else {
         // ── CREATE path ──
@@ -424,6 +415,14 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
               summary.contacts_created++;
             }
           }
+          // register the new company so later rows this run dedupe against it
+          idx.byId.set(id, { tags: JSON.stringify(dedupeTagsArray(row.tags)), status: row.status });
+          const nn = normName(row.name);
+          const ss = normState(row.state);
+          if (nn.length >= 4 && ss) idx.nameState.set(`${ss}|${nn}`, id);
+          const ne = normEmail(row.email);
+          if (ne && !idx.email.has(ne)) idx.email.set(ne, id);
+          if (phoneNorm && !idx.phone.has(phoneNorm)) idx.phone.set(phoneNorm, id);
         }
         summary.created++;
         if (row.status === "customer") summary.status_upgraded_to_customer++;
