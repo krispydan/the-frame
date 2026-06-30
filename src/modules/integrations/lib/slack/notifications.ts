@@ -338,6 +338,38 @@ export async function notifyIntegrationFailure(opts: {
   });
 }
 
+/**
+ * A Faire order arrived from an anonymized Shopify customer (relay email, no
+ * real website). Nudge the team to map it to a real email/website on the
+ * prospect page.
+ */
+export async function notifyFaireMappingNeeded(opts: {
+  companyName: string | null;
+  orderNumber?: string | null;
+  prospectUrl?: string | null;
+}) {
+  const who = opts.companyName ? `*${opts.companyName}*` : "A Faire customer";
+  await postSlack({
+    topic: "orders.wholesale",
+    text: `🕵️ ${opts.companyName || "A Faire customer"} needs a real email/website mapped`,
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `🕵️ ${who} ordered via Faire with an anonymized email${opts.orderNumber ? ` (order *${opts.orderNumber}*)` : ""}. Add their real website + email so we can reach them and sync to Pipedrive.`,
+        },
+      },
+      ...(opts.prospectUrl
+        ? ([{
+            type: "context",
+            elements: [{ type: "mrkdwn", text: `Map it: <${opts.prospectUrl}|open the prospect>` }],
+          }] as SlackBlock[])
+        : []),
+    ],
+  });
+}
+
 export async function notifyConnectedStore(opts: {
   service: string;        // "Shopify" / "Xero" / "Slack"
   identifier: string;     // shop_domain or tenantName or workspace

@@ -191,6 +191,9 @@ export default function CompanyDetailPage() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [orderSummary, setOrderSummary] = useState<OrderSummary | null>(null);
+  const [faireMapping, setFaireMapping] = useState<{ needed: boolean; relayEmail: string | null } | null>(null);
+  const [faireForm, setFaireForm] = useState<{ website: string; email: string }>({ website: "", email: "" });
+  const [faireSaving, setFaireSaving] = useState(false);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [campaigns, setCampaigns] = useState<Array<{
     lead_id: string;
@@ -353,6 +356,7 @@ export default function CompanyDetailPage() {
         setContacts(data.contacts || []);
         setOrders(data.orders || []);
         setOrderSummary(data.orderSummary || null);
+        setFaireMapping(data.faireMapping || null);
         setActivities(data.activities || []);
         setCampaigns(data.campaigns || []);
         setLoading(false);
@@ -403,6 +407,26 @@ export default function CompanyDetailPage() {
     const data = await (await fetch(`/api/v1/sales/prospects/${id}`)).json();
     setCompany(data.company);
     setActivities(data.activities || []);
+  };
+
+  const saveFaireMapping = async () => {
+    if (!faireForm.website.trim() && !faireForm.email.trim()) return;
+    setFaireSaving(true);
+    try {
+      const res = await fetch(`/api/v1/sales/prospects/${id}/faire-map`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ website: faireForm.website.trim(), email: faireForm.email.trim() }),
+      });
+      if (res.ok) {
+        const data = await (await fetch(`/api/v1/sales/prospects/${id}`)).json();
+        setCompany(data.company);
+        setFaireMapping(data.faireMapping || null);
+        setFaireForm({ website: "", email: "" });
+      }
+    } finally {
+      setFaireSaving(false);
+    }
   };
 
   const addNote = async () => {
@@ -995,6 +1019,48 @@ export default function CompanyDetailPage() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {faireMapping?.needed && (
+        <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="font-semibold text-amber-900 dark:text-amber-200">Anonymous Faire customer — needs a real email/website</div>
+              <p className="text-sm text-amber-800 dark:text-amber-300 mt-0.5">
+                This store ordered via Faire with an anonymized address
+                {faireMapping.relayEmail ? <> (<code className="text-xs">{faireMapping.relayEmail}</code>)</> : null}.
+                Add their real website and email so we can reach them and sync to Pipedrive.
+              </p>
+              <div className="flex flex-wrap items-end gap-2 mt-3">
+                <div>
+                  <label className="block text-xs text-amber-800 dark:text-amber-300 mb-1">Website</label>
+                  <Input
+                    className="h-9 w-56 bg-white dark:bg-background"
+                    placeholder="https://store.com"
+                    value={faireForm.website}
+                    onChange={(e) => setFaireForm((f) => ({ ...f, website: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-amber-800 dark:text-amber-300 mb-1">Email</label>
+                  <Input
+                    className="h-9 w-64 bg-white dark:bg-background"
+                    placeholder="owner@store.com"
+                    value={faireForm.email}
+                    onChange={(e) => setFaireForm((f) => ({ ...f, email: e.target.value }))}
+                  />
+                </div>
+                <Button
+                  onClick={saveFaireMapping}
+                  disabled={faireSaving || (!faireForm.website.trim() && !faireForm.email.trim())}
+                >
+                  {faireSaving ? "Saving…" : "Save mapping"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

@@ -96,6 +96,24 @@ export async function GET(
     WHERE company_id = ?
   `).get(id) as Record<string, unknown>;
 
+  // Faire anonymized-customer detection: has a relay.faire.com contact email,
+  // no real website, and no real (non-relay) email → needs manual mapping.
+  const relayContact = sqlite.prepare(
+    `SELECT email FROM contacts WHERE company_id = ?
+       AND LOWER(COALESCE(email,'')) LIKE '%@relay.faire.com%'
+     ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
+  ).get(id) as { email: string } | undefined;
+  const realEmailContact = sqlite.prepare(
+    `SELECT email FROM contacts WHERE company_id = ?
+       AND TRIM(COALESCE(email,'')) <> '' AND LOWER(email) NOT LIKE '%@relay.faire.com%'
+     LIMIT 1`,
+  ).get(id) as { email: string } | undefined;
+  const websiteEmpty = !company.website || !String(company.website).trim();
+  const faireMapping = {
+    needed: !!relayContact && websiteEmpty && !realEmailContact,
+    relayEmail: relayContact?.email ?? null,
+  };
+
   return NextResponse.json({
     company: {
       ...company,
@@ -104,6 +122,7 @@ export async function GET(
     stores: storeRows,
     orders: orderRows,
     orderSummary,
+    faireMapping,
     contacts: contactRows.map(c => ({
       ...c,
       is_primary: Boolean(c.is_primary),
