@@ -21,6 +21,7 @@ export default function ImportAjmPage() {
   const [enrichBusy, setEnrichBusy] = useState(false);
   const [enrichResult, setEnrichResult] = useState<Record<string, unknown> | null>(null);
   const [enrichError, setEnrichError] = useState<string>("");
+  const [pushTag, setPushTag] = useState(true);
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -36,7 +37,7 @@ export default function ImportAjmPage() {
     const res = await fetch("/api/v1/sales/import-ajm-csv", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ csv, dryRun }),
+      body: JSON.stringify({ csv, dryRun, pushTag }),
     });
     return res.json();
   }
@@ -163,6 +164,11 @@ export default function ImportAjmPage() {
         <CardContent className="space-y-4">
           <input type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values,text/plain" onChange={onFile} className="text-sm" />
           {fileName && <div className="text-sm text-muted-foreground">{fileName} loaded ({csvText.split(/\r?\n/).length - 1} rows)</div>}
+
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={pushTag} onChange={(e) => setPushTag(e.target.checked)} />
+            Tag for Pipedrive push (<code>ajm_pipedrive_push</code>) — needed for the AJM seed to pick them up
+          </label>
 
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={runPreview} disabled={busy || !csvText}>

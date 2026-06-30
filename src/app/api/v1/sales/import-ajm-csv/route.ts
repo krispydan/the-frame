@@ -17,7 +17,7 @@ import { importAjmRows } from "@/modules/sales/lib/ajm-import";
  * Returns { ok, stats (cleanup counts), summary (importAjmRows result) }.
  */
 export async function POST(req: NextRequest) {
-  let body: { csv?: string; dryRun?: boolean };
+  let body: { csv?: string; dryRun?: boolean; pushTag?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
 
   const dryRun = !!body.dryRun;
   try {
-    const { rows, stats } = buildAjmRowsFromCsv(body.csv);
+    const { rows, stats } = buildAjmRowsFromCsv(body.csv, { pushTag: body.pushTag !== false });
     // recase: clean up existing ALL-CAPS records (names/addresses) + contact
     // names on merge — these AJM rows mostly match existing companies.
     const summary = rows.length ? importAjmRows(rows, { dryRun, recase: true }) : null;

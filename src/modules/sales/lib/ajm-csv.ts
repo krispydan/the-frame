@@ -137,7 +137,14 @@ export interface AjmCsvStats {
  * Parse + clean the AJM CSV text into importable AjmRow[] plus a summary.
  * Header row is required.
  */
-export function buildAjmRowsFromCsv(text: string): { rows: AjmRow[]; stats: AjmCsvStats } {
+export function buildAjmRowsFromCsv(
+  text: string,
+  opts: { pushTag?: boolean } = {},
+): { rows: AjmRow[]; stats: AjmCsvStats } {
+  // This CSV is the curated wholesale list we want in Pipedrive, so tag rows
+  // with `ajm_pipedrive_push` (what the Pipedrive AJM seed selects on) unless
+  // explicitly told not to.
+  const pushTag = opts.pushTag !== false;
   const grid = parseDelimited(text);
   const stats: AjmCsvStats = {
     totalRows: 0, emitted: 0, customer: 0, reactivation: 0, invalidEmail: 0,
@@ -211,7 +218,7 @@ export function buildAjmRowsFromCsv(text: string): { rows: AjmRow[]; stats: AjmC
       contact_first_name: titleCase(get(r, col.attn)),
       status: status as string,
       source: "ajm_2025_import",
-      tags: ["ajm_2025", cohort as string],
+      tags: pushTag ? ["ajm_2025", cohort as string, "ajm_pipedrive_push"] : ["ajm_2025", cohort as string],
       ajm_last_order: norm(get(r, col.lastSale)) || null,
       ajm_first_order: null,
       ajm_total_spend: null,
