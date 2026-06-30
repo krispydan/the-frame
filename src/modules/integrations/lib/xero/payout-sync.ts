@@ -32,7 +32,7 @@ import { aggregateCogsForPayout, type CogsAggregation } from "./cogs-aggregator"
 import { buildCogsJournal, type CogsAccounts } from "./cogs-journal-builder";
 import { postManualJournal, postSettlementInvoice } from "@/modules/finance/lib/xero-client";
 import { getPayoutRevenueModel } from "./payout-revenue-model";
-import { buildSettlementInvoice, shopifyPayoutToComponents } from "./settlement-invoice-builder";
+import { buildSettlementInvoice, shopifyPayoutToComponents, shopifyPayoutUrl } from "./settlement-invoice-builder";
 
 export type SyncRunResult = {
   runId: string;
@@ -374,11 +374,12 @@ async function postShopifyInvoice(opts: {
     fees: mappings.get("fees")?.xeroAccountCode ?? "5400",
     adjustments: mappings.get("adjustments")?.xeroAccountCode ?? "5900",
   };
+  const payoutUrl = shopifyPayoutUrl(summary.platform, summary.payoutId);
   const built = buildSettlementInvoice({
     channel: summary.platform,
     contactName: human,
     invoiceNumber,
-    reference: `Shopify payout ${summary.payoutId} — ${summary.payoutDate}`,
+    reference: `Shopify payout ${summary.payoutId} — ${summary.payoutDate}${payoutUrl ? ` — ${payoutUrl}` : ""}`,
     date: summary.payoutDate,
     netPayout: summary.netPayoutAmount,
     components: shopifyPayoutToComponents(summary, accounts),

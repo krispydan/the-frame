@@ -394,6 +394,18 @@ export async function enrichViaGoogleMaps(opts: {
       for (const c of batch) {
         result.errors.push({ company_id: c.id, reason });
         stampAttemptStmt().run(errorReason, c.id);
+        // Log batch errors so they show up in the match-log CSV
+        // alongside no_match / skipped / accepted rows.
+        logMatch({
+          companyId: c.id,
+          runId,
+          searchString: buildSearchString(c),
+          company: c,
+          place: null,
+          similarity: 0,
+          decision: "no_match",
+          decisionReason: errorReason,
+        });
       }
       continue;
     }

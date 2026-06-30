@@ -173,6 +173,22 @@ const HUMAN: Record<string, string> = {
   faire: "Faire",
 };
 
+/** Shopify admin store slug per channel (DTC + Afterpay live on the retail
+ *  store; Wholesale is its own store). Used to build the payout deep-link. */
+const SHOPIFY_STORE_SLUG: Record<string, string> = {
+  shopify_dtc: "getjaxy",
+  shopify_afterpay: "getjaxy",
+  shopify_wholesale: "jaxy-wholesale",
+};
+
+/** Deep link to the Shopify payout this invoice was generated from, e.g.
+ *  https://admin.shopify.com/store/jaxy-wholesale/payments/payouts/145823072405
+ *  Returns null for non-Shopify channels (Faire has no such URL). */
+export function shopifyPayoutUrl(channel: string, payoutId: string | number): string | null {
+  const slug = SHOPIFY_STORE_SLUG[channel];
+  return slug ? `https://admin.shopify.com/store/${slug}/payments/payouts/${payoutId}` : null;
+}
+
 /**
  * Map a bucketed Shopify PayoutSummary → ACCREC invoice components per the guide.
  * The "clearing" bucket is intentionally dropped — under the invoice model the
