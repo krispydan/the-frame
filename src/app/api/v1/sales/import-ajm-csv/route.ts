@@ -30,7 +30,9 @@ export async function POST(req: NextRequest) {
   const dryRun = !!body.dryRun;
   try {
     const { rows, stats } = buildAjmRowsFromCsv(body.csv);
-    const summary = rows.length ? importAjmRows(rows, { dryRun }) : null;
+    // recase: clean up existing ALL-CAPS records (names/addresses) + contact
+    // names on merge — these AJM rows mostly match existing companies.
+    const summary = rows.length ? importAjmRows(rows, { dryRun, recase: true }) : null;
     return NextResponse.json({ ok: true, dryRun, stats, summary });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
