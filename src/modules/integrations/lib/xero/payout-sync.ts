@@ -30,7 +30,9 @@ import { aggregatePayoutTransactions, type PayoutSummary } from "./payout-aggreg
 import { buildPayoutJournal, type AccountMapping, type TrackingMapping } from "./journal-builder";
 import { aggregateCogsForPayout, type CogsAggregation } from "./cogs-aggregator";
 import { buildCogsJournal, type CogsAccounts } from "./cogs-journal-builder";
-import { postManualJournal } from "@/modules/finance/lib/xero-client";
+import { postManualJournal, postSettlementInvoice } from "@/modules/finance/lib/xero-client";
+import { getPayoutRevenueModel } from "./payout-revenue-model";
+import { buildSettlementInvoice, shopifyPayoutToComponents } from "./settlement-invoice-builder";
 
 export type SyncRunResult = {
   runId: string;
@@ -129,6 +131,16 @@ export async function syncShopifyPayouts(opts: SyncOpts = {}): Promise<SyncRunRe
           // Load mappings for the resolved platform (might be shopify_afterpay if detected)
           const mappings = await loadAccountMappings(summary.platform);
           const tracking = await loadTrackingMapping(summary.platform);
+
+          // ── Settlement-date invoice model (per channel mapping guide) ──
+          // When enabled, post ONE ACCREC invoice (gross sales +, fees −,
+          // total = net deposit) and skip the deferred journal + bank sweep.
+          if (getPayoutRevenueModel() === "invoice") {
+            const handled = await postShopifyInvoice({ runId, summary, mappings, tracking, result });
+            if (handled) result.successful++;
+            else result.failed++;
+            continue;
+          }
 
           // Build + post the journal
           const built = buildPayoutJournal({ summary, mappings, tracking, status });
@@ -330,6 +342,88 @@ async function loadTrackingMapping(platform: string): Promise<TrackingMapping | 
  *   DR  <clearing account> (BANK, e.g. 1015)
  *   CR  <receivables_holding> (1100, current asset)
  */
+/**
+ * Settlement-date model: post ONE ACCREC invoice for a Shopify payout (gross
+ * sales +, fees −, total = net deposit). No deferred journal, no bank sweep —
+ * the bank deposit reconciles 1:1 against the invoice. Returns true on success.
+ */
+async function postShopifyInvoice(opts: {
+  runId: string;
+  summary: PayoutSummary;
+  mappings: Map<string, AccountMapping>;
+  tracking: TrackingMapping | null;
+  result: SyncRunResult;
+}): Promise<boolean> {
+  const { runId, summary, mappings, tracking, result } = opts;
+  const human = { shopify_dtc: "Shopify Payments", shopify_afterpay: "Shopify Afterpay", shopify_wholesale: "Shopify Wholesale" }[summary.platform] ?? summary.platform;
+  const prefix = summary.platform === "shopify_wholesale" ? "SHOP-WS" : summary.platform === "shopify_afterpay" ? "SHOP-AP" : "SHOP-DTC";
+  const invoiceNumber = `${prefix}-${summary.payoutId}`;
+
+  // Net-negative payout (refunds > sales) can't be an ACCREC invoice — flag for
+  // a manual credit note rather than posting something wrong.
+  if (summary.netPayoutAmount <= 0) {
+    const msg = `Net-negative payout ${summary.payoutId} (${summary.netPayoutAmount.toFixed(2)}) — needs a manual credit note (skipped)`;
+    await logJournalFailure(runId, summary, msg);
+    result.errors.push({ payoutId: summary.payoutId, platform: summary.platform, message: msg });
+    return false;
+  }
+
+  const accounts = {
+    sales: mappings.get("sales")?.xeroAccountCode ?? "4030",
+    refunds: mappings.get("refunds")?.xeroAccountCode ?? "4300",
+    fees: mappings.get("fees")?.xeroAccountCode ?? "5400",
+    adjustments: mappings.get("adjustments")?.xeroAccountCode ?? "5900",
+  };
+  const built = buildSettlementInvoice({
+    channel: summary.platform,
+    contactName: human,
+    invoiceNumber,
+    reference: `Shopify payout ${summary.payoutId} — ${summary.payoutDate}`,
+    date: summary.payoutDate,
+    netPayout: summary.netPayoutAmount,
+    components: shopifyPayoutToComponents(summary, accounts),
+    tracking: tracking
+      ? { trackingCategoryId: tracking.trackingCategoryId, trackingCategoryName: tracking.trackingCategoryName, trackingOptionId: tracking.trackingOptionId, trackingOptionName: tracking.trackingOptionName }
+      : null,
+  });
+  if (!built.ok) {
+    await logJournalFailure(runId, summary, built.error);
+    result.errors.push({ payoutId: summary.payoutId, platform: summary.platform, message: built.error });
+    return false;
+  }
+
+  const post = await postSettlementInvoice(built.payload);
+  if (!post.success) {
+    await logJournalFailure(runId, summary, post.error ?? "invoice post failed", built.payload);
+    result.errors.push({ payoutId: summary.payoutId, platform: summary.platform, message: post.error ?? "invoice post failed" });
+    return false;
+  }
+
+  await db.insert(xeroPayoutSyncs).values({
+    sourcePlatform: summary.platform,
+    sourcePayoutId: String(summary.payoutId),
+    amount: summary.netPayoutAmount,
+    currency: summary.currency,
+    paidAt: summary.payoutDate,
+    xeroObjectType: "invoice",
+    xeroObjectId: post.invoiceId,
+    syncRunId: runId,
+  });
+  await db.insert(xeroJournalLog).values({
+    syncRunId: runId,
+    sourcePlatform: summary.platform,
+    sourceId: String(summary.payoutId),
+    xeroObjectType: "invoice",
+    xeroObjectId: post.invoiceId,
+    status: "success",
+    amount: summary.netPayoutAmount,
+    currency: summary.currency,
+    payload: JSON.stringify({ kind: "settlement_invoice", summary, invoice: built.payload, warnings: built.warnings, existed: post.existed }),
+    response: JSON.stringify({ invoiceId: post.invoiceId, existed: post.existed }),
+  });
+  return true;
+}
+
 async function postPayoutBankReceive(opts: {
   runId: string;
   summary: PayoutSummary;

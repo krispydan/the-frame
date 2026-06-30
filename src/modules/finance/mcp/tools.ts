@@ -8,8 +8,51 @@ import { createLayersForShipment } from "@/modules/finance/lib/cogs-ingest";
 import { runDailyCogsPosting } from "@/modules/finance/lib/daily-cogs";
 import { runCogsBackfill, correctCogsForDate } from "@/modules/finance/lib/cogs-backfill";
 import { stripCogsFromOldRecognitions } from "@/modules/finance/lib/cogs-remediation";
+import { previewSettlementInvoices, restateDeferredToSales } from "@/modules/finance/lib/settlement-revenue";
 
 export function registerFinanceMcpTools() {
+  // ── finance.preview_settlement_invoices ──
+  // READ-ONLY. Renders the settlement-date ACCREC invoices that REPLACE the
+  // deferred-revenue flow, and the restated revenue by account. Posts nothing.
+  mcpRegistry.register(
+    "finance.preview_settlement_invoices",
+    "READ-ONLY dry run of the new settlement-date revenue model: render the per-payout ACCREC invoice for each settlement and the restated revenue by Sales account (gross). Use this to see exact restated P&L numbers before any live cutover. Nothing is posted to Xero.",
+    z.object({
+      from: z.string().optional().describe("Only settlements with period_end >= this (YYYY-MM-DD)"),
+      to: z.string().optional().describe("Only settlements with period_end <= this (YYYY-MM-DD)"),
+      sampleSize: z.number().optional().describe("How many rendered invoices to include (default 5)"),
+    }),
+    async (args) => {
+      const result = previewSettlementInvoices(args);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // ── finance.restate_deferred_to_sales ──
+  // Historical cleanup Entry 1: recognize revenue stranded in Deferred Revenue
+  // by posting DR 2050 / CR sales (target gross − current Xero balance). DEFAULTS
+  // to dryRun; pass dryRun:false to actually post. Caller supplies current Xero
+  // Sales balances per account.
+  mcpRegistry.register(
+    "finance.restate_deferred_to_sales",
+    "Historical cleanup (Entry 1): post one adjusting journal DR 2050 Deferred Revenue / CR 4030|4040|4000 Sales to recognize revenue stranded under the old deferred model. Amount per channel = target gross (from settlements) − currentSales (supplied from the live Xero P&L). DEFAULTS to dryRun — pass dryRun:false to post.",
+    z.object({
+      currentSales: z.record(z.string(), z.number()).describe('Current Xero Sales balances by account code, e.g. {"4040":71732,"4030":607.85,"4000":0}'),
+      date: z.string().describe("Journal date (YYYY-MM-DD), e.g. period end"),
+      deferredAccount: z.string().optional().describe("Deferred Revenue account (default 2050)"),
+      dryRun: z.boolean().optional().describe("Default true. Pass false to actually post."),
+    }),
+    async (args) => {
+      const result = await restateDeferredToSales({
+        currentSales: args.currentSales,
+        date: args.date,
+        deferredAccount: args.deferredAccount,
+        dryRun: args.dryRun !== false,
+      });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
   // ── finance.get_pnl ──
   mcpRegistry.register(
     "finance.get_pnl",

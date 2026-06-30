@@ -364,6 +364,95 @@ export async function pushInvoiceToXero(order: {
 }
 
 /**
+ * Post a settlement ACCREC invoice (the settlement-date revenue model).
+ * Idempotent by InvoiceNumber: if an invoice with that number already exists in
+ * Xero, returns its ID without creating a duplicate. `payload` is the shape
+ * produced by buildSettlementInvoice().
+ */
+export async function postSettlementInvoice(
+  payload: Record<string, unknown> & { InvoiceNumber: string },
+): Promise<{ success: boolean; invoiceId?: string; existed?: boolean; error?: string }> {
+  const auth = await getAccessToken();
+  if (!auth) return { success: false, error: "Not authenticated with Xero" };
+  const headers = {
+    Authorization: `Bearer ${auth.token}`,
+    "xero-tenant-id": auth.tenantId,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+
+  // Idempotency: look up by InvoiceNumber first.
+  try {
+    const lookup = await fetch(
+      `https://api.xero.com/api.xro/2.0/Invoices?InvoiceNumbers=${encodeURIComponent(payload.InvoiceNumber)}`,
+      { headers },
+    );
+    if (lookup.ok) {
+      const j = await lookup.json();
+      const existingId = j?.Invoices?.[0]?.InvoiceID;
+      if (existingId) return { success: true, invoiceId: existingId, existed: true };
+    }
+  } catch {
+    /* fall through to create */
+  }
+
+  const res = await fetch("https://api.xero.com/api.xro/2.0/Invoices", {
+    method: "POST", // POST upserts; with a new InvoiceNumber it creates
+    headers,
+    body: JSON.stringify({ Invoices: [payload] }),
+  });
+  if (!res.ok) {
+    return { success: false, error: `Xero Invoices ${res.status}: ${(await res.text()).slice(0, 300)}` };
+  }
+  const result = await res.json();
+  const invoiceId = result?.Invoices?.[0]?.InvoiceID;
+  if (!invoiceId) return { success: false, error: "Xero returned no InvoiceID" };
+  return { success: true, invoiceId };
+}
+
+/**
+ * Post a settlement ACCRECCREDIT credit note (for net-negative payouts where
+ * refunds exceeded sales). Idempotent by CreditNoteNumber.
+ */
+export async function postSettlementCreditNote(
+  payload: Record<string, unknown> & { CreditNoteNumber: string },
+): Promise<{ success: boolean; creditNoteId?: string; existed?: boolean; error?: string }> {
+  const auth = await getAccessToken();
+  if (!auth) return { success: false, error: "Not authenticated with Xero" };
+  const headers = {
+    Authorization: `Bearer ${auth.token}`,
+    "xero-tenant-id": auth.tenantId,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  try {
+    const lookup = await fetch(
+      `https://api.xero.com/api.xro/2.0/CreditNotes?where=${encodeURIComponent(`CreditNoteNumber=="${payload.CreditNoteNumber}"`)}`,
+      { headers },
+    );
+    if (lookup.ok) {
+      const j = await lookup.json();
+      const existingId = j?.CreditNotes?.[0]?.CreditNoteID;
+      if (existingId) return { success: true, creditNoteId: existingId, existed: true };
+    }
+  } catch {
+    /* fall through */
+  }
+  const res = await fetch("https://api.xero.com/api.xro/2.0/CreditNotes", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ CreditNotes: [payload] }),
+  });
+  if (!res.ok) {
+    return { success: false, error: `Xero CreditNotes ${res.status}: ${(await res.text()).slice(0, 300)}` };
+  }
+  const result = await res.json();
+  const creditNoteId = result?.CreditNotes?.[0]?.CreditNoteID;
+  if (!creditNoteId) return { success: false, error: "Xero returned no CreditNoteID" };
+  return { success: true, creditNoteId };
+}
+
+/**
  * Pull chart of accounts from Xero.
  */
 /**
