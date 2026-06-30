@@ -18,8 +18,8 @@ import { importAjmRows, AjmRow, AjmImportSummary } from "@/modules/sales/lib/ajm
  * Idempotent. Dedupe cascade: email → domain → name+state → phone.
  * Matched rows get tag-merged (no clobber); new rows get created with
  * AJM cohort tags + status (customer for real Jaxy matches, qualified_lead
- * for winback). Phones flow into company_phones via the legacy
- * `companies.phone` mirror trigger from db.ts.
+ * for winback). Phones are written directly into company_phones; emails into
+ * contacts (companies.phone/email were dropped 2026-06-19).
  *
  * Returns the full {@link AjmImportSummary}.
  */

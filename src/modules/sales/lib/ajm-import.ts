@@ -296,12 +296,12 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
   );
   const insertNew = sqlite.prepare(
     `INSERT INTO companies (
-       id, name, phone, address, city, state, zip, country,
+       id, name, address, city, state, zip, country,
        status, source, source_type, tags,
        ajm_total_spend, ajm_total_orders, ajm_first_order, ajm_last_order,
        ajm_status, ajm_category,
        created_at, updated_at
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
   );
   const insertPhone = sqlite.prepare(
     `INSERT OR IGNORE INTO company_phones
@@ -380,7 +380,6 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
           insertNew.run(
             id,
             row.name,
-            phoneNorm ?? null, // legacy column — trigger mirrors to company_phones
             row.address ?? null,
             row.city ?? null,
             row.state ?? null,
@@ -399,8 +398,12 @@ export function importAjmRows(rows: AjmRow[], opts: ImportOpts = {}): AjmImportS
             now,
             now,
           );
-          // Phone trigger from db.ts boot block mirrors companies.phone
-          // into company_phones automatically — no manual insert needed.
+          // companies.phone was dropped (2026-06-19); the old mirror trigger
+          // is gone, so write the phone straight into company_phones.
+          if (phoneNorm) {
+            insertPhone.run(randomUUID(), id, phoneNorm, "ajm_2025_import", now, now);
+            summary.phones_added++;
+          }
           // Email goes to contacts (canonical), not on the company row.
           if (row.email) {
             addCompanyEmail(id, row.email, "ajm_import");
