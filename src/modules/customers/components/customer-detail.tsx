@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import { TIER_LABELS, TIER_COLORS, HEALTH_COLORS, type CustomerTier, type HealthStatus } from "@/modules/customers/schema";
+import { PipedrivePanel } from "@/modules/sales/components/pipedrive-panel";
 
 interface AccountData {
   id: string;
@@ -306,6 +307,9 @@ export function CustomerDetail({
           )}
         </div>
       </div>
+
+      {/* Pipedrive — live CRM record (same company id as the account) */}
+      <PipedrivePanel companyId={account.id} companyName={account.company_name} />
 
       {/* Reorder Prediction */}
       {reorderPrediction && reorderPrediction.avgDaysBetweenOrders && (
