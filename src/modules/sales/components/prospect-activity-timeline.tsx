@@ -156,7 +156,11 @@ const EVENT_CATALOG: Record<string, EventSpec> = {
   sales_interested_enriched: {
     icon: Sparkles, color: "green", category: "note", source: "phoneburner",
     render: (d) => {
-      const opener = (d.opener as string) || "";
+      // openers = { email1, email2, email3 }; older rows had a single `opener` string.
+      const openers = (d.openers && typeof d.openers === "object" ? d.openers : null) as
+        | { email1?: string; email2?: string; email3?: string }
+        | null;
+      const legacy = (d.opener as string) || "";
       const temp = d.temperature as string | undefined;
       const brands = Array.isArray(d.current_brands) ? (d.current_brands as string[]) : [];
       const bits: string[] = [];
@@ -165,6 +169,16 @@ const EVENT_CATALOG: Record<string, EventSpec> = {
       if (d.contact_updated && d.contact_name) bits.push(`contact: ${String(d.contact_name)}`);
       if (d.email_applied && d.alt_email) bits.push(`email: ${String(d.alt_email)}`);
       if (d.transcribed) bits.push("transcribed");
+      let snippet: string | undefined;
+      if (openers && (openers.email1 || openers.email2 || openers.email3)) {
+        snippet =
+          `✍️ Email openers\n\n` +
+          `1. ${openers.email1 ?? ""}\n\n` +
+          `2. ${openers.email2 ?? ""}\n\n` +
+          `3. ${openers.email3 ?? ""}`;
+      } else if (legacy) {
+        snippet = `✍️ Email opener\n\n${legacy}`;
+      }
       return {
         body: (
           <>
@@ -172,7 +186,7 @@ const EVENT_CATALOG: Record<string, EventSpec> = {
             {bits.length ? <span className="text-gray-500"> · {bits.join(" · ")}</span> : null}
           </>
         ),
-        snippet: opener ? `✍️ Email opener\n\n${opener}` : undefined,
+        snippet,
       };
     },
   },

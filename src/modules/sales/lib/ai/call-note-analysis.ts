@@ -51,14 +51,43 @@ export interface AnalyzeInput {
   emailOnFile?: string | null;
 }
 
-export interface AnalyzeResult {
-  analysis: CallAnalysis;
-  emailOpener: string; // 1–2 sentence personalized opener
+export interface EmailOpeners {
+  /** Warm intro for email 1 (catalog send). Flows into "As discussed…". */
+  email1: string;
+  /** Lead-in for email 2 (follow-up). Slightly more push. */
+  email2: string;
+  /** Opening nudge for email 3 (final). Most direct. */
+  email3: string;
 }
 
-const SYSTEM = `You analyze a boutique cold-call for a wholesale sunglasses brand and produce structured follow-up data plus a personalized email opening line.
+export interface AnalyzeResult {
+  analysis: CallAnalysis;
+  /** Per-sequence personalized openers (email 1/2/3). */
+  emailOpeners: EmailOpeners;
+}
+
+const SYSTEM = `You analyze a boutique cold-call for a wholesale sunglasses brand and produce structured follow-up data plus THREE personalized email opening lines, one for each step of a 3-email outreach sequence.
 
 ${JAXY_CONTEXT}
+
+The reps' pitch (facts you may use, but only when relevant to THIS call): sunglasses wholesale at $8/pair, suggested retail ~$28 (strong margin, impulse buy), low $150 minimum with a 4-per-color minimum so it's easy to test the line (vs competitors that force 12-pair cases you can't customize), UV400 or polarized quality, ships within 48h from the US, ~32 styles.
+
+The three openers are dropped into these email templates. Write each so it reads naturally in context:
+
+EMAIL 1 (sent with the catalog):
+  "Hi <First>,
+   {email1}
+   As discussed, you can find our summer sunglasses catalog attached. You can order on Faire or our wholesale Shopify store. I'm happy to answer questions, walk you through bestsellers, or put together a recommended opening order.
+   Thanks, <Sender>"
+  → email1 = 1-2 warm, specific sentences referencing the call. It must flow INTO "As discussed, you can find our catalog attached." Do NOT mention the attachment yourself. Soft and friendly.
+
+EMAIL 2 (follow-up a few days later):
+  "{email2} I just wanted to follow up on the catalog that we sent over. Do you need any help choosing the best styles for your store?"
+  → email2 = ONE short sentence that sits directly before "I just wanted to follow up on the catalog we sent over." Slightly more push than email1: reference their specific situation (a competitor they carry, that it's peak sunglasses season, the margin/bestsellers) to remind them why it's worth a look. Do not say "follow up" yourself.
+
+EMAIL 3 (final nudge):
+  "{email3} Just a quick ping on this, did you have any questions about our sunglasses or catalog? We would really love to stock them in your store."
+  → email3 = ONE short sentence that sits before "Just a quick ping on this…". The most direct of the three: a light, genuine nudge with a concrete reason to act now (peak season, easy low-minimum test, better margin than what they carry). Never pushy or spammy.
 
 Return ONLY minified JSON matching exactly this shape (no markdown, no commentary):
 {
@@ -75,8 +104,18 @@ Return ONLY minified JSON matching exactly this shape (no markdown, no commentar
     "repSummary": "one concise sentence for the sales rep",
     "followUp": "one concise recommended next action"
   },
-  "emailOpener": "1-2 warm, specific sentences referencing the call. Natural, not cheesy. Reference what they told us (brands they carry, that owner asked to see the catalog, that sunglasses are new for them, etc). Do NOT invent facts. No greeting like 'Hi' and no signature, just the opening line(s). NEVER use em-dashes or en-dashes (the — or – characters); use commas, periods, or the word 'and' instead."
+  "emailOpeners": {
+    "email1": "warm intro, see EMAIL 1 above",
+    "email2": "follow-up lead-in, see EMAIL 2 above",
+    "email3": "final nudge, see EMAIL 3 above"
+  }
 }
+
+Opener rules (ALL three):
+- Reference only what they actually told us (brands they carry, owner asked to see the catalog, sunglasses are new for them, weekend markets, etc). Do NOT invent facts.
+- No greeting like 'Hi', no names, no sign-off. Just the line(s).
+- NEVER use em-dashes or en-dashes (the — or – characters); use commas, periods, or the word 'and' instead.
+- Keep each to 1-2 sentences. Vary them so the three don't repeat the same phrasing; escalate the pull from email1 (soft) to email3 (most direct).
 
 Rules:
 - alternateEmail is non-null ONLY if an actual email ADDRESS appears in the text. If the note merely SAYS an email was given/collected but no address is present, set alternateEmail=null and emailReferencedUncaptured=true.
@@ -146,8 +185,13 @@ export async function analyzeCallNote(input: AnalyzeInput): Promise<AnalyzeResul
     const json = (await res.json()) as { content: Array<{ type: string; text?: string }> };
     const raw = json.content.find((c) => c.type === "text")?.text ?? "";
     const parsed = JSON.parse(unwrapJson(raw)) as AnalyzeResult;
-    if (!parsed?.analysis || typeof parsed.emailOpener !== "string") return null;
-    parsed.emailOpener = stripDashes(parsed.emailOpener);
+    const o = parsed?.emailOpeners;
+    if (!parsed?.analysis || !o || typeof o.email1 !== "string" || typeof o.email2 !== "string" || typeof o.email3 !== "string") {
+      return null;
+    }
+    o.email1 = stripDashes(o.email1);
+    o.email2 = stripDashes(o.email2);
+    o.email3 = stripDashes(o.email3);
     // Defensive normalization
     const a = parsed.analysis;
     a.currentBrands = Array.isArray(a.currentBrands) ? a.currentBrands : [];

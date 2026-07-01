@@ -106,28 +106,39 @@ function alreadyEnriched(callId: string): boolean {
   return !!row;
 }
 
-/** Ensure the "AI Email Opener" deal field exists; cache its key. */
-async function ensureOpenerFieldKey(): Promise<string | null> {
-  const cached = getSetting("pipedrive_ai_opener_field_key");
-  if (cached) return cached;
-  try {
-    interface FieldDef { key: string; name: string }
-    const existing = (await pdRequest<FieldDef[]>("GET", "/dealFields")) || [];
-    const found = existing.find((f) => f.name.trim().toLowerCase() === "ai email opener");
-    let key = found?.key;
-    if (!key) {
-      const created = await pdRequest<FieldDef>("POST", "/dealFields", {
-        name: "AI Email Opener",
-        field_type: "text",
-      });
-      key = created.key;
-    }
-    if (key) setSetting("pipedrive_ai_opener_field_key", key);
-    return key ?? null;
-  } catch (e) {
-    console.warn("[interested-enrichment] opener field unavailable:", e instanceof Error ? e.message : e);
-    return null;
+/** Ensure the three "AI Email Opener N" deal fields exist; cache keys.
+ *  One field per email-sequence step so each step's automation can merge
+ *  its own opener. Returns { email1Key, email2Key, email3Key } (any of
+ *  which may be null if provisioning is unavailable). */
+interface OpenerFieldKeys { email1: string | null; email2: string | null; email3: string | null }
+async function ensureOpenerFieldKeys(): Promise<OpenerFieldKeys> {
+  const cached = getSetting("pipedrive_ai_opener_field_keys");
+  if (cached) {
+    try {
+      const k = JSON.parse(cached) as OpenerFieldKeys;
+      if ("email1" in k && "email2" in k && "email3" in k) return k;
+    } catch { /* re-provision */ }
   }
+  interface FieldDef { key: string; name: string }
+  const names: Array<[keyof OpenerFieldKeys, string]> = [
+    ["email1", "AI Email Opener 1"],
+    ["email2", "AI Email Opener 2"],
+    ["email3", "AI Email Opener 3"],
+  ];
+  const keys: OpenerFieldKeys = { email1: null, email2: null, email3: null };
+  try {
+    const existing = (await pdRequest<FieldDef[]>("GET", "/dealFields")) || [];
+    for (const [slot, name] of names) {
+      const found = existing.find((f) => f.name.trim().toLowerCase() === name.toLowerCase());
+      if (found) { keys[slot] = found.key; continue; }
+      const created = await pdRequest<FieldDef>("POST", "/dealFields", { name, field_type: "text" });
+      keys[slot] = created.key ?? null;
+    }
+    setSetting("pipedrive_ai_opener_field_keys", JSON.stringify(keys));
+  } catch (e) {
+    console.warn("[interested-enrichment] opener fields unavailable:", e instanceof Error ? e.message : e);
+  }
+  return keys;
 }
 
 function findOpenDeal(companyId: string): { pipedrive_deal_id: number; pipeline: string | null } | undefined {
@@ -322,7 +333,7 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
   if (!ai) {
     try {
       await postEnrichmentSlack({
-        companyId, companyName: company.name, analysis: null, emailOpener: null,
+        companyId, companyName: company.name, analysis: null, emailOpeners: null,
         dealId, dealUrl: dealId ? dealUrl(dealId) : null,
         phone, website: company.website, recordingUrl: call.recording_url,
         note: call.notes, connected: call.connected === 1, duration: fmtDuration(call.duration_seconds),
@@ -337,7 +348,7 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
     return { ok: true, ai: false, companyId, callId: call.call_id, transcribed };
   }
 
-  const { analysis, emailOpener } = ai;
+  const { analysis, emailOpeners } = ai;
 
   const result: Record<string, unknown> = {
     ok: true,
@@ -409,9 +420,13 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
       console.warn("[interested-enrichment] pd activity failed:", e instanceof Error ? e.message : e);
     }
     try {
-      const fieldKey = await ensureOpenerFieldKey();
-      if (fieldKey) {
-        await updateDeal(dealId, { [fieldKey]: emailOpener.slice(0, 1000) });
+      const fk = await ensureOpenerFieldKeys();
+      const payload: Record<string, unknown> = {};
+      if (fk.email1) payload[fk.email1] = emailOpeners.email1.slice(0, 1000);
+      if (fk.email2) payload[fk.email2] = emailOpeners.email2.slice(0, 1000);
+      if (fk.email3) payload[fk.email3] = emailOpeners.email3.slice(0, 1000);
+      if (Object.keys(payload).length) {
+        await updateDeal(dealId, payload);
         pd.opener = true;
       }
     } catch (e) {
@@ -426,7 +441,7 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
       companyId,
       companyName: company.name,
       analysis,
-      emailOpener,
+      emailOpeners,
       dealId,
       dealUrl: dealId ? dealUrl(dealId) : null,
       phone,
@@ -459,7 +474,7 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
     transcribed,
     pipedrive_deal_id: dealId,
     write_enabled: writeEnabled,
-    opener: emailOpener,
+    openers: emailOpeners,
   });
 
   return result;
@@ -523,14 +538,14 @@ function stripUrl(u: string): string {
 /**
  * The single appointment-set Slack message. Sent once, AFTER the AI runs,
  * so it carries the call outcome + full AI context + deal link together.
- * `analysis`/`emailOpener` are null in the fallback case (AI unavailable)
+ * `analysis`/`emailOpeners` are null in the fallback case (AI unavailable)
  * — the message still goes out with the call basics.
  */
 async function postEnrichmentSlack(o: {
   companyId: string;
   companyName: string | null;
   analysis: AnalyzeResult["analysis"] | null;
-  emailOpener: string | null;
+  emailOpeners: AnalyzeResult["emailOpeners"] | null;
   dealId: number | null;
   dealUrl: string | null;
   phone: string | null;
@@ -578,10 +593,18 @@ async function postEnrichmentSlack(o: {
     if (a.objections.length) parts.push(`*Objections:* ${a.objections.join("; ")}`);
     if (a.catalogSendTo) parts.push(`*Send catalog to:* ${a.catalogSendTo}`);
     if (parts.length) blocks.push({ type: "section", text: { type: "mrkdwn", text: parts.join("\n") } });
-    if (o.emailOpener) {
+    if (o.emailOpeners) {
+      const q = (s: string) => s.replace(/\n/g, " ").trim();
       blocks.push({
         type: "section",
-        text: { type: "mrkdwn", text: `*✍️ Email opener*\n>${o.emailOpener.replace(/\n/g, "\n>")}` },
+        text: {
+          type: "mrkdwn",
+          text:
+            `*✍️ Email openers*\n` +
+            `>*1.* ${q(o.emailOpeners.email1)}\n` +
+            `>*2.* ${q(o.emailOpeners.email2)}\n` +
+            `>*3.* ${q(o.emailOpeners.email3)}`,
+        },
       });
     }
   }
