@@ -25,12 +25,32 @@ function pbKey(): string | null {
   return row?.value ?? null;
 }
 
-async function probe(url: string, headers: Record<string, string>) {
+/** Pull candidate audio/media URLs out of the player HTML. */
+function extractAudioUrls(html: string): string[] {
+  const found = new Set<string>();
+  const patterns = [
+    /https?:\/\/[^"'\s)]+\.(?:mp3|wav|m4a|mp4|ogg)(?:\?[^"'\s)]*)?/gi,
+    /["']([^"']*(?:recording|audio|media|stream|download)[^"']*\.(?:mp3|wav|m4a)[^"']*)["']/gi,
+    /["'](\/[^"']*(?:audio|recording|stream|download)[^"']*)["']/gi,
+    /(?:src|href|data-src|file|url)\s*[:=]\s*["']([^"']+(?:mp3|wav|audio|recording|stream)[^"']*)["']/gi,
+  ];
+  for (const re of patterns) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(html)) !== null) {
+      found.add(m[1] ?? m[0]);
+      if (found.size > 40) break;
+    }
+  }
+  return [...found];
+}
+
+async function probe(url: string, headers: Record<string, string>, scanHtml = false) {
   try {
     const res = await fetch(url, { redirect: "follow", headers });
     const ctype = res.headers.get("content-type") || "";
     const buf = Buffer.from(await res.arrayBuffer());
     const isAudio = /audio|octet-stream|mpeg|mp3|wav|mp4/i.test(ctype);
+    const body = buf.toString("utf8");
     return {
       ok: res.ok,
       status: res.status,
@@ -39,6 +59,7 @@ async function probe(url: string, headers: Record<string, string>) {
       bytes: buf.length,
       looksLikeAudio: isAudio,
       first80: buf.slice(0, 80).toString("utf8").replace(/[^\x20-\x7e]/g, "."),
+      audioUrls: scanHtml && !isAudio ? extractAudioUrls(body) : undefined,
     };
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) };
@@ -78,10 +99,7 @@ export async function POST(req: NextRequest) {
 
   const probes: Record<string, unknown> = {};
   if (recordingUrl) {
-    probes.bearer = await probe(recordingUrl, key ? { Authorization: `Bearer ${key}` } : {});
-    probes.noauth = await probe(recordingUrl, {});
-    const sep = recordingUrl.includes("?") ? "&" : "?";
-    if (key) probes.apiKeyQuery = await probe(`${recordingUrl}${sep}api_key=${encodeURIComponent(key)}`, {});
+    probes.bearer = await probe(recordingUrl, key ? { Authorization: `Bearer ${key}` } : {}, true);
   }
 
   let whisper: unknown = null;
