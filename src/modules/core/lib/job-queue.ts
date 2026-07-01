@@ -41,6 +41,28 @@ export class JobQueue {
    * Respects priority (1 first), scheduled time, and max concurrent (3).
    */
   dequeue(module?: string): typeof jobs.$inferSelect | null {
+    // Self-heal stuck jobs. A server restart mid-job (frequent — every
+    // deploy) strands rows in 'running' forever. The concurrency guard
+    // below (>= 3 running → bail) then jams the ENTIRE queue: once 3
+    // stale 'running' rows accumulate, no pending job ever runs again.
+    // (Prod jam observed 2026-06-22 → 2026-07-01; a shiphero job was
+    // "running" for 13.8 days.) Reset any 'running' job whose started_at
+    // is older than 15 min back to 'pending' so it — and the queue —
+    // recover automatically.
+    db
+      .update(jobs)
+      .set({ status: "pending", startedAt: null })
+      .where(
+        and(
+          eq(jobs.status, "running"),
+          or(
+            isNull(jobs.startedAt),
+            lte(jobs.startedAt, new Date(Date.now() - 15 * 60_000).toISOString()),
+          ),
+        ),
+      )
+      .run();
+
     // Check concurrent running jobs
     const running = db
       .select({ count: sql<number>`count(*)` })
