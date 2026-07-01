@@ -75,7 +75,7 @@ Return ONLY minified JSON matching exactly this shape (no markdown, no commentar
     "repSummary": "one concise sentence for the sales rep",
     "followUp": "one concise recommended next action"
   },
-  "emailOpener": "1-2 warm, specific sentences referencing the call. Natural, not cheesy. Reference what they told us (brands they carry, that owner asked to see the catalog, that sunglasses are new for them, etc). Do NOT invent facts. No greeting like 'Hi' and no signature — just the opening line(s)."
+  "emailOpener": "1-2 warm, specific sentences referencing the call. Natural, not cheesy. Reference what they told us (brands they carry, that owner asked to see the catalog, that sunglasses are new for them, etc). Do NOT invent facts. No greeting like 'Hi' and no signature, just the opening line(s). NEVER use em-dashes or en-dashes (the — or – characters); use commas, periods, or the word 'and' instead."
 }
 
 Rules:
@@ -88,6 +88,19 @@ function unwrapJson(text: string): string {
   const t = text.trim();
   const fence = t.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/);
   return fence ? fence[1].trim() : t;
+}
+
+/** Enforce the no-em-dash rule on generated email copy (models often
+ *  ignore the prompt instruction). Em/en dashes → comma; also fixes the
+ *  double-punctuation/spacing that leaves behind. */
+export function stripDashes(s: string): string {
+  return s
+    .replace(/\s*[—–]\s*/g, ", ")
+    .replace(/\s+([,.;!?])/g, "$1")
+    .replace(/,\s*,/g, ",")
+    .replace(/,\s*([.;!?])/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 export async function analyzeCallNote(input: AnalyzeInput): Promise<AnalyzeResult | null> {
@@ -134,6 +147,7 @@ export async function analyzeCallNote(input: AnalyzeInput): Promise<AnalyzeResul
     const raw = json.content.find((c) => c.type === "text")?.text ?? "";
     const parsed = JSON.parse(unwrapJson(raw)) as AnalyzeResult;
     if (!parsed?.analysis || typeof parsed.emailOpener !== "string") return null;
+    parsed.emailOpener = stripDashes(parsed.emailOpener);
     // Defensive normalization
     const a = parsed.analysis;
     a.currentBrands = Array.isArray(a.currentBrands) ? a.currentBrands : [];
