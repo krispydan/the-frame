@@ -97,16 +97,22 @@ export async function POST(req: NextRequest) {
     pb_key_present: !!key,
   };
 
+  // The API's recording_url is a web PLAYER page, not the mp3. The real
+  // download endpoint (from the PB UI) is keyed by call_id:
+  const downloadUrl = `https://www.phoneburner.com/dialer/sessions/download_recording?call_id=${encodeURIComponent(callId)}`;
+
   const probes: Record<string, unknown> = {};
+  probes.downloadBearer = await probe(downloadUrl, key ? { Authorization: `Bearer ${key}` } : {}, true);
+  probes.downloadNoauth = await probe(downloadUrl, {}, true);
   if (recordingUrl) {
-    probes.bearer = await probe(recordingUrl, key ? { Authorization: `Bearer ${key}` } : {}, true);
+    probes.playerBearer = await probe(recordingUrl, key ? { Authorization: `Bearer ${key}` } : {}, false);
   }
 
   let whisper: unknown = null;
-  const bearerProbe = probes.bearer as { looksLikeAudio?: boolean; bytes?: number } | undefined;
-  if (body.tryWhisper && recordingUrl && env.openai_key_present && bearerProbe?.looksLikeAudio) {
+  const dlProbe = probes.downloadBearer as { looksLikeAudio?: boolean; bytes?: number } | undefined;
+  if (body.tryWhisper && env.openai_key_present && dlProbe?.looksLikeAudio) {
     try {
-      const dl = await fetch(recordingUrl, {
+      const dl = await fetch(downloadUrl, {
         redirect: "follow",
         headers: key ? { Authorization: `Bearer ${key}` } : {},
       });
@@ -130,6 +136,7 @@ export async function POST(req: NextRequest) {
     ok: true,
     callId,
     recordingUrl,
+    downloadUrl,
     row_status: row?.transcript_status ?? null,
     pbGetCall,
     env,
