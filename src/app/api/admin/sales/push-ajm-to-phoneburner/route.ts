@@ -32,6 +32,9 @@ interface Row {
   primary_email: string | null;
   first_name: string | null;
   last_name: string | null;
+  ajm_total_spend: number | null;
+  ajm_total_orders: number | null;
+  ajm_last_order: string | null;
 }
 
 export async function POST(req: NextRequest) {
@@ -50,14 +53,21 @@ async function handle(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  let body: { folder_id?: string; limit?: number; dryRun?: boolean } = {};
+  let body: { folder_id?: string; limit?: number; dryRun?: boolean; pipedrivePushedOnly?: boolean } = {};
   try { body = await req.json(); } catch { /* empty */ }
   const folderId = String(body.folder_id || AJM_FOLDER).trim();
   const limit = Math.min(5000, Math.max(1, body.limit ?? 2000));
+  // Default to the leads we actually pushed to Pipedrive (have a deal) —
+  // that's the working cohort. Pass false to target the full AJM universe.
+  const pipedrivePushedOnly = body.pipedrivePushedOnly !== false;
+  const pdClause = pipedrivePushedOnly
+    ? "AND EXISTS (SELECT 1 FROM pipedrive_deals pd WHERE pd.company_id = c.id)"
+    : "";
 
   const cohort = sqlite
     .prepare(
       `SELECT c.id, c.name, c.city, c.state, c.domain, c.website,
+              c.ajm_total_spend, c.ajm_total_orders, c.ajm_last_order,
               (SELECT cp.phone FROM company_phones cp
                 WHERE cp.company_id = c.id
                 ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS primary_phone,
@@ -73,11 +83,12 @@ async function handle(req: NextRequest) {
           AND c.status != 'customer'
           AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.company_id = c.id)
           AND EXISTS (SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id)
+          ${pdClause}
           AND NOT EXISTS (
             SELECT 1 FROM phoneburner_folder_pushes pfp
              WHERE pfp.company_id = c.id AND pfp.folder_id = ?
           )
-        ORDER BY c.icp_score DESC NULLS LAST
+        ORDER BY c.ajm_total_spend DESC NULLS LAST, c.icp_score DESC NULLS LAST
         LIMIT ?`,
     )
     .all(folderId, limit) as Row[];
@@ -89,20 +100,26 @@ async function handle(req: NextRequest) {
          COUNT(*) AS ajm_total,
          SUM(CASE WHEN c.status = 'customer' THEN 1 ELSE 0 END) AS customers,
          SUM(CASE WHEN EXISTS (SELECT 1 FROM orders o WHERE o.company_id = c.id) THEN 1 ELSE 0 END) AS with_orders,
-         SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id) THEN 1 ELSE 0 END) AS no_phone
+         SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id) THEN 1 ELSE 0 END) AS no_phone,
+         SUM(CASE WHEN EXISTS (SELECT 1 FROM pipedrive_deals pd WHERE pd.company_id = c.id) THEN 1 ELSE 0 END) AS in_pipedrive,
+         SUM(CASE WHEN c.ajm_total_spend IS NOT NULL THEN 1 ELSE 0 END) AS with_spend,
+         SUM(CASE WHEN c.ajm_last_order IS NOT NULL THEN 1 ELSE 0 END) AS with_last_order
        FROM companies c WHERE lower(COALESCE(c.tags,'')) LIKE '%ajm%'`,
     )
-    .get() as { ajm_total: number; customers: number; with_orders: number; no_phone: number };
+    .get() as Record<string, number>;
 
   if (body.dryRun) {
     return NextResponse.json({
       ok: true,
       dry_run: true,
       folder_id: folderId,
+      pipedrive_pushed_only: pipedrivePushedOnly,
       cohort_total: cohort.length,
       ajm_universe: universe,
-      sample: cohort.slice(0, 10).map((c) => ({
-        id: c.id, name: c.name, city: c.city, state: c.state, phone: c.primary_phone, email: c.primary_email,
+      metrics_available: ["ajm_total_spend", "ajm_total_orders", "ajm_first_order", "ajm_last_order", "ajm_status", "ajm_category", "icp_score"],
+      sample: cohort.slice(0, 15).map((c) => ({
+        name: c.name, city: c.city, state: c.state, phone: c.primary_phone,
+        total_spend: c.ajm_total_spend, total_orders: c.ajm_total_orders, last_order: c.ajm_last_order,
       })),
     });
   }
