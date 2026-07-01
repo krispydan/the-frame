@@ -292,7 +292,7 @@ export default function SegmentsPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         <Link
-                          href={`/pipeline?segment=${encodeURIComponent(segment.name)}`}
+                          href={`/prospects?segment=${encodeURIComponent(segment.name)}`}
                           className="inline-block hover:underline"
                         >
                           <div>{segment.active_deals.toLocaleString()}</div>

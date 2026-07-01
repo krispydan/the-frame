@@ -53,10 +53,13 @@ export async function GET(req: NextRequest) {
   // Deals
   try {
     const deals = sqlite
-      .prepare(`SELECT d.id, d.title, c.name as company_name FROM deals d LEFT JOIN companies c ON d.company_id = c.id WHERE d.title LIKE ? OR c.name LIKE ? LIMIT ?`)
-      .all(pattern, pattern, limit) as { id: string; title: string; company_name: string | null }[];
+      .prepare(`SELECT d.id, d.company_id, d.title, c.name as company_name FROM deals d LEFT JOIN companies c ON d.company_id = c.id WHERE d.title LIKE ? OR c.name LIKE ? LIMIT ?`)
+      .all(pattern, pattern, limit) as { id: string; company_id: string | null; title: string; company_name: string | null }[];
     for (const d of deals) {
-      results.push({ type: "deal", id: d.id, title: d.title, subtitle: d.company_name || "Deal", href: `/pipeline/${d.id}` });
+      // Pipedrive is the deal system of record; deep-link to the prospect (the
+      // canonical view) rather than the retired /pipeline surface.
+      const href = d.company_id ? `/prospects/${d.company_id}` : `/pipeline/${d.id}`;
+      results.push({ type: "deal", id: d.id, title: d.title, subtitle: d.company_name || "Deal", href });
     }
   } catch { /* table may not exist */ }
 

@@ -7,6 +7,7 @@ export async function GET() {
   const wakingToday = sqlite.prepare(`
     SELECT
       d.id,
+      d.company_id,
       d.title,
       d.stage,
       d.snooze_reason,
@@ -25,6 +26,7 @@ export async function GET() {
   const reorderDue = sqlite.prepare(`
     SELECT
       d.id,
+      d.company_id,
       d.title,
       d.value,
       d.reorder_due_at,
@@ -43,6 +45,7 @@ export async function GET() {
   const stale = sqlite.prepare(`
     SELECT
       d.id,
+      d.company_id,
       d.title,
       d.stage,
       d.last_activity_at,

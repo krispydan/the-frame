@@ -8,6 +8,15 @@ import { eq, sql } from "drizzle-orm";
  * Called when a deal moves to "order_placed" or a new order is created.
  */
 export function ensureCustomerAccount(companyId: string): string {
+  // A company that has placed an order is a customer — advance its status so
+  // dashboards/segments count them and the "won" signal fans out (stops cold
+  // outreach). Forward-only + idempotent, so re-running on order updates is a
+  // no-op. Dynamic import avoids a customers→sales import cycle; fire-and-forget
+  // so a sync hiccup never blocks account creation.
+  import("@/modules/sales/lib/status-progression")
+    .then((m) => m.progressCompanyStatus(companyId, "customer", { source: "system" }))
+    .catch((e) => console.error("[account-sync] status→customer failed:", e));
+
   const existing = db.select().from(customerAccounts).where(eq(customerAccounts.companyId, companyId)).get();
 
   if (existing) {
