@@ -24,6 +24,7 @@ interface Row {
   connected: number | null;
   duration_seconds: number | null;
   notes: string | null;
+  transcript: string | null;
   recording_url: string | null;
   called_at: string | null;
   website: string | null;
@@ -51,6 +52,7 @@ export async function GET(req: NextRequest) {
               cl.connected          AS connected,
               cl.duration_seconds   AS duration_seconds,
               cl.notes              AS notes,
+              cl.transcript         AS transcript,
               cl.recording_url      AS recording_url,
               cl.called_at          AS called_at,
               co.website            AS website,
@@ -64,7 +66,7 @@ export async function GET(req: NextRequest) {
          FROM phoneburner_call_log cl
          LEFT JOIN companies co ON co.id = cl.company_id
         WHERE cl.disposition_label LIKE '%Set Appointment%'
-          AND TRIM(COALESCE(cl.notes,'')) <> ''
+          AND (TRIM(COALESCE(cl.notes,'')) <> '' OR TRIM(COALESCE(cl.transcript,'')) <> '')
           AND cl.called_at >= datetime('now', ?)
         ORDER BY cl.called_at DESC
         LIMIT ?`,
