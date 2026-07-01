@@ -234,6 +234,18 @@ async function handlePush(req: NextRequest) {
         phone: formatted,
         category_id: folderId,
         notes,
+        // Round-trip our company id so call-result webhooks resolve
+        // via the strong Company ID path instead of relying on phone
+        // matching. Names match the PB workspace's pre-created custom
+        // fields (997341 Company ID / 997334 Company Name / 997335
+        // Website). Type is required for auto-create.
+        user_id: row.id,
+        custom_fields: [
+          { name: "Company ID", type: "text", value: row.id },
+          { name: "Company Name", type: "text", value: row.name },
+          { name: "Website", type: "url", value: row.website || "" },
+          { name: "Domain", type: "text", value: row.domain || "" },
+        ].filter((f) => f.value),
         on_duplicate: "skip",
       });
       stampStmt.run(row.id, folderId, created.id || null, formatted, null);
