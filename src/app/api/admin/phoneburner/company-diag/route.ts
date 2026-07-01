@@ -25,6 +25,17 @@ export async function GET(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  try {
+    return runDiag(req);
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : String(e), stack: e instanceof Error ? e.stack?.split("\n").slice(0, 4) : undefined },
+      { status: 500 },
+    );
+  }
+}
+
+function runDiag(req: NextRequest) {
   const url = new URL(req.url);
   const companyId = url.searchParams.get("companyId");
   const email = url.searchParams.get("email");
