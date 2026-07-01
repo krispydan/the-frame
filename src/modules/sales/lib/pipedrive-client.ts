@@ -327,11 +327,14 @@ export async function getPerson(personId: number): Promise<PdPerson | null> {
 }
 
 export async function listDealsForOrg(orgId: number): Promise<PdDeal[]> {
-  return (await pdRequest<PdDeal[]>("GET", `/deals?org_id=${orgId}&limit=50&status=all_not_deleted`)) || [];
+  // NOTE: GET /deals does NOT support an org_id filter — it silently ignores it
+  // and returns every deal. Deals for one org come from the org sub-resource.
+  return (await pdRequest<PdDeal[]>("GET", `/organizations/${orgId}/deals?limit=50&status=all_not_deleted`)) || [];
 }
 
 export async function listActivitiesForOrg(orgId: number, limit = 15): Promise<PdActivity[]> {
-  return (await pdRequest<PdActivity[]>("GET", `/activities?org_id=${orgId}&limit=${limit}&done=1`)) || [];
+  // Same caveat as deals: filter via the org sub-resource, not /activities?org_id=.
+  return (await pdRequest<PdActivity[]>("GET", `/organizations/${orgId}/activities?limit=${limit}&done=1`)) || [];
 }
 
 export interface PdCreated { id: number }
