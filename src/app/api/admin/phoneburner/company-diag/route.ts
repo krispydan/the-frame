@@ -170,8 +170,8 @@ function runDiag(req: NextRequest) {
   let pipedriveDeals: unknown[] = [];
   try {
     pipedriveDeals = sqlite
-      .prepare("SELECT pipedrive_deal_id, status, is_open, updated_at FROM pipedrive_deals WHERE frame_company_id = ? OR company_id = ? ORDER BY updated_at DESC LIMIT 10")
-      .all(cid, cid);
+      .prepare("SELECT pipedrive_deal_id, pipeline, stage, status, is_open, title, updated_at FROM pipedrive_deals WHERE company_id = ? ORDER BY updated_at DESC LIMIT 10")
+      .all(cid);
   } catch { /* table/columns differ */ }
 
   // The status-sync jobs enqueued for this company
