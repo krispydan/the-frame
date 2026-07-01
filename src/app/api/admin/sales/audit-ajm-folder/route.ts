@@ -93,12 +93,10 @@ export async function POST(req: NextRequest) {
   for (const m of mis) {
     const cid = m.pb_contact_id ? String(m.pb_contact_id).replace(/\.0$/, "") : "";
     if (!cid) {
+      // No captured PB contact id (pushed as a duplicate). Leave its
+      // boutique row in place so the AJM push (on_duplicate:update)
+      // picks it up and moves the existing PB contact to the AJM folder.
       results.no_contact_id++;
-      // Still repoint the record so the audit reflects intent.
-      try {
-        if (existsAjmRow.get(m.company_id, AJM_FOLDER)) dropDup.run(m.push_id);
-        else repoint.run(AJM_FOLDER, m.push_id);
-      } catch { /* ignore */ }
       continue;
     }
     try {

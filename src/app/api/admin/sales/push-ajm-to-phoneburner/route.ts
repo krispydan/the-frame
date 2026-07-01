@@ -150,7 +150,10 @@ async function handle(req: NextRequest) {
           { name: "Website", type: "url", value: row.website || "" },
           { name: "Domain", type: "text", value: row.domain || "" },
         ].filter((f) => f.value),
-        on_duplicate: "skip",
+        // "update" so a lead already in PB (e.g. mis-pushed to the
+        // boutique folder) gets moved into the AJM folder rather than
+        // skipped.
+        on_duplicate: "update",
       });
       stamp.run(row.id, folderId, created.id || null, formatted, null);
       pushed++;
