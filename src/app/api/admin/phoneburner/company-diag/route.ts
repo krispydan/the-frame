@@ -33,15 +33,15 @@ export async function GET(req: NextRequest) {
   let company: { id: string; name: string; status: string; phone: string | null } | undefined;
   if (companyId) {
     company = sqlite
-      .prepare("SELECT id, name, status, phone FROM companies WHERE id = ?")
+      .prepare("SELECT id, name, status FROM companies WHERE id = ?")
       .get(companyId) as typeof company;
   } else if (email) {
     company = sqlite
-      .prepare("SELECT id, name, status, phone FROM companies WHERE lower(email) = lower(?) LIMIT 1")
+      .prepare("SELECT id, name, status FROM companies WHERE lower(email) = lower(?) LIMIT 1")
       .get(email) as typeof company;
   } else if (name) {
     company = sqlite
-      .prepare("SELECT id, name, status, phone FROM companies WHERE name LIKE ? LIMIT 1")
+      .prepare("SELECT id, name, status FROM companies WHERE name LIKE ? LIMIT 1")
       .get(`%${name}%`) as typeof company;
   }
 

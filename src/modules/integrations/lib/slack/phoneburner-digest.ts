@@ -114,7 +114,10 @@ export async function postPhoneBurnerCallDigest(): Promise<{
     .prepare(
       `SELECT COALESCE(co.name, l.phoneburner_contact_id, l.id) AS who,
               co.id    AS company_id,
-              co.phone AS phone,
+              (SELECT cp.phone FROM company_phones cp
+                WHERE cp.company_id = co.id
+                ORDER BY cp.is_primary DESC, cp.created_at ASC
+                LIMIT 1) AS phone,
               co.website AS website,
               l.disposition_label AS disposition
          FROM phoneburner_call_log l
