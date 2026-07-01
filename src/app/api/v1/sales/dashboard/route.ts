@@ -23,9 +23,10 @@ export async function GET() {
     "SELECT count(*) as c FROM companies WHERE icp_score IS NULL"
   ).get() as { c: number }).c;
 
-  // Active deals (not closed stages) + pipeline value
+  // Active deals + pipeline value — sourced from the Pipedrive projection
+  // (Pipedrive is the system of record for deals). Open deals only.
   const activeDeals = (sqlite.prepare(
-    "SELECT count(*) as c, coalesce(sum(value), 0) as total FROM deals WHERE stage NOT IN ('order_placed', 'not_interested')"
+    "SELECT count(*) as c, coalesce(sum(value), 0) as total FROM pipedrive_deals WHERE is_open = 1"
   ).get() as { c: number; total: number });
 
   // Pending orders + total revenue
@@ -101,17 +102,17 @@ export async function GET() {
       ) as campaignCount,
       (
         SELECT count(*)
-        FROM deals d
+        FROM pipedrive_deals d
         JOIN companies c ON c.id = d.company_id
         WHERE (c.segment_id = s.id OR lower(trim(c.segment)) = lower(trim(s.name)))
-          AND d.stage NOT IN ('order_placed', 'not_interested')
+          AND d.is_open = 1
       ) as activeDealCount,
       (
         SELECT coalesce(sum(d.value), 0)
-        FROM deals d
+        FROM pipedrive_deals d
         JOIN companies c ON c.id = d.company_id
         WHERE (c.segment_id = s.id OR lower(trim(c.segment)) = lower(trim(s.name)))
-          AND d.stage NOT IN ('order_placed', 'not_interested')
+          AND d.is_open = 1
       ) as pipelineValue,
       (
         SELECT coalesce(sum(o.total), 0)

@@ -7,9 +7,7 @@ import {
   LayoutDashboard,
   Users,
   Layers3,
-  Kanban,
   Mail,
-  Inbox,
   ShoppingCart,
   Package,
   Warehouse,
@@ -79,9 +77,7 @@ const salesNav: NavItem[] = [
       { title: "Brand Accounts", href: "/brands", icon: Building },
     ],
   },
-  { title: "Pipeline", href: "/pipeline", icon: Kanban },
   { title: "Campaigns", href: "/campaigns", icon: Mail },
-  { title: "Inbox", href: "/campaigns/inbox", icon: Inbox },
   { title: "Customers", href: "/customers", icon: HeartHandshake },
 ];
 
@@ -120,7 +116,7 @@ const bottomNav = [
 
 const ROLE_ALLOWED_HREFS: Record<string, string[]> = {
   owner: ["*"],
-  sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/segments", "/pipeline", "/campaigns", "/campaigns/inbox", "/customers", "/brands", "/catalog"],
+  sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/segments", "/campaigns", "/campaigns/inbox", "/customers", "/brands", "/catalog"],
   warehouse: ["/dashboard", "/orders", "/catalog", "/media", "/inventory", "/inventory/purchase-orders", "/inventory/exports"],
   finance: ["/dashboard", "/orders", "/finance", "/finance/cogs"],
   marketing: ["/dashboard", "/marketing", "/catalog", "/media", "/campaigns"],

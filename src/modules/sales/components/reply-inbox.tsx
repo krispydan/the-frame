@@ -127,12 +127,14 @@ export function ReplyInbox({ replies: initialReplies, unreadCount }: { replies: 
   };
 
   const handleMarkQualified = async (id: string, companyId: string) => {
-    // Classify as interested + create/update deal
+    // Classify the reply as interested, then advance the company's status to
+    // "interested". progressCompanyStatus fans that out to Pipedrive (creating
+    // the outreach deal) — no separate internal deal is created here anymore.
     await handleClassify(id, "interested");
-    await fetch("/api/v1/sales/deals", {
-      method: "POST",
+    await fetch(`/api/v1/sales/prospects/${companyId}`, {
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ companyId, stage: "interested", source: "campaign_reply" }),
+      body: JSON.stringify({ status: "interested" }),
     });
   };
 
