@@ -96,7 +96,7 @@ Return ONLY minified JSON matching exactly this shape (no markdown, no commentar
   "analysis": {
     "temperature": "hot|warm|lukewarm",
     "carriesSunglasses": "yes|no|unknown",
-    "currentBrands": ["competitor sunglass brands they already carry, normalized to proper casing, e.g. Freyrs, DAX, Eyesea"],
+    "currentBrands": ["competitor sunglass brands they already carry, normalized to the REAL brand name (see brand glossary below)"],
     "spokeWith": "owner|staff|<role or name>|null",
     "contact": { "name": null, "role": "e.g. Director of Operations, or null", "email": "only if literally present, else null" },
     "alternateEmail": { "value": "email@x.com", "action": "add_contact|update_primary", "confidence": 0.0 } OR null,
@@ -112,6 +112,12 @@ Return ONLY minified JSON matching exactly this shape (no markdown, no commentar
     "email3": "final nudge, see EMAIL 3 above"
   }
 }
+
+BRAND GLOSSARY — the call transcripts are auto-transcribed from phone audio, so competitor brand names are OFTEN misheard. Map them to the real brand name in currentBrands (and when a competitor is referenced in an opener):
+- "I-Sea" is frequently transcribed as: I.C., I see, Icy, Icey, Icee, Eyesea, I-C, ICS. Normalize ALL of these to "I-Sea".
+- "Freyrs" is transcribed as: Friars, Frayers, Fryers, Freyers, Freyr. Normalize to "Freyrs".
+- Other real boutique sunglass brands to recognize/normalize: DIFF Eyewear, Quay, DAX Eyewear ("Dax"), Peepers, Maui Jim, SunCloud, Z Supply ("Z Supply"/"ZSupply"), WMP Eyewear ("WMP"/"WNP"), Goodr ("Gooder"/"Goober"), Blenders, Crew, 11th Hour, Easy Peasy, Brighton, Salt, Illesteva, DIP.
+- If a named brand clearly isn't one of these and isn't obviously a sunglasses brand, use your best judgment on the real name; if genuinely unsure, keep the closest real brand it phonetically matches.
 
 You may also be given a CRM profile of the store (location, size, socials, existing eyewear/competitors, what they're about). Use it to make the openers more relevant and specific (e.g. nod to their locale, their aesthetic, a competitor they stock, that they're a high-volume shop). But the CALL is the primary source of truth, and the structured "analysis" fields must come from the call note/transcript only — never populate analysis from the CRM profile, and never state CRM facts as if they were said on the call.
 
