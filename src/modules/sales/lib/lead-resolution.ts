@@ -130,7 +130,13 @@ export function resolveByPbContactId(pbContactId: string | null): ResolveResult 
 
 /**
  * Last-resort phone-based resolution. Strips to 10 US digits and
- * searches company_phones, then companies.phone.
+ * searches the canonical company_phones store.
+ *
+ * NOTE: the legacy companies.phone column was dropped — do NOT query
+ * it. A stale `SELECT id FROM companies WHERE phone = ?` fallback here
+ * threw "no such column: phone" on EVERY PhoneBurner call_end webhook
+ * once the column went away, silently killing all call ingestion
+ * (handler_ok=0). company_phones is the single source of truth.
  */
 export function resolveByPhone(phoneRaw: string | null | undefined): ResolveResult | null {
   if (!phoneRaw) return null;
@@ -153,15 +159,6 @@ export function resolveByPhone(phoneRaw: string | null | undefined): ResolveResu
     if (phoneRow) {
       return { companyId: phoneRow.company_id, campaignLeadId: null };
     }
-
-    const compRow = sqlite
-      .prepare(
-        `SELECT id FROM companies
-          WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone,'+',''),' ',''),'-',''),'(',''),')','') = ?
-          LIMIT 1`,
-      )
-      .get(candidate) as { id: string } | undefined;
-    if (compRow) return { companyId: compRow.id, campaignLeadId: null };
   }
   return null;
 }
