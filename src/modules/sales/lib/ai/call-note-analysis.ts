@@ -49,6 +49,8 @@ export interface AnalyzeInput {
   /** Optional call transcript (when transcription ran). */
   transcript?: string | null;
   emailOnFile?: string | null;
+  /** Compact profile of the lead from The Frame (loadLeadContext). */
+  leadContext?: string | null;
 }
 
 export interface EmailOpeners {
@@ -111,8 +113,10 @@ Return ONLY minified JSON matching exactly this shape (no markdown, no commentar
   }
 }
 
+You may also be given a CRM profile of the store (location, size, socials, existing eyewear/competitors, what they're about). Use it to make the openers more relevant and specific (e.g. nod to their locale, their aesthetic, a competitor they stock, that they're a high-volume shop). But the CALL is the primary source of truth, and the structured "analysis" fields must come from the call note/transcript only — never populate analysis from the CRM profile, and never state CRM facts as if they were said on the call.
+
 Opener rules (ALL three):
-- Reference only what they actually told us (brands they carry, owner asked to see the catalog, sunglasses are new for them, weekend markets, etc). Do NOT invent facts.
+- Reference only what is genuinely true (from the call, or clearly from the CRM profile). Do NOT invent facts, and do not claim they said something on the call that only appears in the CRM profile.
 - No greeting like 'Hi', no names, no sign-off. Just the line(s).
 - NEVER use em-dashes or en-dashes (the — or – characters); use commas, periods, or the word 'and' instead.
 - Keep each to 1-2 sentences. Vary them so the three don't repeat the same phrasing; escalate the pull from email1 (soft) to email3 (most direct).
@@ -152,9 +156,11 @@ export async function analyzeCallNote(input: AnalyzeInput): Promise<AnalyzeResul
   const transcript = (input.transcript ?? "").trim();
   if (!noteText && !transcript) return null;
 
+  const leadContext = (input.leadContext ?? "").trim();
   const userParts = [
     `Store: ${input.companyName ?? "(unknown)"}`,
     input.emailOnFile ? `Email on file: ${input.emailOnFile}` : null,
+    leadContext ? "\nWhat we know about this store (from our CRM):\n" + leadContext : "",
     "",
     "Rep note:",
     noteText || "(none)",

@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { analyzeCallNote } from "@/modules/sales/lib/ai/call-note-analysis";
 import { getOrCreateTranscript, isTranscriptionEnabled } from "@/modules/sales/lib/ai/recording-transcription";
+import { loadLeadContext } from "@/modules/sales/lib/lead-context";
 
 /**
  * POST /api/admin/sales/enrich-preview
@@ -71,17 +72,21 @@ export async function POST(req: NextRequest) {
     transcript = await getOrCreateTranscript(call.call_id, call.recording_url);
   }
 
+  const leadContext = loadLeadContext(companyId);
+
   const ai = await analyzeCallNote({
     companyName: company.name,
     notes: call.notes,
     transcript,
     emailOnFile,
+    leadContext,
   });
 
   return NextResponse.json({
     ok: true,
     mode: "dry",
     company: { id: company.id, name: company.name },
+    leadContext,
     call: {
       call_id: call.call_id,
       disposition: call.disposition_label,

@@ -35,6 +35,7 @@ import {
 import { isSyncEnabled } from "./pipedrive-sync";
 import { analyzeCallNote, type AnalyzeResult } from "./ai/call-note-analysis";
 import { getOrCreateTranscript } from "./ai/recording-transcription";
+import { loadLeadContext } from "./lead-context";
 import { postSlack, type SlackBlock } from "@/modules/integrations/lib/slack/client";
 
 const APP_BASE_URL =
@@ -315,12 +316,13 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
   const transcript = await getOrCreateTranscript(call.call_id, call.recording_url);
   const transcribed = !!transcript;
 
-  // ── 2. AI analysis (note + transcript) ──
+  // ── 2. AI analysis (note + transcript + full CRM profile) ──
   const ai: AnalyzeResult | null = await analyzeCallNote({
     companyName: company.name,
     notes: call.notes,
     transcript,
     emailOnFile: onFile,
+    leadContext: loadLeadContext(companyId),
   });
 
   // Pipedrive deal (for the link + write-backs).
