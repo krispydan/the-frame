@@ -38,6 +38,30 @@ export async function GET(
     ORDER BY created_at DESC LIMIT 50
   `).all(id, id) as Record<string, unknown>[];
 
+  // The full call transcript lives in phoneburner_call_log (not the
+  // feed) — inject it into the matching phoneburner_call_completed
+  // events so the timeline can show it inline.
+  try {
+    const txRows = sqlite.prepare(
+      `SELECT id, transcript FROM phoneburner_call_log
+        WHERE company_id = ? AND transcript IS NOT NULL AND TRIM(transcript) <> ''`,
+    ).all(id) as Array<{ id: string; transcript: string }>;
+    if (txRows.length) {
+      const byCallId = new Map(txRows.map((r) => [String(r.id), r.transcript]));
+      for (const a of activities) {
+        if (a.event_type !== "phoneburner_call_completed" || !a.data) continue;
+        try {
+          const d = JSON.parse(a.data as string) as Record<string, unknown>;
+          const cid = d.call_id != null ? String(d.call_id) : null;
+          if (cid && byCallId.has(cid)) {
+            d.transcript = byCallId.get(cid);
+            a.data = JSON.stringify(d);
+          }
+        } catch { /* leave event as-is */ }
+      }
+    }
+  } catch { /* transcript column may be absent on old DBs */ }
+
   // Get change logs for notes/status changes
   const changes = sqlite.prepare(`
     SELECT * FROM change_logs

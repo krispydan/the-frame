@@ -18,7 +18,7 @@ import {
   Mail, MailOpen, MousePointerClick, MessageSquare, MessageCircleDashed,
   CheckCircle2, XCircle, Clock, EyeOff, Phone, PhoneCall, PhoneOff,
   RefreshCw, StickyNote, Pencil, UserPlus, Flag, Inbox, Send,
-  CalendarCheck, AlertTriangle, type LucideIcon,
+  CalendarCheck, AlertTriangle, Sparkles, type LucideIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -137,9 +137,42 @@ const EVENT_CATALOG: Record<string, EventSpec> = {
       const disp = d.disposition_label as string | undefined;
       const dur = d.duration_seconds as number | undefined;
       const durFmt = dur != null ? ` · ${Math.floor(dur / 60)}m ${dur % 60}s` : "";
+      const note = (d.notes as string) || "";
+      const transcript = (d.transcript as string) || "";
       return {
-        body: <>Call: <span className="font-medium">{disp ?? "completed"}</span><span className="text-gray-500">{durFmt}</span></>,
-        snippet: (d.notes as string) || undefined,
+        body: (
+          <>
+            Call: <span className="font-medium">{disp ?? "completed"}</span>
+            <span className="text-gray-500">{durFmt}</span>
+            {note ? <div className="text-gray-500 mt-0.5">{note}</div> : null}
+          </>
+        ),
+        // Full Whisper transcript (collapsible). Falls back to the note
+        // when a transcript isn't available.
+        snippet: transcript ? `📄 Full call transcript\n\n${transcript}` : (note || undefined),
+      };
+    },
+  },
+  sales_interested_enriched: {
+    icon: Sparkles, color: "green", category: "note", source: "phoneburner",
+    render: (d) => {
+      const opener = (d.opener as string) || "";
+      const temp = d.temperature as string | undefined;
+      const brands = Array.isArray(d.current_brands) ? (d.current_brands as string[]) : [];
+      const bits: string[] = [];
+      if (temp) bits.push(temp);
+      if (brands.length) bits.push(`carries ${brands.join(", ")}`);
+      if (d.contact_updated && d.contact_name) bits.push(`contact: ${String(d.contact_name)}`);
+      if (d.email_applied && d.alt_email) bits.push(`email: ${String(d.alt_email)}`);
+      if (d.transcribed) bits.push("transcribed");
+      return {
+        body: (
+          <>
+            <span className="font-medium">AI enrichment</span>
+            {bits.length ? <span className="text-gray-500"> · {bits.join(" · ")}</span> : null}
+          </>
+        ),
+        snippet: opener ? `✍️ Email opener\n\n${opener}` : undefined,
       };
     },
   },
