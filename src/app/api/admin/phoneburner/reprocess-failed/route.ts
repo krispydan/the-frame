@@ -180,5 +180,35 @@ export async function POST(req: NextRequest) {
     markOk.run(`reprocessed: ${outcome} disposition=${disposition ?? "(none)"}`, r.id);
   }
 
-  return NextResponse.json(summary);
+  // Stamp-backfill pass: link every campaign_lead that's missing a
+  // phoneburner_contact_id to the PB contact id we already have in
+  // phoneburner_call_log for the same company. Catches the leads that
+  // were reprocessed BEFORE the self-heal shipped (their call_log rows
+  // carry the contact id but campaign_leads was never stamped).
+  let contactLinksStamped = 0;
+  if (!dryRun) {
+    const res = sqlite
+      .prepare(
+        `UPDATE campaign_leads
+            SET phoneburner_contact_id = (
+              SELECT pcl.phoneburner_contact_id
+                FROM phoneburner_call_log pcl
+               WHERE pcl.company_id = campaign_leads.company_id
+                 AND pcl.phoneburner_contact_id IS NOT NULL
+                 AND pcl.phoneburner_contact_id != ''
+               ORDER BY pcl.called_at DESC LIMIT 1
+            )
+          WHERE (phoneburner_contact_id IS NULL OR phoneburner_contact_id = '')
+            AND EXISTS (
+              SELECT 1 FROM phoneburner_call_log pcl2
+               WHERE pcl2.company_id = campaign_leads.company_id
+                 AND pcl2.phoneburner_contact_id IS NOT NULL
+                 AND pcl2.phoneburner_contact_id != ''
+            )`,
+      )
+      .run();
+    contactLinksStamped = res.changes;
+  }
+
+  return NextResponse.json({ ...summary, contactLinksStamped });
 }
