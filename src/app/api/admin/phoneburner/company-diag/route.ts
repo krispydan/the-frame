@@ -151,6 +151,53 @@ function runDiag(req: NextRequest) {
       .all(...likeTerms.map((t) => `%${t}%`));
   }
 
+  // ── Pipeline / Pipedrive diagnostics ──
+  let deals: unknown[] = [];
+  try {
+    deals = sqlite
+      .prepare("SELECT id, title, stage, channel, created_at FROM deals WHERE company_id = ? ORDER BY created_at DESC LIMIT 10")
+      .all(cid);
+  } catch { /* deals shape differs */ }
+
+  // Pipedrive linkage on the company
+  let pipedriveCompany: unknown = null;
+  try {
+    pipedriveCompany = sqlite
+      .prepare("SELECT pipedrive_org_id, pipedrive_person_id, pipedrive_synced_at FROM companies WHERE id = ?")
+      .get(cid) ?? null;
+  } catch { pipedriveCompany = "(columns absent)"; }
+
+  let pipedriveDeals: unknown[] = [];
+  try {
+    pipedriveDeals = sqlite
+      .prepare("SELECT pipedrive_deal_id, status, is_open, updated_at FROM pipedrive_deals WHERE frame_company_id = ? OR company_id = ? ORDER BY updated_at DESC LIMIT 10")
+      .all(cid, cid);
+  } catch { /* table/columns differ */ }
+
+  // The status-sync jobs enqueued for this company
+  let syncJobs: unknown[] = [];
+  try {
+    syncJobs = sqlite
+      .prepare(
+        `SELECT type, status, attempts, error, substr(output,1,200) AS output, created_at
+           FROM jobs
+          WHERE type LIKE 'sales.sync_status_%'
+            AND input LIKE ?
+          ORDER BY created_at DESC LIMIT 10`,
+      )
+      .all(`%${cid}%`);
+  } catch { /* jobs shape differs */ }
+
+  // Pipedrive settings
+  const pdSettings = sqlite
+    .prepare("SELECT key, value FROM settings WHERE key IN ('pipedrive_sync_enabled','pipedrive_access_token','pipedrive_pipeline_config')")
+    .all() as Array<{ key: string; value: string | null }>;
+  const pdSettingsSummary = pdSettings.map((s) => ({
+    key: s.key,
+    set: !!s.value,
+    value: s.key === "pipedrive_sync_enabled" ? s.value : undefined,
+  }));
+
   return NextResponse.json({
     ok: true,
     company,
@@ -161,6 +208,9 @@ function runDiag(req: NextRequest) {
       webhook_events_by_payload: payloadMatches.length,
       activity_feed: (activityFeed as unknown[]).length,
       phones: phones.length,
+      deals: (deals as unknown[]).length,
+      pipedrive_deals: (pipedriveDeals as unknown[]).length,
+      sync_jobs: (syncJobs as unknown[]).length,
     },
     phones,
     campaignLeads,
@@ -168,5 +218,10 @@ function runDiag(req: NextRequest) {
     webhookEvents,
     payloadMatches,
     activityFeed,
+    deals,
+    pipedriveCompany,
+    pipedriveDeals,
+    syncJobs,
+    pipedriveSettings: pdSettingsSummary,
   });
 }
