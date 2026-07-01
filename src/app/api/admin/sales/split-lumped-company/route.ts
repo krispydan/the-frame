@@ -34,14 +34,27 @@ export async function POST(req: NextRequest) {
   } catch {
     /* empty */
   }
-  const companyId = body.companyId;
+  // Accept either a companies.id or a customer_accounts.id (the /customers/<id>
+  // URL uses the account id), so callers can paste straight from the page URL.
+  const inputId = body.companyId;
   const dryRun = body.dryRun !== false; // default true
-  if (!companyId) return NextResponse.json({ error: "companyId required" }, { status: 400 });
+  if (!inputId) return NextResponse.json({ error: "companyId required" }, { status: 400 });
 
-  const company = sqlite.prepare("SELECT id, name FROM companies WHERE id = ?").get(companyId) as
+  let company = sqlite.prepare("SELECT id, name FROM companies WHERE id = ?").get(inputId) as
     | { id: string; name: string | null }
     | undefined;
-  if (!company) return NextResponse.json({ error: "company not found" }, { status: 404 });
+  if (!company) {
+    const acct = sqlite.prepare("SELECT company_id FROM customer_accounts WHERE id = ?").get(inputId) as
+      | { company_id: string | null }
+      | undefined;
+    if (acct?.company_id) {
+      company = sqlite.prepare("SELECT id, name FROM companies WHERE id = ?").get(acct.company_id) as
+        | { id: string; name: string | null }
+        | undefined;
+    }
+  }
+  if (!company) return NextResponse.json({ error: "company not found (tried company id and customer-account id)" }, { status: 404 });
+  const companyId = company.id;
 
   const orders = sqlite
     .prepare(
