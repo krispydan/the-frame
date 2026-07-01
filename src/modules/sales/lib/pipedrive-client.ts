@@ -352,10 +352,6 @@ export async function updateOrganization(id: number, input: Record<string, unkno
   return pdRequest<PdCreated>("PUT", `/organizations/${id}`, input);
 }
 
-export async function updatePerson(id: number, input: Record<string, unknown>): Promise<PdCreated> {
-  return pdRequest<PdCreated>("PUT", `/persons/${id}`, input);
-}
-
 export async function createPerson(input: {
   name: string;
   org_id?: number;
