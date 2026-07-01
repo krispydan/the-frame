@@ -721,10 +721,9 @@ export async function backfillInterested(opts: { dryRun?: boolean } = {}): Promi
     try {
       const isAjm = isAjmCompany(c);
       const pipeline: "ajm" | "catalog" = isAjm ? "ajm" : "catalog";
-      // AJM reactivation is a call queue — its deals stay at "To Contact"
-      // (Christina advances them manually), never auto-bumped to Interested.
-      // Non-AJM: catalog_sent → "Catalog Sent", else "Interested".
-      const stageName = isAjm ? "To Contact" : c.status === "catalog_sent" ? "Catalog Sent" : "Interested";
+      // Advance to match the frame status in both pipelines: an interested
+      // AJM lead moves from its seeded "To Contact" to "Interested".
+      const stageName = c.status === "catalog_sent" ? "Catalog Sent" : "Interested";
       const r = await ensureOutreachDeal(c.id, pipeline, stageName, { dryRun });
       if (r.action === "created") {
         if (isAjm) result.ajmAdvanced++;
@@ -1162,9 +1161,11 @@ export async function syncStatusToPipedrive(
   if (status === "interested" || status === "catalog_sent") {
     const isAjm = isAjmCompany(c);
     const pipeline: "ajm" | "catalog" = isAjm ? "ajm" : "catalog";
-    // AJM reactivation deals stay at "To Contact" (call queue) — never
-    // auto-advanced. Non-AJM advance with the frame status.
-    const stageName = isAjm ? "To Contact" : status === "catalog_sent" ? "Catalog Sent" : "Interested";
+    // Advance the deal to match the frame status in BOTH pipelines. AJM
+    // deals seed at "To Contact"; once Christina sets an appointment they
+    // move to "Interested" (both pipelines have Interested + Catalog Sent
+    // stages). ensureOutreachDeal only advances forward, never backward.
+    const stageName = status === "catalog_sent" ? "Catalog Sent" : "Interested";
     const r = await ensureOutreachDeal(companyId, pipeline, stageName);
     return { ...r };
   }
