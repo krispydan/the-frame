@@ -202,10 +202,10 @@ mcpRegistry.register(
     const run = sqlite.transaction(() => {
       switch (action) {
         case "approve":
-          affected = sqlite.prepare(`UPDATE companies SET status = 'qualified', updated_at = ? WHERE id IN (${placeholders})`).run(now, ...ids).changes;
+          affected = sqlite.prepare(`UPDATE companies SET status = 'qualified_lead', updated_at = ? WHERE id IN (${placeholders})`).run(now, ...ids).changes;
           break;
         case "reject":
-          affected = sqlite.prepare(`UPDATE companies SET status = 'rejected', updated_at = ? WHERE id IN (${placeholders})`).run(now, ...ids).changes;
+          affected = sqlite.prepare(`UPDATE companies SET status = 'not_qualified', updated_at = ? WHERE id IN (${placeholders})`).run(now, ...ids).changes;
           break;
         case "tag": {
           if (!args.tag) throw new Error("tag required for tag action");
