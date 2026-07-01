@@ -83,7 +83,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   try {
-    const [org, person, deals, activities, stages, pipelines, users] = await Promise.all([
+    const [orgR, personR, dealsR, activitiesR, stagesR, pipelinesR, usersR] = await Promise.all([
       getOrganization(company.pipedrive_org_id),
       company.pipedrive_person_id ? getPerson(company.pipedrive_person_id) : Promise.resolve(null),
       listDealsForOrg(company.pipedrive_org_id),
@@ -92,6 +92,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       listPipelines(),
       listUsers(),
     ]);
+    // Pipedrive occasionally returns a non-array (e.g. {data:null}) for empty
+    // collections; coerce so a bad shape never crashes the whole summary.
+    const org = orgR;
+    const person = personR;
+    const deals = Array.isArray(dealsR) ? dealsR : [];
+    const activities = Array.isArray(activitiesR) ? activitiesR : [];
+    const stages = Array.isArray(stagesR) ? stagesR : [];
+    const pipelines = Array.isArray(pipelinesR) ? pipelinesR : [];
+    const users = Array.isArray(usersR) ? usersR : [];
     const stageName = new Map(stages.map((s) => [s.id, s.name]));
     const pipeName = new Map(pipelines.map((p) => [p.id, p.name]));
     const userName = new Map(users.map((u) => [u.id, u.name]));
