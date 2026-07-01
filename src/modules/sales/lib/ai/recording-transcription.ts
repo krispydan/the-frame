@@ -38,10 +38,20 @@ function resolvePbApiKey(): string | null {
 
 /**
  * Download the recording (PB bearer auth) and transcribe it.
+ *
+ * The PB API's `recording_url` is a web PLAYER page, not the mp3. The
+ * real audio is the UI's download endpoint, keyed by call_id and gated
+ * behind the API bearer token (no-auth returns an HTML login page).
+ *
+ * @param callId  PhoneBurner call id (phoneburner_call_log.id)
  * @returns transcript text, or null if unavailable.
  */
-export async function transcribeRecording(recordingUrl: string | null): Promise<string | null> {
-  if (!recordingUrl) return null;
+export function pbRecordingDownloadUrl(callId: string): string {
+  return `https://www.phoneburner.com/dialer/sessions/download_recording?call_id=${encodeURIComponent(callId)}`;
+}
+
+export async function transcribeRecording(callId: string | null): Promise<string | null> {
+  if (!callId) return null;
   if (!isTranscriptionEnabled()) return null;
 
   const openaiKey = process.env.OPENAI_API_KEY;
@@ -50,20 +60,25 @@ export async function transcribeRecording(recordingUrl: string | null): Promise<
     return null;
   }
   const pbKey = resolvePbApiKey();
+  if (!pbKey) {
+    console.warn("[transcription] PhoneBurner API key not set — cannot download recording");
+    return null;
+  }
+  const downloadUrl = pbRecordingDownloadUrl(callId);
 
   try {
-    const audioRes = await fetch(recordingUrl, {
+    const audioRes = await fetch(downloadUrl, {
       redirect: "follow",
-      headers: pbKey ? { Authorization: `Bearer ${pbKey}` } : {},
+      headers: { Authorization: `Bearer ${pbKey}` },
     });
     if (!audioRes.ok) {
-      console.warn("[transcription] recording download", audioRes.status, recordingUrl);
+      console.warn("[transcription] recording download", audioRes.status, downloadUrl);
       return null;
     }
     const ctype = audioRes.headers.get("content-type") || "";
-    // A login redirect returns HTML, not audio — bail rather than send junk.
+    // No recording (or a login redirect) returns HTML, not audio — bail.
     if (!/audio|octet-stream|mpeg|mp3|wav|mp4/i.test(ctype)) {
-      console.warn("[transcription] non-audio response", ctype, "for", recordingUrl);
+      console.warn("[transcription] non-audio response", ctype, "for call", callId);
       return null;
     }
     const buf = Buffer.from(await audioRes.arrayBuffer());
@@ -105,7 +120,7 @@ export async function transcribeRecording(recordingUrl: string | null): Promise<
  */
 export async function getOrCreateTranscript(
   callId: string,
-  recordingUrl: string | null,
+  _recordingUrl?: string | null, // kept for call-site compat; download is keyed by callId
 ): Promise<string | null> {
   const existing = sqlite
     .prepare("SELECT transcript FROM phoneburner_call_log WHERE id = ? LIMIT 1")
@@ -129,9 +144,8 @@ export async function getOrCreateTranscript(
   };
 
   if (!isTranscriptionEnabled()) { setStatus("disabled"); return null; }
-  if (!recordingUrl) { setStatus("no_recording"); return null; }
 
-  const text = await transcribeRecording(recordingUrl);
+  const text = await transcribeRecording(callId);
   setStatus(text ? "ok" : "failed", text ?? undefined);
   return text;
 }
