@@ -115,18 +115,58 @@ function runDiag(req: NextRequest) {
     )
     .all(cid);
 
+  // This company's phones (canonical store) — needed to know if a PB
+  // call by phone COULD have matched.
+  const phones = sqlite
+    .prepare(
+      `SELECT phone, source, is_primary FROM company_phones WHERE company_id = ?`,
+    )
+    .all(cid) as Array<{ phone: string; source: string | null; is_primary: number }>;
+
+  // Deep search: find ANY webhook_event whose raw payload mentions this
+  // company's email or any of its phone digit-strings. Catches events
+  // that arrived but never resolved to this company (e.g. contact added
+  // to PB manually, so no Company ID custom field → resolver missed).
+  const emails = (campaignLeads as Array<{ email: string | null }>)
+    .map((l) => l.email)
+    .filter(Boolean) as string[];
+  const digitStrings = phones
+    .map((p) => p.phone.replace(/\D+/g, ""))
+    .filter((d) => d.length >= 10)
+    .map((d) => (d.length === 11 && d.startsWith("1") ? d.slice(1) : d));
+
+  const likeTerms = [...emails, ...digitStrings];
+  let payloadMatches: unknown[] = [];
+  if (likeTerms.length) {
+    const clauses = likeTerms.map(() => "payload LIKE ?").join(" OR ");
+    payloadMatches = sqlite
+      .prepare(
+        `SELECT id, event_type, pb_call_id, pb_contact_id, frame_lead_id,
+                token_valid, handler_ok, handler_message, received_at,
+                substr(payload, 1, 500) AS payload_preview
+           FROM phoneburner_webhook_events
+          WHERE ${clauses}
+          ORDER BY received_at DESC LIMIT 20`,
+      )
+      .all(...likeTerms.map((t) => `%${t}%`));
+  }
+
   return NextResponse.json({
     ok: true,
     company,
     counts: {
       call_log: (callLog as unknown[]).length,
       campaign_leads: (campaignLeads as unknown[]).length,
-      webhook_events: webhookEvents.length,
+      webhook_events_by_id: webhookEvents.length,
+      webhook_events_by_payload: payloadMatches.length,
       activity_feed: (activityFeed as unknown[]).length,
+      phones: phones.length,
     },
+    phones,
     campaignLeads,
     callLog,
     webhookEvents,
+    payloadMatches,
     activityFeed,
   });
 }
