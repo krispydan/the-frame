@@ -14,9 +14,9 @@ import { ShopifyStatusWidget } from "@/modules/integrations/components/shopify-s
 
 
 interface FocusData {
-  wakingToday: { id: string; title: string; company_name: string; segment: string | null; snooze_reason: string; value: number }[];
-  reorderDue: { id: string; title: string; company_name: string; segment: string | null; reorder_due_at: string; value: number }[];
-  stale: { id: string; title: string; company_name: string; segment: string | null; last_activity_at: string; stage: string; value: number }[];
+  wakingToday: { id: string; company_id: string; title: string; company_name: string; segment: string | null; snooze_reason: string; value: number }[];
+  reorderDue: { id: string; company_id: string; title: string; company_name: string; segment: string | null; reorder_due_at: string; value: number }[];
+  stale: { id: string; company_id: string; title: string; company_name: string; segment: string | null; last_activity_at: string; stage: string; value: number }[];
 }
 
 interface DashboardStats {
@@ -158,7 +158,7 @@ export default function DashboardPage() {
           icon={<Target className="w-5 h-5" />}
           color="green"
           subtitle={`Pipeline: $${(stats?.pipelineValue ?? 0).toLocaleString()}`}
-          href="/pipeline"
+          href="/prospects?status=interested"
         />
         <StatCard
           title="Pending Orders"
@@ -325,7 +325,7 @@ export default function DashboardPage() {
                       <div>${pipelinePerCampaign.toLocaleString(undefined, { maximumFractionDigits: 0 })} pipeline/campaign</div>
                     </Link>
                     <Link
-                      href={`/pipeline?segment=${encodeURIComponent(segment.name)}`}
+                      href={`/prospects?segment=${encodeURIComponent(segment.name)}`}
                       className="block text-xs text-gray-500 hover:underline"
                     >
                       <div>{segment.activeDealCount.toLocaleString()} active deals</div>
@@ -392,7 +392,7 @@ export default function DashboardPage() {
                   <h4 className="text-sm font-medium text-amber-700 mb-2">⏰ Waking Today ({focus.wakingToday.length})</h4>
                   {focus.wakingToday.map(d => (
                     <div key={d.id} className="rounded p-2 hover:bg-amber-50 dark:hover:bg-amber-900/10 text-sm">
-                      <Link href={`/pipeline/${d.id}`} className="font-medium hover:underline">
+                      <Link href={`/prospects/${d.company_id}`} className="font-medium hover:underline">
                         {d.company_name}
                       </Link>
                       {d.segment && (
@@ -415,7 +415,7 @@ export default function DashboardPage() {
                   <h4 className="text-sm font-medium text-teal-700 mb-2">🔄 Reorder Due ({focus.reorderDue.length})</h4>
                   {focus.reorderDue.map(d => (
                     <div key={d.id} className="rounded p-2 hover:bg-teal-50 dark:hover:bg-teal-900/10 text-sm">
-                      <Link href={`/pipeline/${d.id}`} className="font-medium hover:underline">
+                      <Link href={`/prospects/${d.company_id}`} className="font-medium hover:underline">
                         {d.company_name}
                       </Link>
                       {d.segment && (
@@ -438,7 +438,7 @@ export default function DashboardPage() {
                   <h4 className="text-sm font-medium text-red-700 mb-2">💤 Needs Attention ({focus.stale.length})</h4>
                   {focus.stale.map(d => (
                     <div key={d.id} className="rounded p-2 hover:bg-red-50 dark:hover:bg-red-900/10 text-sm">
-                      <Link href={`/pipeline/${d.id}`} className="font-medium hover:underline">
+                      <Link href={`/prospects/${d.company_id}`} className="font-medium hover:underline">
                         {d.company_name}
                       </Link>
                       {d.segment && (
@@ -537,7 +537,7 @@ export default function DashboardPage() {
               </div>
             )}
 
-            <Link href="/pipeline?filter=stale" className="block p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors">
+            <Link href="/prospects?status=interested" className="block p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors">
               <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
                 Re-engagement Queue
               </p>

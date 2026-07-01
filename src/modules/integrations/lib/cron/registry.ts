@@ -33,6 +33,8 @@ import { runDailyCogsPosting } from "@/modules/finance/lib/daily-cogs";
 import { syncFairePayouts } from "@/modules/integrations/lib/faire/payout-sync";
 import { runOrderDealSweep, runActivitySweep } from "@/modules/sales/lib/pipedrive-sync";
 import { enrichViaGoogleMaps } from "@/modules/sales/lib/google-maps-enrichment";
+import { recalculateAllHealthScores } from "@/modules/customers/lib/health-scoring";
+import { refreshReorderEstimates } from "@/modules/customers/lib/reorder-engine";
 
 export type CronJob = {
   id: string;                         // stable, kebab-case
@@ -66,6 +68,24 @@ export type CronJob = {
 };
 
 export const CRON_JOBS: CronJob[] = [
+  // ── Customer lifecycle refresh ──
+  // Keep customer health scores and reorder estimates current. Both are quick
+  // whole-table passes over customer_accounts; account stats update on each
+  // order, but health (RFM/recency) and reorder timing drift with the calendar,
+  // so a nightly recompute keeps the customer pages + retention signals honest.
+  {
+    id: "recalculate-health-scores",
+    schedule: "0 11 * * *",  // 11:00 UTC ≈ 4am PT
+    description: "Recompute RFM health scores + statuses for all customer accounts",
+    handler: async () => recalculateAllHealthScores(),
+  },
+  {
+    id: "refresh-reorder-estimates",
+    schedule: "20 11 * * *",  // 11:20 UTC ≈ 4:20am PT (after health scores)
+    description: "Refresh next-reorder-date estimates for all customer accounts",
+    handler: async () => ({ updated: refreshReorderEstimates() }),
+  },
+
   // ── Catalog metafield sync ──
   // Catch-all nightly sweep to keep Shopify metafields in sync with
   // the-frame's tag data. Immediate syncs happen on tag mutations

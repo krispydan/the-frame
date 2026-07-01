@@ -153,7 +153,7 @@ export async function GET() {
         WHEN 'payment' THEN (SELECT 'Payment' || CASE WHEN entity_id IS NOT NULL THEN ' #' || substr(af.entity_id, 1, 8) ELSE '' END)
       END as entity_name,
       CASE af.entity_type
-        WHEN 'deal' THEN '/pipeline/' || af.entity_id
+        WHEN 'deal' THEN '/prospects/' || (SELECT company_id FROM deals WHERE id = af.entity_id)
         WHEN 'order' THEN '/orders/' || af.entity_id
         WHEN 'company' THEN '/prospects/' || af.entity_id
         WHEN 'product' THEN '/catalog/' || (SELECT sku_prefix FROM catalog_products WHERE id = af.entity_id)
