@@ -266,14 +266,15 @@ registerJobHandler(
   },
 );
 
-/** Enqueue transcription of a call recording (~60s out so PB has time to
- *  finalize the recording). Fires for every interested/Set-Appointment call. */
-export function enqueueCallTranscription(callId: string): void {
+/** Enqueue transcription of a call recording. Defaults to ~60s out so
+ *  PB has time to finalize the recording for a just-ended call; pass
+ *  delayMs=0 for backfilling historical calls. */
+export function enqueueCallTranscription(callId: string, delayMs = 60_000): void {
   if (!callId) return;
   void jobQueue.enqueue(
     "sales.transcribe_call",
     "sales",
     { callId },
-    { priority: 3, scheduledFor: new Date(Date.now() + 60_000).toISOString() },
+    { priority: 3, scheduledFor: new Date(Date.now() + delayMs).toISOString() },
   );
 }
