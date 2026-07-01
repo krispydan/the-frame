@@ -1,0 +1,94 @@
+/**
+ * Transcribe a PhoneBurner call recording so verbally-given details
+ * (most notably the "send the catalog to <email>" that reps say out
+ * loud but don't type) can be recovered.
+ *
+ * PhoneBurner recording URLs (www.phoneburner.com/recording/.../recording.mp3)
+ * are NOT public — they 302 to a login. We download with the PB API
+ * bearer token, then send the audio to OpenAI's transcription endpoint.
+ *
+ * Fully gated + graceful:
+ *   - off unless settings.pb_transcription_enabled === "true"
+ *   - returns null (never throws) if OPENAI_API_KEY is unset, the
+ *     download isn't audio, or transcription fails.
+ * So enrichment always proceeds notes-only when this can't run.
+ */
+import { sqlite } from "@/lib/db";
+
+const OPENAI_TRANSCRIBE_URL = "https://api.openai.com/v1/audio/transcriptions";
+const TRANSCRIBE_MODEL = "whisper-1";
+const MAX_BYTES = 25 * 1024 * 1024; // OpenAI hard limit
+
+function getSetting(key: string): string | null {
+  const row = sqlite.prepare("SELECT value FROM settings WHERE key = ? LIMIT 1").get(key) as
+    | { value: string | null }
+    | undefined;
+  return row?.value ?? null;
+}
+
+export function isTranscriptionEnabled(): boolean {
+  return getSetting("pb_transcription_enabled") === "true";
+}
+
+function resolvePbApiKey(): string | null {
+  return process.env.PHONEBURNER_API_KEY || getSetting("phoneburner_api_key");
+}
+
+/**
+ * Download the recording (PB bearer auth) and transcribe it.
+ * @returns transcript text, or null if unavailable.
+ */
+export async function transcribeRecording(recordingUrl: string | null): Promise<string | null> {
+  if (!recordingUrl) return null;
+  if (!isTranscriptionEnabled()) return null;
+
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (!openaiKey) {
+    console.warn("[transcription] OPENAI_API_KEY not set — skipping");
+    return null;
+  }
+  const pbKey = resolvePbApiKey();
+
+  try {
+    const audioRes = await fetch(recordingUrl, {
+      redirect: "follow",
+      headers: pbKey ? { Authorization: `Bearer ${pbKey}` } : {},
+    });
+    if (!audioRes.ok) {
+      console.warn("[transcription] recording download", audioRes.status, recordingUrl);
+      return null;
+    }
+    const ctype = audioRes.headers.get("content-type") || "";
+    // A login redirect returns HTML, not audio — bail rather than send junk.
+    if (!/audio|octet-stream|mpeg|mp3|wav|mp4/i.test(ctype)) {
+      console.warn("[transcription] non-audio response", ctype, "for", recordingUrl);
+      return null;
+    }
+    const buf = Buffer.from(await audioRes.arrayBuffer());
+    if (buf.length === 0 || buf.length > MAX_BYTES) {
+      console.warn("[transcription] audio size out of range:", buf.length);
+      return null;
+    }
+
+    const form = new FormData();
+    form.append("file", new Blob([buf], { type: "audio/mpeg" }), "recording.mp3");
+    form.append("model", TRANSCRIBE_MODEL);
+    form.append("language", "en");
+
+    const tRes = await fetch(OPENAI_TRANSCRIBE_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${openaiKey}` },
+      body: form,
+    });
+    if (!tRes.ok) {
+      console.error("[transcription] OpenAI", tRes.status, (await tRes.text()).slice(0, 300));
+      return null;
+    }
+    const j = (await tRes.json()) as { text?: string };
+    const text = (j.text ?? "").trim();
+    return text || null;
+  } catch (e) {
+    console.error("[transcription] failed:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}

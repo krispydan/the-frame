@@ -398,6 +398,17 @@ export async function createActivity(input: {
   return pdRequest<PdCreated>("POST", "/activities", input);
 }
 
+/** Attach a free-text note to a deal / org / person. */
+export async function createNote(input: {
+  content: string; // supports basic HTML
+  deal_id?: number;
+  org_id?: number;
+  person_id?: number;
+  [k: string]: unknown;
+}): Promise<PdCreated> {
+  return pdRequest<PdCreated>("POST", "/notes", input);
+}
+
 /** Search persons by email/term; returns the first matching person id, or null. */
 export async function findPersonIdByEmail(email: string): Promise<number | null> {
   if (!email) return null;

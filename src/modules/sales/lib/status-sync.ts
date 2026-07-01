@@ -71,6 +71,30 @@ export function fanOutStatusChange(
   if (source !== "pipedrive") {
     enqueuePipedriveSync(companyId, status);
   }
+  // AI enrichment of interested leads (analysis + auto-email + opener +
+  // Pipedrive deal note/activity/opener + Slack). Scheduled ~30s out so
+  // the Pipedrive deal-creation job above has normally landed the deal.
+  if (status === "interested" && enrichmentEnabled()) {
+    enqueueInterestedEnrichment(companyId);
+  }
+}
+
+/** Master switch for AI enrichment of interested leads. Off until the
+ *  prompts/flow are validated in prod (settings.interested_enrichment_enabled). */
+function enrichmentEnabled(): boolean {
+  const row = sqlite
+    .prepare("SELECT value FROM settings WHERE key = 'interested_enrichment_enabled' LIMIT 1")
+    .get() as { value: string | null } | undefined;
+  return row?.value === "true";
+}
+
+function enqueueInterestedEnrichment(companyId: string): void {
+  void jobQueue.enqueue(
+    "sales.enrich_interested_lead",
+    "sales",
+    { companyId },
+    { priority: 3, scheduledFor: new Date(Date.now() + 30_000).toISOString() },
+  );
 }
 
 function enqueueInstantlySync(companyId: string, status: CompanyStatus): void {
@@ -198,5 +222,14 @@ registerJobHandler(
     const status = String(input.status) as CompanyStatus;
     const { syncStatusToPipedrive } = await import("./pipedrive-sync");
     return syncStatusToPipedrive(companyId, status);
+  },
+);
+
+registerJobHandler(
+  "sales.enrich_interested_lead",
+  async (input): Promise<Record<string, unknown>> => {
+    const companyId = String(input.companyId);
+    const { enrichInterestedLead } = await import("./interested-enrichment");
+    return enrichInterestedLead(companyId);
   },
 );
