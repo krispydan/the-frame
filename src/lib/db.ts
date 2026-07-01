@@ -884,6 +884,11 @@ try {
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_phoneburner_call_log_called_at ON phoneburner_call_log(called_at)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_phoneburner_call_log_lead ON phoneburner_call_log(campaign_lead_id)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_phoneburner_call_log_pb_contact ON phoneburner_call_log(phoneburner_contact_id)");
+  // Full call transcript (Whisper) — saved on file for every Set-Appointment
+  // call so it can feed AI analysis, notes, and future use.
+  try { sqlite.exec("ALTER TABLE phoneburner_call_log ADD COLUMN transcript TEXT"); } catch { /* exists */ }
+  try { sqlite.exec("ALTER TABLE phoneburner_call_log ADD COLUMN transcript_status TEXT"); } catch { /* exists */ }
+  try { sqlite.exec("ALTER TABLE phoneburner_call_log ADD COLUMN transcribed_at TEXT"); } catch { /* exists */ }
 } catch { /* exists */ }
 
 // PhoneBurner webhook delivery log — workspace-wide webhooks per the

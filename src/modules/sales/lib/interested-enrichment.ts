@@ -33,7 +33,7 @@ import {
 } from "./pipedrive-client";
 import { isSyncEnabled } from "./pipedrive-sync";
 import { analyzeCallNote, type AnalyzeResult } from "./ai/call-note-analysis";
-import { transcribeRecording, isTranscriptionEnabled } from "./ai/recording-transcription";
+import { getOrCreateTranscript } from "./ai/recording-transcription";
 import { postSlack, type SlackBlock } from "@/modules/integrations/lib/slack/client";
 
 const APP_BASE_URL =
@@ -183,30 +183,18 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
 
   const onFile = emailOnFile(companyId);
 
-  // ── 1. AI analysis (notes-only first) ──
-  let ai: AnalyzeResult | null = await analyzeCallNote({
+  // ── 1. Transcript — always fetched + saved on file for interested
+  //       calls; feeds the analysis (recovers verbally-given emails). ──
+  const transcript = await getOrCreateTranscript(call.call_id, call.recording_url);
+  const transcribed = !!transcript;
+
+  // ── 2. AI analysis (note + transcript) ──
+  const ai: AnalyzeResult | null = await analyzeCallNote({
     companyName: company.name,
     notes: call.notes,
+    transcript,
     emailOnFile: onFile,
   });
-
-  // ── 2. Transcribe + re-analyze when the note references an email we
-  //       couldn't capture from text (the reps say it out loud). ──
-  let transcript: string | null = null;
-  let transcribed = false;
-  if (ai?.analysis.emailReferencedUncaptured && isTranscriptionEnabled() && call.recording_url) {
-    transcript = await transcribeRecording(call.recording_url);
-    if (transcript) {
-      transcribed = true;
-      const reAnalyzed = await analyzeCallNote({
-        companyName: company.name,
-        notes: call.notes,
-        transcript,
-        emailOnFile: onFile,
-      });
-      if (reAnalyzed) ai = reAnalyzed;
-    }
-  }
 
   if (!ai) return { skipped: "ai analysis unavailable", callId: call.call_id };
   const { analysis, emailOpener } = ai;

@@ -26,8 +26,10 @@ function getSetting(key: string): string | null {
   return row?.value ?? null;
 }
 
+/** On by default — the full transcript is saved for every Set-Appointment
+ *  call. Set settings.pb_transcription_enabled = "false" as a kill switch. */
 export function isTranscriptionEnabled(): boolean {
-  return getSetting("pb_transcription_enabled") === "true";
+  return getSetting("pb_transcription_enabled") !== "false";
 }
 
 function resolvePbApiKey(): string | null {
@@ -91,4 +93,45 @@ export async function transcribeRecording(recordingUrl: string | null): Promise<
     console.error("[transcription] failed:", e instanceof Error ? e.message : e);
     return null;
   }
+}
+
+/**
+ * Return the saved transcript for a call, transcribing + persisting it
+ * on first request. Idempotent: an already-transcribed call returns the
+ * stored text without re-hitting the audio/AI. Persists a status so we
+ * can see failures (`ok` | `failed` | `disabled` | `no_recording`).
+ *
+ * @returns transcript text or null.
+ */
+export async function getOrCreateTranscript(
+  callId: string,
+  recordingUrl: string | null,
+): Promise<string | null> {
+  const existing = sqlite
+    .prepare("SELECT transcript FROM phoneburner_call_log WHERE id = ? LIMIT 1")
+    .get(callId) as { transcript: string | null } | undefined;
+  if (existing?.transcript && existing.transcript.trim()) return existing.transcript;
+
+  const setStatus = (status: string, transcript?: string) => {
+    try {
+      sqlite
+        .prepare(
+          `UPDATE phoneburner_call_log
+              SET transcript = COALESCE(?, transcript),
+                  transcript_status = ?,
+                  transcribed_at = datetime('now')
+            WHERE id = ?`,
+        )
+        .run(transcript ?? null, status, callId);
+    } catch (e) {
+      console.error("[transcription] persist failed:", e instanceof Error ? e.message : e);
+    }
+  };
+
+  if (!isTranscriptionEnabled()) { setStatus("disabled"); return null; }
+  if (!recordingUrl) { setStatus("no_recording"); return null; }
+
+  const text = await transcribeRecording(recordingUrl);
+  setStatus(text ? "ok" : "failed", text ?? undefined);
+  return text;
 }

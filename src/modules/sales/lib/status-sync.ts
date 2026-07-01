@@ -233,3 +233,47 @@ registerJobHandler(
     return enrichInterestedLead(companyId);
   },
 );
+
+// Transcribe + persist the full call recording for every Set-Appointment
+// call. Runs regardless of the enrichment flag — the transcript is kept
+// on file for AI analysis, notes, and future use.
+registerJobHandler(
+  "sales.transcribe_call",
+  async (input): Promise<Record<string, unknown>> => {
+    const callId = String(input.callId || "");
+    if (!callId) return { skipped: "no callId" };
+    const row = sqlite
+      .prepare("SELECT recording_url, transcript FROM phoneburner_call_log WHERE id = ?")
+      .get(callId) as { recording_url: string | null; transcript: string | null } | undefined;
+    if (!row) return { skipped: "call not found", callId };
+    if (row.transcript && row.transcript.trim()) return { ok: true, cached: true, callId };
+
+    // Recording may not have been on the webhook; fetch it from PB.
+    let url = row.recording_url;
+    if (!url) {
+      try {
+        const { phoneBurnerClient } = await import("./phoneburner-client");
+        const call = await phoneBurnerClient.getCall(callId, { include_recording: true });
+        url = call?.recording_url ?? null;
+        if (url) sqlite.prepare("UPDATE phoneburner_call_log SET recording_url = ? WHERE id = ?").run(url, callId);
+      } catch (e) {
+        console.warn("[transcribe_call] getCall failed:", e instanceof Error ? e.message : e);
+      }
+    }
+    const { getOrCreateTranscript } = await import("./ai/recording-transcription");
+    const text = await getOrCreateTranscript(callId, url);
+    return { ok: !!text, callId, chars: text?.length ?? 0 };
+  },
+);
+
+/** Enqueue transcription of a call recording (~60s out so PB has time to
+ *  finalize the recording). Fires for every interested/Set-Appointment call. */
+export function enqueueCallTranscription(callId: string): void {
+  if (!callId) return;
+  void jobQueue.enqueue(
+    "sales.transcribe_call",
+    "sales",
+    { callId },
+    { priority: 3, scheduledFor: new Date(Date.now() + 60_000).toISOString() },
+  );
+}

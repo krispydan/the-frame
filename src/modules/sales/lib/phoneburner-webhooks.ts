@@ -47,6 +47,7 @@ import {
   type ResolveResult,
 } from "./lead-resolution";
 import { progressCompanyStatus, type CompanyStatus } from "./status-progression";
+import { enqueueCallTranscription } from "./status-sync";
 import { notifyPhoneBurnerInterested } from "@/modules/integrations/lib/slack/phoneburner-interested";
 
 /**
@@ -412,6 +413,11 @@ async function handlePhoneBurnerWebhook(
               fireInterestedSlackAlert(match.companyId, body, disposition).catch((e) =>
                 console.error("[phoneburner-webhook] Slack alert failed:", e),
               );
+              // Always transcribe + save the recording for interested calls,
+              // independent of the AI-enrichment flag — good data on file.
+              try { enqueueCallTranscription(callId); } catch (e) {
+                console.error("[phoneburner-webhook] enqueue transcription failed:", e);
+              }
             }
           } else {
             message += ` status=${r.from ?? "?"}(no-progress)`;

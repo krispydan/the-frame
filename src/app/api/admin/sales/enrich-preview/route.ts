@@ -4,7 +4,7 @@ export const maxDuration = 120;
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { analyzeCallNote } from "@/modules/sales/lib/ai/call-note-analysis";
-import { transcribeRecording, isTranscriptionEnabled } from "@/modules/sales/lib/ai/recording-transcription";
+import { getOrCreateTranscript, isTranscriptionEnabled } from "@/modules/sales/lib/ai/recording-transcription";
 
 /**
  * POST /api/admin/sales/enrich-preview
@@ -63,11 +63,12 @@ export async function POST(req: NextRequest) {
     )
     .get(companyId) as { email: string | null } | undefined)?.email ?? null;
 
+  // Default: fetch (and persist) the transcript, matching live behaviour.
+  // Pass transcribe:false to preview notes-only.
   let transcript: string | null = null;
-  let transcriptionAttempted = false;
-  if (body.transcribe) {
-    transcriptionAttempted = true;
-    transcript = await transcribeRecording(call.recording_url);
+  const transcriptionAttempted = body.transcribe !== false;
+  if (transcriptionAttempted) {
+    transcript = await getOrCreateTranscript(call.call_id, call.recording_url);
   }
 
   const ai = await analyzeCallNote({
