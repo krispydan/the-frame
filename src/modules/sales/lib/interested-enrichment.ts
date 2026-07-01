@@ -159,14 +159,6 @@ function splitName(name: string): { first: string; last: string | null } {
   return { first: parts[0], last: parts.slice(1).join(" ") };
 }
 
-/** A stored name we should overwrite: empty, or a placeholder equal to the
- *  company name (Apify-pushed leads seeded first_name with the store name). */
-function isPlaceholderName(first: string | null, companyName: string | null): boolean {
-  if (!first || !first.trim()) return true;
-  const f = first.trim().toLowerCase();
-  return !!companyName && f === companyName.trim().toLowerCase();
-}
-
 interface AppliedContact {
   emailApplied: boolean;   // a new email was written as a contact
   contactUpdated: boolean; // name/role filled on an existing contact
@@ -217,24 +209,32 @@ function applyLeadContactUpdates(
       return out;
     }
 
-    // B) Fill name/role onto the existing send-to / primary contact.
+    // B) Write the call's name/role onto the existing send-to / primary
+    //    contact. Per Daniel: the person who answered is the current
+    //    source of truth — OVERWRITE any existing name (only skip when
+    //    it's already identical, to avoid a no-op "update").
     if (rawName || role) {
       const target = sqlite
         .prepare(
-          `SELECT id, first_name, title FROM contacts
+          `SELECT id, first_name, last_name, title FROM contacts
             WHERE company_id = ?
             ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
         )
-        .get(companyId) as { id: string; first_name: string | null; title: string | null } | undefined;
+        .get(companyId) as
+        | { id: string; first_name: string | null; last_name: string | null; title: string | null }
+        | undefined;
       if (target) {
         const sets: string[] = [];
         const vals: unknown[] = [];
-        if (rawName && isPlaceholderName(target.first_name, company.name)) {
-          const nm = splitName(rawName);
-          sets.push("first_name = ?", "last_name = ?");
-          vals.push(nm.first, nm.last);
+        if (rawName) {
+          const currentFull = `${target.first_name ?? ""} ${target.last_name ?? ""}`.trim().toLowerCase();
+          if (currentFull !== rawName.toLowerCase()) {
+            const nm = splitName(rawName);
+            sets.push("first_name = ?", "last_name = ?");
+            vals.push(nm.first, nm.last);
+          }
         }
-        if (role && (!target.title || !target.title.trim())) {
+        if (role && (target.title ?? "").trim().toLowerCase() !== role.toLowerCase()) {
           sets.push("title = ?");
           vals.push(role);
         }
