@@ -388,6 +388,11 @@ try { sqlite.exec("CREATE INDEX idx_companies_ajm_last_order ON companies (ajm_l
 // the company; the deal id is stamped on the order (Customers pipeline)
 // and on the deals projection (outreach pipelines). See
 // docs/crm-master-plan.md §4 and src/modules/sales/lib/pipedrive-sync.ts.
+// Shopify customer id — the stable identity for a retailer, esp. Faire-via-
+// Shopify orders that share a relay email / carry no company name. Used to key
+// distinct customers so they don't collapse under one company.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN shopify_customer_id TEXT"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_companies_shopify_customer ON companies (shopify_customer_id)"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN pipedrive_org_id INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN pipedrive_person_id INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN pipedrive_synced_at TEXT"); } catch { /* exists */ }
