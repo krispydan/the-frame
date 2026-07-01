@@ -28,6 +28,7 @@ import {
   createNote,
   createActivity,
   createPerson,
+  updatePerson,
   updateDeal,
   getPipedriveConnectionStatus,
 } from "./pipedrive-client";
@@ -152,6 +153,105 @@ function dealUrl(dealId: number): string | null {
   return `${domain.replace(/\/$/, "")}/deal/${dealId}`;
 }
 
+function splitName(name: string): { first: string; last: string | null } {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length <= 1) return { first: parts[0] ?? "", last: null };
+  return { first: parts[0], last: parts.slice(1).join(" ") };
+}
+
+/** A stored name we should overwrite: empty, or a placeholder equal to the
+ *  company name (Apify-pushed leads seeded first_name with the store name). */
+function isPlaceholderName(first: string | null, companyName: string | null): boolean {
+  if (!first || !first.trim()) return true;
+  const f = first.trim().toLowerCase();
+  return !!companyName && f === companyName.trim().toLowerCase();
+}
+
+interface AppliedContact {
+  emailApplied: boolean;   // a new email was written as a contact
+  contactUpdated: boolean; // name/role filled on an existing contact
+  newEmail: string | null;
+  name: string | null;     // best-known contact name (for Pipedrive person)
+}
+
+/**
+ * Write captured contact info back to the lead. Two paths:
+ *  A) A high-confidence NEW email → ensure a Frame contact carries it
+ *     (with the captured name/role).
+ *  B) No new email, but we learned a name/role → fill it onto the
+ *     existing send-to/primary contact (fill-missing, never clobber a
+ *     real existing name).
+ */
+function applyLeadContactUpdates(
+  companyId: string,
+  company: CompanyRow,
+  analysis: AnalyzeResult["analysis"],
+  source: string,
+): AppliedContact {
+  const out: AppliedContact = {
+    emailApplied: false,
+    contactUpdated: false,
+    newEmail: null,
+    name: (analysis.contact?.name ?? "").trim() || null,
+  };
+  const rawName = out.name;
+  const role = (analysis.contact?.role ?? "").trim() || null;
+  const alt = analysis.alternateEmail;
+  const hiConf = alt && alt.confidence >= 0.9 ? alt.value : null;
+
+  try {
+    // A) New alternate email → ensure a contact carries it.
+    if (hiConf && !contactWithEmailExists(companyId, hiConf)) {
+      const hasAny = sqlite.prepare("SELECT 1 FROM contacts WHERE company_id = ? LIMIT 1").get(companyId);
+      const nm = rawName ? splitName(rawName) : { first: company.name ?? "Contact", last: null };
+      sqlite
+        .prepare(
+          `INSERT INTO contacts
+             (id, company_id, first_name, last_name, title, email, is_primary,
+              source, notes, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'phoneburner-call-ai', ?, datetime('now'), datetime('now'))`,
+        )
+        .run(crypto.randomUUID(), companyId, nm.first, nm.last, role, hiConf, hasAny ? 0 : 1, `Captured from ${source}`);
+      out.emailApplied = true;
+      out.newEmail = hiConf;
+      return out;
+    }
+
+    // B) Fill name/role onto the existing send-to / primary contact.
+    if (rawName || role) {
+      const target = sqlite
+        .prepare(
+          `SELECT id, first_name, title FROM contacts
+            WHERE company_id = ?
+            ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
+        )
+        .get(companyId) as { id: string; first_name: string | null; title: string | null } | undefined;
+      if (target) {
+        const sets: string[] = [];
+        const vals: unknown[] = [];
+        if (rawName && isPlaceholderName(target.first_name, company.name)) {
+          const nm = splitName(rawName);
+          sets.push("first_name = ?", "last_name = ?");
+          vals.push(nm.first, nm.last);
+        }
+        if (role && (!target.title || !target.title.trim())) {
+          sets.push("title = ?");
+          vals.push(role);
+        }
+        if (sets.length) {
+          sets.push("updated_at = datetime('now')");
+          vals.push(target.id);
+          sqlite.prepare(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+          out.contactUpdated = true;
+        }
+      }
+    }
+  } catch (e) {
+    console.error("[interested-enrichment] lead contact update failed:", e instanceof Error ? e.message : e);
+  }
+  return out;
+}
+
 /**
  * Enrich one interested company. Returns a structured summary for the
  * job output / logs.
@@ -215,47 +315,28 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
   const dealId = deal?.pipedrive_deal_id ?? null;
   (result.pipedrive as Record<string, unknown>).deal = dealId;
 
-  // ── 3. Auto-apply a high-confidence alternate email ──
-  const alt = analysis.alternateEmail;
-  if (alt && alt.confidence >= 0.9) {
+  // ── 3. Write captured contact info (name / role / email) back to the
+  //       lead — Frame contact + Pipedrive person. ──
+  const src = `cold call (${call.disposition_label ?? "Set Appointment"})${transcribed ? " transcript" : " note"}`;
+  const applied = applyLeadContactUpdates(companyId, company, analysis, src);
+  result.emailApplied = applied.emailApplied;
+  result.contactUpdated = applied.contactUpdated;
+
+  // Mirror to Pipedrive: new email → new person; otherwise update the
+  // linked person's name when we learned it.
+  if (company.pipedrive_org_id) {
     try {
-      if (!contactWithEmailExists(companyId, alt.value)) {
-        // Frame contact (secondary unless the company has no contacts).
-        const hasAny = sqlite
-          .prepare("SELECT 1 FROM contacts WHERE company_id = ? LIMIT 1")
-          .get(companyId);
-        sqlite
-          .prepare(
-            `INSERT INTO contacts
-               (id, company_id, first_name, last_name, title, email, is_primary,
-                source, notes, created_at, updated_at)
-             VALUES (?, ?, ?, NULL, ?, ?, ?, 'phoneburner-call-ai', ?, datetime('now'), datetime('now'))`,
-          )
-          .run(
-            crypto.randomUUID(),
-            companyId,
-            analysis.contact?.name ?? (company.name ?? "Contact"),
-            analysis.contact?.role ?? null,
-            alt.value,
-            hasAny ? 0 : 1,
-            `Captured from cold call (${call.disposition_label ?? "Set Appointment"})${transcribed ? " transcript" : " note"}`,
-          );
-        result.emailApplied = true;
-      }
-      // Pipedrive person for the new email.
-      if (dealId && company.pipedrive_org_id) {
-        try {
-          await createPerson({
-            name: analysis.contact?.name ?? (company.name ?? "Contact"),
-            org_id: company.pipedrive_org_id,
-            email: [alt.value],
-          });
-        } catch (e) {
-          console.warn("[interested-enrichment] pd person create failed:", e instanceof Error ? e.message : e);
-        }
+      if (applied.newEmail) {
+        await createPerson({
+          name: applied.name ?? (company.name ?? "Contact"),
+          org_id: company.pipedrive_org_id,
+          email: [applied.newEmail],
+        });
+      } else if (company.pipedrive_person_id && applied.name) {
+        await updatePerson(company.pipedrive_person_id, { name: applied.name });
       }
     } catch (e) {
-      console.error("[interested-enrichment] email apply failed:", e instanceof Error ? e.message : e);
+      console.warn("[interested-enrichment] pd person sync failed:", e instanceof Error ? e.message : e);
     }
   }
 
@@ -302,8 +383,10 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
       emailOpener,
       dealId,
       dealUrl: dealId ? dealUrl(dealId) : null,
-      emailApplied: result.emailApplied === true,
-      altEmail: alt && alt.confidence >= 0.9 ? alt.value : null,
+      emailApplied: applied.emailApplied,
+      altEmail: applied.newEmail,
+      contactUpdated: applied.contactUpdated,
+      updatedName: applied.contactUpdated ? applied.name : null,
       emailUncaptured: analysis.emailReferencedUncaptured && !transcribed,
       transcribed,
       duration: fmtDuration(call.duration_seconds),
@@ -328,8 +411,10 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
           call_id: call.call_id,
           temperature: analysis.temperature,
           current_brands: analysis.currentBrands,
-          email_applied: result.emailApplied,
-          alt_email: alt?.value ?? null,
+          email_applied: applied.emailApplied,
+          alt_email: applied.newEmail,
+          contact_updated: applied.contactUpdated,
+          contact_name: applied.contactUpdated ? applied.name : null,
           transcribed,
           pipedrive_deal_id: dealId,
           opener: emailOpener,
@@ -379,6 +464,8 @@ async function postEnrichmentSlack(o: {
   dealUrl: string | null;
   emailApplied: boolean;
   altEmail: string | null;
+  contactUpdated: boolean;
+  updatedName: string | null;
   emailUncaptured: boolean;
   transcribed: boolean;
   duration: string;
@@ -414,13 +501,12 @@ async function postEnrichmentSlack(o: {
     text: { type: "mrkdwn", text: `*✍️ Email opener*\n>${o.emailOpener.replace(/\n/g, "\n>")}` },
   });
 
-  const emailLine = o.emailApplied
-    ? `✅ Added email: ${o.altEmail}`
-    : o.emailUncaptured
-      ? "⚠️ An email was mentioned on the call but not captured — check the recording"
-      : null;
-  if (emailLine) {
-    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: emailLine }] });
+  const updateLines: string[] = [];
+  if (o.emailApplied) updateLines.push(`✅ Added email: ${o.altEmail}`);
+  if (o.contactUpdated && o.updatedName) updateLines.push(`✅ Updated contact: ${o.updatedName}`);
+  if (o.emailUncaptured) updateLines.push("⚠️ An email was mentioned on the call but not captured — check the recording");
+  if (updateLines.length) {
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: updateLines.join("  ·  ") }] });
   }
 
   const pills: string[] = [`<${frameLink}|🔗 Open in The Frame>`];

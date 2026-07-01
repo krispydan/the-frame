@@ -363,6 +363,10 @@ export async function createPerson(input: {
   return pdRequest<PdCreated>("POST", "/persons", input);
 }
 
+export async function updatePerson(id: number, input: Record<string, unknown>): Promise<PdCreated> {
+  return pdRequest<PdCreated>("PUT", `/persons/${id}`, input);
+}
+
 export async function createDeal(input: {
   title: string;
   org_id?: number;
