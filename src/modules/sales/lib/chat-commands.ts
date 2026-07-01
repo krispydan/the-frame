@@ -88,7 +88,7 @@ const commands: ChatCommand[] = [
     handler: async () => {
       const result = sqlite
         .prepare(
-          "SELECT COUNT(*) as count FROM companies WHERE status = 'qualified' AND id IN (SELECT company_id FROM contacts WHERE email IS NOT NULL AND email != '')"
+          "SELECT COUNT(*) as count FROM companies WHERE status = 'qualified_lead' AND id IN (SELECT company_id FROM contacts WHERE email IS NOT NULL AND email != '')"
         )
         .get() as { count: number };
       return {

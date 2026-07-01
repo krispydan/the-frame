@@ -13,7 +13,7 @@ import { INDUSTRY_DISPLAY, type Industry } from "./industry-mapping";
 import type { LlmOutputRow } from "./llm-prompt";
 
 export type Verdict = "approve" | "reject" | "needs_human";
-export type ProspectStatus = "new" | "qualified" | "not_qualified";
+export type ProspectStatus = "prospect" | "qualified_lead" | "not_qualified";
 
 export interface VerdictDecision {
   verdict: Verdict;
@@ -88,11 +88,11 @@ export function decideVerdict(opts: VerdictInputs): VerdictDecision {
 }
 
 function approve(reason: string): VerdictDecision {
-  return { verdict: "approve", status: "qualified", reason };
+  return { verdict: "approve", status: "qualified_lead", reason };
 }
 function reject(reason: string): VerdictDecision {
   return { verdict: "reject", status: "not_qualified", reason };
 }
 function human(reason: string): VerdictDecision {
-  return { verdict: "needs_human", status: "new", reason };
+  return { verdict: "needs_human", status: "prospect", reason };
 }

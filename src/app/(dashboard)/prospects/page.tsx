@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { PushToInstantlyModal } from "./push-to-instantly-modal";
 import { ListFilter, Bookmark, Plus, X, ChevronRight, Download, Search, Merge, AlertTriangle, CheckCircle2, ExternalLink, Globe, Phone, Mail, MapPin, Star, Tag, ChevronsUpDown, Check, Sparkles, Award, Send, Loader2 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { getCompanyStatusBadge } from "@/modules/sales/lib/company-status-display";
 import {
   Command,
   CommandInput,
@@ -16,13 +17,6 @@ import {
   CommandItem,
 } from "@/components/ui/command";
 
-const statusLabels: Record<string, string> = {
-  new: "New",
-  contacted: "Contacted",
-  qualified: "Qualified",
-  rejected: "Not Qualified",
-  customer: "Customer",
-};
 
 interface Prospect {
   id: string;
@@ -1173,12 +1167,7 @@ function ProspectsPage() {
                     </div>
                     <div className="min-w-0">
                       <h3 className="font-semibold text-gray-900 dark:text-white truncate">{String(drawerData.company.name)}</h3>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium mt-1 ${
-                        drawerData.company.status === "qualified" ? "bg-green-100 text-green-800" :
-                        drawerData.company.status === "contacted" ? "bg-blue-100 text-blue-800" :
-                        drawerData.company.status === "rejected" ? "bg-red-100 text-red-800" :
-                        drawerData.company.status === "customer" ? "bg-purple-100 text-purple-800" : "bg-gray-100 text-gray-600"
-                      }`}>{statusLabels[String(drawerData.company.status)] || String(drawerData.company.status)}</span>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium mt-1 ${getCompanyStatusBadge(String(drawerData.company.status)).color}`}>{getCompanyStatusBadge(String(drawerData.company.status)).label}</span>
                     </div>
                   </div>
                   <button onClick={closeDrawer} className="text-gray-400 hover:text-gray-600 p-1">
@@ -1340,7 +1329,7 @@ function ProspectsPage() {
                           await fetch(`/api/v1/sales/prospects/${drawerProspectId}`, {
                             method: "PATCH",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ status: "qualified" }),
+                            body: JSON.stringify({ status: "qualified_lead" }),
                           });
                           // Auto-advance to next prospect
                           const currentIdx = prospects.findIndex(p => p.id === drawerProspectId);
@@ -1351,7 +1340,7 @@ function ProspectsPage() {
                             closeDrawer();
                           }
                           // Update local list
-                          setProspects(prev => prev.map(p => p.id === drawerProspectId ? { ...p, status: "qualified" } : p));
+                          setProspects(prev => prev.map(p => p.id === drawerProspectId ? { ...p, status: "qualified_lead" } : p));
                         } catch (e) { console.error("Failed to qualify", e); }
                       }}
                       className="flex-1 px-3 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 flex items-center justify-center gap-1.5"
@@ -1364,7 +1353,7 @@ function ProspectsPage() {
                           await fetch(`/api/v1/sales/prospects/${drawerProspectId}`, {
                             method: "PATCH",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ status: "rejected" }),
+                            body: JSON.stringify({ status: "not_qualified" }),
                           });
                           // Auto-advance to next prospect
                           const currentIdx = prospects.findIndex(p => p.id === drawerProspectId);
@@ -1375,7 +1364,7 @@ function ProspectsPage() {
                             closeDrawer();
                           }
                           // Update local list
-                          setProspects(prev => prev.map(p => p.id === drawerProspectId ? { ...p, status: "rejected" } : p));
+                          setProspects(prev => prev.map(p => p.id === drawerProspectId ? { ...p, status: "not_qualified" } : p));
                         } catch (e) { console.error("Failed to reject", e); }
                       }}
                       className="flex-1 px-3 py-2.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 flex items-center justify-center gap-1.5"
@@ -1541,12 +1530,7 @@ function ProspectsPage() {
                     ) : "—"}
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                      p.status === "qualified" ? "bg-green-100 text-green-800" :
-                      p.status === "contacted" ? "bg-blue-100 text-blue-800" :
-                      p.status === "rejected" ? "bg-red-100 text-red-800" :
-                      p.status === "customer" ? "bg-purple-100 text-purple-800" : "bg-gray-100 text-gray-600"
-                    }`}>{statusLabels[p.status] || p.status}</span>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getCompanyStatusBadge(p.status).color}`}>{getCompanyStatusBadge(p.status).label}</span>
                   </td>
                   <td className="px-2 py-3">
                     <button

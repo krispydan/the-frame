@@ -70,7 +70,7 @@ function ReviewQueueInner() {
   const [sourceType, setSourceType] = useState(searchParams.get("source_type") || "all");
   const [stateFilter, setStateFilter] = useState(searchParams.get("state") || "all");
   const [categoryFilter, setCategoryFilter] = useState(searchParams.get("category") || "all");
-  const [statusFilter, setStatusFilter] = useState(searchParams.get("status") || "new");
+  const [statusFilter, setStatusFilter] = useState(searchParams.get("status") || "prospect");
   const [sortBy, setSortBy] = useState(searchParams.get("sort") || "random");
   const [segmentFilter, setSegmentFilter] = useState(searchParams.get("segment") || "all");
 
@@ -172,7 +172,7 @@ function ReviewQueueInner() {
     if (categoryFilter !== "all") params.set("category", categoryFilter);
     else params.delete("category");
 
-    if (statusFilter !== "new") params.set("status", statusFilter);
+    if (statusFilter !== "prospect") params.set("status", statusFilter);
     else params.delete("status");
 
     if (sortBy !== "random") params.set("sort", sortBy);
@@ -262,9 +262,10 @@ function ReviewQueueInner() {
     const name = current.name;
 
     if (action !== "skip") {
+      // UI actions map onto the canonical lead-gen enum.
       pendingUpdates.current.push({
         id: current.id,
-        status: action,
+        status: action === "qualified" ? "qualified_lead" : "not_qualified",
       });
       processedIds.current.add(current.id);
       setReviewed(r => r + 1);
@@ -488,11 +489,10 @@ function ReviewQueueInner() {
             <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="new">New</SelectItem>
+            <SelectItem value="prospect">Prospect</SelectItem>
             <SelectItem value="all">All</SelectItem>
-            <SelectItem value="contacted">Contacted</SelectItem>
-            <SelectItem value="qualified">Qualified</SelectItem>
-            <SelectItem value="rejected">Rejected</SelectItem>
+            <SelectItem value="qualified_lead">Qualified Lead</SelectItem>
+            <SelectItem value="not_qualified">Not Qualified</SelectItem>
           </SelectContent>
         </Select>
 
