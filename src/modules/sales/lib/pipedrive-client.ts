@@ -280,6 +280,60 @@ export async function listUsers(): Promise<PdUser[]> {
   return (await pdRequest<PdUser[]>("GET", "/users")) || [];
 }
 
+// ── Read helpers (for the per-company Pipedrive panel) ───────────────────────
+
+export interface PdOrg { id: number; name: string; address?: string; owner_id?: unknown; [k: string]: unknown }
+export interface PdDeal {
+  id: number;
+  title: string;
+  status: string;
+  value?: number;
+  currency?: string;
+  pipeline_id?: number;
+  stage_id?: number;
+  user_id?: { id?: number; name?: string } | number;
+  add_time?: string;
+  update_time?: string;
+  won_time?: string;
+  [k: string]: unknown;
+}
+export interface PdActivity {
+  id: number;
+  subject?: string;
+  type?: string;
+  done?: boolean;
+  due_date?: string;
+  marked_as_done_time?: string;
+  add_time?: string;
+  note?: string;
+  [k: string]: unknown;
+}
+export interface PdPerson { id: number; name?: string; email?: unknown; phone?: unknown; [k: string]: unknown }
+
+export async function getOrganization(orgId: number): Promise<PdOrg | null> {
+  try {
+    return await pdRequest<PdOrg>("GET", `/organizations/${orgId}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function getPerson(personId: number): Promise<PdPerson | null> {
+  try {
+    return await pdRequest<PdPerson>("GET", `/persons/${personId}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function listDealsForOrg(orgId: number): Promise<PdDeal[]> {
+  return (await pdRequest<PdDeal[]>("GET", `/deals?org_id=${orgId}&limit=50&status=all_not_deleted`)) || [];
+}
+
+export async function listActivitiesForOrg(orgId: number, limit = 15): Promise<PdActivity[]> {
+  return (await pdRequest<PdActivity[]>("GET", `/activities?org_id=${orgId}&limit=${limit}&done=1`)) || [];
+}
+
 export interface PdCreated { id: number }
 
 export async function createOrganization(input: {

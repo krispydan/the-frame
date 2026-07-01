@@ -21,23 +21,12 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  DEAL_STAGES,
   DEAL_STAGE_LABELS,
-  DEAL_CHANNELS,
-  type DealStage,
 } from "@/modules/sales/schema/pipeline";
 import {
   COMPANY_STATUS_LABELS,
@@ -45,6 +34,7 @@ import {
   getCompanyStatusBadge,
 } from "@/modules/sales/lib/company-status-display";
 import { ProspectActivityTimeline } from "@/modules/sales/components/prospect-activity-timeline";
+import { PipedrivePanel } from "@/modules/sales/components/pipedrive-panel";
 
 interface Company {
   id: string; name: string; type: string; website: string; domain: string;
@@ -237,12 +227,6 @@ export default function CompanyDetailPage() {
     else setContactForm(prev => ({ ...prev, [key]: value }));
   };
   const [statusDropdown, setStatusDropdown] = useState(false);
-  const [createDealOpen, setCreateDealOpen] = useState(false);
-  const [dealStage, setDealStage] = useState<DealStage>("interested");
-  const [dealChannel, setDealChannel] = useState("");
-  const [dealValue, setDealValue] = useState("");
-  const [dealNotes, setDealNotes] = useState("");
-  const [dealSaving, setDealSaving] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [enrichingSL, setEnrichingSL] = useState(false);
   const [newlyEnrichedFields, setNewlyEnrichedFields] = useState<string[]>([]);
@@ -318,34 +302,6 @@ export default function CompanyDetailPage() {
     }
   };
 
-  const createDeal = async () => {
-    if (!company) return;
-    setDealSaving(true);
-    const res = await fetch("/api/v1/sales/deals", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        company_id: company.id,
-        title: company.name,
-        stage: dealStage,
-        channel: dealChannel || undefined,
-        value: dealValue ? parseFloat(dealValue) : undefined,
-        notes: dealNotes || undefined,
-      }),
-    });
-    if (res.ok) {
-      const { id: dealId } = await res.json();
-      setDealSaving(false);
-      setCreateDealOpen(false);
-      setDealStage("interested");
-      setDealChannel("");
-      setDealValue("");
-      setDealNotes("");
-      router.push(`/pipeline/${dealId}`);
-    } else {
-      setDealSaving(false);
-    }
-  };
 
   useEffect(() => {
     fetch(`/api/v1/sales/prospects/${id}`)
@@ -524,8 +480,8 @@ export default function CompanyDetailPage() {
       {(adjacent.prev || adjacent.next || adjacent.position) && (() => {
         const pipelineStage = searchParams.get("pipeline");
         const stageLabel = pipelineStage ? (DEAL_STAGE_LABELS[pipelineStage as keyof typeof DEAL_STAGE_LABELS] || pipelineStage) : null;
-        const backHref = pipelineStage ? "/pipeline" : `/prospects${filterQs ? `?${filterQs}` : ""}`;
-        const backLabel = pipelineStage ? "Back to Pipeline" : "Back to List";
+        const backHref = `/prospects${filterQs ? `?${filterQs}` : ""}`;
+        const backLabel = "Back to List";
         return (
           <div className={`flex items-center justify-between mb-3 px-3 py-1.5 rounded-lg text-sm ${
             pipelineStage
@@ -865,53 +821,8 @@ export default function CompanyDetailPage() {
           {/* Right-aligned action toolbar */}
           <div className="flex items-center gap-2 flex-wrap">
 
-          <Dialog open={createDealOpen} onOpenChange={setCreateDealOpen}>
-            <DialogTrigger render={<Button variant="outline" size="sm" />}>
-              <Briefcase className="w-4 h-4 mr-1" /> Create Deal
-            </DialogTrigger>
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle>Create Deal — {company.name}</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Stage</Label>
-                    <Select value={dealStage} onValueChange={(v) => setDealStage(v as DealStage)}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {DEAL_STAGES.map((s) => (
-                          <SelectItem key={s} value={s}>{DEAL_STAGE_LABELS[s]}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Channel</Label>
-                    <Select value={dealChannel} onValueChange={(v) => setDealChannel(v || "")}>
-                      <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
-                      <SelectContent>
-                        {DEAL_CHANNELS.map((c) => (
-                          <SelectItem key={c} value={c}>{c}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div>
-                  <Label>Value ($)</Label>
-                  <Input type="number" placeholder="0" value={dealValue} onChange={(e) => setDealValue(e.target.value)} />
-                </div>
-                <div>
-                  <Label>Notes</Label>
-                  <Textarea placeholder="Initial notes..." value={dealNotes} onChange={(e) => setDealNotes(e.target.value)} rows={2} />
-                </div>
-                <Button onClick={createDeal} disabled={dealSaving} className="w-full">
-                  {dealSaving ? "Creating..." : "Create Deal"}
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
+          {/* Deal creation moved to the Pipedrive panel (Pipedrive is the deal
+              system of record). See <PipedrivePanel/> below. */}
 
           {/* Disqualify confirmation dialog */}
           <Dialog open={showDisqualifyDialog} onOpenChange={setShowDisqualifyDialog}>
@@ -1721,6 +1632,9 @@ export default function CompanyDetailPage() {
             </CardContent>
           </Card>
           )}
+
+          {/* Pipedrive — deal system of record: live org/deals/activities + push + create-deal */}
+          <PipedrivePanel companyId={company.id} companyName={company.name} />
         </div>
 
         {/* Right sidebar — Activity dominant on top, then Notes, then Lead Source. */}

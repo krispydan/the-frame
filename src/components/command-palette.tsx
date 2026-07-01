@@ -12,7 +12,6 @@ import {
 const navCommands = [
   { label: "Go to Dashboard", icon: LayoutDashboard, path: "/dashboard" },
   { label: "Go to Prospects", icon: Users, path: "/prospects" },
-  { label: "Go to Pipeline", icon: Kanban, path: "/pipeline" },
   { label: "Go to Campaigns", icon: Mail, path: "/campaigns" },
   { label: "Go to Orders", icon: ShoppingCart, path: "/orders" },
   { label: "Go to Catalog", icon: Package, path: "/catalog" },
@@ -27,7 +26,6 @@ const navCommands = [
 const actionCommands = [
   { label: "Search Prospects", icon: Search, path: "/prospects?focus=search" },
   { label: "Search Products", icon: Search, path: "/catalog?focus=search" },
-  { label: "New Deal", icon: Kanban, path: "/pipeline?action=new" },
   { label: "Import Leads", icon: Users, path: "/prospects?action=import" },
 ];
 
