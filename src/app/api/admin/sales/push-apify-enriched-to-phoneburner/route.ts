@@ -111,6 +111,9 @@ async function handlePush(req: NextRequest) {
          FROM companies c
         WHERE c.status NOT IN ('not_interested','ghosted','not_qualified','rejected','customer')
           AND EXISTS (SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id AND cp.source = 'gmaps')
+          -- AJM reactivation leads belong in their own PB folder (66249536),
+          -- never the boutique/cold folder — exclude them here.
+          AND lower(COALESCE(c.tags, '')) NOT LIKE '%ajm%'
           AND NOT EXISTS (
             SELECT 1 FROM phoneburner_folder_pushes pfp
              WHERE pfp.company_id = c.id AND pfp.folder_id = ?
