@@ -798,42 +798,10 @@ export default function CompanyDetailPage() {
             )}
           </div>
 
-          {/* Intermediate-stage quick advance buttons. Only render when
-              a forward progression actually exists from the current
-              status — keeps the bar clean for terminal states. */}
-          {(() => {
-            const s = company.status;
-            const showCatalogSent = s === "qualified_lead" || s === "interested";
-            const showRevisitLater = s === "qualified_lead" || s === "interested" || s === "catalog_sent";
-            if (!showCatalogSent && !showRevisitLater) return null;
-            return (
-              <div className="flex items-center gap-1.5">
-                <span className="text-gray-300 dark:text-gray-600 text-sm">→</span>
-                {showCatalogSent && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => changeStatus("catalog_sent")}
-                    title="Move to Catalog Sent"
-                    className="border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-900 dark:text-blue-300 dark:hover:bg-blue-950"
-                  >
-                    Catalog Sent
-                  </Button>
-                )}
-                {showRevisitLater && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => changeStatus("revisit_later")}
-                    title="Move to Revisit Later"
-                    className="border-orange-200 text-orange-700 hover:bg-orange-50 dark:border-orange-900 dark:text-orange-300 dark:hover:bg-orange-950"
-                  >
-                    Revisit Later
-                  </Button>
-                )}
-              </div>
-            );
-          })()}
+          {/* Catalog Sent / Revisit Later quick-advance buttons retired
+              (2026-07): once a lead is Interested the deal lives in
+              Pipedrive, where those stages are worked. Won/Lost stay in the
+              toolbar above (they drive the blocklist + customer creation). */}
           </div>{/* end left status pills */}
 
           {/* Right-aligned action toolbar */}

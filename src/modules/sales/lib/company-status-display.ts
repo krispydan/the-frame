@@ -35,18 +35,22 @@ export const COMPANY_STATUS_COLORS: Record<CompanyStatus, string> = {
 };
 
 /**
- * Status values selectable from the prospect page status dropdown. We
- * deliberately omit `ghosted` from the manual picker — it's set
- * automatically by the Instantly `campaign_completed` event handler.
- * Christina shouldn't be marking people ghosted by hand.
+ * Status values selectable from the prospect page status dropdown.
+ *
+ * Omissions:
+ *  - `ghosted` is set automatically by the Instantly `campaign_completed`
+ *    handler — never marked by hand.
+ *  - `catalog_sent` and `revisit_later` are retired from the manual picker
+ *    (2026-07): once a lead is Interested the deal lives in Pipedrive, and
+ *    Catalog-Sent / nurture are worked as Pipedrive deal stages. The enum
+ *    values + status→Pipedrive mappings are kept so historical records and
+ *    inbound Pipedrive→frame webhook mapping still resolve.
  */
 export const MANUAL_STATUS_OPTIONS: CompanyStatus[] = [
   "prospect",
   "not_qualified",
   "qualified_lead",
   "interested",
-  "catalog_sent",
-  "revisit_later",
   "not_interested",
   "customer",
 ];
