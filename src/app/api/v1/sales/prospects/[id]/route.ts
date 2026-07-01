@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
+import { getPipedriveConnectionStatus } from "@/modules/sales/lib/pipedrive-client";
 
 export async function GET(
   request: NextRequest,
@@ -114,10 +115,18 @@ export async function GET(
     relayEmail: relayContact?.email ?? null,
   };
 
+  const pdStatus = getPipedriveConnectionStatus();
+
   return NextResponse.json({
     company: {
       ...company,
       tags: company.tags ? JSON.parse(company.tags as string) : [],
+      pipedrive: {
+        connected: pdStatus.connected,
+        apiDomain: pdStatus.apiDomain ?? null,
+        orgUrl: pdStatus.apiDomain && company.pipedrive_org_id ? `${pdStatus.apiDomain}/organization/${company.pipedrive_org_id}` : null,
+        personUrl: pdStatus.apiDomain && company.pipedrive_person_id ? `${pdStatus.apiDomain}/person/${company.pipedrive_person_id}` : null,
+      },
     },
     stores: storeRows,
     orders: orderRows,
