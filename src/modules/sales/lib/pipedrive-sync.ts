@@ -38,7 +38,7 @@ import {
   PipedriveError,
   type PdCreated,
 } from "./pipedrive-client";
-import { getPipelineConfig, getPipedriveOwner, type PipelineConfig } from "./pipedrive-setup";
+import { getPipelineConfig, getPipedriveOwner, getPipelineOwner, type PipelineConfig } from "./pipedrive-setup";
 
 // ── settings helpers ────────────────────────────────────────────────────────
 
@@ -293,6 +293,7 @@ export function resetPipedriveSyncState(): Record<string, number> {
     "pipedrive_custom_fields",
     "pipedrive_owner_id",
     "pipedrive_owner_name",
+    "pipedrive_pipeline_owners",
     "pipedrive_webhook_user",
     "pipedrive_webhook_password",
     "pipedrive_sync_enabled",
@@ -618,7 +619,10 @@ export async function ensureOutreachDeal(
   };
   if (keys.dealFrameCompanyId) body[keys.dealFrameCompanyId] = companyId;
   if (personId) body.person_id = personId;
-  if (ownerId) body.user_id = ownerId; // deals use user_id for the owner (not owner_id)
+  // Deal owner is per-pipeline (e.g. catalog → Sandra), falling back to the
+  // global default. Deals use user_id for the owner (not owner_id).
+  const dealOwnerId = getPipelineOwner(pipeline)?.id ?? ownerId;
+  if (dealOwnerId) body.user_id = dealOwnerId;
   const created = await createDealSafe(body, [keys.dealFrameCompanyId]);
   upsertProjection({
     pipedriveDealId: created.id,
@@ -845,7 +849,9 @@ export async function createDealForOrder(
   if (keys.dealFrameCompanyId) body[keys.dealFrameCompanyId] = order.company_id;
   if (keys.dealFrameOrderId) body[keys.dealFrameOrderId] = orderId;
   if (personId) body.person_id = personId;
-  if (ownerId) body.user_id = ownerId; // deals use user_id for the owner (not owner_id)
+  // Customers-pipeline deal owner (per-pipeline, falling back to the default).
+  const dealOwnerId = getPipelineOwner("customers")?.id ?? ownerId;
+  if (dealOwnerId) body.user_id = dealOwnerId; // deals use user_id for the owner (not owner_id)
   if (opts.backfillRunId && keys.dealBackfillRunId) body[keys.dealBackfillRunId] = opts.backfillRunId;
   const created = await createDealSafe(body, [keys.dealFrameCompanyId, keys.dealFrameOrderId, keys.dealBackfillRunId]);
   upsertProjection({

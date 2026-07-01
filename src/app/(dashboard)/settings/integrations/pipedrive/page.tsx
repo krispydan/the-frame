@@ -17,6 +17,12 @@ type PipelineConfig = {
   customers: { pipelineId: number; stages: Record<string, number> };
 };
 
+const PIPELINE_LABELS: Record<"ajm" | "catalog" | "customers", string> = {
+  ajm: "AJM Reactivation",
+  catalog: "Catalog Interested",
+  customers: "Customers",
+};
+
 type PipedriveStatus = {
   configured: boolean;
   connected: boolean;
@@ -30,6 +36,7 @@ type PipedriveStatus = {
   users?: PdUser[];
   pipelineConfig?: PipelineConfig | null;
   owner?: { id: number; name?: string } | null;
+  pipelineOwners?: Partial<Record<"ajm" | "catalog" | "customers", { id: number; name?: string }>>;
   stagesError?: string;
   syncStats?: {
     syncEnabled: boolean;
@@ -67,6 +74,7 @@ function PipedriveIntegrationsPageInner() {
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<{ kind: "success" | "error"; title: string; message: string } | null>(null);
   const [ownerSel, setOwnerSel] = useState<string>("");
+  const [pipelineOwnerSel, setPipelineOwnerSel] = useState<Record<"ajm" | "catalog" | "customers", string>>({ ajm: "", catalog: "", customers: "" });
 
   useEffect(() => {
     const connected = search?.get("connected");
@@ -84,6 +92,14 @@ function PipedriveIntegrationsPageInner() {
     const data = (await res.json()) as PipedriveStatus;
     setStatus(data);
     if (data.owner?.id) setOwnerSel(String(data.owner.id));
+    if (data.pipelineOwners) {
+      const po = data.pipelineOwners;
+      setPipelineOwnerSel({
+        ajm: po.ajm?.id ? String(po.ajm.id) : "",
+        catalog: po.catalog?.id ? String(po.catalog.id) : "",
+        customers: po.customers?.id ? String(po.customers.id) : "",
+      });
+    }
   }
 
   useEffect(() => {
@@ -202,6 +218,25 @@ function PipedriveIntegrationsPageInner() {
         setBanner({ kind: "success", title: "Owner saved", message: `Deals will be assigned to ${ownerName || "the selected user"}.` });
       } else {
         setBanner({ kind: "error", title: "Save failed", message: r.error || "Could not save owner." });
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function savePipelineOwner(key: "ajm" | "catalog" | "customers") {
+    const sel = pipelineOwnerSel[key];
+    if (!sel) return;
+    setBusy(true);
+    try {
+      const ownerId = parseInt(sel, 10);
+      const ownerName = status?.users?.find((u) => u.id === ownerId)?.name;
+      const r = await post({ action: "set-pipeline-owner", pipelineKey: key, ownerId, ownerName });
+      if (r.ok) {
+        await reload();
+        setBanner({ kind: "success", title: "Pipeline owner saved", message: `New ${PIPELINE_LABELS[key]} deals will be assigned to ${ownerName || "the selected user"}.` });
+      } else {
+        setBanner({ kind: "error", title: "Save failed", message: r.error || "Could not save pipeline owner." });
       }
     } finally {
       setBusy(false);
@@ -443,7 +478,8 @@ function PipedriveIntegrationsPageInner() {
                 Default deal owner
               </CardTitle>
               <CardDescription>
-                AJM reactivation deals are owned by Christina. Pick the Pipedrive user new deals are assigned to.
+                Fallback owner for new deals in any pipeline without a specific owner set below.
+                Also used as the owner for organizations and people created during a push.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -469,6 +505,54 @@ function PipedriveIntegrationsPageInner() {
                   Current owner: <strong>{status.owner.name || `user #${status.owner.id}`}</strong>
                 </p>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Per-pipeline deal owners */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <UserCheck className="h-5 w-5" />
+                Deal owner by pipeline
+              </CardTitle>
+              <CardDescription>
+                Who new deals are assigned to per pipeline (e.g. Catalog Interested → Sandra,
+                AJM Reactivation → Christina). Leave a pipeline unset to use the default owner above.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {(["ajm", "catalog", "customers"] as const).map((key) => {
+                const current = status.pipelineOwners?.[key];
+                return (
+                  <div key={key} className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium min-w-[10rem]">{PIPELINE_LABELS[key]}</span>
+                    <select
+                      className="h-9 rounded-md border border-input bg-background px-3 text-sm min-w-[16rem]"
+                      value={pipelineOwnerSel[key]}
+                      onChange={(e) => setPipelineOwnerSel((s) => ({ ...s, [key]: e.target.value }))}
+                    >
+                      <option value="">— Use default owner —</option>
+                      {(status.users || []).map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.name} ({u.email})
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      variant="outline"
+                      onClick={() => savePipelineOwner(key)}
+                      disabled={busy || !pipelineOwnerSel[key] || String(current?.id ?? "") === pipelineOwnerSel[key]}
+                    >
+                      Save
+                    </Button>
+                    {current?.id && (
+                      <span className="text-xs text-muted-foreground">
+                        → {current.name || `user #${current.id}`}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </CardContent>
           </Card>
 
