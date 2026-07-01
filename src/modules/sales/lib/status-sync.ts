@@ -71,21 +71,14 @@ export function fanOutStatusChange(
   if (source !== "pipedrive") {
     enqueuePipedriveSync(companyId, status);
   }
-  // AI enrichment of interested leads (analysis + auto-email + opener +
-  // Pipedrive deal note/activity/opener + Slack). Scheduled ~30s out so
-  // the Pipedrive deal-creation job above has normally landed the deal.
-  if (status === "interested" && enrichmentEnabled()) {
+  // AI enrichment of interested leads. ALWAYS enqueued — this job owns
+  // the single appointment-set Slack notification (sent after the AI
+  // runs, with full call context). The lead/Pipedrive WRITE-backs inside
+  // the job stay gated behind settings.interested_enrichment_enabled.
+  // Scheduled ~30s out so the Pipedrive deal-creation job has landed.
+  if (status === "interested") {
     enqueueInterestedEnrichment(companyId);
   }
-}
-
-/** Master switch for AI enrichment of interested leads. Off until the
- *  prompts/flow are validated in prod (settings.interested_enrichment_enabled). */
-function enrichmentEnabled(): boolean {
-  const row = sqlite
-    .prepare("SELECT value FROM settings WHERE key = 'interested_enrichment_enabled' LIMIT 1")
-    .get() as { value: string | null } | undefined;
-  return row?.value === "true";
 }
 
 function enqueueInterestedEnrichment(companyId: string): void {

@@ -56,8 +56,25 @@ interface InterestedCall {
 interface CompanyRow {
   id: string;
   name: string | null;
+  website: string | null;
   pipedrive_org_id: number | null;
   pipedrive_person_id: number | null;
+}
+
+/** Master switch for the write-backs (contact overwrite + Pipedrive).
+ *  The AI analysis + consolidated Slack notification run regardless. */
+function writeBackEnabled(): boolean {
+  return getSetting("interested_enrichment_enabled") === "true";
+}
+
+function primaryPhone(companyId: string): string | null {
+  const row = sqlite
+    .prepare(
+      `SELECT phone FROM company_phones WHERE company_id = ?
+        ORDER BY is_primary DESC, (source='gmaps') DESC, created_at ASC LIMIT 1`,
+    )
+    .get(companyId) as { phone: string | null } | undefined;
+  return row?.phone ?? null;
 }
 
 function getSetting(key: string): string | null {
@@ -259,7 +276,7 @@ function applyLeadContactUpdates(
 export async function enrichInterestedLead(companyId: string): Promise<Record<string, unknown>> {
   const company = sqlite
     .prepare(
-      "SELECT id, name, pipedrive_org_id, pipedrive_person_id FROM companies WHERE id = ?",
+      "SELECT id, name, website, pipedrive_org_id, pipedrive_person_id FROM companies WHERE id = ?",
     )
     .get(companyId) as CompanyRow | undefined;
   if (!company) return { skipped: "company not found", companyId };
@@ -277,11 +294,10 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
 
   if (!call) return { skipped: "no interested call found", companyId };
   if (alreadyEnriched(call.call_id)) return { skipped: "already enriched", callId: call.call_id };
-  if (!call.notes || !call.notes.trim()) {
-    return { skipped: "call has no notes", callId: call.call_id };
-  }
 
+  const writeEnabled = writeBackEnabled();
   const onFile = emailOnFile(companyId);
+  const phone = primaryPhone(companyId);
 
   // ── 1. Transcript — always fetched + saved on file for interested
   //       calls; feeds the analysis (recovers verbally-given emails). ──
@@ -296,7 +312,31 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
     emailOnFile: onFile,
   });
 
-  if (!ai) return { skipped: "ai analysis unavailable", callId: call.call_id };
+  // Pipedrive deal (for the link + write-backs).
+  const pdConnected = getPipedriveConnectionStatus().connected && isSyncEnabled();
+  const deal = pdConnected ? findOpenDeal(companyId) : undefined;
+  const dealId = deal?.pipedrive_deal_id ?? null;
+
+  // ── Fallback: AI unavailable → still send the appointment-set
+  //    notification so the team never misses a hot lead. ──
+  if (!ai) {
+    try {
+      await postEnrichmentSlack({
+        companyId, companyName: company.name, analysis: null, emailOpener: null,
+        dealId, dealUrl: dealId ? dealUrl(dealId) : null,
+        phone, website: company.website, recordingUrl: call.recording_url,
+        note: call.notes, connected: call.connected === 1, duration: fmtDuration(call.duration_seconds),
+        disposition: call.disposition_label, writeEnabled,
+        emailApplied: false, altEmail: null, contactUpdated: false, updatedName: null,
+        emailUncaptured: false, transcribed,
+      });
+    } catch (e) {
+      console.error("[interested-enrichment] fallback slack failed:", e instanceof Error ? e.message : e);
+    }
+    markEnriched(companyId, call.call_id, { ai: false });
+    return { ok: true, ai: false, companyId, callId: call.call_id, transcribed };
+  }
+
   const { analysis, emailOpener } = ai;
 
   const result: Record<string, unknown> = {
@@ -304,44 +344,49 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
     companyId,
     callId: call.call_id,
     transcribed,
+    writeEnabled,
     temperature: analysis.temperature,
     currentBrands: analysis.currentBrands,
     emailApplied: false,
-    pipedrive: { deal: null as number | null, note: false, activity: false, opener: false },
+    pipedrive: { deal: dealId as number | null, note: false, activity: false, opener: false },
   };
 
-  const pdConnected = getPipedriveConnectionStatus().connected && isSyncEnabled();
-  const deal = pdConnected ? findOpenDeal(companyId) : undefined;
-  const dealId = deal?.pipedrive_deal_id ?? null;
-  (result.pipedrive as Record<string, unknown>).deal = dealId;
+  // ── 3. Write-backs (contact + Pipedrive) — GATED behind the flag. The
+  //       AI analysis + Slack below run regardless. ──
+  let applied = {
+    emailApplied: false,
+    contactUpdated: false,
+    newEmail: null as string | null,
+    name: (analysis.contact?.name ?? "").trim() || null,
+  };
 
-  // ── 3. Write captured contact info (name / role / email) back to the
-  //       lead — Frame contact + Pipedrive person. ──
-  const src = `cold call (${call.disposition_label ?? "Set Appointment"})${transcribed ? " transcript" : " note"}`;
-  const applied = applyLeadContactUpdates(companyId, company, analysis, src);
-  result.emailApplied = applied.emailApplied;
-  result.contactUpdated = applied.contactUpdated;
+  if (writeEnabled) {
+    const src = `cold call (${call.disposition_label ?? "Set Appointment"})${transcribed ? " transcript" : " note"}`;
+    applied = applyLeadContactUpdates(companyId, company, analysis, src);
+    result.emailApplied = applied.emailApplied;
+    result.contactUpdated = applied.contactUpdated;
 
-  // Mirror to Pipedrive: new email → new person; otherwise update the
-  // linked person's name when we learned it.
-  if (company.pipedrive_org_id) {
-    try {
-      if (applied.newEmail) {
-        await createPerson({
-          name: applied.name ?? (company.name ?? "Contact"),
-          org_id: company.pipedrive_org_id,
-          email: [applied.newEmail],
-        });
-      } else if (company.pipedrive_person_id && applied.name) {
-        await updatePerson(company.pipedrive_person_id, { name: applied.name });
+    // Mirror to Pipedrive: new email → new person; otherwise update the
+    // linked person's name when we learned it.
+    if (company.pipedrive_org_id) {
+      try {
+        if (applied.newEmail) {
+          await createPerson({
+            name: applied.name ?? (company.name ?? "Contact"),
+            org_id: company.pipedrive_org_id,
+            email: [applied.newEmail],
+          });
+        } else if (company.pipedrive_person_id && applied.name) {
+          await updatePerson(company.pipedrive_person_id, { name: applied.name });
+        }
+      } catch (e) {
+        console.warn("[interested-enrichment] pd person sync failed:", e instanceof Error ? e.message : e);
       }
-    } catch (e) {
-      console.warn("[interested-enrichment] pd person sync failed:", e instanceof Error ? e.message : e);
     }
   }
 
-  // ── 4. Pipedrive deal enrichment (best-effort) ──
-  if (dealId) {
+  // ── 4. Pipedrive deal enrichment (best-effort) — GATED. ──
+  if (writeEnabled && dealId) {
     const pd = result.pipedrive as Record<string, unknown>;
     const noteHtml = buildDealNoteHtml(company.name, analysis, call, transcribed);
     try {
@@ -374,7 +419,8 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
     }
   }
 
-  // ── 5. Consolidated Slack message with the deal link ──
+  // ── 5. Consolidated appointment-set Slack message (ALWAYS) — one
+  //       message carrying call outcome + AI context + deal link. ──
   try {
     await postEnrichmentSlack({
       companyId,
@@ -383,19 +429,45 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
       emailOpener,
       dealId,
       dealUrl: dealId ? dealUrl(dealId) : null,
+      phone,
+      website: company.website,
+      recordingUrl: call.recording_url,
+      note: call.notes,
+      connected: call.connected === 1,
+      duration: fmtDuration(call.duration_seconds),
+      disposition: call.disposition_label,
+      writeEnabled,
       emailApplied: applied.emailApplied,
       altEmail: applied.newEmail,
       contactUpdated: applied.contactUpdated,
       updatedName: applied.contactUpdated ? applied.name : null,
       emailUncaptured: analysis.emailReferencedUncaptured && !transcribed,
       transcribed,
-      duration: fmtDuration(call.duration_seconds),
     });
   } catch (e) {
     console.error("[interested-enrichment] slack post failed:", e instanceof Error ? e.message : e);
   }
 
   // ── 6. Idempotency marker + timeline event ──
+  markEnriched(companyId, call.call_id, {
+    temperature: analysis.temperature,
+    current_brands: analysis.currentBrands,
+    email_applied: applied.emailApplied,
+    alt_email: applied.newEmail,
+    contact_updated: applied.contactUpdated,
+    contact_name: applied.contactUpdated ? applied.name : null,
+    transcribed,
+    pipedrive_deal_id: dealId,
+    write_enabled: writeEnabled,
+    opener: emailOpener,
+  });
+
+  return result;
+}
+
+/** Idempotency marker + prospect-timeline event. Keyed by call_id so a
+ *  re-run (or a re-fired disposition) never double-notifies. */
+function markEnriched(companyId: string, callId: string, data: Record<string, unknown>): void {
   try {
     sqlite
       .prepare(
@@ -403,28 +475,10 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
            (id, event_type, module, entity_type, entity_id, data, user_id, created_at)
          VALUES (?, ?, 'sales', 'company', ?, ?, NULL, datetime('now'))`,
       )
-      .run(
-        crypto.randomUUID(),
-        ENRICHED_MARKER,
-        companyId,
-        JSON.stringify({
-          call_id: call.call_id,
-          temperature: analysis.temperature,
-          current_brands: analysis.currentBrands,
-          email_applied: applied.emailApplied,
-          alt_email: applied.newEmail,
-          contact_updated: applied.contactUpdated,
-          contact_name: applied.contactUpdated ? applied.name : null,
-          transcribed,
-          pipedrive_deal_id: dealId,
-          opener: emailOpener,
-        }),
-      );
+      .run(crypto.randomUUID(), ENRICHED_MARKER, companyId, JSON.stringify({ call_id: callId, ...data }));
   } catch (e) {
     console.error("[interested-enrichment] marker insert failed:", e instanceof Error ? e.message : e);
   }
-
-  return result;
 }
 
 function esc(s: string): string {
@@ -455,70 +509,124 @@ function buildDealNoteHtml(
   return lines.join("<br>");
 }
 
+function fmtPhoneDisplay(p: string | null): string {
+  if (!p) return "—";
+  const d = p.replace(/\D+/g, "");
+  if (d.length === 11 && d.startsWith("1")) return `(${d.slice(1, 4)}) ${d.slice(4, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+  return p;
+}
+function stripUrl(u: string): string {
+  return u.replace(/^https?:\/\//, "").replace(/\/$/, "");
+}
+
+/**
+ * The single appointment-set Slack message. Sent once, AFTER the AI runs,
+ * so it carries the call outcome + full AI context + deal link together.
+ * `analysis`/`emailOpener` are null in the fallback case (AI unavailable)
+ * — the message still goes out with the call basics.
+ */
 async function postEnrichmentSlack(o: {
   companyId: string;
   companyName: string | null;
-  analysis: AnalyzeResult["analysis"];
-  emailOpener: string;
+  analysis: AnalyzeResult["analysis"] | null;
+  emailOpener: string | null;
   dealId: number | null;
   dealUrl: string | null;
+  phone: string | null;
+  website: string | null;
+  recordingUrl: string | null;
+  note: string | null;
+  connected: boolean;
+  duration: string;
+  disposition: string | null;
+  writeEnabled: boolean;
   emailApplied: boolean;
   altEmail: string | null;
   contactUpdated: boolean;
   updatedName: string | null;
   emailUncaptured: boolean;
   transcribed: boolean;
-  duration: string;
 }): Promise<void> {
   const frameLink = `${APP_BASE_URL.replace(/\/$/, "")}/prospects/${o.companyId}`;
   const name = o.companyName ?? "(unknown company)";
-
-  const contextBits: string[] = [];
-  contextBits.push(`🌡️ ${o.analysis.temperature}`);
-  if (o.analysis.currentBrands.length) contextBits.push(`carries ${o.analysis.currentBrands.join(", ")}`);
-  else if (o.analysis.carriesSunglasses === "no") contextBits.push("no sunglasses yet");
-  if (o.transcribed) contextBits.push("🎙️ transcribed");
+  const disp = o.disposition ?? "Set Appointment";
+  const a = o.analysis;
 
   const blocks: SlackBlock[] = [
     {
       type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `🧠 *AI enrichment* — *${name}*\n_${o.analysis.repSummary}_`,
-      },
+      text: { type: "mrkdwn", text: `🎯 *Interested lead from PhoneBurner* — *${name}* just hit "${disp}"` },
     },
   ];
 
-  if (o.analysis.objections.length || o.analysis.followUp) {
-    const parts: string[] = [];
-    if (o.analysis.followUp) parts.push(`*Next:* ${o.analysis.followUp}`);
-    if (o.analysis.objections.length) parts.push(`*Objections:* ${o.analysis.objections.join("; ")}`);
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: parts.join("\n") } });
-  }
-
-  blocks.push({
-    type: "section",
-    text: { type: "mrkdwn", text: `*✍️ Email opener*\n>${o.emailOpener.replace(/\n/g, "\n>")}` },
+  // Call basics
+  const fields: { type: "mrkdwn"; text: string }[] = [];
+  if (o.phone) fields.push({ type: "mrkdwn", text: `*Phone*\n${fmtPhoneDisplay(o.phone)}` });
+  fields.push({
+    type: "mrkdwn",
+    text: `*Call*\n${o.connected ? "✓ Connected" : "✗ Not connected"}${o.duration ? ` · ${o.duration}` : ""}`,
   });
+  if (o.website) fields.push({ type: "mrkdwn", text: `*Website*\n<${o.website}|${stripUrl(o.website)}>` });
+  blocks.push({ type: "section", fields });
 
-  const updateLines: string[] = [];
-  if (o.emailApplied) updateLines.push(`✅ Added email: ${o.altEmail}`);
-  if (o.contactUpdated && o.updatedName) updateLines.push(`✅ Updated contact: ${o.updatedName}`);
-  if (o.emailUncaptured) updateLines.push("⚠️ An email was mentioned on the call but not captured — check the recording");
-  if (updateLines.length) {
-    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: updateLines.join("  ·  ") }] });
+  // AI context
+  if (a) {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: `🧠 *${a.repSummary}*` } });
+    const parts: string[] = [];
+    if (a.followUp) parts.push(`*Next:* ${a.followUp}`);
+    if (a.objections.length) parts.push(`*Objections:* ${a.objections.join("; ")}`);
+    if (a.catalogSendTo) parts.push(`*Send catalog to:* ${a.catalogSendTo}`);
+    if (parts.length) blocks.push({ type: "section", text: { type: "mrkdwn", text: parts.join("\n") } });
+    if (o.emailOpener) {
+      blocks.push({
+        type: "section",
+        text: { type: "mrkdwn", text: `*✍️ Email opener*\n>${o.emailOpener.replace(/\n/g, "\n>")}` },
+      });
+    }
   }
 
+  // Rep note
+  if (o.note && o.note.trim()) {
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `*📝 Call note*\n>${o.note.trim().slice(0, 600).replace(/\n/g, "\n>")}` },
+    });
+  }
+
+  // Applied updates (writes on) / detected info (writes off)
+  const updateLines: string[] = [];
+  if (o.writeEnabled) {
+    if (o.emailApplied) updateLines.push(`✅ Added email: ${o.altEmail}`);
+    if (o.contactUpdated && o.updatedName) updateLines.push(`✅ Updated contact: ${o.updatedName}`);
+  } else if (a) {
+    const det: string[] = [];
+    if (a.contact?.name) det.push(`name *${a.contact.name}*`);
+    if (a.alternateEmail?.value) det.push(`email *${a.alternateEmail.value}*`);
+    if (det.length) updateLines.push(`📇 Detected: ${det.join(" · ")} _(write-back off)_`);
+  }
+  if (o.emailUncaptured) updateLines.push("⚠️ Email mentioned on the call but not captured — check the recording");
+  if (updateLines.length) blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: updateLines.join("  ·  ") }] });
+
+  // Context bits + links
+  const bits: string[] = [];
+  if (a) {
+    bits.push(`🌡️ ${a.temperature}`);
+    if (a.currentBrands.length) bits.push(`carries ${a.currentBrands.join(", ")}`);
+    else if (a.carriesSunglasses === "no") bits.push("no sunglasses yet");
+  }
+  if (o.transcribed) bits.push("🎙️ transcribed");
   const pills: string[] = [`<${frameLink}|🔗 Open in The Frame>`];
   if (o.dealUrl) pills.push(`<${o.dealUrl}|🟢 Pipedrive deal>`);
+  if (o.recordingUrl) pills.push(`<${o.recordingUrl}|▶️ Recording>`);
   blocks.push({
     type: "context",
-    elements: [{ type: "mrkdwn", text: `${contextBits.join(" · ")}   ·   ${pills.join("   ·   ")}` }],
+    elements: [{ type: "mrkdwn", text: `${bits.length ? bits.join(" · ") + "   ·   " : ""}${pills.join("   ·   ")}` }],
   });
 
   await postSlack({
     topic: "sales.phoneburner_interested",
-    text: `🧠 AI enrichment — ${name}`,
+    text: `🎯 Interested lead — ${name} (${disp})`,
     blocks,
   });
 }

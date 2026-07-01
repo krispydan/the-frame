@@ -48,7 +48,6 @@ import {
 } from "./lead-resolution";
 import { progressCompanyStatus, type CompanyStatus } from "./status-progression";
 import { enqueueCallTranscription } from "./status-sync";
-import { notifyPhoneBurnerInterested } from "@/modules/integrations/lib/slack/phoneburner-interested";
 
 /**
  * Map a PhoneBurner disposition label to a companies.status value, or
@@ -406,18 +405,18 @@ async function handlePhoneBurnerWebhook(
           const r = progressCompanyStatus(match.companyId, targetStatus, { source: "phoneburner" });
           if (r.updated) {
             message += ` status=${r.from ?? "?"}→${r.to}`;
-            // Slack alert on the forward edge into 'interested' only —
-            // so subsequent calls re-asserting the same disposition
-            // don't re-ping #sales-leads.
+            // Forward edge into 'interested' only — so re-asserting the
+            // same disposition doesn't re-fire.
             if (r.to === "interested" && disposition) {
-              fireInterestedSlackAlert(match.companyId, body, disposition).catch((e) =>
-                console.error("[phoneburner-webhook] Slack alert failed:", e),
-              );
               // Always transcribe + save the recording for interested calls,
               // independent of the AI-enrichment flag — good data on file.
               try { enqueueCallTranscription(callId); } catch (e) {
                 console.error("[phoneburner-webhook] enqueue transcription failed:", e);
               }
+              // The Slack appointment-set notification is now sent by the
+              // enrichment job (sales.enrich_interested_lead, enqueued via
+              // the status fan-out) AFTER the AI runs, so it carries the
+              // full call context in a single message.
             }
           } else {
             message += ` status=${r.from ?? "?"}(no-progress)`;
@@ -458,59 +457,6 @@ async function handlePhoneBurnerWebhook(
     .run(message, id);
 
   return { ok: true, message };
-}
-
-/**
- * Build the "interested lead" Slack notification from a PB call_end
- * payload + send via the sales.phoneburner_interested topic. Fired on
- * the forward-edge transition into companies.status='interested' only —
- * the caller handles deduping that.
- */
-async function fireInterestedSlackAlert(
-  companyId: string,
-  body: PbWebhookPayload,
-  disposition: string,
-): Promise<void> {
-  // Look up the company display name from our DB (more reliable than
-  // PB's contact.first_name which we set to the company name at push
-  // time but might be stale).
-  const compRow = sqlite
-    .prepare("SELECT name, website FROM companies WHERE id = ? LIMIT 1")
-    .get(companyId) as { name: string | null; website: string | null } | undefined;
-
-  // socials may live on custom_fields OR on companies — prefer payload
-  // (which is always current) and fall back to DB.
-  const socialsFromCF = {
-    instagram: pbCustomField(body, "Instagram URL") ?? pbCustomField(body, "Instagram"),
-    facebook: pbCustomField(body, "Facebook URL"),
-    tiktok: pbCustomField(body, "TikTok URL"),
-  };
-
-  await notifyPhoneBurnerInterested({
-    companyId,
-    companyName:
-      pbCustomField(body, "Company Name") ??
-      compRow?.name ??
-      body.contact?.first_name ??
-      null,
-    phone: pbContactPhone(body),
-    disposition,
-    agentEmail: pbAgentEmail(body),
-    durationSeconds:
-      typeof body.duration === "number" ? Math.round(body.duration) : null,
-    connected: pbConnected(body),
-    recordingUrl: body.recording_url ?? null,
-    notes: pbNotes(body),
-    industry: pbCustomField(body, "Industry"),
-    icpTier: pbCustomField(body, "ICP Tier"),
-    icpScore: pbCustomField(body, "ICP Score"),
-    website: pbCustomField(body, "Website") ?? compRow?.website ?? null,
-    description: pbCustomField(body, "Description"),
-    leadSource: pbCustomField(body, "Lead Source"),
-    pbContactId: pbContactUserId(body),
-    socials: socialsFromCF,
-    callId: pbCallId(body),
-  });
 }
 
 // Self-register at module load. The generic dispatcher route imports
