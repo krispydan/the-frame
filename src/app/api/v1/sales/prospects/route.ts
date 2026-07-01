@@ -126,8 +126,9 @@ export async function GET(request: NextRequest) {
     whereClauses.push(`c.status IN (${statusFilter.map(() => "?").join(",")})`);
     whereParams.push(...statusFilter);
   } else {
-    // Default: exclude rejected/not-qualified prospects
-    whereClauses.push(`c.status != 'rejected'`);
+    // Default: hide disqualified prospects. Includes the legacy 'rejected'
+    // value alongside the canonical 'not_qualified' for pre-migration rows.
+    whereClauses.push(`c.status NOT IN ('not_qualified', 'rejected')`);
   }
 
   if (icpMin) {

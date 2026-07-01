@@ -64,13 +64,15 @@ function mapCategory(category: string): "independent" | "chain" | "online" | "de
   return "independent";
 }
 
-function mapStatus(status: string): "new" | "contacted" | "qualified" | "rejected" | "customer" {
+// Maps any CSV-provided status onto the canonical lead-gen enum. Accepts the
+// legacy values (new/qualified/contacted/rejected) and the current ones so old
+// export files keep importing correctly. See status-progression.ts for the enum.
+function mapStatus(status: string): "prospect" | "qualified_lead" | "not_qualified" | "customer" {
   const s = (status || "").toLowerCase().trim();
-  if (s === "qualified") return "qualified";
-  if (s === "contacted") return "contacted";
-  if (s === "rejected") return "rejected";
+  if (s === "qualified" || s === "qualified_lead" || s === "contacted") return "qualified_lead";
+  if (s === "rejected" || s === "not_qualified") return "not_qualified";
   if (s === "customer") return "customer";
-  return "new";
+  return "prospect";
 }
 
 /**

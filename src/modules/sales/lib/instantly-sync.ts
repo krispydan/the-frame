@@ -514,7 +514,7 @@ export async function importLeadsFromInstantly(): Promise<ImportLeadsStats> {
        id, name, type, status, source, source_type,
        created_at, updated_at
      ) VALUES (
-       ?, ?, 'online', 'new', 'instantly_pull', 'instantly_pull',
+       ?, ?, 'online', 'prospect', 'instantly_pull', 'instantly_pull',
        datetime('now'), datetime('now')
      )`,
   );

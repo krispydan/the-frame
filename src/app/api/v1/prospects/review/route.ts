@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   const state = params.getAll("state");
   const category = params.get("category");
   const segment = params.get("segment");
-  const status = params.get("status") || "new";
+  const status = params.get("status") || "prospect";
   const sort = params.get("sort") || "random";
 
   const whereClauses: string[] = [];
