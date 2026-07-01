@@ -117,6 +117,7 @@ You may also be given a CRM profile of the store (location, size, socials, exist
 
 Opener rules (ALL three):
 - Reference only what is genuinely true (from the call, or clearly from the CRM profile). Do NOT invent facts, and do not claim they said something on the call that only appears in the CRM profile.
+- When the store's city is known (from the CRM Location), be specific that we're looking to partner with / stock more boutiques in THAT city (e.g. "we're looking to work with more boutiques in Austin"). It sounds targeted and signals we want them specifically because of their location. Prefer the city; if only the state is known, use the state. Do not force it into all three, but land it naturally in at least one of the openers.
 - No greeting like 'Hi', no names, no sign-off. Just the line(s).
 - NEVER use em-dashes or en-dashes (the — or – characters); use commas, periods, or the word 'and' instead.
 - Keep each to 1-2 sentences. Vary them so the three don't repeat the same phrasing; escalate the pull from email1 (soft) to email3 (most direct).
