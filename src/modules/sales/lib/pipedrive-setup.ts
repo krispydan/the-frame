@@ -104,3 +104,36 @@ export function getPipedriveOwner(): { id: number; name?: string } | null {
   if (!id) return null;
   return { id: parseInt(id, 10), name: getSetting("pipedrive_owner_name") || undefined };
 }
+
+// ── Per-pipeline deal owners ──────────────────────────────────────────────
+//
+// New deals in each pipeline can be assigned to a specific Pipedrive user
+// (e.g. AJM reactivation → Christina, Catalog interest → Sandra). Stored as a
+// single JSON map under `pipedrive_pipeline_owners`; a pipeline with no entry
+// falls back to the global default owner (getPipedriveOwner).
+
+export type PipelineOwners = Partial<Record<keyof PipelineConfig, { id: number; name?: string }>>;
+
+export function getPipelineOwners(): PipelineOwners {
+  const raw = getSetting("pipedrive_pipeline_owners");
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as PipelineOwners;
+  } catch {
+    return {};
+  }
+}
+
+export function setPipelineOwner(key: keyof PipelineConfig, ownerId: number, ownerName?: string): void {
+  const owners = getPipelineOwners();
+  owners[key] = { id: ownerId, name: ownerName };
+  setSetting("pipedrive_pipeline_owners", JSON.stringify(owners));
+}
+
+/**
+ * Owner for new deals in a pipeline: the pipeline-specific owner if configured,
+ * otherwise the global default owner.
+ */
+export function getPipelineOwner(key: keyof PipelineConfig): { id: number; name?: string } | null {
+  return getPipelineOwners()[key] ?? getPipedriveOwner();
+}

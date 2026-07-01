@@ -16,6 +16,9 @@ import {
   getPipelineConfig,
   setPipedriveOwner,
   getPipedriveOwner,
+  getPipelineOwners,
+  setPipelineOwner,
+  type PipelineConfig,
 } from "@/modules/sales/lib/pipedrive-setup";
 import {
   seedAjmToPipedrive,
@@ -73,6 +76,7 @@ export async function GET() {
     ...status,
     pipelineConfig: getPipelineConfig(),
     owner: getPipedriveOwner(),
+    pipelineOwners: getPipelineOwners(),
     syncStats: syncStats(),
     runs: getAllRunStates(),
   };
@@ -153,6 +157,18 @@ export async function POST(req: NextRequest) {
         }
         setPipedriveOwner(body.ownerId, body.ownerName);
         return NextResponse.json({ ok: true, owner: getPipedriveOwner() });
+      }
+
+      case "set-pipeline-owner": {
+        const key = (body as { pipelineKey?: string }).pipelineKey as keyof PipelineConfig | undefined;
+        if (!key || !["ajm", "catalog", "customers"].includes(key)) {
+          return NextResponse.json({ ok: false, error: "pipelineKey must be ajm | catalog | customers" }, { status: 400 });
+        }
+        if (!body.ownerId) {
+          return NextResponse.json({ ok: false, error: "ownerId is required" }, { status: 400 });
+        }
+        setPipelineOwner(key, body.ownerId, body.ownerName);
+        return NextResponse.json({ ok: true, pipelineOwners: getPipelineOwners() });
       }
 
       case "register-webhook": {
