@@ -30,6 +30,7 @@ import {
   createOrganization,
   updateOrganization,
   createPerson,
+  updatePerson,
   createDeal,
   updateDeal,
   createActivity,
@@ -607,8 +608,12 @@ export async function ensureOutreachDeal(
 
   const c = getCompany(companyId);
   const keys = await ensureCustomFields();
-  const orgId = await resolveOrg(companyId, ownerId);
-  const personId = await resolvePerson(companyId, orgId, ownerId);
+  // Owner is per-pipeline (e.g. catalog → Sandra), falling back to the global
+  // default. Apply it to the org + person + deal so the whole record belongs to
+  // the right rep, not just the deal. (Deals use user_id; orgs/persons owner_id.)
+  const dealOwnerId = getPipelineOwner(pipeline)?.id ?? ownerId;
+  const orgId = await resolveOrg(companyId, dealOwnerId);
+  const personId = await resolvePerson(companyId, orgId, dealOwnerId);
   const title = `${c?.name || "Company"} — ${pipeline === "ajm" ? "AJM reactivation" : "catalog interest"}`;
   const body: Record<string, unknown> = {
     title,
@@ -619,9 +624,6 @@ export async function ensureOutreachDeal(
   };
   if (keys.dealFrameCompanyId) body[keys.dealFrameCompanyId] = companyId;
   if (personId) body.person_id = personId;
-  // Deal owner is per-pipeline (e.g. catalog → Sandra), falling back to the
-  // global default. Deals use user_id for the owner (not owner_id).
-  const dealOwnerId = getPipelineOwner(pipeline)?.id ?? ownerId;
   if (dealOwnerId) body.user_id = dealOwnerId;
   const created = await createDealSafe(body, [keys.dealFrameCompanyId]);
   upsertProjection({
@@ -795,7 +797,8 @@ export async function createDealForOrder(
   const order = getOrder(orderId);
   if (!order) return { orderId, dealId: null, action: "skipped", reason: "order not found" };
   if (order.pipedrive_deal_id) return { orderId, dealId: order.pipedrive_deal_id, action: "already_synced" };
-  if (order.channel !== "shopify_wholesale") {
+  // Wholesale + Faire orders become deals (the B2B channels). DTC/retail don't.
+  if (!/wholesale|faire/i.test(order.channel || "")) {
     return { orderId, dealId: null, action: "skipped", reason: `channel ${order.channel} not wholesale` };
   }
   if (order.status === "cancelled") return { orderId, dealId: null, action: "skipped", reason: "cancelled" };
@@ -828,12 +831,14 @@ export async function createDealForOrder(
 
   if (dryRun) return { orderId, dealId: null, action: "created_won", reason: "dry-run" };
 
-  // Else create a standalone Won deal in Customers.
+  // Else create a standalone Won deal in Customers. Owner (org + person + deal)
+  // is the Customers-pipeline owner, falling back to the global default.
   const keys = await ensureCustomFields();
   const meta = pipelineMeta(config, "customers");
   const stageName = meta.stageNames[0]; // "Order Placed"
-  const orgId = await resolveOrg(order.company_id, ownerId);
-  const personId = await resolvePerson(order.company_id, orgId, ownerId);
+  const dealOwnerId = getPipelineOwner("customers")?.id ?? ownerId;
+  const orgId = await resolveOrg(order.company_id, dealOwnerId);
+  const personId = await resolvePerson(order.company_id, orgId, dealOwnerId);
   const c = getCompany(order.company_id);
   const title = `${c?.name || "Customer"} — order ${order.order_number || ""}`.trim();
   const body: Record<string, unknown> = {
@@ -849,8 +854,6 @@ export async function createDealForOrder(
   if (keys.dealFrameCompanyId) body[keys.dealFrameCompanyId] = order.company_id;
   if (keys.dealFrameOrderId) body[keys.dealFrameOrderId] = orderId;
   if (personId) body.person_id = personId;
-  // Customers-pipeline deal owner (per-pipeline, falling back to the default).
-  const dealOwnerId = getPipelineOwner("customers")?.id ?? ownerId;
   if (dealOwnerId) body.user_id = dealOwnerId; // deals use user_id for the owner (not owner_id)
   if (opts.backfillRunId && keys.dealBackfillRunId) body[keys.dealBackfillRunId] = opts.backfillRunId;
   const created = await createDealSafe(body, [keys.dealFrameCompanyId, keys.dealFrameOrderId, keys.dealBackfillRunId]);
@@ -1178,6 +1181,81 @@ export async function syncStatusToPipedrive(
     return { skipped: "no open deal to lose" };
   }
   return { skipped: `status ${status} not mapped` };
+}
+
+/**
+ * Re-apply the per-pipeline owner to an already-synced company: its Pipedrive
+ * org, primary person, and every open deal. Needed because the per-pipeline
+ * owner is only applied when records are first created — changing the owner
+ * config later doesn't touch leads already in Pipedrive.
+ *
+ * Org + person get the owner of the company's primary pipeline (the open deal's
+ * pipeline, else the outreach pipeline it routes to); each open deal gets the
+ * owner of its own pipeline.
+ */
+export async function reassignOwner(companyId: string): Promise<Record<string, unknown>> {
+  if (!getPipedriveConnectionStatus().connected) return { skipped: "pipedrive not connected" };
+  const c = getCompany(companyId);
+  if (!c) return { skipped: "company not found" };
+  if (!c.pipedrive_org_id) return { skipped: "not synced to pipedrive yet" };
+
+  const openDeals = sqlite
+    .prepare(
+      "SELECT pipedrive_deal_id, pipeline FROM pipedrive_deals WHERE company_id = ? AND is_open = 1 AND pipedrive_deal_id IS NOT NULL",
+    )
+    .all(companyId) as Array<{ pipedrive_deal_id: number; pipeline: string | null }>;
+
+  const primaryPipeline = (openDeals.find((d) => d.pipeline)?.pipeline
+    || (isAjmCompany(c) ? "ajm" : "catalog")) as "ajm" | "catalog" | "customers";
+  const orgOwnerId = getPipelineOwner(primaryPipeline)?.id ?? getPipedriveOwner()?.id;
+
+  const out: Record<string, unknown> = { primaryPipeline, ownerId: orgOwnerId ?? null };
+  if (!orgOwnerId) return { ...out, skipped: "no owner configured" };
+
+  try {
+    await updateOrganization(c.pipedrive_org_id, { owner_id: orgOwnerId });
+    out.org = c.pipedrive_org_id;
+  } catch (e) {
+    out.orgError = e instanceof Error ? e.message : String(e);
+  }
+  if (c.pipedrive_person_id) {
+    try {
+      await updatePerson(c.pipedrive_person_id, { owner_id: orgOwnerId });
+      out.person = c.pipedrive_person_id;
+    } catch (e) {
+      out.personError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  let dealsUpdated = 0;
+  for (const d of openDeals) {
+    const dealOwnerId =
+      getPipelineOwner(((d.pipeline as "ajm" | "catalog" | "customers") || primaryPipeline))?.id ?? orgOwnerId;
+    try {
+      await updateDeal(d.pipedrive_deal_id, { user_id: dealOwnerId });
+      dealsUpdated++;
+    } catch {
+      /* best-effort per deal */
+    }
+  }
+  out.dealsUpdated = dealsUpdated;
+  return { ok: true, ...out };
+}
+
+/**
+ * Best-effort inline order→deal push for order webhooks. Represents a
+ * just-placed wholesale/Faire order as a Won deal immediately (wins an open
+ * outreach deal or creates one in Customers), instead of waiting for the hourly
+ * sweep. Respects the sync master switch; never throws.
+ */
+export async function syncOrderToPipedrive(orderId: string): Promise<void> {
+  try {
+    if (!isSyncEnabled()) return;
+    if (!getPipedriveConnectionStatus().connected || !getPipelineConfig()) return;
+    await createDealForOrder(orderId);
+  } catch (e) {
+    console.error("[pipedrive-sync] syncOrderToPipedrive failed:", e instanceof Error ? e.message : e);
+  }
 }
 
 export { PipedriveError };

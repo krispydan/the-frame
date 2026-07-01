@@ -17,6 +17,7 @@ import {
   resolveOrg,
   resolvePerson,
   ensureOutreachDeal,
+  reassignOwner,
   isSyncEnabled,
   PipedriveNotReadyError,
 } from "@/modules/sales/lib/pipedrive-sync";
@@ -164,6 +165,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const orgId = await resolveOrg(id, owner);
       const personId = await resolvePerson(id, orgId, owner);
       return NextResponse.json({ ok: true, orgId, personId });
+    }
+
+    if (body.action === "reassign-owner") {
+      const r = await reassignOwner(id);
+      return NextResponse.json({ ok: !r.skipped, ...r });
     }
 
     if (body.action === "create-deal") {

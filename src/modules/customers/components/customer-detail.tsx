@@ -9,6 +9,7 @@ import { PipedrivePanel } from "@/modules/sales/components/pipedrive-panel";
 
 interface AccountData {
   id: string;
+  company_id: string;
   company_name: string;
   company_email: string | null;
   company_phone: string | null;
@@ -308,8 +309,8 @@ export function CustomerDetail({
         </div>
       </div>
 
-      {/* Pipedrive — live CRM record (same company id as the account) */}
-      <PipedrivePanel companyId={account.id} companyName={account.company_name} />
+      {/* Pipedrive — live CRM record (keyed by the underlying company id) */}
+      <PipedrivePanel companyId={account.company_id} companyName={account.company_name} />
 
       {/* Reorder Prediction */}
       {reorderPrediction && reorderPrediction.avgDaysBetweenOrders && (
