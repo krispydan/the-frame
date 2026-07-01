@@ -62,6 +62,7 @@ interface ShopifyOrder {
   financial_status: string;
   line_items: ShopifyLineItem[];
   customer?: {
+    id?: number;
     email: string;
     first_name: string;
     last_name: string;
@@ -151,17 +152,29 @@ function isRelayEmail(email: string | null | undefined): boolean {
 
 async function findOrCreateCompany(order: ShopifyOrder, shopDomain?: string): Promise<string | null> {
   const email = order.email || order.customer?.email;
+  const shopifyCustomerId = order.customer?.id != null ? String(order.customer.id) : null;
+  const relay = isRelayEmail(email);
   // Faire passes the retailer's store name through the address even when it
   // anonymizes the email — it's the reliable identity for these orders.
   const companyName =
     order.customer?.default_address?.company || order.shipping_address?.company || null;
 
-  // 1. Email match — case-insensitive against contacts (canonical email
-  // store). Includes Faire relay addresses on purpose: Faire issues one
-  // Shopify customer (one stable relay email) per store, so matching the full
-  // relay address groups a store's repeat orders. (The collapse bug was the
-  // DOMAIN match in step 3 — relay.faire.com is excluded there, not here.)
-  if (email) {
+  // 0. Shopify customer id — the strongest identity. Faire issues a distinct
+  // Shopify customer per retailer, so this keeps stores separate even when they
+  // share a relay email and carry no company name (the collapse we were seeing).
+  if (shopifyCustomerId) {
+    const custMatch = sqlite
+      .prepare(`SELECT id FROM companies WHERE shopify_customer_id = ? LIMIT 1`)
+      .get(shopifyCustomerId) as { id: string } | undefined;
+    if (custMatch) return custMatch.id;
+  }
+
+  // 1. Email match — case-insensitive against contacts (canonical email store).
+  // EXCLUDE relay addresses: a shared relay email must NOT group distinct
+  // retailers (that was collapsing e.g. 5 Faire stores into one company).
+  // Repeat orders from the same store are grouped by customer id in step 0.
+  // When there's no customer id, fall back to matching relay too (best effort).
+  if (email && (!relay || !shopifyCustomerId)) {
     const emailMatch = sqlite
       .prepare(
         `SELECT ct.company_id AS id FROM contacts ct
@@ -206,6 +219,15 @@ async function findOrCreateCompany(order: ShopifyOrder, shopDomain?: string): Pr
       domain: businessDomain,
       source: "shopify",
     }).returning().get();
+    // Stamp the Shopify customer id so this retailer's future orders match at
+    // step 0 (distinct customers stay distinct even with a shared relay email).
+    if (shopifyCustomerId) {
+      try {
+        sqlite.prepare("UPDATE companies SET shopify_customer_id = ? WHERE id = ?").run(shopifyCustomerId, newCompany.id);
+      } catch (e) {
+        console.error("[shopify-webhook] stamp shopify_customer_id failed:", e);
+      }
+    }
     // Email lands in contacts (canonical), not on the company row. The relay
     // address is still stored — it's stable per retailer, so a repeat Faire
     // order from the same store matches it in step 1. Pipedrive sync skips
