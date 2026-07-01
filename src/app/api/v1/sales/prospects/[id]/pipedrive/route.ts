@@ -20,7 +20,7 @@ import {
   isSyncEnabled,
   PipedriveNotReadyError,
 } from "@/modules/sales/lib/pipedrive-sync";
-import { getPipelineConfig, getPipedriveOwner } from "@/modules/sales/lib/pipedrive-setup";
+import { getPipelineConfig, getPipedriveOwner, getPipelineOwner } from "@/modules/sales/lib/pipedrive-setup";
 
 function getCompany(id: string) {
   return sqlite
@@ -170,7 +170,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const config = getPipelineConfig();
       if (!config) return NextResponse.json({ ok: false, error: "Pipelines not provisioned" }, { status: 409 });
       const pipelineKey = body.pipelineKey || "catalog";
-      const owner = body.ownerId || getPipedriveOwner()?.id;
+      const owner = body.ownerId || getPipelineOwner(pipelineKey)?.id;
 
       if (pipelineKey === "ajm" || pipelineKey === "catalog") {
         const stageName = body.stageName || (pipelineKey === "ajm" ? "To Contact" : "Interested");
