@@ -107,6 +107,14 @@ interface Company {
   ai_opener_generated_at?: string | null;
   ai_opener_model?: string | null;
   created_at: string; updated_at: string;
+  pipedrive_org_id?: number | null;
+  pipedrive_person_id?: number | null;
+  pipedrive?: {
+    connected: boolean;
+    apiDomain: string | null;
+    orgUrl: string | null;
+    personUrl: string | null;
+  } | null;
 }
 
 // Format money cents → "$1.2M" / "$450K" / "$320"
@@ -569,6 +577,16 @@ export default function CompanyDetailPage() {
               regular PATCH + progressCompanyStatus path so the
               hub-and-spoke sync handles Instantly + PhoneBurner. */}
           <div className="flex items-center gap-2 shrink-0">
+            {company.pipedrive?.orgUrl && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-green-700 dark:text-green-400"
+                render={<a href={company.pipedrive.orgUrl} target="_blank" rel="noreferrer" />}
+              >
+                <ExternalLink className="w-4 h-4 mr-1" /> View in Pipedrive
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={() => { setEditing(!editing); setEditFields({}); }}>
               <Edit className="w-4 h-4 mr-1" /> Edit
             </Button>
