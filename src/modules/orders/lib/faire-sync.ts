@@ -125,6 +125,12 @@ export async function importFaireOrders(csvRows: FaireCsvRow[]): Promise<{ impor
         await detectWholesaleConversion(newOrder.id);
       } catch (e) { console.error("[Faire CSV] conversion detection:", e); }
     })();
+    void (async () => {
+      try {
+        const { syncOrderToPipedrive } = await import("@/modules/sales/lib/pipedrive-sync");
+        await syncOrderToPipedrive(newOrder.id);
+      } catch (e) { console.error("[Faire CSV] pipedrive order push:", e); }
+    })();
     imported++;
   }
 
@@ -271,6 +277,12 @@ function syncFaireOrder(faireOrder: FaireOrder): { action: "created" | "updated"
       const { detectWholesaleConversion } = await import("./wholesale-conversion");
       await detectWholesaleConversion(newOrder.id);
     } catch (e) { console.error("[Faire Sync] conversion detection:", e); }
+  })();
+  void (async () => {
+    try {
+      const { syncOrderToPipedrive } = await import("@/modules/sales/lib/pipedrive-sync");
+      await syncOrderToPipedrive(newOrder.id);
+    } catch (e) { console.error("[Faire Sync] pipedrive order push:", e); }
   })();
   return { action: "created" };
 }

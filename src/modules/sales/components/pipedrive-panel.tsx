@@ -112,6 +112,20 @@ export function PipedrivePanel({ companyId }: { companyId: string; companyName?:
     }
   }
 
+  async function reassign() {
+    setBusy(true);
+    setMsg("");
+    try {
+      const r = await post({ action: "reassign-owner" });
+      if (r.ok) {
+        setMsg("Owner reassigned to the pipeline owner.");
+        await load();
+      } else setMsg(r.error || r.skipped || "Reassign failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createDeal() {
     setBusy(true);
     setMsg("");
@@ -190,6 +204,9 @@ export function PipedrivePanel({ companyId }: { companyId: string; companyName?:
                 {data.org?.owner && (
                   <div className="flex items-center gap-1.5">
                     <User className="w-3 h-3 shrink-0" /> <span>Owner: {data.org.owner}</span>
+                    <button onClick={reassign} disabled={busy} className="ml-1 text-blue-600 hover:underline disabled:opacity-50" title="Set the org, contact and open deals to this pipeline's owner">
+                      Reassign
+                    </button>
                   </div>
                 )}
                 {data.org?.website && (

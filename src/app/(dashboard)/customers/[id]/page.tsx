@@ -54,7 +54,10 @@ async function getAccount(id: string) {
     SELECT
       ca.*,
       c.name as company_name,
-      c.email as company_email,
+      (SELECT ct.email FROM contacts ct
+        WHERE ct.company_id = c.id AND ct.email IS NOT NULL AND TRIM(ct.email) != ''
+        ORDER BY ct.is_primary DESC, ct.created_at ASC
+        LIMIT 1) as company_email,
       (SELECT cp.phone FROM company_phones cp
         WHERE cp.company_id = c.id
         ORDER BY cp.is_primary DESC, cp.created_at ASC

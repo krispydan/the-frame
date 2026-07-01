@@ -79,6 +79,7 @@ interface OrderDetail {
   shippedAt: string | null;
   deliveredAt: string | null;
   company: { id: string; name: string; segment?: string | null } | null;
+  pipedrive: { apiDomain: string; dealUrl: string | null; orgUrl: string | null; personUrl: string | null } | null;
   contact: { id: string; name: string; email: string } | null;
   profit: {
     itemsRevenue: number;
@@ -862,6 +863,35 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               )}
             </div>
           </div>
+
+          {/* Pipedrive — deep links to the CRM record */}
+          {order.pipedrive && (order.pipedrive.dealUrl || order.pipedrive.orgUrl || order.pipedrive.personUrl) && (
+            <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
+              <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
+                <span className="text-green-600">●</span> Pipedrive
+              </h2>
+              <div className="space-y-2 text-sm">
+                {order.pipedrive.dealUrl && (
+                  <a href={order.pipedrive.dealUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-blue-600 hover:underline w-full">
+                    <ExternalLink className="h-3.5 w-3.5" /> View deal
+                  </a>
+                )}
+                {order.pipedrive.orgUrl && (
+                  <a href={order.pipedrive.orgUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-blue-600 hover:underline w-full">
+                    <Building2 className="h-3.5 w-3.5" /> View organization
+                  </a>
+                )}
+                {order.pipedrive.personUrl && (
+                  <a href={order.pipedrive.personUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-blue-600 hover:underline w-full">
+                    <User className="h-3.5 w-3.5" /> View contact
+                  </a>
+                )}
+                {!order.pipedrive.dealUrl && (
+                  <p className="text-xs text-muted-foreground">No deal linked yet — created on the next Pipedrive sync.</p>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Faire details (channel-specific) */}
           {order.channel === "faire" && (

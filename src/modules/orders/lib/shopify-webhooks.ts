@@ -351,6 +351,17 @@ export async function handleOrderCreate(order: ShopifyOrder, shopDomain?: string
     }
   }
 
+  // Push the order to Pipedrive now (wins an open outreach deal or creates a
+  // Won deal in Customers). Self-guards on channel + sync switch; never throws.
+  void (async () => {
+    try {
+      const { syncOrderToPipedrive } = await import("@/modules/sales/lib/pipedrive-sync");
+      await syncOrderToPipedrive(newOrder.id);
+    } catch (e) {
+      console.error("[Shopify Webhook] pipedrive order push failed:", e);
+    }
+  })();
+
   eventBus.emit("order.created", {
     orderId: newOrder.id,
     companyId: companyId || "",

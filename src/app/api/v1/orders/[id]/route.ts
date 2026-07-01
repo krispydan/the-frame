@@ -8,6 +8,7 @@ import { activityFeed } from "@/modules/core/schema";
 import { shopifyShops } from "@/modules/integrations/schema/shopify";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { updateOrderStatus } from "@/modules/orders/lib/fulfillment";
+import { getPipedriveConnectionStatus } from "@/modules/sales/lib/pipedrive-client";
 
 // GET /api/v1/orders/:id — order detail
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -121,9 +122,29 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     }
   }
 
+  // Pipedrive deep links. These ids live in raw columns (added outside the
+  // Drizzle schema), so read them directly. Deal is stamped on the order once
+  // the order→deal push runs; org/person on the company.
+  const pdIds = sqlite
+    .prepare(
+      `SELECT o.pipedrive_deal_id, c.pipedrive_org_id, c.pipedrive_person_id
+         FROM orders o LEFT JOIN companies c ON c.id = o.company_id WHERE o.id = ?`,
+    )
+    .get(id) as { pipedrive_deal_id: number | null; pipedrive_org_id: number | null; pipedrive_person_id: number | null } | undefined;
+  const pdBase = getPipedriveConnectionStatus().apiDomain ?? null;
+  const pipedrive = pdBase
+    ? {
+        apiDomain: pdBase,
+        dealUrl: pdIds?.pipedrive_deal_id ? `${pdBase}/deal/${pdIds.pipedrive_deal_id}` : null,
+        orgUrl: pdIds?.pipedrive_org_id ? `${pdBase}/organization/${pdIds.pipedrive_org_id}` : null,
+        personUrl: pdIds?.pipedrive_person_id ? `${pdBase}/person/${pdIds.pipedrive_person_id}` : null,
+      }
+    : null;
+
   return NextResponse.json({
     ...order,
     company: company ? { ...company, segment: companySegment || company.segment || null } : null,
+    pipedrive,
     contact,
     items: itemsWithProfit,
     returns: orderReturns,
