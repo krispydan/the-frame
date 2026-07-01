@@ -32,7 +32,7 @@ import {
   updateDeal,
   getPipedriveConnectionStatus,
 } from "./pipedrive-client";
-import { isSyncEnabled } from "./pipedrive-sync";
+import { isSyncEnabled, syncStatusToPipedrive } from "./pipedrive-sync";
 import { analyzeCallNote, type AnalyzeResult } from "./ai/call-note-analysis";
 import { getOrCreateTranscript } from "./ai/recording-transcription";
 import { loadLeadContext } from "./lead-context";
@@ -281,11 +281,23 @@ function applyLeadContactUpdates(
   return out;
 }
 
+export interface EnrichOptions {
+  /** Skip the Slack notification (used for historical backfills so we
+   *  don't spam the channel with old calls). */
+  skipSlack?: boolean;
+  /** If no open Pipedrive deal exists yet, create one first so the
+   *  note/activity/openers have somewhere to land (backfill). */
+  ensureDeal?: boolean;
+}
+
 /**
  * Enrich one interested company. Returns a structured summary for the
  * job output / logs.
  */
-export async function enrichInterestedLead(companyId: string): Promise<Record<string, unknown>> {
+export async function enrichInterestedLead(
+  companyId: string,
+  opts: EnrichOptions = {},
+): Promise<Record<string, unknown>> {
   const company = sqlite
     .prepare(
       "SELECT id, name, website, pipedrive_org_id, pipedrive_person_id FROM companies WHERE id = ?",
@@ -327,24 +339,35 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
 
   // Pipedrive deal (for the link + write-backs).
   const pdConnected = getPipedriveConnectionStatus().connected && isSyncEnabled();
-  const deal = pdConnected ? findOpenDeal(companyId) : undefined;
+  let deal = pdConnected ? findOpenDeal(companyId) : undefined;
+  // Backfill: create the deal first if it doesn't exist yet.
+  if (pdConnected && !deal && opts.ensureDeal) {
+    try {
+      await syncStatusToPipedrive(companyId, "interested");
+      deal = findOpenDeal(companyId);
+    } catch (e) {
+      console.warn("[interested-enrichment] ensureDeal failed:", e instanceof Error ? e.message : e);
+    }
+  }
   const dealId = deal?.pipedrive_deal_id ?? null;
 
   // ── Fallback: AI unavailable → still send the appointment-set
   //    notification so the team never misses a hot lead. ──
   if (!ai) {
-    try {
-      await postEnrichmentSlack({
-        companyId, companyName: company.name, analysis: null, emailOpeners: null,
-        dealId, dealUrl: dealId ? dealUrl(dealId) : null,
-        phone, website: company.website, recordingUrl: call.recording_url,
-        note: call.notes, connected: call.connected === 1, duration: fmtDuration(call.duration_seconds),
-        disposition: call.disposition_label, writeEnabled,
-        emailApplied: false, altEmail: null, contactUpdated: false, updatedName: null,
-        emailUncaptured: false, transcribed,
-      });
-    } catch (e) {
-      console.error("[interested-enrichment] fallback slack failed:", e instanceof Error ? e.message : e);
+    if (!opts.skipSlack) {
+      try {
+        await postEnrichmentSlack({
+          companyId, companyName: company.name, analysis: null, emailOpeners: null,
+          dealId, dealUrl: dealId ? dealUrl(dealId) : null,
+          phone, website: company.website, recordingUrl: call.recording_url,
+          note: call.notes, connected: call.connected === 1, duration: fmtDuration(call.duration_seconds),
+          disposition: call.disposition_label, writeEnabled,
+          emailApplied: false, altEmail: null, contactUpdated: false, updatedName: null,
+          emailUncaptured: false, transcribed,
+        });
+      } catch (e) {
+        console.error("[interested-enrichment] fallback slack failed:", e instanceof Error ? e.message : e);
+      }
     }
     markEnriched(companyId, call.call_id, { ai: false });
     return { ok: true, ai: false, companyId, callId: call.call_id, transcribed };
@@ -436,33 +459,36 @@ export async function enrichInterestedLead(companyId: string): Promise<Record<st
     }
   }
 
-  // ── 5. Consolidated appointment-set Slack message (ALWAYS) — one
-  //       message carrying call outcome + AI context + deal link. ──
-  try {
-    await postEnrichmentSlack({
-      companyId,
-      companyName: company.name,
-      analysis,
-      emailOpeners,
-      dealId,
-      dealUrl: dealId ? dealUrl(dealId) : null,
-      phone,
-      website: company.website,
-      recordingUrl: call.recording_url,
-      note: call.notes,
-      connected: call.connected === 1,
-      duration: fmtDuration(call.duration_seconds),
-      disposition: call.disposition_label,
-      writeEnabled,
-      emailApplied: applied.emailApplied,
-      altEmail: applied.newEmail,
-      contactUpdated: applied.contactUpdated,
-      updatedName: applied.contactUpdated ? applied.name : null,
-      emailUncaptured: analysis.emailReferencedUncaptured && !transcribed,
-      transcribed,
-    });
-  } catch (e) {
-    console.error("[interested-enrichment] slack post failed:", e instanceof Error ? e.message : e);
+  // ── 5. Consolidated appointment-set Slack message — one message
+  //       carrying call outcome + AI context + deal link. Skipped for
+  //       historical backfills (opts.skipSlack). ──
+  if (!opts.skipSlack) {
+    try {
+      await postEnrichmentSlack({
+        companyId,
+        companyName: company.name,
+        analysis,
+        emailOpeners,
+        dealId,
+        dealUrl: dealId ? dealUrl(dealId) : null,
+        phone,
+        website: company.website,
+        recordingUrl: call.recording_url,
+        note: call.notes,
+        connected: call.connected === 1,
+        duration: fmtDuration(call.duration_seconds),
+        disposition: call.disposition_label,
+        writeEnabled,
+        emailApplied: applied.emailApplied,
+        altEmail: applied.newEmail,
+        contactUpdated: applied.contactUpdated,
+        updatedName: applied.contactUpdated ? applied.name : null,
+        emailUncaptured: analysis.emailReferencedUncaptured && !transcribed,
+        transcribed,
+      });
+    } catch (e) {
+      console.error("[interested-enrichment] slack post failed:", e instanceof Error ? e.message : e);
+    }
   }
 
   // ── 6. Idempotency marker + timeline event ──

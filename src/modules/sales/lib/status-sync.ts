@@ -223,7 +223,10 @@ registerJobHandler(
   async (input): Promise<Record<string, unknown>> => {
     const companyId = String(input.companyId);
     const { enrichInterestedLead } = await import("./interested-enrichment");
-    return enrichInterestedLead(companyId);
+    return enrichInterestedLead(companyId, {
+      skipSlack: input.skipSlack === true,
+      ensureDeal: input.ensureDeal === true,
+    });
   },
 );
 
