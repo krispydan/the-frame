@@ -693,6 +693,29 @@ export function ingestOneCall(
       .run(calledAt, disposition, campaignLeadId);
   }
 
+  // Self-heal the PB contact link. Many leads live in PhoneBurner
+  // without our push having stamped phoneburner_contact_id (bulk CSV
+  // imports, contacts added agent-side, pushes that resolved by phone
+  // rather than our custom-field round-trip). When a call resolves to
+  // a company and PB gives us its contact_id, backfill it onto that
+  // company's campaign_leads rows that are still null — so future
+  // webhooks resolve via the stronger pb_contact_id path and the
+  // last-call denormalized fields stay current even for phone-matched
+  // leads (where campaignLeadId came back null from resolveByPhone).
+  const pbContactId = call.contact_id ?? null;
+  if (companyId && pbContactId) {
+    sqlite
+      .prepare(
+        `UPDATE campaign_leads
+            SET phoneburner_contact_id = ?,
+                last_called_at = COALESCE(last_called_at, ?),
+                last_call_disposition = COALESCE(?, last_call_disposition)
+          WHERE company_id = ?
+            AND (phoneburner_contact_id IS NULL OR phoneburner_contact_id = '')`,
+      )
+      .run(pbContactId, calledAt, disposition, companyId);
+  }
+
   if (companyId) {
     try {
       sqlite

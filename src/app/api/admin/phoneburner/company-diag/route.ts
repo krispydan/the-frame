@@ -143,7 +143,7 @@ function runDiag(req: NextRequest) {
       .prepare(
         `SELECT id, event_type, pb_call_id, pb_contact_id, frame_lead_id,
                 token_valid, handler_ok, handler_message, received_at,
-                substr(payload, 1, 500) AS payload_preview
+                substr(payload, 1, 4000) AS payload_preview
            FROM phoneburner_webhook_events
           WHERE ${clauses}
           ORDER BY received_at DESC LIMIT 20`,
