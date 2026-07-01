@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, Loader2, Plug, Plus } from "lucide-react";
+import { ExternalLink, Globe, Loader2, Mail, MapPin, Phone, Plug, Plus, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -25,7 +25,8 @@ type Summary = {
   syncEnabled: boolean;
   orgId: number | null;
   synced: boolean;
-  org?: { name: string; address: string | null; website: string | null; url: string | null } | null;
+  org?: { name: string; address: string | null; website: string | null; owner: string | null; url: string | null } | null;
+  person?: { id: number; name: string | null; email: string | null; phone: string | null; url: string | null } | null;
   deals?: PdDeal[];
   activities?: PdActivity[];
   projection?: Array<Record<string, unknown>>;
@@ -183,6 +184,45 @@ export function PipedrivePanel({ companyId }: { companyId: string; companyName?:
           </Button>
         ) : (
           <>
+            {/* Org + primary contact */}
+            {(data.org || data.person) && (
+              <div className="space-y-1 text-xs text-muted-foreground">
+                {data.org?.owner && (
+                  <div className="flex items-center gap-1.5">
+                    <User className="w-3 h-3 shrink-0" /> <span>Owner: {data.org.owner}</span>
+                  </div>
+                )}
+                {data.org?.website && (
+                  <div className="flex items-center gap-1.5">
+                    <Globe className="w-3 h-3 shrink-0" />
+                    <a href={/^https?:\/\//.test(data.org.website) ? data.org.website : `https://${data.org.website}`} target="_blank" rel="noreferrer" className="truncate hover:underline text-blue-600">
+                      {data.org.website.replace(/^https?:\/\//, "")}
+                    </a>
+                  </div>
+                )}
+                {data.org?.address && (
+                  <div className="flex items-center gap-1.5">
+                    <MapPin className="w-3 h-3 shrink-0" /> <span className="truncate">{data.org.address}</span>
+                  </div>
+                )}
+                {data.person && (data.person.name || data.person.email || data.person.phone) && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-0.5">
+                    {data.person.name && (
+                      <a href={data.person.url || "#"} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-foreground hover:underline">
+                        {data.person.name} <ExternalLink className="w-3 h-3 text-muted-foreground" />
+                      </a>
+                    )}
+                    {data.person.email && (
+                      <a href={`mailto:${data.person.email}`} className="inline-flex items-center gap-1 hover:underline"><Mail className="w-3 h-3" /> {data.person.email}</a>
+                    )}
+                    {data.person.phone && (
+                      <span className="inline-flex items-center gap-1"><Phone className="w-3 h-3" /> {data.person.phone}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Deals */}
             {(data.deals || []).length > 0 ? (
               <div className="space-y-2">

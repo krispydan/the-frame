@@ -480,8 +480,8 @@ export default function CompanyDetailPage() {
       {(adjacent.prev || adjacent.next || adjacent.position) && (() => {
         const pipelineStage = searchParams.get("pipeline");
         const stageLabel = pipelineStage ? (DEAL_STAGE_LABELS[pipelineStage as keyof typeof DEAL_STAGE_LABELS] || pipelineStage) : null;
-        const backHref = pipelineStage ? "/pipeline" : `/prospects${filterQs ? `?${filterQs}` : ""}`;
-        const backLabel = pipelineStage ? "Back to Pipeline" : "Back to List";
+        const backHref = `/prospects${filterQs ? `?${filterQs}` : ""}`;
+        const backLabel = "Back to List";
         return (
           <div className={`flex items-center justify-between mb-3 px-3 py-1.5 rounded-lg text-sm ${
             pipelineStage

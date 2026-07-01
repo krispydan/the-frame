@@ -4,6 +4,7 @@ import { sqlite } from "@/lib/db";
 import {
   getPipedriveConnectionStatus,
   getOrganization,
+  getPerson,
   listDealsForOrg,
   listActivitiesForOrg,
   listStages,
@@ -31,6 +32,21 @@ function ownerName(user: { id?: number; name?: string } | number | undefined, us
   if (user == null) return null;
   if (typeof user === "number") return users.get(user) ?? null;
   return user.name ?? (user.id ? users.get(user.id) ?? null : null);
+}
+
+/**
+ * Pipedrive person email/phone are arrays of { value, primary, label }
+ * (occasionally a bare string). Return the primary value, else the first.
+ */
+function primaryValue(field: unknown): string | null {
+  if (field == null) return null;
+  if (typeof field === "string") return field || null;
+  if (Array.isArray(field)) {
+    const arr = field as Array<{ value?: string; primary?: boolean }>;
+    const primary = arr.find((e) => e?.primary && e?.value) ?? arr.find((e) => e?.value);
+    return primary?.value ?? null;
+  }
+  return null;
 }
 
 /**
@@ -66,8 +82,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   try {
-    const [org, deals, activities, stages, pipelines, users] = await Promise.all([
+    const [org, person, deals, activities, stages, pipelines, users] = await Promise.all([
       getOrganization(company.pipedrive_org_id),
+      company.pipedrive_person_id ? getPerson(company.pipedrive_person_id) : Promise.resolve(null),
       listDealsForOrg(company.pipedrive_org_id),
       listActivitiesForOrg(company.pipedrive_org_id),
       listStages(),
@@ -79,11 +96,23 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const userName = new Map(users.map((u) => [u.id, u.name]));
     const base = status.apiDomain ?? "";
 
-    out.org = org ? { name: org.name, address: org.address ?? null, website: (org.website as string) ?? null, url: base ? `${base}/organization/${org.id}` : null } : null;
+    out.org = org
+      ? {
+          name: org.name,
+          address: org.address ?? null,
+          website: (org.website as string) ?? null,
+          owner: ownerName(org.owner_id as { id?: number; name?: string } | number | undefined, userName),
+          url: base ? `${base}/organization/${org.id}` : null,
+        }
+      : null;
     out.person = company.pipedrive_person_id
-      ? (() => {
-          return { id: company.pipedrive_person_id, url: base ? `${base}/person/${company.pipedrive_person_id}` : null };
-        })()
+      ? {
+          id: company.pipedrive_person_id,
+          name: person?.name ?? null,
+          email: primaryValue(person?.email),
+          phone: primaryValue(person?.phone),
+          url: base ? `${base}/person/${company.pipedrive_person_id}` : null,
+        }
       : null;
     out.deals = (deals || []).map((d) => ({
       id: d.id,
