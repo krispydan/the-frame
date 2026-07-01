@@ -42,12 +42,28 @@ interface Row {
   business_hours: string | null;
 }
 
-function money(cents: number | null): string | null {
+function money(cents: number | null, floorDollars = 0): string | null {
   if (!cents || cents <= 0) return null;
   const d = cents / 100;
+  if (d < floorDollars) return null; // implausibly low → treat as bad data
   if (d >= 1_000_000) return `$${(d / 1_000_000).toFixed(1)}M`;
   if (d >= 1_000) return `$${Math.round(d / 1_000)}k`;
   return `$${Math.round(d)}`;
+}
+
+/** Dedupe + tidy a "type · category · industry" style label. */
+function cleanKind(parts: Array<string | null>): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of parts) {
+    if (!raw) continue;
+    const v = raw.replace(/^[/\\\s]+/, "").trim();
+    const key = v.toLowerCase();
+    if (!v || seen.has(key)) continue;
+    seen.add(key);
+    out.push(v);
+  }
+  return out.join(" · ");
 }
 
 function num(n: number | null): string | null {
@@ -80,7 +96,7 @@ export function loadLeadContext(companyId: string): string {
 
   const lines: string[] = [];
 
-  const kind = [r.type, r.category, r.industry].filter(Boolean).join(" · ");
+  const kind = cleanKind([r.type, r.category, r.industry]);
   if (kind) lines.push(`Type: ${kind}`);
 
   const loc = [r.city, r.state, r.country && r.country !== "US" ? r.country : null].filter(Boolean).join(", ");
@@ -96,7 +112,7 @@ export function loadLeadContext(companyId: string): string {
   }
 
   const size: string[] = [];
-  const yr = money(r.estimated_yearly_sales_cents);
+  const yr = money(r.estimated_yearly_sales_cents, 5_000); // drop implausible sub-$5k/yr artifacts
   if (yr) size.push(`~${yr}/yr est. sales`);
   const vis = num(r.estimated_monthly_visits);
   if (vis) size.push(`~${vis} monthly visits`);
