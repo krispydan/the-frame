@@ -33,6 +33,7 @@ import {
   updatePerson,
   createDeal,
   updateDeal,
+  createNote,
   createActivity,
   findPersonIdByEmail,
   getPipedriveConnectionStatus,
@@ -767,6 +768,62 @@ function getOrder(orderId: string): OrderRow | undefined {
     .get(orderId) as OrderRow | undefined;
 }
 
+const CHANNEL_LABELS: Record<string, string> = {
+  shopify_wholesale: "Shopify (wholesale)",
+  shopify_dtc: "Shopify (DTC)",
+  faire: "Faire",
+  amazon: "Amazon",
+  direct: "Direct",
+  phone: "Phone",
+};
+
+function esc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * Post a note on the Won deal capturing the order: channel (Faire / Shopify /
+ * etc.), order number, date, line items (qty × product @ price), and total —
+ * so the rep sees exactly what was bought without leaving Pipedrive.
+ * Best-effort: never throws.
+ */
+async function postOrderDealNote(dealId: number, orgId: number | undefined, order: OrderRow): Promise<void> {
+  try {
+    const items = sqlite
+      .prepare(
+        `SELECT product_name, sku, color_name, quantity, unit_price, total_price
+           FROM order_items WHERE order_id = ? ORDER BY total_price DESC`,
+      )
+      .all(order.id) as Array<{ product_name: string; sku: string | null; color_name: string | null; quantity: number; unit_price: number; total_price: number }>;
+
+    const cur = order.currency || "USD";
+    const money = (n: number) => `${n.toFixed(2)} ${cur}`;
+    const channel = CHANNEL_LABELS[order.channel] || order.channel || "order";
+    const placed = order.placed_at || order.created_at;
+
+    const lines: string[] = [];
+    lines.push(`<b>🛒 Order ${esc(order.order_number || "")} — ${esc(channel)}</b>`);
+    const meta: string[] = [];
+    if (placed) meta.push(`Placed ${new Date(placed).toISOString().slice(0, 10)}`);
+    meta.push(`Total ${money(order.total)}`);
+    const units = items.reduce((s, i) => s + (i.quantity || 0), 0);
+    if (items.length) meta.push(`${units} unit${units === 1 ? "" : "s"} · ${items.length} line${items.length === 1 ? "" : "s"}`);
+    lines.push(meta.join(" · "));
+    if (items.length) {
+      lines.push("");
+      for (const it of items.slice(0, 40)) {
+        const name = [it.product_name, it.color_name].filter(Boolean).join(" — ");
+        const skuTag = it.sku ? ` (${esc(it.sku)})` : "";
+        lines.push(`• ${it.quantity} × ${esc(name)}${skuTag} @ ${money(it.unit_price)} = ${money(it.total_price)}`);
+      }
+      if (items.length > 40) lines.push(`…and ${items.length - 40} more line(s)`);
+    }
+    await createNote({ content: lines.join("<br>"), deal_id: dealId, org_id: orgId });
+  } catch (e) {
+    console.warn("[pipedrive-sync] order deal note failed (non-fatal):", e instanceof Error ? e.message : e);
+  }
+}
+
 /** Pipedrive want "YYYY-MM-DD HH:MM:SS" (UTC) for won_time/add_time. */
 function pdDateTime(iso: string | null | undefined): string | undefined {
   if (!iso) return undefined;
@@ -825,6 +882,7 @@ export async function createDealForOrder(
       )
       .run(order.total, orderId, open.pipedrive_deal_id);
     sqlite.prepare("UPDATE orders SET pipedrive_deal_id = ? WHERE id = ?").run(open.pipedrive_deal_id, orderId);
+    await postOrderDealNote(open.pipedrive_deal_id, getCompany(order.company_id)?.pipedrive_org_id ?? undefined, order);
     return { orderId, dealId: open.pipedrive_deal_id, action: "won_existing" };
   }
 
@@ -868,6 +926,7 @@ export async function createDealForOrder(
     backfillRunId: opts.backfillRunId,
   });
   sqlite.prepare("UPDATE orders SET pipedrive_deal_id = ? WHERE id = ?").run(created.id, orderId);
+  await postOrderDealNote(created.id, orgId, order);
   return { orderId, dealId: created.id, action: "created_won" };
 }
 

@@ -81,7 +81,7 @@ EMAIL 1 (sent with the catalog):
    {email1}
    As discussed, you can find our summer sunglasses catalog attached. You can order on Faire or our wholesale Shopify store. I'm happy to answer questions, walk you through bestsellers, or put together a recommended opening order.
    Thanks, <Sender>"
-  → email1 = 1-2 warm, specific sentences referencing the call. It must flow INTO "As discussed, you can find our catalog attached." Do NOT mention the attachment yourself. Soft and friendly.
+  → email1 = 1-2 warm sentences that reference something SPECIFIC and true from the call (what they said they were looking for, a detail about their shop they mentioned, or the plan you agreed on). It must read as a natural lead-in to "As discussed, you can find our catalog attached." Do NOT open with a bare pleasantry as the whole thought; if you start warmly, tie it to a real detail in the same breath. Do NOT mention the attachment yourself. Soft and friendly.
 
 EMAIL 2 (follow-up a few days later):
   "{email2} I just wanted to follow up on the catalog that we sent over. Do you need any help choosing the best styles for your store?"
@@ -123,16 +123,21 @@ You may also be given a CRM profile of the store (location, size, socials, exist
 
 Opener rules (ALL three):
 - Reference only what is genuinely true (from the call, or clearly from the CRM profile). Do NOT invent facts, and do not claim they said something on the call that only appears in the CRM profile.
-- When the store's city is known (from the CRM Location), be specific that we're looking to partner with / stock more boutiques in THAT city (e.g. "we're looking to work with more boutiques in Austin"). It sounds targeted and signals we want them specifically because of their location. Prefer the city; if only the state is known, use the state. Do not force it into all three, but land it naturally in ONE of the openers. Use the plain city name only, do NOT infer a broader region or comment on its weather/seasonality-by-location (never write things like "West Texas" or "summer in full swing there").
+- When the store's city is known (from the CRM Location), be specific that we're looking to partner with / stock more boutiques in THAT city (e.g. "we're looking to work with more boutiques in Austin"). It sounds targeted and signals we want them specifically because of their location. Prefer the city; if only the state is known, use the state. This is OPTIONAL: land it naturally in AT MOST one of the openers, and only when it genuinely adds warmth. Skip it rather than force it, and never make it a reflex line. Use the plain city name only, do NOT infer a broader region or comment on its weather/seasonality-by-location (never write things like "West Texas" or "summer in full swing there").
 - No greeting like 'Hi', no names, no sign-off. Just the line(s).
 - NEVER use em-dashes or en-dashes (the — or – characters); use commas, periods, or the word 'and' instead.
 
-VOICE — write like Sandra (a real, warm human on the phone) actually talking, NOT like marketing copy:
-- BANNED phrases, never use any of these or close variants: "worth a look", "worth exploring", "low-risk", "high-margin", "great addition", "in full swing", "natural fit", "perfect fit", "game changer", "reach out", "touch base", "circle back", "at the end of the day", "elevate", "curated", "seamless", "no-brainer", "level up".
-- Be CONCRETE, not vague. Instead of adjectives like "high margins" / "great quality", use the real specifics we have: "$8 a pair wholesale, sells around $28", "about half of what Freyrs costs you", "$150 minimum so it's easy to test", "polarized / UV400". Only use numbers or facts actually provided.
+VOICE — you JUST got off a friendly phone call with this buyer and set up to send them the catalog. Write like a real person dashing off a warm, personal note the same day, NOT like marketing copy:
+- Sound like a quick human note, not a pitch: contractions, plain words, genuine warmth. A buyer should feel like the specific person they spoke to wrote this to them, not a template.
+- BANNED phrases and any close variant: "worth a look", "worth exploring", "low-risk", "high-margin", "great addition", "in full swing", "natural fit", "perfect fit", "game changer", "reach out", "touch base", "circle back", "at the end of the day", "elevate", "curated", "seamless", "no-brainer", "level up", "it was great connecting", "great connecting with you", "so nice chatting", "really enjoyed", "it was a pleasure", "hope you're doing well", "hope this finds you well", "I wanted to reach out", "just following up".
+- Do NOT open with a bare pleasantry that could be sent to anyone. If you start warmly, attach it to a REAL detail from the call in the same sentence.
+- ONE concrete specific at most per opener, and only where it fits. Real specifics we have: "$8 a pair wholesale, sells around $28", "$150 minimum", "4 pairs per color", "polarized or UV400", "ships in 48 hours". Do NOT stack numbers, and never let an opener read like a spec sheet. Put a number where it answers something the buyer actually asked (e.g. they asked the minimum), not as a reflex.
+- Never claim to beat, undercut, or out-margin a competitor. You may mention fitting in alongside what they already carry, never replacing or beating it.
+- The catalog is our SUMMER line. If you mention season at all it is summer / warm weather; never reference another season.
+- If the shop does not carry sunglasses yet, do NOT name a competitor brand; lean on their own customers, foot traffic, or an idea they raised on the call (e.g. a display by the register).
+- You may use the buyer's first name once if the call gave it. Never guess a name, a brand, or a fact.
 - Cut hedges: no "could be", "might", "maybe", "I think", "possibly". Say it plainly and with quiet confidence.
-- Each of the three must use DIFFERENT phrasing and a different angle. Never reuse the same phrase (e.g. "test the line", "$150 minimum") in more than one of the three.
-- Vary how email1 starts; do not always begin with "It was great connecting with you today".
+- All three must differ in shape, opening word, and angle. Never reuse a phrase or repeat the same fact across two of them.
 - Length: email1 up to 2 short sentences; email2 and email3 ONE tight sentence each. Keep it conversational and specific; cut every filler word.
 
 Rules:
