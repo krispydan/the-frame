@@ -1,4 +1,11 @@
-# Monthly campaign planner prompt — v1 (2026-06-23)
+# Monthly campaign planner prompt — v2 (2026-07-02)
+
+<!-- v2: don't force a distant/out-of-window holiday across every slot when
+     the calendar is empty. Anchor to events ONLY when they fall inside the
+     window; otherwise plan a diverse EVERGREEN mix driven by the actual
+     season + product rotation. De-anchored the all-Labor-Day examples that
+     were priming the model to make every email about Labor Day. -->
+
 
 Purpose: given an audience, a date range, and the marketing
 calendar for that window, propose **a unique brief per email
@@ -45,10 +52,33 @@ HARD CONSTRAINTS
 1. **One brief per slot, in the same order as `slots[]`.**
    The number of returned briefs MUST equal {{slotCount}}.
 
-2. **Lean into PRIMARY calendar events.** If a calendar event
-   marked `[PRIMARY — lead with this]` falls within ±5 days of
-   a slot's date, that slot's brief MUST orient around it.
-   Don't fight the calendar.
+2. **Anchor to calendar events ONLY when they're in the window —
+   never reach for a distant one.**
+   - If a `[PRIMARY — lead with this]` event falls within ±5 days
+     of a slot's date, that slot's brief MUST orient around it.
+     Don't fight the calendar.
+   - **NEVER anchor a slot to an event OUTSIDE the window
+     ({{startDate}} → {{endDate}}).** A holiday weeks past `endDate`
+     (e.g. Labor Day when the window ends in mid-August) is NOT this
+     month's story — ignore it entirely. Do not mention it.
+   - Cap: at most **2 slots** may share the same holiday/seasonal
+     anchor. If one event genuinely dominates the window, the
+     remaining slots still get their own distinct, non-holiday ideas.
+
+2b. **Empty or sparse calendar → go EVERGREEN and diverse, don't
+   repeat one holiday.** If `calendarEvents` is `(none)` — or has far
+   fewer events than slots — do NOT invent a single distant holiday
+   and make every email about it. Plan the un-anchored slots as a
+   varied evergreen mix, each its own idea, driven by:
+     • the **actual season of the slot dates** — read
+       {{startDate}}/{{endDate}} (e.g. mid-July = peak summer, late-
+       August = back-to-school / early-fall preview; NOT Labor Day)
+     • **product / colorway rotation** — new arrivals, best-sellers,
+       restocks, a hero style per slot
+     • **audience needs** — wholesale: floor sets, margin, weeks-to-
+       restock, don't-run-dry; retail: the colorway/moment for right now
+   A month with no events should read as {{slotCount}} genuinely
+   DIFFERENT campaigns, not {{slotCount}} takes on the same holiday.
 
 3. **No two slots share the same brief angle.** Even if they
    anchor to the same event (e.g. a 3-day BFCM window with 2
@@ -80,7 +110,8 @@ HARD CONSTRAINTS
    - `name`           3–8 word internal label. Sentence case. The
                        operator's view of "what is this campaign
                        about?" Becomes the campaign.name in the DB.
-                       Good: "Honey colorway lands for Labor Day"
+                       Good: "Sunset colorway hits the floor"
+                             "Summer best-sellers, restock before August"
                              "Last-chance readers, 30% off, ends Mon"
                        Bad:  "Email 1" / "Promo" / "Newsletter"
    - `angle`          2–4 sentences. Why this email, why now, what
@@ -96,12 +127,18 @@ HARD CONSTRAINTS
                        why I proposed this." Operator reads it to
                        decide whether to accept or refine.
 
-7. **No empty briefs.** Even if there's no calendar event for a
-   slot, propose a brief grounded in the audience + season + the
-   assigned image-style. Don't return placeholders.
+7. **No empty briefs, no filler-by-holiday.** Every slot gets a
+   real, specific brief grounded in the audience + the *actual*
+   season of its date + the assigned image-style + a concrete
+   product/angle. "No calendar event" is NOT a reason to fall back
+   on the nearest holiday — it's a reason to lead with product and
+   season. Don't return placeholders, and don't pad with a holiday
+   that isn't in the window.
 
 ────────────────────────────────────────────────────────────
-SHAPE — example output for a 2-slot window
+SHAPE A — when a PRIMARY event IS in the window (2-slot example)
+Use this pattern ONLY when the event actually falls inside
+{{startDate}} → {{endDate}}.
 ────────────────────────────────────────────────────────────
 
 ```json
@@ -124,5 +161,36 @@ SHAPE — example output for a 2-slot window
   ]
 }
 ```
+
+────────────────────────────────────────────────────────────
+SHAPE B — empty calendar (`calendarEvents = (none)`), the COMMON
+case. Each slot is its OWN idea — evergreen, season + product
+driven, NO distant holiday. Example: 2 wholesale slots in mid-July.
+────────────────────────────────────────────────────────────
+
+```json
+{
+  "briefs": [
+    {
+      "name": "Summer best-sellers, restock before August",
+      "angle": "Peak-summer reorder nudge. Lead with the 3 fastest movers on Christina's floor this season and the weeks-to-restock math before the August rush. No holiday — just the pragmatic 'don't run dry on your winners' moment.",
+      "productHook": "Top-3 summer SKUs",
+      "seasonalContext": "Mid-summer sell-through",
+      "rationale": "No calendar event — driven by the actual season (peak-summer sell-through) + wholesale practical-value angle. Product-catalog layout shows the best-sellers with restock numbers."
+    },
+    {
+      "name": "Sunset colorway hits the floor",
+      "angle": "New colorway arrival, framed for the buyer: a fresh SKU to refresh the set mid-season, strong margin, limited first run. The easy add that makes the shelf feel new without a big reorder.",
+      "productHook": "Sunset colorway, 4 styles",
+      "seasonalContext": "Late-summer refresh",
+      "rationale": "No event — product-rotation driven, a different idea from slot 1. Split layout + product-focused angle fits a single hero colorway with the margin / pieces-in-stock hook."
+    }
+  ]
+}
+```
+
+Note how SHAPE B's two slots share NO anchor — one is a restock
+play, one is a new-arrival play. That's the target for a no-event
+month: {{slotCount}} distinct ideas, not one holiday repeated.
 
 Return strict JSON via the tool. No prose around it.

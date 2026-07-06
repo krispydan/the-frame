@@ -703,7 +703,7 @@ export async function planMonth(opts: {
               properties: {
                 name: {
                   type: "string",
-                  description: "3–8 word campaign name (sentence case, no quotes). The operator's internal label. Examples: 'Honey colorway lands for Labor Day' / 'Last-chance readers, 30% off'",
+                  description: "3–8 word campaign name (sentence case, no quotes). The operator's internal label. Examples: 'Sunset colorway hits the floor' / 'Summer best-sellers, restock before August' / 'Last-chance readers, 30% off'",
                   maxLength: 80,
                 },
                 angle: {
