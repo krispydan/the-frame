@@ -1171,6 +1171,77 @@ Slot context: ${imageStyleLabel}. Subject-angle direction: ${rec.subjectAngleHin
       };
     },
   },
+  {
+    name: "marketing.email.push_omnisend",
+    description:
+      "Push a finished campaign into Omnisend: renders the email HTML, imports it as an Omnisend template, creates the Omnisend campaign (draft by default; schedule=true also schedules 9am PT on the campaign's send date). Requires OMNISEND_API_KEY to be configured — returns a clear error otherwise. Stores the Omnisend campaign id on the row.",
+    inputSchema: {
+      type: "object",
+      required: ["campaign_id"],
+      properties: {
+        campaign_id: { type: "string", description: "the-frame campaign id" },
+        schedule: { type: "boolean", description: "Also schedule the send (default false = draft in Omnisend)" },
+      },
+    },
+    handler: async ({ input }) => {
+      const { isOmnisendConfigured, importTemplate, createCampaign, sendCampaign } = await import("../lib/omnisend-client");
+      const { renderEmailHtml } = await import("../lib/render-email");
+      const { campaignRowToData } = await import("../lib/campaign-render-data");
+      if (!isOmnisendConfigured()) {
+        return { content: [{ type: "text", text: JSON.stringify({ error: "Omnisend not configured — set OMNISEND_API_KEY or the omnisend_api_key setting." }) }] };
+      }
+      const [row] = await db.select().from(emailCampaigns).where(eq(emailCampaigns.id, input.campaign_id as string)).limit(1);
+      if (!row) return { content: [{ type: "text", text: JSON.stringify({ error: "Campaign not found" }) }] };
+      if (!row.subject) return { content: [{ type: "text", text: JSON.stringify({ error: "Campaign has no subject — generate copy first." }) }] };
+      const html = renderEmailHtml(campaignRowToData(row));
+      const label = row.name || row.subject;
+      const tpl = await importTemplate(`the-frame — ${label}`, html);
+      if (!tpl.ok) return { content: [{ type: "text", text: JSON.stringify({ error: tpl.error }) }] };
+      const scheduledAt = input.schedule && row.scheduledDate ? `${row.scheduledDate}T17:00:00Z` : null;
+      const created = await createCampaign({ name: label, subject: row.subject, preheader: row.preheader, senderName: "Jaxy", templateID: tpl.data.templateID, scheduledAt });
+      if (!created.ok) return { content: [{ type: "text", text: JSON.stringify({ error: created.error }) }] };
+      let scheduled = false;
+      if (scheduledAt) {
+        const sent = await sendCampaign(created.data.campaignID);
+        scheduled = sent.ok;
+      }
+      sqlite.prepare("UPDATE marketing_email_campaigns SET omnisend_campaign_id = ?, updated_at = datetime('now') WHERE id = ?").run(created.data.campaignID, row.id);
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true, omnisendCampaignId: created.data.campaignID, scheduled }, null, 2) }] };
+    },
+  },
+  {
+    name: "marketing.email.record_send_results",
+    description:
+      "Record post-send performance (recipients/opens/clicks/notes) for a campaign, per platform (omnisend|faire). Auto-advances status sent/scheduled → analyzed. This is the learning-loop input that future planning reads.",
+    inputSchema: {
+      type: "object",
+      required: ["campaign_id", "platform"],
+      properties: {
+        campaign_id: { type: "string" },
+        platform: { type: "string", enum: ["omnisend", "faire"] },
+        sent_at: { type: "string", description: "ISO date the send went out" },
+        recipients: { type: "number" },
+        opens: { type: "number" },
+        clicks: { type: "number" },
+        notes: { type: "string" },
+      },
+    },
+    handler: async ({ input }) => {
+      const [row] = await db.select({ id: emailCampaigns.id, status: emailCampaigns.status }).from(emailCampaigns).where(eq(emailCampaigns.id, input.campaign_id as string)).limit(1);
+      if (!row) return { content: [{ type: "text", text: JSON.stringify({ error: "Campaign not found" }) }] };
+      const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.round(v) : null);
+      const rid = crypto.randomUUID();
+      sqlite.prepare(
+        `INSERT INTO marketing_email_send_results (id, campaign_id, platform, sent_at, recipients, opens, clicks, notes) VALUES (?,?,?,?,?,?,?,?)`,
+      ).run(rid, row.id, input.platform as string, (input.sent_at as string) ?? null, num(input.recipients), num(input.opens), num(input.clicks), (input.notes as string)?.slice(0, 2000) ?? null);
+      let statusAfter = row.status;
+      if (row.status === "sent" || row.status === "scheduled") {
+        sqlite.prepare("UPDATE marketing_email_campaigns SET status = 'analyzed' WHERE id = ?").run(row.id);
+        statusAfter = "analyzed";
+      }
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true, resultId: rid, statusAfter }, null, 2) }] };
+    },
+  },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────
