@@ -82,7 +82,7 @@ export default function PlanMonthPage() {
         body: JSON.stringify({ audience, startDate, weeks }),
       });
       const text = await res.text();
-      let data: { error?: string; proposals?: Proposal[]; eventsConsidered?: number };
+      let data: { error?: string; warning?: string; proposals?: Proposal[]; eventsConsidered?: number };
       try { data = JSON.parse(text); } catch {
         setError(`HTTP ${res.status}: ${text.slice(0, 300) || "(empty response — upstream timeout, try again)"}`);
         return;
