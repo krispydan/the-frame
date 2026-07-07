@@ -287,9 +287,14 @@ function heroFullBleedOverlay(p: HeroProps & { scrim: "dark" | "light" | "none";
     ? `<!--[if gte mso 9]></v:textbox></v:rect><![endif]-->`
     : "";
 
+  // NOTE: no role="img" here — this td contains the real headline/
+  // subtitle/CTA content, and role="img" made screen readers treat the
+  // whole block as one opaque image, hiding the text AND the CTA link.
+  // The background photo is decorative; the alt text is preserved in the
+  // adjacent VML fallback + title attr instead.
   return `
   <tr>
-    <td role="img" aria-label="${escAttr(p.imageAlt)}" style="position:relative;${bg}">
+    <td title="${escAttr(p.imageAlt)}" style="position:relative;${bg}">
       ${msoOpen}
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
         <tr>

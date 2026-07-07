@@ -116,7 +116,9 @@ export default function EmailAssistantDashboard() {
   // generations — warn first. (Completed ones are already saved.)
   useEffect(() => {
     if (!batchGen?.running) return;
-    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    // preventDefault covers modern browsers; returnValue is the legacy
+    // Chromium/Edge trigger — both needed for the prompt to show.
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [batchGen?.running]);

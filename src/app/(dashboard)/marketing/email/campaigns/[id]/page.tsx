@@ -84,6 +84,7 @@ export default function CampaignDetailPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
   const [previewKey, setPreviewKey] = useState(0);
@@ -125,7 +126,7 @@ export default function CampaignDetailPage({
     // Flush any pending in-flight edits before the AI runs so the
     // server reads the latest. flushChanges = no-op when nothing's
     // queued, so this is cheap when the user hasn't typed in a while.
-    await save();
+    try { await save(); } catch { return; } // saveError banner explains; don't run AI on stale state
 
     setGenerating("copy");
     setGenerateError(null);
@@ -160,7 +161,7 @@ export default function CampaignDetailPage({
   // to revise-copy, which rewrites every field and persists it
   // (snapshotting first, so it's undoable from Copy history).
   async function handleReviseCopy(feedbackText: string): Promise<boolean> {
-    await save(); // flush pending edits so we revise the latest copy
+    try { await save(); } catch { return false; } // don't revise stale state
     setGenerating("copy");
     setGenerateError(null);
     setFailedChecks([]);
@@ -188,7 +189,7 @@ export default function CampaignDetailPage({
   }
 
   async function handleGenerateImagePrompts(slot?: "hero" | "secondary") {
-    await save(); // flush any queued edits before the AI runs
+    try { await save(); } catch { return; } // don't brief images off stale state
     setGenerating("image_prompts");
     setRegenSlot(slot ?? null);
     setGenerateError(null);
@@ -355,13 +356,22 @@ export default function CampaignDetailPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(changes),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // Restore the failed edits so they aren't silently dropped —
+        // newer edits queued during the fetch win over the restored ones.
+        pendingChanges.current = { ...changes, ...pendingChanges.current };
+        const msg = (data as { error?: string }).error ?? `Save failed (HTTP ${res.status})`;
+        setSaveError(msg);
+        throw new Error(msg); // callers awaiting save() must NOT proceed with stale state
+      }
       if (data.campaign) {
         // Merge server response into local state — don't fully
         // replace, in case the user has unsaved edits queued
         // since the PATCH started.
         setCampaign(c => (c ? { ...c, ...data.campaign } : data.campaign));
       }
+      setSaveError(null);
       setSavedAt(Date.now());
       setPreviewKey(k => k + 1);
     } finally {
@@ -381,7 +391,9 @@ export default function CampaignDetailPage({
     }
     pendingChanges.current[key] = value;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(flushChanges, 500);
+    // Debounced path: failures surface via saveError (set inside
+    // flushChanges); swallow the rejection so it isn't unhandled.
+    saveTimer.current = setTimeout(() => { void flushChanges().catch(() => {}); }, 500);
   }, [flushChanges]);
 
   // Manual save fallback used by AI handlers — pushes any pending
@@ -527,7 +539,7 @@ export default function CampaignDetailPage({
             <ShieldCheck className="h-4 w-4 mr-2" />
             {validating ? "Checking…" : "Validate"}
           </Button>
-          <Button onClick={save} disabled={saving}>
+          <Button onClick={() => void save().catch(() => {})} disabled={saving}>
             <Save className="h-4 w-4 mr-2" />
             {saving ? "Saving…" : "Save"}
           </Button>
@@ -535,6 +547,11 @@ export default function CampaignDetailPage({
             <Trash2 className="h-4 w-4" />
           </Button>
         </div>
+        {saveError && (
+          <p className="text-xs text-destructive text-right w-full">
+            {saveError} — your edits are kept locally; fix and save again.
+          </p>
+        )}
       </div>
 
       {/* Pipeline stepper — where am I, what's next */}
@@ -1154,8 +1171,12 @@ export default function CampaignDetailPage({
                   <button
                     type="button"
                     onClick={async () => {
-                      await save(); // flush unsaved edits first
-                      window.open(`/api/v1/marketing/email/campaigns/${id}/preview?download=1`, "_blank");
+                      try {
+                        await save(); // flush unsaved edits first — abort on failure
+                        window.open(`/api/v1/marketing/email/campaigns/${id}/preview?download=1`, "_blank");
+                      } catch (e) {
+                        setExportError(e instanceof Error ? e.message : "Save failed");
+                      }
                     }}
                     className="text-xs px-2 py-1 rounded border border-input hover:bg-accent"
                     title="Download the full email as an .html file"
