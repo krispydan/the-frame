@@ -63,6 +63,9 @@ export const videoClips = sqliteTable("marketing_video_clips", {
    * future composer rules can then keep one face per video (or mix).
    */
   talent: text("talent"),
+  /** Set when the clip was auto-extracted from a raw footage source
+   *  (marketing_video_sources). Null = uploaded by hand. */
+  sourceId: text("source_id"),
   status: text("status", { enum: ["uploaded", "normalizing", "ready", "failed", "archived"] })
     .notNull()
     .default("uploaded"),

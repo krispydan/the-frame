@@ -113,6 +113,11 @@ export function rawClipPath(checksum: string, ext: string): string {
   return `clips/raw/${checksum}.${ext.replace(/^\./, "")}`;
 }
 
+/** Raw footage sources the auto-clipper splits into clips. */
+export function sourcePath(checksum: string, ext: string): string {
+  return `sources/${checksum}.${ext.replace(/^\./, "")}`;
+}
+
 export function normalizedClipPath(checksum: string, version: number): string {
   return `clips/normalized/${checksum}_v${version}.mp4`;
 }

@@ -14,8 +14,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { RefreshCw, Trash2, Volume2, VolumeX, Zap } from "lucide-react";
+import { RefreshCw, Scissors, Trash2, Volume2, VolumeX, Zap } from "lucide-react";
 import { ClipUploader, type UploaderCategory, type UploaderSku } from "./clip-uploader";
+import { SourceAutoClipper } from "./source-auto-clipper";
 
 type Category = UploaderCategory & {
   description: string | null;
@@ -66,6 +67,7 @@ export function ClipLibrary() {
   const [editClip, setEditClip] = useState<Clip | null>(null);
   const [showCategories, setShowCategories] = useState(false);
   const [showUploader, setShowUploader] = useState(false);
+  const [showAutoClipper, setShowAutoClipper] = useState(false);
 
   const load = useCallback(() => {
     const params = new URLSearchParams();
@@ -137,6 +139,10 @@ export function ClipLibrary() {
         <Button onClick={() => setShowUploader((v) => !v)}>
           {showUploader ? "Hide uploader" : "Upload clips"}
         </Button>
+        <Button variant="outline" onClick={() => setShowAutoClipper((v) => !v)}>
+          <Scissors className="h-4 w-4 mr-1" />
+          {showAutoClipper ? "Hide auto-clipper" : "Auto-clip raw footage"}
+        </Button>
         <Button variant="outline" onClick={() => setShowCategories(true)}>
           Categories
         </Button>
@@ -181,6 +187,15 @@ export function ClipLibrary() {
 
       {showUploader && (
         <ClipUploader categories={activeCategories} skus={skus} talents={talents} onUploadComplete={load} />
+      )}
+
+      {showAutoClipper && (
+        <SourceAutoClipper
+          categories={activeCategories}
+          skus={skus}
+          talents={talents}
+          onClipsChanged={load}
+        />
       )}
 
       {/* Bulk bar */}
