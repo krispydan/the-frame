@@ -11,8 +11,10 @@
  * - Direct XHR upload to /api/v1/catalog/images/upload with per-file
  *   skuId as a form field
  *
- * Uppy is imported dynamically so it never runs on the server — its
- * CSS and web-worker bits break SSR.
+ * The Uppy JS is imported dynamically so it never runs on the server.
+ * The CSS is bundled from the installed packages (NOT a third-party CDN
+ * — that link was unreachable in prod, leaving the dashboard unstyled;
+ * same fix as the video clip-uploader).
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -21,11 +23,11 @@ import {
   matchSkuFromFilename,
   type UploaderSku,
 } from "@/modules/catalog/lib/match-sku-filename";
-
-// CSS is loaded via <link> tags on the client to avoid SSR import issues
-const UPPY_CSS = [
-  "https://releases.transloadit.com/uppy/v4.16.1/uppy.min.css",
-];
+// Bundled, same-origin Uppy styles — static CSS imports are fine in an
+// App Router client component and guarantee the dashboard is styled.
+import "@uppy/core/dist/style.min.css";
+import "@uppy/dashboard/dist/style.min.css";
+import "@uppy/image-editor/dist/style.min.css";
 
 export function UppyUploader({
   skus,
@@ -54,16 +56,6 @@ export function UppyUploader({
     if (!containerRef.current) return;
     let cleanup: (() => void) | undefined;
     let cancelled = false;
-
-    // Inject Uppy CSS once
-    for (const href of UPPY_CSS) {
-      if (!document.head.querySelector(`link[href="${href}"]`)) {
-        const link = document.createElement("link");
-        link.rel = "stylesheet";
-        link.href = href;
-        document.head.appendChild(link);
-      }
-    }
 
     (async () => {
       const [{ default: Uppy }, { default: Dashboard }, { default: XHRUpload }, { default: ImageEditor }] =
