@@ -112,6 +112,15 @@ export default function EmailAssistantDashboard() {
     (c) => (c.status === "draft" || c.status === "copywriting") && !c.subject && !c.heroHeadline,
   );
 
+  // Leaving the page mid-batch silently abandons the remaining
+  // generations — warn first. (Completed ones are already saved.)
+  useEffect(() => {
+    if (!batchGen?.running) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [batchGen?.running]);
+
   async function handleBatchGenerate() {
     const targets = needsCopy;
     if (targets.length === 0) return;

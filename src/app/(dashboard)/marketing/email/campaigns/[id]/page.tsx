@@ -1134,11 +1134,13 @@ export default function CampaignDetailPage({
                     type="button"
                     onClick={async () => {
                       try {
+                        await save(); // flush unsaved edits — export must match what's on screen
+                        if (!navigator.clipboard) throw new Error("Clipboard needs HTTPS — use the .html download instead");
                         const res = await fetch(`/api/v1/marketing/email/campaigns/${id}/preview`);
                         if (!res.ok) throw new Error(`HTTP ${res.status}`);
                         await navigator.clipboard.writeText(await res.text());
                         setCopiedKind("html");
-                        setTimeout(() => setCopiedKind(null), 2000);
+                        setTimeout(() => setCopiedKind((k) => (k === "html" ? null : k)), 2000);
                       } catch (e) {
                         setExportError(e instanceof Error ? e.message : "Copy failed");
                       }
@@ -1149,14 +1151,18 @@ export default function CampaignDetailPage({
                     <Copy className="h-3 w-3 inline mr-1" />
                     {copiedKind === "html" ? "Copied" : "Copy HTML"}
                   </button>
-                  <a
-                    href={`/api/v1/marketing/email/campaigns/${id}/preview?download=1`}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await save(); // flush unsaved edits first
+                      window.open(`/api/v1/marketing/email/campaigns/${id}/preview?download=1`, "_blank");
+                    }}
                     className="text-xs px-2 py-1 rounded border border-input hover:bg-accent"
                     title="Download the full email as an .html file"
                   >
                     <Download className="h-3 w-3 inline mr-1" />
                     .html
-                  </a>
+                  </button>
                 </div>
               </div>
               <p className="text-xs text-muted-foreground pt-2 border-t mt-2">

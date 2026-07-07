@@ -212,9 +212,11 @@ function headerLogoOnly(): string {
   // Brand logo is fixed — Daniel: "we don't need any custom logos,
   // the current one is ok. we will never really change it so we
   // can remove this part of the app — make it static."
-  // SVG lives at /public/brand/jaxy-logo-black.svg (vendored from
-  // assets/logos/svg/jaxy-logo-black.svg). Width 96px per V2.
-  const logoSrc = `${publicBaseUrl()}/brand/jaxy-logo-black.svg`;
+  // PNG (384px, rendered from the brand SVG) served from /public/brand.
+  // PNG not SVG: Gmail/Outlook/Yahoo block SVG images in email, so the
+  // SVG wordmark rendered fine in the app preview but broke for every
+  // actual recipient. Width 96px per V2 (4× source = crisp on retina).
+  const logoSrc = `${publicBaseUrl()}/brand/jaxy-logo-black.png`;
   return `
   <tr>
     <td style="padding:32px 0 28px;text-align:center;background-color:${C.white};">
@@ -269,9 +271,26 @@ function heroFullBleedOverlay(p: HeroProps & { scrim: "dark" | "light" | "none";
   const vAlign = placement === "top" ? "top" : placement === "bottom" ? "bottom" : "middle";
   const pad = placement === "top" ? "44px 36px 56px" : placement === "bottom" ? "56px 36px 44px" : "48px 36px";
 
+  // Outlook desktop (Word engine) ignores CSS background-image — without a
+  // VML fallback the hero is a blank ivory box there. The classic
+  // "bulletproof background" pattern: a v:rect with type="frame" fill
+  // carrying the same photo, content inside its textbox. Non-Outlook
+  // clients skip the conditional comments entirely.
+  const msoOpen = p.imageUrl
+    ? `<!--[if gte mso 9]>
+      <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="width:${EMAIL_W}px;height:460px;">
+        <v:fill type="frame" src="${escAttr(p.imageUrl)}" color="${C.ivory}" />
+        <v:textbox inset="0,0,0,0">
+      <![endif]-->`
+    : "";
+  const msoClose = p.imageUrl
+    ? `<!--[if gte mso 9]></v:textbox></v:rect><![endif]-->`
+    : "";
+
   return `
   <tr>
     <td role="img" aria-label="${escAttr(p.imageAlt)}" style="position:relative;${bg}">
+      ${msoOpen}
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
         <tr>
           <td height="460" style="position:relative;height:460px;padding:${pad};text-align:center;vertical-align:${vAlign};${inner}">
@@ -281,6 +300,7 @@ function heroFullBleedOverlay(p: HeroProps & { scrim: "dark" | "light" | "none";
           </td>
         </tr>
       </table>
+      ${msoClose}
     </td>
   </tr>`;
 }

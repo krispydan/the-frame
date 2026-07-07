@@ -5,6 +5,10 @@ const publicPaths = [
   "/login", "/api/auth", "/api/webhooks", "/api/v1/webhooks", "/api/health", "/api/seed", "/api/migrate",
   "/api/debug-auth", "/api/auth/manual-login", "/api/admin", "/api/v1/ext", "/api/v1/proxy",
   "/api/mcp", "/api/images",
+  // Static brand assets (the email header logo). Recipients' email clients
+  // fetch it with no session cookie — without this every exported email
+  // renders a broken logo (307 → /login).
+  "/brand",
   "/api/v1/catalog/images/upload-raw", "/api/v1/catalog/images/bulk-delete",
   "/api/v1/catalog/images/regen-collections", "/api/v1/inventory/bulk-update",
   // Cron-callable endpoints. Hit by Railway cron services or external cron
