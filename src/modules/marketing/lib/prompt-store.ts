@@ -82,9 +82,11 @@ function ensureSeeded(): void {
     // nothing in prod forever — the stale seed kept winning (this is how
     // the month-planner ran a dead v1 prompt after the v2 file landed).
     // Operator edits still always win; "Reset to default" still works.
+    // "reset-to-default" rows track the file too — a reset means "follow
+    // the shipped baseline", so later file updates keep flowing in.
     const sync = sqlite.prepare(
       `UPDATE marketing_ai_documents SET content = ?, updated_at = datetime('now')
-        WHERE slug = ? AND updated_by IS NULL AND content != ?`,
+        WHERE slug = ? AND (updated_by IS NULL OR updated_by = 'reset-to-default') AND content != ?`,
     );
     for (const d of AI_DOCS) {
       const def = fileDefault(d.slug);

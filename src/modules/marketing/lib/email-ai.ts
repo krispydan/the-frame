@@ -18,6 +18,81 @@
 
 import { emailModel } from "./ai-model";
 import { getDocContent } from "./prompt-store";
+import { sqlite } from "@/lib/db";
+
+// ── Planner grounding loaders ───────────────────────────────────
+// Each returns a prompt-ready text block and NEVER throws — a broken
+// source degrades to a clear "(unavailable)" marker so planning still runs.
+
+/** Real catalog: sellable products the planner may name. Compact on
+ *  purpose (name + prices) — ~74 rows ≈ a few hundred tokens. */
+async function loadPlannerProductContext(): Promise<string> {
+  try {
+    const rows = sqlite
+      .prepare(
+        `SELECT name, wholesale_price AS w, retail_price AS r
+           FROM catalog_products
+          WHERE status IN ('approved','published') AND name IS NOT NULL AND name != ''
+          ORDER BY name`,
+      )
+      .all() as Array<{ name: string; w: number | null; r: number | null }>;
+    if (rows.length === 0) return "(no products in catalog)";
+    const lines = rows.map((p) => {
+      const price = [p.w != null ? `$${p.w} ws` : null, p.r != null ? `$${p.r} rt` : null].filter(Boolean).join(" / ");
+      return `- ${p.name}${price ? ` (${price})` : ""}`;
+    });
+    return `The COMPLETE product line (${rows.length} styles — these are the ONLY product names that exist):\n${lines.join("\n")}`;
+  } catch {
+    return "(product catalog unavailable — do not name specific products)";
+  }
+}
+
+/** What this audience was already sent/planned recently — the planner
+ *  must not re-tread it. Copy-gen has its own 5-email window; this is
+ *  the PLAN-level memory across months. */
+async function loadRecentCampaignContext(audience: "retail" | "wholesale"): Promise<string> {
+  try {
+    const rows = sqlite
+      .prepare(
+        `SELECT scheduled_date AS d, name, substr(COALESCE(brief_angle,''),1,110) AS angle
+           FROM marketing_email_campaigns
+          WHERE audience = ? AND name IS NOT NULL AND name != ''
+          ORDER BY scheduled_date DESC LIMIT 10`,
+      )
+      .all(audience) as Array<{ d: string; name: string; angle: string }>;
+    if (rows.length === 0) return "(no prior campaigns)";
+    return rows.map((r) => `- ${r.d} — "${r.name}"${r.angle ? ` — ${r.angle}` : ""}`).join("\n");
+  } catch {
+    return "(history unavailable)";
+  }
+}
+
+/** Recorded send performance for this audience — top subjects by open
+ *  rate. Empty until the operator records results; the prompt treats
+ *  absence gracefully. */
+async function loadPerformanceNotes(audience: "retail" | "wholesale"): Promise<string> {
+  try {
+    const rows = sqlite
+      .prepare(
+        `SELECT c.subject, r.recipients, r.opens, r.clicks
+           FROM marketing_email_send_results r
+           JOIN marketing_email_campaigns c ON c.id = r.campaign_id
+          WHERE c.audience = ? AND r.recipients > 0 AND r.opens IS NOT NULL
+          ORDER BY CAST(r.opens AS REAL)/r.recipients DESC LIMIT 5`,
+      )
+      .all(audience) as Array<{ subject: string | null; recipients: number; opens: number; clicks: number | null }>;
+    if (rows.length === 0) return "(no send performance recorded yet — plan on fundamentals)";
+    return rows
+      .map((r) => {
+        const openPct = ((r.opens / r.recipients) * 100).toFixed(1);
+        const clickPct = r.clicks != null ? `, ${((r.clicks / r.recipients) * 100).toFixed(1)}% click` : "";
+        return `- "${r.subject ?? "(no subject)"}" — ${openPct}% open${clickPct} (${r.recipients} sent)`;
+      })
+      .join("\n");
+  } catch {
+    return "(performance data unavailable)";
+  }
+}
 
 // ── Prompt + brand-context loaders ──────────────────────────────
 // Prompts + brand-voice docs are now LIVING documents: editable in the
@@ -669,6 +744,15 @@ export async function planMonth(opts: {
     )
     .join("\n");
 
+  // ── Grounding context ──
+  // Without this the planner INVENTS products ("Dusk colorway", "Sunday
+  // Drive frame" — zero catalog matches) and stats ("moving 4x velocity").
+  const [productContext, recentCampaigns, performanceNotes] = await Promise.all([
+    loadPlannerProductContext(),
+    loadRecentCampaignContext(opts.audience),
+    loadPerformanceNotes(opts.audience),
+  ]);
+
   const taskPrompt = fillTemplate(extractPromptBody(monthPlan), {
     audience: opts.audience,
     startDate: opts.startDate,
@@ -677,6 +761,9 @@ export async function planMonth(opts: {
     slotCount: String(opts.slots.length),
     calendarEvents: opts.calendarEvents,
     slotsTable,
+    productContext,
+    recentCampaigns,
+    performanceNotes,
   });
 
   return callClaude({
@@ -690,8 +777,13 @@ export async function planMonth(opts: {
       description: "Submit the month's planned briefs, one per slot, in slot order.",
       input_schema: {
         type: "object",
-        required: ["briefs"],
+        required: ["briefs", "windowCheck"],
         properties: {
+          // Forced self-assertion (same pattern as copy-gen's selfCheckPassed).
+          windowCheck: {
+            type: "string",
+            description: `Restate the planning window (${opts.startDate} → ${opts.endDate}) and confirm: (1) every seasonal/holiday anchor falls INSIDE it, (2) every product named appears in the provided product list, (3) every number cited comes from the provided context.`,
+          },
           briefs: {
             type: "array",
             description: `Array of length ${opts.slots.length}. ORDER MATCHES the input slots array — briefs[0] is for slots[0], etc.`,

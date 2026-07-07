@@ -1,4 +1,11 @@
-# Monthly campaign planner prompt — v3 (2026-07-07)
+# Monthly campaign planner prompt — v4 (2026-07-07)
+
+<!-- v4: GROUNDING — the planner used to invent products ("Dusk colorway",
+     "Sunday Drive frame" — zero catalog matches) and stats ("moving 4x
+     velocity"). It now receives the real product line, recent campaigns
+     (plan-level anti-repetition) and recorded send performance, with a hard
+     truthfulness rule + a forced windowCheck self-assertion in the schema.
+     Also adds a retail worked example. -->
 
 <!-- v3: STRUCTURAL FIX — the entire working prompt now lives in the FIRST
      triple-backtick block below, because email-ai's extractPromptBody()
@@ -39,6 +46,22 @@ Marketing calendar — what's happening in this window:
 Slots (from the strategy engine — each row has its layout, image-style and
 subject-angle pre-assigned for variety):
 {{slotsTable}}
+
+────────────────────────────────────────────────────────────
+GROUND TRUTH — the only facts you may use
+────────────────────────────────────────────────────────────
+
+PRODUCT LINE (the ONLY product/style names that exist — anything else is
+fiction):
+{{productContext}}
+
+RECENT CAMPAIGNS for this audience (do NOT re-tread these ideas/angles —
+propose something meaningfully different):
+{{recentCampaigns}}
+
+RECORDED SEND PERFORMANCE (what actually earned opens/clicks — let winners
+inform your angles when present):
+{{performanceNotes}}
 
 ────────────────────────────────────────────────────────────
 HARD CONSTRAINTS
@@ -106,7 +129,16 @@ HARD CONSTRAINTS
      brief and why the angle fits the slot's image-style + subject-angle.
      This is the AI-to-operator handoff.
 
-8. NO EMPTY BRIEFS, NO FILLER-BY-HOLIDAY. Every slot gets a real, specific
+8. TRUTHFULNESS — NOTHING INVENTED.
+   - Product names: use ONLY names from the PRODUCT LINE list above.
+     Never invent a style, colorway, or collection name.
+   - Numbers: cite ONLY figures present in the context you were given
+     (prices from the product list, stats from performance notes). If you
+     have no real number, stay qualitative ("moving fast", "restock-worthy")
+     — never fabricate ("4x velocity", "reordered 3 times").
+   - productHook must reference real products from the list, or be "".
+
+9. NO EMPTY BRIEFS, NO FILLER-BY-HOLIDAY. Every slot gets a real, specific
    brief grounded in the audience + the actual season of its date + a
    concrete product angle. "No calendar event" is a reason to lead with
    product and season — never a reason to fall back on the nearest
@@ -154,7 +186,27 @@ new-arrival play:
       "rationale": "No event — product-rotation driven and distinct from slot 1's restock play; split layout + product-focused angle fits a single hero colorway with the margin hook."
     }
 
-Return the briefs via the submit_month_plan tool. No prose.
+EXAMPLE C — retail voice (2 retail slots, empty calendar, late July).
+Note: customer-as-self voice, no wholesale pragmatics, product names would
+come from the real list:
+
+    briefs[0] = {
+      "name": "The pair living in your beach bag",
+      "angle": "Peak-summer moment: the one pair that's been on every drive, beach day and patio hour. Frame it as the reader's own summer sidekick — scratched, sandy, still perfect. Soft nudge toward a second pair before the season turns.",
+      "productHook": "",
+      "seasonalContext": "Peak summer",
+      "rationale": "No calendar event — season-driven retail moment; UGC layout + lifestyle-sensation angle fits the 'your summer' framing."
+    }
+    briefs[1] = {
+      "name": "Golden hour called, it wants its frames",
+      "angle": "Late-July light is the whole point of tinted lenses. Lead with the sensory moment — 7pm, warm light, the right lens color — and let one hero style carry it. Playful, texty, zero urgency.",
+      "productHook": "",
+      "seasonalContext": "Late-summer golden hour",
+      "rationale": "Season + product-focused slot; single hero style suits the editorial full-bleed layout."
+    }
+
+Return the briefs via the submit_month_plan tool (fill windowCheck honestly
+— restate the window and confirm the constraints held). No prose.
 ```
 
 ## Output schema
