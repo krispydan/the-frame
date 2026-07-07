@@ -180,11 +180,35 @@ export async function PATCH(
     .prepare(`UPDATE marketing_email_campaigns SET ${sets.join(", ")} WHERE id = ?`)
     .run(...vals);
 
-  const [row] = await db
+  let [row] = await db
     .select()
     .from(emailCampaigns)
     .where(eq(emailCampaigns.id, id))
     .limit(1);
+
+  // ── Auto-advance: photography → design_review ──
+  // Uploading the last required image IS the "photography done" moment;
+  // making the operator also click the status pill was pure overhead.
+  // Guarded tightly: only fires when this PATCH touched an image field,
+  // only from `photography`, and only forward — an explicit `status` in
+  // the same PATCH wins (operator intent beats automation).
+  const touchedImages = "heroImagePath" in body || "secondaryImagePath" in body || "secondaryImagePath2" in body;
+  if (touchedImages && !("status" in body) && row && row.status === "photography") {
+    const heroReady = !!row.heroDisabled || !!row.heroImagePath;
+    const secondaryReady =
+      !!row.secondaryDisabled ||
+      (row.secondaryImageVariant === "grid_2up"
+        ? !!row.secondaryImagePath && !!row.secondaryImagePath2
+        : !!row.secondaryImagePath);
+    if (heroReady && secondaryReady) {
+      sqlite
+        .prepare(`UPDATE marketing_email_campaigns SET status = 'design_review', updated_at = datetime('now') WHERE id = ? AND status = 'photography'`)
+        .run(id);
+      [row] = await db.select().from(emailCampaigns).where(eq(emailCampaigns.id, id)).limit(1);
+      return NextResponse.json({ campaign: row, autoAdvanced: "design_review" });
+    }
+  }
+
   return NextResponse.json({ campaign: row });
 }
 
