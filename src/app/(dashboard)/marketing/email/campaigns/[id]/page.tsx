@@ -406,6 +406,9 @@ export default function CampaignDetailPage({
   }
 
   const showScrimPicker = campaign.heroVariant === "full_bleed_overlay";
+  // Focal applies wherever the hero image is cover-cropped.
+  const showFocalPicker =
+    campaign.heroVariant === "full_bleed_overlay" || campaign.heroVariant === "split_50_50";
   const showSecondaryImage2 = campaign.secondaryImageVariant === "grid_2up";
 
   return (
@@ -827,6 +830,34 @@ export default function CampaignDetailPage({
                   </div>
                   <p className="text-[11px] text-muted-foreground mt-1">
                     Where the headline sits over the image — the fade follows the text.
+                  </p>
+                </div>
+              )}
+              {showFocalPicker && (
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">
+                    Image focal point
+                  </label>
+                  <div className="grid grid-cols-3 gap-1 w-fit">
+                    {(["left top","center top","right top","left center","center center","right center","left bottom","center bottom","right bottom"] as const).map(f => (
+                      <button
+                        key={f}
+                        title={f}
+                        onClick={() => updateField("heroImageFocal", f)}
+                        className={`w-7 h-7 rounded border flex items-center justify-center ${
+                          (campaign.heroImageFocal ?? "center center") === f
+                            ? "bg-accent border-foreground"
+                            : "border-input"
+                        }`}
+                      >
+                        <span className={`block w-1.5 h-1.5 rounded-full ${
+                          (campaign.heroImageFocal ?? "center center") === f ? "bg-foreground" : "bg-muted-foreground/40"
+                        }`} />
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Which part of the photo survives the crop — aim it at the product.
                   </p>
                 </div>
               )}

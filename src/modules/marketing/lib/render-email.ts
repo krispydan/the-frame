@@ -145,6 +145,24 @@ function ctaAnchor(label: string | null | undefined, url: string | null | undefi
 
 export type HeroTextPlacement = "top" | "middle" | "bottom";
 
+// 9-point focal grid for cover-cropped hero images. The hero window is a
+// fixed 460px band (or a 50% column on split), so `cover` inevitably crops —
+// the focal point decides WHAT survives the crop. Values are CSS
+// background-position keywords, validated so nothing arbitrary reaches the
+// style attribute.
+const HERO_FOCAL_POINTS = [
+  "left top",    "center top",    "right top",
+  "left center", "center center", "right center",
+  "left bottom", "center bottom", "right bottom",
+] as const;
+export type HeroImageFocal = (typeof HERO_FOCAL_POINTS)[number];
+
+function focalPosition(focal: string | null | undefined): string {
+  return (HERO_FOCAL_POINTS as readonly string[]).includes(focal ?? "")
+    ? (focal as string)
+    : "center center";
+}
+
 // Placement-aware scrim — the darkening/lightening PEAKS behind the text
 // (so it stays legible) and eases toward the opposite edge (so the image
 // breathes). Top-placed text → fade strongest at top; bottom → strongest
@@ -219,6 +237,8 @@ interface HeroProps {
   subtitle: string;
   ctaLabel: string;
   ctaUrl: string;
+  /** Which part of the image survives the cover-crop. Default center. */
+  imageFocal?: string | null;
 }
 
 function heroFullBleedOverlay(p: HeroProps & { scrim: "dark" | "light" | "none"; textPlacement?: HeroTextPlacement }): string {
@@ -240,7 +260,7 @@ function heroFullBleedOverlay(p: HeroProps & { scrim: "dark" | "light" | "none";
     : "none";
   const grad = scrimGradient(effScrim, placement);
   const bg = p.imageUrl
-    ? `background-color:${C.ivory};background-image:url('${escAttr(p.imageUrl)}');background-size:cover;background-position:center;`
+    ? `background-color:${C.ivory};background-image:url('${escAttr(p.imageUrl)}');background-size:cover;background-position:${focalPosition(p.imageFocal)};`
     : `background-color:${C.ivory};`;
   const inner = grad ? `background-image:${grad};` : "";
   const cta = ctaAnchor(p.ctaLabel, p.ctaUrl);
@@ -296,7 +316,7 @@ function heroImage75Solid(p: HeroProps): string {
 
 function heroSplit5050(p: HeroProps): string {
   const leftCell = p.imageUrl
-    ? `background-color:${C.ivory};background-image:url('${escAttr(p.imageUrl)}');background-size:cover;background-position:center;`
+    ? `background-color:${C.ivory};background-image:url('${escAttr(p.imageUrl)}');background-size:cover;background-position:${focalPosition(p.imageFocal)};`
     : `background-color:${C.ivory};`;
   const placeholder = p.imageUrl
     ? ""
@@ -482,6 +502,7 @@ function dispatchHero(c: CampaignData): string {
     subtitle: c.heroSubtitle ?? PLACEHOLDER,
     ctaLabel: c.heroCtaLabel ?? "Find your pair",
     ctaUrl: c.heroCtaUrl ?? "#",
+    imageFocal: c.heroImageFocal ?? "center center",
   };
   switch (c.heroVariant) {
     case "image_75_solid": return heroImage75Solid(common);

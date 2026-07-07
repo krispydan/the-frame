@@ -30,6 +30,7 @@ export interface CampaignData {
   heroCtaUrl?: string | null;
   heroScrim?: "dark" | "light" | "none" | null;
   heroTextPlacement?: "top" | "middle" | "bottom" | null;
+  heroImageFocal?: string | null; // CSS background-position keywords, e.g. "center top"
 
   // Section A
   sectionAVariant: "centered" | "with_pullquote";

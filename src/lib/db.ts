@@ -129,6 +129,10 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN enrichment_fetched_at TEXT")
 // preserves the pre-existing center-aligned behavior.
 try { sqlite.exec("ALTER TABLE marketing_email_campaigns ADD COLUMN hero_text_placement TEXT DEFAULT 'middle'"); } catch { /* exists */ }
 
+// Email hero: which part of the image survives the cover-crop (CSS
+// background-position keywords, 9-point grid). Default keeps center-crop.
+try { sqlite.exec("ALTER TABLE marketing_email_campaigns ADD COLUMN hero_image_focal TEXT DEFAULT 'center center'"); } catch { /* exists */ }
+
 // Contact form URL — when scraping a prospect for classification, we ALSO
 // harvest contact info. If we found a contact-us page but no direct email,
 // stash the URL here for later outreach (manual form submission or scraper).

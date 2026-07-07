@@ -43,6 +43,7 @@ const PATCHABLE_COLUMNS = new Set([
   "heroCtaUrl",
   "heroScrim",
   "heroTextPlacement",
+  "heroImageFocal",
   "heroImagePath",
   "heroImageAlt",
   "heroImagePrompt",

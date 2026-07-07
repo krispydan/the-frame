@@ -125,6 +125,13 @@ export const emailCampaigns = sqliteTable("marketing_email_campaigns", {
    * for heroVariant=full_bleed_overlay.
    */
   heroTextPlacement: text("hero_text_placement", { enum: ["top", "middle", "bottom"] }).default("middle"),
+  /**
+   * 9-point focal grid for the cover-cropped hero image (CSS
+   * background-position keywords, e.g. "center top"). Decides what part
+   * of the photo survives the crop. Used by full_bleed_overlay +
+   * split_50_50; image variants that don't crop ignore it.
+   */
+  heroImageFocal: text("hero_image_focal").default("center center"),
   heroImagePath: text("hero_image_path"),                    // /data/images/email/{id}/hero.jpg
   heroImageAlt: text("hero_image_alt"),
   heroImagePrompt: text("hero_image_prompt"),                // Higgsfield brief
