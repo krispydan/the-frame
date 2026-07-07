@@ -1,7 +1,7 @@
 /**
  * PATCH /api/v1/marketing/videos/clips/bulk — bulk retag.
  *
- * Body: { clipIds: string[], categoryId?, audioMode?, boost?, addSkuIds?, removeSkuIds? }
+ * Body: { clipIds: string[], categoryId?, audioMode?, boost?, talent?, addSkuIds?, removeSkuIds? }
  * categoryId accepts an id or slug. Only provided fields change.
  * Tagging 300 clips one-by-one is not a workflow; this is.
  */
@@ -16,6 +16,7 @@ export async function PATCH(request: NextRequest) {
     categoryId?: string | null;
     audioMode?: string;
     boost?: number;
+    talent?: string | null;
     addSkuIds?: string[];
     removeSkuIds?: string[];
   };
@@ -58,6 +59,15 @@ export async function PATCH(request: NextRequest) {
     }
     sets.push("boost = ?");
     setParams.push(Number(body.boost));
+  }
+  if ("talent" in body) {
+    const talent = body.talent == null ? "" : String(body.talent).trim();
+    if (talent) {
+      sets.push("talent = ?");
+      setParams.push(talent);
+    } else {
+      sets.push("talent = NULL");
+    }
   }
 
   let updated = 0;

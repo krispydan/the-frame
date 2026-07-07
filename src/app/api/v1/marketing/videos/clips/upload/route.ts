@@ -10,6 +10,7 @@
  *   categoryId — optional, category id OR slug (batch default from the UI)
  *   skuIds     — optional, JSON array or comma-separated catalog_skus ids
  *   audioMode  — optional, "mute" (default) | "keep"
+ *   talent     — optional, who appears in the clip (empty = no one)
  *   notes      — optional
  *
  * Re-uploading identical bytes re-saves the file (volume-wipe
@@ -75,6 +76,7 @@ export async function POST(request: NextRequest) {
   const categoryId = resolveCategoryId(formData.get("categoryId") as string | null);
   const skuIds = parseSkuIds(formData.get("skuIds") as string | null);
   const audioMode = (formData.get("audioMode") as string) === "keep" ? "keep" : "mute";
+  const talent = ((formData.get("talent") as string) || "").trim() || null;
   const notes = (formData.get("notes") as string) || null;
 
   const buffer = Buffer.from(await file.arrayBuffer());
@@ -120,6 +122,7 @@ export async function POST(request: NextRequest) {
       height: probe.height,
       categoryId,
       audioMode,
+      talent,
       notes,
       status: "uploaded",
     })

@@ -56,6 +56,13 @@ export const videoClips = sqliteTable("marketing_video_clips", {
    * Whether it's actually USED is the recipe audioPolicy's decision.
    */
   audioMode: text("audio_mode", { enum: ["mute", "keep"] }).notNull().default("mute"),
+  /**
+   * Who appears in the clip (model/actor/creator name). Null = no one /
+   * not applicable (flat lays, b-roll). Free text, but the UI offers
+   * existing values so the same person is always spelled the same way —
+   * future composer rules can then keep one face per video (or mix).
+   */
+  talent: text("talent"),
   status: text("status", { enum: ["uploaded", "normalizing", "ready", "failed", "archived"] })
     .notNull()
     .default("uploaded"),

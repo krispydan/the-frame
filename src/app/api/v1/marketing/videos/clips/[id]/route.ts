@@ -2,8 +2,9 @@
  * /api/v1/marketing/videos/clips/[id]
  *
  * GET    — clip detail (with category + products)
- * PATCH  — edit tags: { categoryId?, skuIds?, audioMode?, boost?, notes? }
- *          categoryId accepts an id or slug; skuIds replaces the set.
+ * PATCH  — edit tags: { categoryId?, skuIds?, audioMode?, boost?, talent?, notes? }
+ *          categoryId accepts an id or slug; skuIds replaces the set;
+ *          talent is the person in the clip (null/empty = no one).
  * DELETE — archive by default; hard-deletes (row + volume files) only
  *          when the clip has never been used in a post AND ?hard=1.
  */
@@ -86,6 +87,10 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "boost must be 0, 1 or 2" }, { status: 400 });
     }
     updates.boost = boost;
+  }
+  if ("talent" in body) {
+    const talent = body.talent == null ? "" : String(body.talent).trim();
+    updates.talent = talent || null; // empty = no one appears
   }
   if ("notes" in body) updates.notes = body.notes == null ? null : String(body.notes);
   if ("status" in body) {
