@@ -90,6 +90,10 @@ export default function PlanMonthPage() {
       if (data.error) { setError(data.error); return; }
       setProposals(data.proposals ?? []);
       setEventsConsidered(data.eventsConsidered ?? 0);
+      // Partial-accept path: the AI returned fewer briefs than slots —
+      // proposals still render (trailing ones blank), surfaced as a
+      // non-fatal notice in the same banner slot.
+      if (data.warning) setError(data.warning);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

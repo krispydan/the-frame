@@ -81,16 +81,23 @@ export async function POST(req: NextRequest) {
     }
 
     const briefs = (aiResult.output as { briefs?: Array<unknown> }).briefs ?? [];
-    if (briefs.length !== slots.length) {
+    // Partial accept instead of a hard 502: if the AI returned N-1 briefs,
+    // throwing away the N-1 good ones and making the operator re-run the
+    // whole (slow, token-expensive) plan is worse than surfacing what we
+    // got. Missing slots come back with an EMPTY brief the operator fills
+    // (or hits "Plan with AI" again just for those). Zero briefs is still
+    // a real failure.
+    if (briefs.length === 0) {
       return NextResponse.json({
-        error: `AI returned ${briefs.length} briefs but ${slots.length} slots were requested. Try again.`,
+        error: "AI returned no briefs. Try again.",
       }, { status: 502 });
     }
+    const briefShortfall = Math.max(0, slots.length - briefs.length);
 
     // Zip briefs with their slot dimensions so the UI can render
     // a unified review table.
     const proposals = slots.map((slot, i) => {
-      const brief = briefs[i] as Record<string, string>;
+      const brief = (briefs[i] ?? {}) as Record<string, string>;
       return {
         slotIndex: i,
         scheduledDate: slot.scheduledDate,
@@ -117,6 +124,9 @@ export async function POST(req: NextRequest) {
       window: { startDate, endDate, weeks },
       eventsConsidered: rawEvents.length,
       proposals,
+      ...(briefShortfall > 0
+        ? { warning: `AI returned ${briefs.length} of ${slots.length} briefs — the last ${briefShortfall} slot(s) are blank. Fill them by hand or re-plan.` }
+        : {}),
       usage: aiResult.usage,
     });
   } catch (e) {
