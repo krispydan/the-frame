@@ -156,6 +156,15 @@ export default function PlanMonthPage() {
 
   async function createAll() {
     if (!proposals) return;
+    // Guardrails before a 16-campaign bulk create: warn on blank briefs
+    // (partial-accept planning can leave trailing slots empty) and always
+    // confirm the count — one click creating a month of drafts deserves
+    // an "are you sure".
+    const blank = proposals.filter((p) => !p.brief.name.trim() && !p.brief.angle.trim()).length;
+    const msg =
+      `Create ${proposals.length} ${audience} campaign${proposals.length === 1 ? "" : "s"} as drafts?` +
+      (blank > 0 ? `\n\n⚠ ${blank} slot${blank === 1 ? " has" : "s have"} a blank brief — they'll be created empty.` : "");
+    if (!confirm(msg)) return;
     setCreating(true);
     setError(null);
     try {
