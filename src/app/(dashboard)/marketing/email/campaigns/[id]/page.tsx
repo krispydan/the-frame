@@ -1120,6 +1120,45 @@ export default function CampaignDetailPage({
               {exportError && (
                 <p className="text-xs text-destructive pt-1">{exportError}</p>
               )}
+              {/* FULL-HTML EXPORT — Omnisend accepts custom-HTML emails, so
+                  the whole email can go over as ONE artifact instead of
+                  screenshot blocks. Images stay absolute URLs served by
+                  the-frame, so the HTML works as-is. */}
+              <div className="flex items-center justify-between gap-2 text-sm pt-2 border-t mt-2">
+                <span>
+                  Email HTML
+                  <span className="ml-1 text-xs text-muted-foreground">for Omnisend custom-HTML</span>
+                </span>
+                <div className="flex gap-1 items-center">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const res = await fetch(`/api/v1/marketing/email/campaigns/${id}/preview`);
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        await navigator.clipboard.writeText(await res.text());
+                        setCopiedKind("html");
+                        setTimeout(() => setCopiedKind(null), 2000);
+                      } catch (e) {
+                        setExportError(e instanceof Error ? e.message : "Copy failed");
+                      }
+                    }}
+                    className="text-xs px-2 py-1 rounded border border-input hover:bg-accent"
+                    title="Copy the full email HTML — paste into Omnisend's custom HTML editor"
+                  >
+                    <Copy className="h-3 w-3 inline mr-1" />
+                    {copiedKind === "html" ? "Copied" : "Copy HTML"}
+                  </button>
+                  <a
+                    href={`/api/v1/marketing/email/campaigns/${id}/preview?download=1`}
+                    className="text-xs px-2 py-1 rounded border border-input hover:bg-accent"
+                    title="Download the full email as an .html file"
+                  >
+                    <Download className="h-3 w-3 inline mr-1" />
+                    .html
+                  </a>
+                </div>
+              </div>
               <p className="text-xs text-muted-foreground pt-2 border-t mt-2">
                 Rendered in your browser ({exportScale}× = {600 * exportScale}px wide). No server
                 wait — <strong>Copy</strong> puts the image on your clipboard (paste straight into Faire/Omnisend),

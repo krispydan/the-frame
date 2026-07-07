@@ -57,6 +57,8 @@ export async function GET(
     heroCtaLabel: row.heroCtaLabel,
     heroCtaUrl: row.heroCtaUrl,
     heroScrim: row.heroScrim as CampaignData["heroScrim"],
+    heroTextPlacement: row.heroTextPlacement as CampaignData["heroTextPlacement"],
+    heroImageFocal: row.heroImageFocal,
     sectionAVariant: row.sectionAVariant as CampaignData["sectionAVariant"],
     sectionAHeading: row.sectionAHeading,
     sectionABody: row.sectionABody,
@@ -78,11 +80,25 @@ export async function GET(
       ? renderSectionHtml(data, kind as SectionKind)
       : renderEmailHtml(data);
 
+  // ?download=1 → serve as an attachment so the operator can upload
+  // the full email HTML straight into Omnisend (custom-HTML email)
+  // instead of screenshotting blocks. Filename slugs from the campaign
+  // name so downloads stay identifiable.
+  const download = req.nextUrl.searchParams.get("download") === "1";
+  const slug = (row.name || row.subject || row.id)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60) || "email";
+
   return new NextResponse(html, {
     status: 200,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
+      ...(download
+        ? { "Content-Disposition": `attachment; filename="jaxy-${slug}.html"` }
+        : {}),
     },
   });
 }
