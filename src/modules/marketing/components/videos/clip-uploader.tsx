@@ -8,14 +8,17 @@
  * nobody tags 300 clips one at a time. Defaults are attached as Uppy
  * meta on file-added and travel as multipart form fields.
  *
- * Mechanics mirror src/modules/catalog/components/uppy-uploader.tsx
- * (dynamic import so Uppy never runs on the server, CSS via <link>).
+ * The Uppy JS is dynamically imported so it never runs on the server.
+ * The CSS is bundled from the installed packages (NOT a third-party CDN
+ * — that link was unreachable in prod, leaving the dashboard unstyled).
  */
 
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-
-const UPPY_CSS = ["https://releases.transloadit.com/uppy/v4.16.1/uppy.min.css"];
+// Bundled, same-origin Uppy styles. Static imports work in an App Router
+// client component and guarantee the dashboard is always styled.
+import "@uppy/core/dist/style.min.css";
+import "@uppy/dashboard/dist/style.min.css";
 
 export interface UploaderCategory {
   id: string;
@@ -55,15 +58,6 @@ export function ClipUploader({
     let cleanup: (() => void) | undefined;
     let cancelled = false;
 
-    for (const href of UPPY_CSS) {
-      if (!document.head.querySelector(`link[href="${href}"]`)) {
-        const link = document.createElement("link");
-        link.rel = "stylesheet";
-        link.href = href;
-        document.head.appendChild(link);
-      }
-    }
-
     (async () => {
       const [{ default: Uppy }, { default: Dashboard }, { default: XHRUpload }] = await Promise.all([
         import("@uppy/core"),
@@ -75,7 +69,9 @@ export function ClipUploader({
 
       const uppy = new Uppy({
         id: "video-clip-uploader",
-        autoProceed: false,
+        // Upload as soon as files are dropped — batch defaults are set
+        // above beforehand, so there's no per-file step to wait for.
+        autoProceed: true,
         restrictions: {
           maxFileSize: 200 * 1024 * 1024,
           allowedFileTypes: ["video/*", ".mp4", ".mov", ".m4v", ".webm"],
@@ -88,7 +84,7 @@ export function ClipUploader({
           height: 360,
           proudlyDisplayPoweredByUppy: false,
           showProgressDetails: true,
-          note: "5-10s clips, up to 200MB each. Set the batch defaults above BEFORE dropping files — every file picks them up.",
+          note: "5-10s clips, up to 200MB each. Set the batch defaults above FIRST — files upload as soon as you drop them, tagged with those defaults.",
         })
         .use(XHRUpload, {
           endpoint: "/api/v1/marketing/videos/clips/upload",
