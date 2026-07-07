@@ -42,6 +42,11 @@ Active/upcoming marketing moments:
 {{events}}                     ← array of {title, type, window, priority,
                                   description} (may be empty)
 
+TikTok trending sounds RIGHT NOW (synced from TikTok's charts):
+{{trendingSounds}}             ← array of {id, title, author, chart:
+                                  "breakout"|"popular", rank, trend,
+                                  durationSec} (may be empty)
+
 ────────────────────────────────────────────────────────────
 CAPTION RULES
 ────────────────────────────────────────────────────────────
@@ -67,11 +72,17 @@ POSTING INSTRUCTIONS
 
 Write the exact manual steps for the person posting:
 
-- audio: If the video is silent, tell them to pick a CURRENT trending
-  sound in the TikTok app and suggest the vibe (upbeat / chill /
-  voiceover-friendly) based on the clip sequence. If original audio is
-  kept on some clips, say which clip's audio matters and whether to
-  layer a trending sound underneath at low volume.
+- audio: If the video is silent AND trendingSounds is non-empty, pick
+  the 2-3 sounds that best fit this video's pacing and vibe and return
+  their ids in suggestedSoundIds (best fit first). Prefer "breakout"
+  chart and trend "up"/"new" — riding a sound on its way up beats one
+  already saturated. In the audio text, name your top pick naturally
+  ("Use 'song title' by author — it's breaking out right now").
+  If trendingSounds is empty, describe the vibe to look for instead
+  (upbeat / chill / voiceover-friendly) and leave suggestedSoundIds [].
+  If original audio is kept on some clips, say which clip's audio
+  matters and whether to layer a trending sound underneath at low
+  volume; suggestedSoundIds may still carry one low-volume option.
 - onScreenText: 0-3 short text overlays with timing, written to be
   typed in the TikTok/IG editor. Front-load the hook text in the first
   2 seconds. Empty array if the video speaks for itself.
@@ -97,6 +108,7 @@ Forced tool call `submit_video_copy`:
   "hashtags": ["string"],
   "postingInstructions": {
     "audio": "string",
+    "suggestedSoundIds": ["id from trendingSounds, max 3, best first"],
     "onScreenText": [{ "text": "string", "timing": "string", "placement": "string" }],
     "tagProducts": ["string"],
     "coverSuggestion": "string",

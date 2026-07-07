@@ -126,3 +126,7 @@ export { videoClipCategories, videoClips, videoClipProducts } from "./video-clip
 export type { VideoClipCategory, VideoClip, VideoClipInsert, VideoClipProduct } from "./video-clips";
 export { videoRecipes, videoPosts } from "./video-posts";
 export type { VideoRecipe, VideoPost, VideoPostInsert, RecipeSlot } from "./video-posts";
+
+// TikTok trending sounds — synced via Apify, feeds AI audio suggestions.
+export { tiktokSounds } from "./tiktok-sounds";
+export type { TiktokSound, TiktokSoundInsert } from "./tiktok-sounds";

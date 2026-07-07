@@ -33,6 +33,7 @@ type Clip = {
   category_slug: string | null;
   category_name: string | null;
   audio_mode: "mute" | "keep";
+  talent: string | null;
   boost: number;
   duration_sec: number | null;
   times_used: number;
@@ -55,9 +56,11 @@ export function ClipLibrary() {
   const [clips, setClips] = useState<Clip[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [skus, setSkus] = useState<UploaderSku[]>([]);
+  const [talents, setTalents] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterCategory, setFilterCategory] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [filterTalent, setFilterTalent] = useState("");
   const [filterUntagged, setFilterUntagged] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editClip, setEditClip] = useState<Clip | null>(null);
@@ -68,16 +71,18 @@ export function ClipLibrary() {
     const params = new URLSearchParams();
     if (filterCategory) params.set("category", filterCategory);
     if (filterStatus) params.set("status", filterStatus);
+    if (filterTalent) params.set("talent", filterTalent);
     if (filterUntagged) params.set("untagged", "1");
     Promise.all([
       fetch(`/api/v1/marketing/videos/clips?${params}`).then((r) => r.json()),
       fetch("/api/v1/marketing/videos/categories").then((r) => r.json()),
     ]).then(([clipsRes, catsRes]) => {
       setClips(clipsRes.clips ?? []);
+      setTalents(clipsRes.talents ?? []);
       setCategories(catsRes.categories ?? []);
       setLoading(false);
     });
-  }, [filterCategory, filterStatus, filterUntagged]);
+  }, [filterCategory, filterStatus, filterTalent, filterUntagged]);
 
   useEffect(() => {
     load();
@@ -156,6 +161,17 @@ export function ClipLibrary() {
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
+        <select
+          value={filterTalent}
+          onChange={(e) => setFilterTalent(e.target.value)}
+          className="border rounded px-2 py-1.5 text-sm bg-background"
+        >
+          <option value="">Anyone</option>
+          <option value="none">No one</option>
+          {talents.map((t) => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+        </select>
         <label className="flex items-center gap-1.5 text-sm">
           <input type="checkbox" checked={filterUntagged} onChange={(e) => setFilterUntagged(e.target.checked)} />
           Untagged only
@@ -164,7 +180,7 @@ export function ClipLibrary() {
       </div>
 
       {showUploader && (
-        <ClipUploader categories={activeCategories} skus={skus} onUploadComplete={load} />
+        <ClipUploader categories={activeCategories} skus={skus} talents={talents} onUploadComplete={load} />
       )}
 
       {/* Bulk bar */}
@@ -185,6 +201,7 @@ export function ClipLibrary() {
           <Button size="sm" variant="outline" onClick={() => bulkPatch({ audioMode: "mute" })}>Audio: mute</Button>
           <Button size="sm" variant="outline" onClick={() => bulkPatch({ boost: 1 })}>Boost</Button>
           <Button size="sm" variant="outline" onClick={() => bulkPatch({ boost: 0 })}>Unboost</Button>
+          <BulkTalentInput talents={talents} onApply={(t) => bulkPatch({ talent: t })} />
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Clear</Button>
         </div>
       )}
@@ -251,6 +268,7 @@ export function ClipLibrary() {
                   )}
                 </div>
                 <div className="truncate text-[11px] text-muted-foreground" title={clip.file_name}>
+                  {clip.talent && <span className="mr-1">👤{clip.talent}</span>}
                   {clip.file_name}
                 </div>
               </div>
@@ -264,6 +282,7 @@ export function ClipLibrary() {
           clip={editClip}
           categories={activeCategories}
           skus={skus}
+          talents={talents}
           onClose={() => setEditClip(null)}
           onSaved={() => {
             setEditClip(null);
@@ -283,24 +302,52 @@ export function ClipLibrary() {
   );
 }
 
+// ── Bulk talent setter ──
+
+function BulkTalentInput({ talents, onApply }: { talents: string[]; onApply: (talent: string) => void }) {
+  const [value, setValue] = useState("");
+  return (
+    <span className="flex items-center gap-1">
+      <input
+        list="bulk-talents"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="Person…"
+        className="w-28 border rounded px-2 py-1 text-sm bg-background"
+      />
+      <datalist id="bulk-talents">
+        {talents.map((t) => (
+          <option key={t} value={t} />
+        ))}
+      </datalist>
+      <Button size="sm" variant="outline" onClick={() => onApply(value)}>
+        {value.trim() ? "Set person" : "Clear person"}
+      </Button>
+    </span>
+  );
+}
+
 // ── Per-clip editor ──
 
 function ClipEditDialog({
   clip,
   categories,
   skus,
+  talents,
   onClose,
   onSaved,
 }: {
   clip: Clip;
   categories: Category[];
   skus: UploaderSku[];
+  talents: string[];
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [categoryId, setCategoryId] = useState(clip.category_id ?? "");
   const [audioMode, setAudioMode] = useState(clip.audio_mode);
   const [boost, setBoost] = useState(clip.boost);
+  const [talent, setTalent] = useState(clip.talent ?? "");
   const [notes, setNotes] = useState(clip.notes ?? "");
   const [skuIds, setSkuIds] = useState<string[]>(clip.products.map((p) => p.skuId));
   const [skuSearch, setSkuSearch] = useState("");
@@ -322,7 +369,7 @@ function ClipEditDialog({
     const res = await fetch(`/api/v1/marketing/videos/clips/${clip.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ categoryId: categoryId || null, audioMode, boost, notes, skuIds }),
+      body: JSON.stringify({ categoryId: categoryId || null, audioMode, boost, talent, notes, skuIds }),
     });
     setSaving(false);
     if (res.ok) {
@@ -416,6 +463,21 @@ function ClipEditDialog({
                 ))}
               </div>
             </div>
+            <label className="block">
+              <span className="text-muted-foreground">Person in clip (model/actor — leave empty for no one)</span>
+              <Input
+                list="edit-talents"
+                value={talent}
+                onChange={(e) => setTalent(e.target.value)}
+                placeholder="no one"
+                className="mt-1"
+              />
+              <datalist id="edit-talents">
+                {talents.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
+            </label>
             <label className="block">
               <span className="text-muted-foreground">Notes</span>
               <Input value={notes} onChange={(e) => setNotes(e.target.value)} className="mt-1" />

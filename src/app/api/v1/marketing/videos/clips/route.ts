@@ -1,8 +1,10 @@
 /**
  * GET /api/v1/marketing/videos/clips — clip library list.
  *
- * Filters: status, category (id or slug), skuId, untagged=1, search.
- * Returns clips with category + product joins and public asset URLs.
+ * Filters: status, category (id or slug), skuId, talent (name, or "none"
+ * for clips with nobody in them), untagged=1, search.
+ * Returns clips with category + product joins and public asset URLs,
+ * plus the distinct talent list for the UI's pickers/datalists.
  */
 export const dynamic = "force-dynamic";
 
@@ -15,6 +17,7 @@ export async function GET(request: NextRequest) {
   const status = searchParams.get("status") || "";
   const category = searchParams.get("category") || "";
   const skuId = searchParams.get("skuId") || "";
+  const talent = searchParams.get("talent") || "";
   const untagged = searchParams.get("untagged") === "1";
   const search = searchParams.get("search") || "";
   const limit = Math.min(500, parseInt(searchParams.get("limit") || "200", 10));
@@ -33,6 +36,12 @@ export async function GET(request: NextRequest) {
     params.push(category, category);
   }
   if (untagged) clauses.push("c.category_id IS NULL");
+  if (talent === "none") {
+    clauses.push("c.talent IS NULL");
+  } else if (talent) {
+    clauses.push("c.talent = ?");
+    params.push(talent);
+  }
   if (skuId) {
     clauses.push("EXISTS (SELECT 1 FROM marketing_video_clip_products cp WHERE cp.clip_id = c.id AND cp.sku_id = ?)");
     params.push(skuId);
@@ -74,5 +83,12 @@ export async function GET(request: NextRequest) {
     products: productStmt.all(row.id) as Array<Record<string, unknown>>,
   }));
 
-  return NextResponse.json({ clips, total });
+  // Distinct people across the whole library (not just this page) so
+  // pickers always offer every known name — consistent spelling matters.
+  const talents = (sqlite.prepare(`
+    SELECT DISTINCT talent FROM marketing_video_clips
+    WHERE talent IS NOT NULL AND talent != '' ORDER BY talent COLLATE NOCASE
+  `).all() as Array<{ talent: string }>).map((r) => r.talent);
+
+  return NextResponse.json({ clips, total, talents });
 }

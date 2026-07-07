@@ -36,10 +36,13 @@ export interface UploaderSku {
 export function ClipUploader({
   categories,
   skus,
+  talents = [],
   onUploadComplete,
 }: {
   categories: UploaderCategory[];
   skus: UploaderSku[];
+  /** Known model/actor names — powers the datalist so spelling stays consistent. */
+  talents?: string[];
   onUploadComplete: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -50,8 +53,9 @@ export function ClipUploader({
   const [categoryId, setCategoryId] = useState<string>("");
   const [audioMode, setAudioMode] = useState<"mute" | "keep">("mute");
   const [skuIds, setSkuIds] = useState<string[]>([]);
-  const defaultsRef = useRef({ categoryId, audioMode, skuIds });
-  defaultsRef.current = { categoryId, audioMode, skuIds };
+  const [talent, setTalent] = useState("");
+  const defaultsRef = useRef({ categoryId, audioMode, skuIds, talent });
+  defaultsRef.current = { categoryId, audioMode, skuIds, talent };
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -109,6 +113,7 @@ export function ClipUploader({
           categoryId: d.categoryId,
           audioMode: d.audioMode,
           skuIds: JSON.stringify(d.skuIds),
+          talent: d.talent.trim(),
         });
       });
 
@@ -187,6 +192,21 @@ export function ClipUploader({
             <option value="mute">Mute (trending audio later)</option>
             <option value="keep">Keep — audio is worth using</option>
           </select>
+        </label>
+        <label className="flex items-center gap-2">
+          <span className="text-muted-foreground">Person</span>
+          <input
+            list="clip-talents"
+            value={talent}
+            onChange={(e) => setTalent(e.target.value)}
+            placeholder="no one"
+            className="w-32 border rounded px-2 py-1 text-sm bg-background"
+          />
+          <datalist id="clip-talents">
+            {talents.map((t) => (
+              <option key={t} value={t} />
+            ))}
+          </datalist>
         </label>
         <details className="relative">
           <summary className="cursor-pointer select-none border rounded px-2 py-1 bg-background">
