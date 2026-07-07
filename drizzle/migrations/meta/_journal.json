@@ -57,6 +57,13 @@
       "when": 1783468800000,
       "tag": "0007_tiktok_sounds_and_talent",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1783555200000,
+      "tag": "0008_video_sources",
+      "breakpoints": true
     }
   ]
 }

@@ -130,3 +130,7 @@ export type { VideoRecipe, VideoPost, VideoPostInsert, RecipeSlot } from "./vide
 // TikTok trending sounds — synced via Apify, feeds AI audio suggestions.
 export { tiktokSounds } from "./tiktok-sounds";
 export type { TiktokSound, TiktokSoundInsert } from "./tiktok-sounds";
+
+// Raw footage sources — the auto-clipper's input (split into clips).
+export { videoSources } from "./video-sources";
+export type { VideoSource, VideoSourceInsert } from "./video-sources";

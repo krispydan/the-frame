@@ -17,6 +17,15 @@ registerJobHandler("marketing.video.normalize-clip", async (input) => {
   return (await normalizeClip(clipId)) as unknown as Record<string, unknown>;
 });
 
+registerJobHandler("marketing.video.split-source", async (input) => {
+  const sourceId = input.sourceId;
+  if (!sourceId || typeof sourceId !== "string") {
+    throw new Error("sourceId is required for marketing.video.split-source jobs");
+  }
+  const { splitSource } = await import("./split");
+  return (await splitSource(sourceId)) as unknown as Record<string, unknown>;
+});
+
 registerJobHandler("marketing.video.render-post", async (input) => {
   const postId = input.postId;
   if (!postId || typeof postId !== "string") {
