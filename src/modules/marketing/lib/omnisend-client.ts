@@ -14,6 +14,13 @@
  */
 import { sqlite } from "@/lib/db";
 
+// Auth/endpoint shape per the CURRENT Omnisend API docs (api-docs.omnisend.com,
+// "Campaigns" + "Email templates import" references, fetched 2026-07-07):
+//   Authorization: Omnisend-API-Key <key>   (NOT the legacy v3 X-API-KEY)
+//   base https://api.omnisend.com/api        (NOT the legacy /v3)
+//   Omnisend-Version: 2026-03-15
+// If a live call 401s, re-check those pages first — Omnisend renamed both the
+// header and the base between v3/v5 and the 2026 versions.
 const API_BASE = "https://api.omnisend.com/api";
 const API_VERSION = "2026-03-15";
 

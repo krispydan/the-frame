@@ -1193,6 +1193,8 @@ Slot context: ${imageStyleLabel}. Subject-angle direction: ${rec.subjectAngleHin
       const [row] = await db.select().from(emailCampaigns).where(eq(emailCampaigns.id, input.campaign_id as string)).limit(1);
       if (!row) return { content: [{ type: "text", text: JSON.stringify({ error: "Campaign not found" }) }] };
       if (!row.subject) return { content: [{ type: "text", text: JSON.stringify({ error: "Campaign has no subject — generate copy first." }) }] };
+      const { imagesComplete } = await import("../lib/images-complete");
+      if (!imagesComplete(row)) return { content: [{ type: "text", text: JSON.stringify({ error: "Campaign images aren't complete — upload hero/secondary images (or disable those sections) first." }) }] };
       const html = renderEmailHtml(campaignRowToData(row));
       const label = row.name || row.subject;
       const tpl = await importTemplate(`the-frame — ${label}`, html);

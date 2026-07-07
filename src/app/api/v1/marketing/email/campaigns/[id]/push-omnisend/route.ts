@@ -7,6 +7,7 @@ import { emailCampaigns } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
 import { renderEmailHtml } from "@/modules/marketing/lib/render-email";
 import { campaignRowToData } from "@/modules/marketing/lib/campaign-render-data";
+import { imagesComplete } from "@/modules/marketing/lib/images-complete";
 import {
   isOmnisendConfigured,
   importTemplate,
@@ -55,6 +56,14 @@ export async function POST(
   if (!row.subject) {
     return NextResponse.json({ error: "Campaign has no subject — generate copy first." }, { status: 400 });
   }
+  // Don't ship placeholders: a missing hero/secondary image renders as a
+  // broken block, and Omnisend would happily import it.
+  if (!imagesComplete(row)) {
+    return NextResponse.json(
+      { error: "Campaign images aren't complete — upload the hero/secondary images (or disable those sections) before pushing." },
+      { status: 400 },
+    );
+  }
 
   let body: { schedule?: boolean } = {};
   try { body = await req.json(); } catch { /* empty body fine */ }
@@ -89,7 +98,7 @@ export async function POST(
       // Campaign exists as a draft — surface the partial success rather
       // than pretending the whole push failed.
       sqlite
-        .prepare("UPDATE marketing_email_campaigns SET omnisend_campaign_id = ? WHERE id = ?")
+        .prepare("UPDATE marketing_email_campaigns SET omnisend_campaign_id = ?, updated_at = datetime('now') WHERE id = ?")
         .run(created.data.campaignID, id);
       return NextResponse.json({
         ok: true,
@@ -100,13 +109,20 @@ export async function POST(
     }
   }
 
+  // Status only advances to "scheduled" when a send is actually queued —
+  // a draft-only push leaves status alone (omnisend_campaign_id records
+  // the push; "scheduled" would falsely signal the send is locked in).
   sqlite
     .prepare(
-      `UPDATE marketing_email_campaigns
-         SET omnisend_campaign_id = ?,
-             status = CASE WHEN status IN ('design_review','copywriting','photography') THEN 'scheduled' ELSE status END,
-             updated_at = datetime('now')
-       WHERE id = ?`,
+      sendTriggered
+        ? `UPDATE marketing_email_campaigns
+             SET omnisend_campaign_id = ?,
+                 status = CASE WHEN status IN ('design_review','copywriting','photography') THEN 'scheduled' ELSE status END,
+                 updated_at = datetime('now')
+           WHERE id = ?`
+        : `UPDATE marketing_email_campaigns
+             SET omnisend_campaign_id = ?, updated_at = datetime('now')
+           WHERE id = ?`,
     )
     .run(created.data.campaignID, id);
 
