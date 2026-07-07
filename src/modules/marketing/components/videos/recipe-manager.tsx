@@ -232,7 +232,9 @@ function RecipeEditDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+      {/* sm:max-w-2xl — the base DialogContent pins sm:max-w-sm, and an
+          unprefixed max-w-2xl loses to it at desktop widths. */}
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{recipe ? `Edit: ${recipe.name}` : "New video style"}</DialogTitle>
         </DialogHeader>

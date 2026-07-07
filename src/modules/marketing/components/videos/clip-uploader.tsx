@@ -203,6 +203,8 @@ export function ClipUploader({
                 />
                 <span className="truncate">
                   {s.productName ?? s.sku} {s.colorName ? `— ${s.colorName}` : ""}
+                  {/* sku code distinguishes same-name variants (sizes, powers) */}
+                  {s.sku && <span className="text-muted-foreground ml-1">({s.sku})</span>}
                 </span>
               </label>
             ))}

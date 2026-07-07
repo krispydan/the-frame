@@ -348,7 +348,9 @@ function ClipEditDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl">
+      {/* sm:max-w-2xl — the base DialogContent pins sm:max-w-sm, and an
+          unprefixed max-w-2xl loses to it at desktop widths. */}
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="truncate">{clip.file_name}</DialogTitle>
         </DialogHeader>
@@ -407,6 +409,8 @@ function ClipEditDialog({
                     />
                     <span className="truncate">
                       {s.productName ?? s.sku} {s.colorName ? `— ${s.colorName}` : ""}
+                      {/* sku code distinguishes same-name variants (sizes, powers) */}
+                      {s.sku && <span className="text-muted-foreground ml-1">({s.sku})</span>}
                     </span>
                   </label>
                 ))}
@@ -479,7 +483,7 @@ function CategoryManager({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Clip categories</DialogTitle>
         </DialogHeader>
