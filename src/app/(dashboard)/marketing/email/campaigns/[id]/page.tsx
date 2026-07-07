@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Trash2, Monitor, Smartphone, Save, Sparkles, Image as ImageIcon, Copy, Download, Loader2, ShieldCheck, RefreshCw, Check, Plus, X, Search, Package, MessageSquare, Send } from "lucide-react";
 import { parseFeaturedIds } from "@/modules/marketing/lib/featured-products";
+import { briefFingerprint } from "@/modules/marketing/lib/brief-fingerprint";
 import type { ProductSummary } from "@/modules/marketing/lib/product-selector";
 
 type Campaign = Record<string, unknown>;
@@ -612,6 +613,32 @@ export default function CampaignDetailPage({
         </div>
       )}
 
+      {/* Brief edited after COPY was generated → the written email no
+          longer matches the idea. Fingerprint persisted at generation
+          time, so this survives reloads (unlike the session-only image-
+          prompt nudge below). */}
+      {(() => {
+        const fp = campaign.copyBriefFingerprint as string | null;
+        const live = briefFingerprint({
+          name: campaign.name as string | null,
+          briefAngle: campaign.briefAngle as string | null,
+          briefProductHook: campaign.briefProductHook as string | null,
+          briefSeasonalContext: campaign.briefSeasonalContext as string | null,
+        });
+        if (!fp || fp === live || !campaign.subject) return null;
+        return (
+          <div className="rounded border border-amber-300 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-sm flex items-center justify-between gap-3">
+            <span>
+              The brief changed since this copy was generated — subject, hero
+              and sections may no longer match the idea.
+            </span>
+            <Button size="sm" variant="outline" onClick={handleGenerateCopy} disabled={generating !== null}>
+              {generating === "copy" ? "Regenerating…" : "Regenerate copy"}
+            </Button>
+          </div>
+        );
+      })()}
+
       {/* Brief edited after image prompts were generated → stale. */}
       {briefStale && (
         <div className="rounded border border-amber-300 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-sm flex items-center justify-between gap-3">
@@ -1208,6 +1235,18 @@ export default function CampaignDetailPage({
               </p>
             </CardContent>
           </Card>
+
+          {/* SEND RESULTS — record what happened after the send (from the
+              Omnisend / Faire dashboards). Completes the lifecycle
+              (sent → analyzed) and feeds the strategy engine real
+              performance data for future planning. */}
+          <SendResultsCard
+            campaignId={id}
+            onRecorded={(status) => {
+              // Server may auto-advance sent/scheduled → analyzed.
+              if (status) setCampaign((c) => (c ? { ...c, status } : c));
+            }}
+          />
         </div>
       </div>
     </div>
@@ -2092,5 +2131,160 @@ function InlineImageUpload({
 
       {error && <div className="text-xs text-destructive">{error}</div>}
     </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Send results — record post-send performance (from the Omnisend /
+// Faire dashboards) against the campaign. ~20 seconds of typing that
+// closes the loop: campaign auto-advances to "analyzed" and the
+// numbers become training signal for future planning.
+// ────────────────────────────────────────────────────────────
+
+type SendResultRow = {
+  id: string;
+  platform: "omnisend" | "faire";
+  sentAt: string | null;
+  recipients: number | null;
+  opens: number | null;
+  clicks: number | null;
+  notes: string | null;
+};
+
+function SendResultsCard({
+  campaignId,
+  onRecorded,
+}: {
+  campaignId: string;
+  onRecorded: (newStatus: string | null) => void;
+}) {
+  const [results, setResults] = useState<SendResultRow[]>([]);
+  const [open, setOpen] = useState(false);
+  const [platform, setPlatform] = useState<"omnisend" | "faire">("omnisend");
+  const [sentAt, setSentAt] = useState("");
+  const [recipients, setRecipients] = useState("");
+  const [opens, setOpens] = useState("");
+  const [clicks, setClicks] = useState("");
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/v1/marketing/email/campaigns/${campaignId}/results`)
+      .then((r) => r.json())
+      .then((d) => setResults(d.results ?? []))
+      .catch(() => {});
+  }, [campaignId]);
+
+  async function submit() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const num = (s: string) => (s.trim() === "" ? undefined : Number(s));
+      const res = await fetch(`/api/v1/marketing/email/campaigns/${campaignId}/results`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          platform,
+          sentAt: sentAt || undefined,
+          recipients: num(recipients),
+          opens: num(opens),
+          clicks: num(clicks),
+          notes: notes || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setResults((rs) => [data.result, ...rs]);
+      setRecipients(""); setOpens(""); setClicks(""); setNotes(""); setSentAt("");
+      setOpen(false);
+      // The route advances sent/scheduled → analyzed; reflect locally.
+      onRecorded("analyzed");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to record");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const pct = (n: number | null, d: number | null) =>
+    n != null && d ? ` (${((n / d) * 100).toFixed(1)}%)` : "";
+
+  return (
+    <Card>
+      <CardHeader className="pb-3 flex flex-row items-center justify-between">
+        <CardTitle className="text-sm">
+          Send results
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
+            from Omnisend / Faire — feeds future planning
+          </span>
+        </CardTitle>
+        {!open && (
+          <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+            <Plus className="h-3 w-3 mr-1" />
+            Record
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {results.length === 0 && !open && (
+          <p className="text-xs text-muted-foreground">
+            Nothing recorded yet. After the send, drop in recipients / opens /
+            clicks from the platform dashboard.
+          </p>
+        )}
+        {results.map((r) => (
+          <div key={r.id} className="text-sm flex flex-wrap items-center gap-x-3 gap-y-1 border rounded px-3 py-2">
+            <Badge variant="outline">{r.platform}</Badge>
+            {r.sentAt && <span className="text-xs text-muted-foreground">{r.sentAt}</span>}
+            <span>{r.recipients ?? "—"} sent</span>
+            <span>{r.opens ?? "—"} opens{pct(r.opens, r.recipients)}</span>
+            <span>{r.clicks ?? "—"} clicks{pct(r.clicks, r.recipients)}</span>
+            {r.notes && <span className="text-xs text-muted-foreground w-full">{r.notes}</span>}
+          </div>
+        ))}
+        {open && (
+          <div className="space-y-2 border rounded p-3">
+            <div className="flex gap-2 items-center">
+              <label className="text-xs text-muted-foreground">Platform</label>
+              {(["omnisend", "faire"] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setPlatform(p)}
+                  className={`px-3 py-1 text-xs rounded border ${platform === p ? "bg-accent border-foreground" : "border-input"}`}
+                >
+                  {p}
+                </button>
+              ))}
+              <Input type="date" value={sentAt} onChange={(e) => setSentAt(e.target.value)} className="h-7 w-36 text-xs ml-auto" />
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <label className="text-xs text-muted-foreground">Recipients
+                <Input inputMode="numeric" value={recipients} onChange={(e) => setRecipients(e.target.value)} className="h-8 mt-1" />
+              </label>
+              <label className="text-xs text-muted-foreground">Opens
+                <Input inputMode="numeric" value={opens} onChange={(e) => setOpens(e.target.value)} className="h-8 mt-1" />
+              </label>
+              <label className="text-xs text-muted-foreground">Clicks
+                <Input inputMode="numeric" value={clicks} onChange={(e) => setClicks(e.target.value)} className="h-8 mt-1" />
+              </label>
+            </div>
+            <Textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Notes — what worked, what didn't (optional)"
+              className="text-sm min-h-[52px]"
+            />
+            {err && <p className="text-xs text-destructive">{err}</p>}
+            <div className="flex gap-2 justify-end">
+              <Button size="sm" variant="ghost" onClick={() => setOpen(false)} disabled={busy}>Cancel</Button>
+              <Button size="sm" onClick={submit} disabled={busy}>
+                {busy ? "Saving…" : "Save results"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
