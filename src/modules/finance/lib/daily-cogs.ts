@@ -48,6 +48,18 @@ export interface DailyCogsResult {
   xeroJournalId: string | null;
   exceptions: Array<{ type: ExceptionType; orderNumber: string; sku: string | null; units: number; detail: string }>;
   skipped?: string; // reason, if the run short-circuited
+  nonProductLinesSkipped: number; // discount/adjustment lines with no COGS by design
+}
+
+/**
+ * Order lines that legitimately carry no product cost — Faire's discount /
+ * promo / adjustment markers, etc. These are handled on the revenue side (baked
+ * into the net payout), so they must NOT be costed and must NOT recur as
+ * "unmapped SKU" exceptions. Matched case-insensitively on the exact SKU.
+ */
+const NON_PRODUCT_SKUS = new Set(["FAIRE-DISCOUNT"]);
+function isNonProductLine(sku: string | null | undefined): boolean {
+  return !!sku && NON_PRODUCT_SKUS.has(sku.trim().toUpperCase());
 }
 
 interface ShippedLine {
@@ -82,7 +94,7 @@ export async function runDailyCogsPosting(
   const result: DailyCogsResult = {
     date, mode: dryRun ? "dry_run" : "live",
     ordersProcessed: 0, unitsCosted: 0, totalCogs: 0,
-    journalId: null, xeroJournalId: null, exceptions: [],
+    journalId: null, xeroJournalId: null, exceptions: [], nonProductLinesSkipped: 0,
   };
 
   try {
@@ -163,6 +175,10 @@ export async function runDailyCogsPosting(
     };
 
     for (const line of lines) {
+      // Non-product lines (Faire discount/adjustment markers) carry no COGS by
+      // design — skip silently so they don't recur as unmapped-SKU exceptions.
+      if (isNonProductLine(line.sku)) { result.nonProductLinesSkipped++; continue; }
+
       result.ordersProcessed++;
       const { unitSkuId, units } = resolveDepletionTarget({ sku: line.sku, skuId: line.skuId, quantity: line.quantity });
 
