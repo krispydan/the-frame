@@ -119,3 +119,10 @@ export {
 // the AI prompt so generate-copy knows what's coming up.
 export { calendarEvents } from "./calendar-events";
 export type { CalendarEvent, CalendarEventInsert } from "./calendar-events";
+
+// Video Remix Studio — clip library + recipes + generated posts.
+// See ./video-clips.ts and ./video-posts.ts for the full model.
+export { videoClipCategories, videoClips, videoClipProducts } from "./video-clips";
+export type { VideoClipCategory, VideoClip, VideoClipInsert, VideoClipProduct } from "./video-clips";
+export { videoRecipes, videoPosts } from "./video-posts";
+export type { VideoRecipe, VideoPost, VideoPostInsert, RecipeSlot } from "./video-posts";

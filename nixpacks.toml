@@ -1,5 +1,7 @@
 [phases.setup]
-nixPkgs = ["nodejs_22", "python3", "gcc", "gnumake"]
+# ffmpeg powers the marketing video remix pipeline (clip normalization +
+# concat renders). See src/modules/marketing/lib/video/ffmpeg.ts.
+nixPkgs = ["nodejs_22", "python3", "gcc", "gnumake", "ffmpeg"]
 
 [phases.install]
 # --include=dev because Railway sets NODE_ENV=production which makes

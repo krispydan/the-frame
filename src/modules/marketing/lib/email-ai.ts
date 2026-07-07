@@ -52,7 +52,7 @@ function loadPrompts() {
  * iteration history + ``` prompt content ``` + output schema +
  * worked examples. We only want the prompt content.
  */
-function extractPromptBody(md: string): string {
+export function extractPromptBody(md: string): string {
   const match = md.match(/```\s*([\s\S]*?)```/);
   return match ? match[1].trim() : md;
 }
@@ -153,7 +153,7 @@ interface CallClaudeOpts {
   images?: Array<{ url: string }>;
 }
 
-async function callClaude({
+export async function callClaude({
   systemPrompt,
   userPrompt,
   tool,
@@ -737,7 +737,7 @@ export async function planMonth(opts: {
 // Replace {{key}} or {{key.sub}} in a string with values from a map.
 // Keys with dots are taken literally (no nested-object resolution
 // needed since callers flatten before passing).
-function fillTemplate(template: string, vars: Record<string, string>): string {
+export function fillTemplate(template: string, vars: Record<string, string>): string {
   let out = template;
   for (const [key, val] of Object.entries(vars)) {
     const pattern = new RegExp(`\\{\\{\\s*${escapeRe(key)}\\s*\\}\\}`, "g");

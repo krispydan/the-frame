@@ -6,6 +6,11 @@ export async function register() {
     // Start the background job worker
     startJobWorker();
 
+    // Video pipeline: log the ffmpeg version (or a loud warning if the
+    // binary is missing) so a broken nixpacks setup is visible at boot.
+    const { assertFfmpegAvailable } = await import("@/modules/marketing/lib/video/ffmpeg");
+    void assertFfmpegAvailable();
+
     // Seed recurring ShipHero inventory sync (hourly) if not already queued
     const { sqlite } = await import("@/lib/db");
     const existing = sqlite

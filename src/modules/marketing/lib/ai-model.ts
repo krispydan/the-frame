@@ -28,3 +28,19 @@ export function emailModel(): string {
   }
   return m;
 }
+
+let videoLogged = false;
+
+/** Model for video caption/instruction generation. Same fallback chain
+ *  as email, with its own env override so the two can diverge. */
+export function videoModel(): string {
+  const m =
+    process.env.MARKETING_VIDEO_MODEL ||
+    process.env.ANTHROPIC_MODEL ||
+    DEFAULT_MODEL;
+  if (!videoLogged) {
+    videoLogged = true;
+    console.info(`[marketing-video] AI model: ${m}`);
+  }
+  return m;
+}

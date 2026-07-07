@@ -35,6 +35,8 @@ import { runOrderDealSweep, runActivitySweep } from "@/modules/sales/lib/pipedri
 import { enrichViaGoogleMaps } from "@/modules/sales/lib/google-maps-enrichment";
 import { recalculateAllHealthScores } from "@/modules/customers/lib/health-scoring";
 import { refreshReorderEstimates } from "@/modules/customers/lib/reorder-engine";
+import { topUpVideoQueue } from "@/modules/marketing/lib/video/scheduler";
+import { runVideoStorageHygiene } from "@/modules/marketing/lib/video/cleanup";
 
 export type CronJob = {
   id: string;                         // stable, kebab-case
@@ -307,6 +309,26 @@ export const CRON_JOBS: CronJob[] = [
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       return data;
     },
+  },
+
+  // ── Video Remix Studio ──
+  {
+    id: "video-queue-top-up",
+    schedule: "0 13 * * *",  // 13:00 UTC ≈ 6am PT daily
+    description: "Compose + enqueue renders so the next 7 days have a video post in every slot (3/day). Opt-in — enable once the clip library is seeded.",
+    handler: () => topUpVideoQueue({ horizonDays: 7 }) as unknown as Promise<unknown>,
+    // Opt-in: with an empty clip library this would just log warnings
+    // every morning. Flip on in the cron settings UI after seeding.
+    defaultEnabled: false,
+    // Composing 21 slots + trend detection can exceed the edge timeout
+    // on a cold cache; renders themselves run via the job queue anyway.
+    fireAndForget: true,
+  },
+  {
+    id: "video-storage-hygiene",
+    schedule: "0 12 * * 1",  // Mondays 12:00 UTC ≈ 5am PT
+    description: "Delete render files for posts posted >60d ago / discarded, sweep tmp/, report disk usage + permutation headroom per recipe",
+    handler: () => runVideoStorageHygiene(),
   },
 ];
 
