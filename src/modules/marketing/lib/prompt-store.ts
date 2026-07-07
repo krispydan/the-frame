@@ -76,7 +76,21 @@ function ensureSeeded(): void {
       )
     `);
     const ins = sqlite.prepare(`INSERT OR IGNORE INTO marketing_ai_documents (slug, content) VALUES (?, ?)`);
-    for (const d of AI_DOCS) ins.run(d.slug, fileDefault(d.slug));
+    // Auto-sync: a row the operator NEVER edited in-app (updated_by IS
+    // NULL — both updateDoc and resetDoc stamp it) tracks the shipped
+    // file. Without this, editing a prompt .md in the repo silently did
+    // nothing in prod forever — the stale seed kept winning (this is how
+    // the month-planner ran a dead v1 prompt after the v2 file landed).
+    // Operator edits still always win; "Reset to default" still works.
+    const sync = sqlite.prepare(
+      `UPDATE marketing_ai_documents SET content = ?, updated_at = datetime('now')
+        WHERE slug = ? AND updated_by IS NULL AND content != ?`,
+    );
+    for (const d of AI_DOCS) {
+      const def = fileDefault(d.slug);
+      ins.run(d.slug, def);
+      if (def) sync.run(def, d.slug, def);
+    }
     seeded = true;
   } catch (e) {
     // DB unavailable (e.g. during a build phase) — callers fall back to
