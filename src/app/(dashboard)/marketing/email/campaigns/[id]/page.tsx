@@ -351,11 +351,22 @@ export default function CampaignDetailPage({
     if (Object.keys(changes).length === 0) return;
     setSaving(true);
     try {
-      const res = await fetch(`/api/v1/marketing/email/campaigns/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(changes),
-      });
+      let res: Response;
+      try {
+        res = await fetch(`/api/v1/marketing/email/campaigns/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(changes),
+        });
+      } catch (e) {
+        // Network-level failure (offline, DNS, reset) — same treatment as
+        // an HTTP error: restore the edits, surface, throw. Without this
+        // the edits vanished from the queue with no error at all.
+        pendingChanges.current = { ...changes, ...pendingChanges.current };
+        const msg = `Save failed: ${e instanceof Error ? e.message : "network error"}`;
+        setSaveError(msg);
+        throw new Error(msg);
+      }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         // Restore the failed edits so they aren't silently dropped —
@@ -1173,7 +1184,11 @@ export default function CampaignDetailPage({
                     onClick={async () => {
                       try {
                         await save(); // flush unsaved edits first — abort on failure
-                        window.open(`/api/v1/marketing/email/campaigns/${id}/preview?download=1`, "_blank");
+                        // Same-tab navigation: Content-Disposition:attachment
+                        // downloads without leaving the page, and unlike
+                        // window.open it isn't popup-blocked in Safari after
+                        // the async save gap.
+                        window.location.assign(`/api/v1/marketing/email/campaigns/${id}/preview?download=1`);
                       } catch (e) {
                         setExportError(e instanceof Error ? e.message : "Save failed");
                       }
