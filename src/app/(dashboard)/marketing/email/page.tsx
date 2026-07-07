@@ -92,6 +92,51 @@ export default function EmailAssistantDashboard() {
     }
   }
 
+  // ── Batch copy generation ──
+  // After "Plan the month" bulk-creates drafts, the operator used to open
+  // each campaign and click Generate one at a time (8 round-trips). This
+  // runs the SAME per-campaign route sequentially client-side — sequential
+  // (not parallel) on purpose: each call takes ~20-40s of Claude time and
+  // the anti-sameness context ("recent emails") benefits from earlier
+  // generations landing before later ones run. Client-side looping also
+  // sidesteps the ~100s proxy timeout a server-side batch would hit.
+  const [batchGen, setBatchGen] = useState<{
+    running: boolean;
+    done: number;
+    total: number;
+    current: string | null;
+    errors: { id: string; label: string; message: string }[];
+  } | null>(null);
+
+  const needsCopy = campaigns.filter(
+    (c) => (c.status === "draft" || c.status === "copywriting") && !c.subject && !c.heroHeadline,
+  );
+
+  async function handleBatchGenerate() {
+    const targets = needsCopy;
+    if (targets.length === 0) return;
+    if (!confirm(`Generate copy for ${targets.length} campaign${targets.length === 1 ? "" : "s"} without copy? Runs one at a time (~30s each).`)) return;
+    setBatchGen({ running: true, done: 0, total: targets.length, current: null, errors: [] });
+    const errors: { id: string; label: string; message: string }[] = [];
+    for (let i = 0; i < targets.length; i++) {
+      const c = targets[i];
+      setBatchGen({ running: true, done: i, total: targets.length, current: campaignLabel(c), errors });
+      try {
+        const res = await fetch(`/api/v1/marketing/email/campaigns/${c.id}/generate-copy`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) errors.push({ id: c.id, label: campaignLabel(c), message: data.error ?? `HTTP ${res.status}` });
+      } catch (e) {
+        errors.push({ id: c.id, label: campaignLabel(c), message: e instanceof Error ? e.message : "network error" });
+      }
+    }
+    setBatchGen({ running: false, done: targets.length, total: targets.length, current: null, errors });
+    load(); // refresh subjects/statuses
+  }
+
   // Group by status for pipeline chips
   const statusCounts: Record<string, number> = {};
   for (const s of STATUS_ORDER) statusCounts[s] = 0;
@@ -132,6 +177,16 @@ export default function EmailAssistantDashboard() {
           {/* Create — the primary path. Plan the month is the
               recommended AI-batch start; New campaign is the manual single. */}
           <div className="flex items-center gap-2">
+            {needsCopy.length > 0 && !batchGen?.running && (
+              <Button
+                variant="secondary"
+                onClick={handleBatchGenerate}
+                title={`Generate copy for the ${needsCopy.length} campaign(s) that have none — runs sequentially, ~30s each`}
+              >
+                <Sparkles className="h-4 w-4 mr-2" />
+                Generate copy ({needsCopy.length})
+              </Button>
+            )}
             <Link href="/marketing/email/plan">
               <Button title="AI plans a month of briefs for you, then bulk-creates drafts">
                 <Sparkles className="h-4 w-4 mr-2" />
@@ -143,6 +198,26 @@ export default function EmailAssistantDashboard() {
               onCreated={(c) => setCampaigns((cs) => [c, ...cs])}
             />
           </div>
+          {batchGen && (
+            <div className="text-xs text-muted-foreground text-right space-y-0.5">
+              {batchGen.running ? (
+                <p>
+                  Writing copy {batchGen.done + 1}/{batchGen.total}
+                  {batchGen.current ? <> — <span className="font-medium">{batchGen.current}</span></> : null}…
+                </p>
+              ) : (
+                <p>
+                  Copy generated for {batchGen.total - batchGen.errors.length}/{batchGen.total} campaigns
+                  {batchGen.errors.length > 0 ? ` — ${batchGen.errors.length} failed` : " ✓"}
+                </p>
+              )}
+              {batchGen.errors.map((e) => (
+                <p key={e.id} className="text-destructive">
+                  {e.label}: {e.message}
+                </p>
+              ))}
+            </div>
+          )}
           {/* Views & tools — quieter secondary cluster */}
           <div className="flex items-center gap-1 text-muted-foreground">
             <Link href="/marketing/email/calendar">
