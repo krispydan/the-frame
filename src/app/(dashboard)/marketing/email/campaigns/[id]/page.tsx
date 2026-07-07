@@ -40,6 +40,12 @@ const SCRIM_OPTIONS = [
   { value: "none",  label: "No scrim" },
 ];
 
+const TEXT_PLACEMENT_OPTIONS = [
+  { value: "top",    label: "Top" },
+  { value: "middle", label: "Middle" },
+  { value: "bottom", label: "Bottom" },
+];
+
 /**
  * Wraps `fetch().then(r => r.json())` so empty bodies + non-JSON
  * responses (Railway proxy timeouts, Cloudflare 524s, framework
@@ -797,6 +803,31 @@ export default function CampaignDetailPage({
                       </button>
                     ))}
                   </div>
+                </div>
+              )}
+              {showScrimPicker && (
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">
+                    Text placement
+                  </label>
+                  <div className="flex gap-1">
+                    {TEXT_PLACEMENT_OPTIONS.map(o => (
+                      <button
+                        key={o.value}
+                        onClick={() => updateField("heroTextPlacement", o.value)}
+                        className={`px-3 py-1 text-xs rounded border ${
+                          (campaign.heroTextPlacement ?? "middle") === o.value
+                            ? "bg-accent border-foreground"
+                            : "border-input"
+                        }`}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Where the headline sits over the image — the fade follows the text.
+                  </p>
                 </div>
               )}
               <InlineImageUpload

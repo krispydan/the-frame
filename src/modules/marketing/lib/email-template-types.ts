@@ -29,6 +29,7 @@ export interface CampaignData {
   heroCtaLabel?: string | null;
   heroCtaUrl?: string | null;
   heroScrim?: "dark" | "light" | "none" | null;
+  heroTextPlacement?: "top" | "middle" | "bottom" | null;
 
   // Section A
   sectionAVariant: "centered" | "with_pullquote";

@@ -143,15 +143,26 @@ function ctaAnchor(label: string | null | undefined, url: string | null | undefi
   return `<a href="${escAttr(real)}" class="jx-cta-pill" style="${CTA_STYLE}">${esc(label || "Shop now")}</a>`;
 }
 
-// Center-weighted scrim — content is vertically centered in the hero,
-// so the darkening/lightening peaks in the middle (behind the text)
-// and eases toward both edges so the image still breathes.
-function scrimGradient(scrim: "dark" | "light" | "none"): string {
-  if (scrim === "dark")
-    return "linear-gradient(180deg, rgba(0,0,0,0.12) 0%, rgba(0,0,0,0.55) 50%, rgba(0,0,0,0.12) 100%)";
-  if (scrim === "light")
-    return "linear-gradient(180deg, rgba(255,253,240,0.35) 0%, rgba(255,253,240,0.85) 50%, rgba(255,253,240,0.35) 100%)";
-  return "";
+export type HeroTextPlacement = "top" | "middle" | "bottom";
+
+// Placement-aware scrim — the darkening/lightening PEAKS behind the text
+// (so it stays legible) and eases toward the opposite edge (so the image
+// breathes). Top-placed text → fade strongest at top; bottom → strongest
+// at bottom; middle → center-weighted (the original behavior).
+function scrimGradient(
+  scrim: "dark" | "light" | "none",
+  placement: HeroTextPlacement = "middle",
+): string {
+  if (scrim === "none") return "";
+  const rgb = scrim === "dark" ? "0,0,0" : "255,253,240";
+  const peak = scrim === "dark" ? 0.55 : 0.85; // opacity behind the text
+  const edge = scrim === "dark" ? 0.12 : 0.35; // opacity at the breathing edge
+  const s = (a: number) => `rgba(${rgb},${a})`;
+  if (placement === "top")
+    return `linear-gradient(180deg, ${s(peak)} 0%, ${s(peak * 0.8)} 30%, ${s(edge * 0.4)} 70%, ${s(0)} 100%)`;
+  if (placement === "bottom")
+    return `linear-gradient(180deg, ${s(0)} 0%, ${s(edge * 0.4)} 30%, ${s(peak * 0.8)} 70%, ${s(peak)} 100%)`;
+  return `linear-gradient(180deg, ${s(edge)} 0%, ${s(peak)} 50%, ${s(edge)} 100%)`;
 }
 
 // ── HEADER ─────────────────────────────────────────────────────
@@ -210,8 +221,9 @@ interface HeroProps {
   ctaUrl: string;
 }
 
-function heroFullBleedOverlay(p: HeroProps & { scrim: "dark" | "light" | "none" }): string {
+function heroFullBleedOverlay(p: HeroProps & { scrim: "dark" | "light" | "none"; textPlacement?: HeroTextPlacement }): string {
   const hasImg = !!p.imageUrl;
+  const placement: HeroTextPlacement = p.textPlacement ?? "middle";
   // Legibility-safe: over an image, never leave text un-scrimmed. A
   // bare scrim:"none" + image would paint dark text on a photo with no
   // backdrop, so we treat "none over an image" as a subtle light scrim
@@ -226,19 +238,23 @@ function heroFullBleedOverlay(p: HeroProps & { scrim: "dark" | "light" | "none" 
       ? "0 1px 3px rgba(0,0,0,0.5)"
       : "0 1px 3px rgba(255,253,240,0.7)"
     : "none";
-  const grad = scrimGradient(effScrim);
+  const grad = scrimGradient(effScrim, placement);
   const bg = p.imageUrl
     ? `background-color:${C.ivory};background-image:url('${escAttr(p.imageUrl)}');background-size:cover;background-position:center;`
     : `background-color:${C.ivory};`;
   const inner = grad ? `background-image:${grad};` : "";
   const cta = ctaAnchor(p.ctaLabel, p.ctaUrl);
+  // Anchor the text to the chosen edge; give the text side extra breathing
+  // room so it doesn't crowd the frame.
+  const vAlign = placement === "top" ? "top" : placement === "bottom" ? "bottom" : "middle";
+  const pad = placement === "top" ? "44px 36px 56px" : placement === "bottom" ? "56px 36px 44px" : "48px 36px";
 
   return `
   <tr>
     <td role="img" aria-label="${escAttr(p.imageAlt)}" style="position:relative;${bg}">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
         <tr>
-          <td height="460" style="position:relative;height:460px;padding:48px 36px;text-align:center;vertical-align:middle;${inner}">
+          <td height="460" style="position:relative;height:460px;padding:${pad};text-align:center;vertical-align:${vAlign};${inner}">
             <h1 class="jx-hero-headline" style="font-family:${F.display};font-size:44px;line-height:1.1;font-weight:500;color:${textColor};text-shadow:${textShadow};margin:0 0 12px;">${esc(p.headline)}</h1>
             <p class="jx-hero-subtitle" style="font-family:${F.body};font-size:14px;line-height:1.55;color:${textColor};text-shadow:${textShadow};margin:0 auto 20px;max-width:380px;">${esc(p.subtitle)}</p>
             ${cta}
@@ -471,7 +487,7 @@ function dispatchHero(c: CampaignData): string {
     case "image_75_solid": return heroImage75Solid(common);
     case "split_50_50": return heroSplit5050(common);
     case "full_bleed_overlay":
-    default: return heroFullBleedOverlay({ ...common, scrim: c.heroScrim ?? "dark" });
+    default: return heroFullBleedOverlay({ ...common, scrim: c.heroScrim ?? "dark", textPlacement: c.heroTextPlacement ?? "middle" });
   }
 }
 

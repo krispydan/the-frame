@@ -119,6 +119,12 @@ export const emailCampaigns = sqliteTable("marketing_email_campaigns", {
    * Other variants ignore it; the field stays for forward-compat.
    */
   heroScrim: text("hero_scrim", { enum: ["dark", "light", "none"] }).default("dark"),
+  /**
+   * Where hero text sits over a full-bleed image (top/middle/bottom).
+   * The scrim fade follows the text so it stays legible. Only meaningful
+   * for heroVariant=full_bleed_overlay.
+   */
+  heroTextPlacement: text("hero_text_placement", { enum: ["top", "middle", "bottom"] }).default("middle"),
   heroImagePath: text("hero_image_path"),                    // /data/images/email/{id}/hero.jpg
   heroImageAlt: text("hero_image_alt"),
   heroImagePrompt: text("hero_image_prompt"),                // Higgsfield brief

@@ -124,6 +124,11 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN enrichment_text TEXT"); } ca
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN enrichment_source TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN enrichment_fetched_at TEXT"); } catch { /* exists */ }
 
+// Email hero: where the headline/subtitle sits over a full-bleed image
+// (top/middle/bottom); the scrim fade follows the text. Default middle
+// preserves the pre-existing center-aligned behavior.
+try { sqlite.exec("ALTER TABLE marketing_email_campaigns ADD COLUMN hero_text_placement TEXT DEFAULT 'middle'"); } catch { /* exists */ }
+
 // Contact form URL — when scraping a prospect for classification, we ALSO
 // harvest contact info. If we found a contact-us page but no direct email,
 // stash the URL here for later outreach (manual form submission or scraper).
