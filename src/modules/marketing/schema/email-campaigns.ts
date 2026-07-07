@@ -71,8 +71,8 @@ export const emailCampaigns = sqliteTable("marketing_email_campaigns", {
   briefSeasonalContext: text("brief_seasonal_context"),       // holiday / weather / cultural anchor
 
   /** Per-campaign logo override (e.g. for co-branded campaigns).
-   *  When null, the default brand logo (/public/brand/jaxy-logo-black.svg)
-   *  is used by the renderer. */
+   *  When null, the default brand logo (/public/brand/jaxy-logo-black.png —
+   *  PNG because email clients block SVG) is used by the renderer. */
   logoImagePath: text("logo_image_path"),
 
   /** Per-section visibility toggles. When TRUE the renderer skips
@@ -164,6 +164,7 @@ export const emailCampaigns = sqliteTable("marketing_email_campaigns", {
   // during planning.
   featuredProductIds: text("featured_product_ids"),
   aiCopyPromptVersion: text("ai_copy_prompt_version"),       // prompt template version used
+  copyBriefFingerprint: text("copy_brief_fingerprint"),      // brief hash at copy-generation time (stale-copy nudge)
   aiCopyRawJson: text("ai_copy_raw_json"),                   // last Claude response, full
   aiImagePromptRawJson: text("ai_image_prompt_raw_json"),    // last image-prompt response
   exportedHtmlPath: text("exported_html_path"),              // post-export, where the file lives

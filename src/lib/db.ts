@@ -133,6 +133,10 @@ try { sqlite.exec("ALTER TABLE marketing_email_campaigns ADD COLUMN hero_text_pl
 // background-position keywords, 9-point grid). Default keeps center-crop.
 try { sqlite.exec("ALTER TABLE marketing_email_campaigns ADD COLUMN hero_image_focal TEXT DEFAULT 'center center'"); } catch { /* exists */ }
 
+// Brief hash at copy-generation time — the editor compares live brief fields
+// against this to nudge "brief changed since copy was generated".
+try { sqlite.exec("ALTER TABLE marketing_email_campaigns ADD COLUMN copy_brief_fingerprint TEXT"); } catch { /* exists */ }
+
 // Contact form URL — when scraping a prospect for classification, we ALSO
 // harvest contact info. If we found a contact-us page but no direct email,
 // stash the URL here for later outreach (manual form submission or scraper).

@@ -9,6 +9,7 @@ import { emailCampaigns } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
 import { snapshotCopy } from "./copy-versions";
 import { lintGeneratedCopy } from "./copy-quality";
+import { briefFingerprint } from "./brief-fingerprint";
 
 /**
  * Snapshot the current copy (for undo), write the new copy onto the
@@ -83,6 +84,24 @@ export async function persistGeneratedCopy(
     .from(emailCampaigns)
     .where(eq(emailCampaigns.id, id))
     .limit(1);
+
+  // Record what the brief looked like when THIS copy was written (post-
+  // update row, since generate-copy may have just filled empty brief
+  // columns). The editor compares live brief fields against this to nudge
+  // "brief changed — regenerate?" instead of shipping stale copy.
+  if (updated) {
+    sqlite
+      .prepare(`UPDATE marketing_email_campaigns SET copy_brief_fingerprint = ? WHERE id = ?`)
+      .run(
+        briefFingerprint({
+          name: updated.name,
+          briefAngle: updated.briefAngle,
+          briefProductHook: updated.briefProductHook,
+          briefSeasonalContext: updated.briefSeasonalContext,
+        }),
+        id,
+      );
+  }
 
   return { updated, failedChecks, lint };
 }
