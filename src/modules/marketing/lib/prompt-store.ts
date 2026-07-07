@@ -43,6 +43,7 @@ export const AI_DOCS: DocMeta[] = [
   { slug: "image-prompt-generation", category: "prompt", title: "Image briefs (Higgsfield)", description: "Generates the hero + secondary image briefs for the designer.", file: path.join(PROMPTS_DIR, "image-prompt-generation.md") },
   { slug: "theme-generation-prompt", category: "prompt", title: "Theme generation", description: "Proposes weekly content themes for an audience.", file: path.join(PROMPTS_DIR, "theme-generation-prompt.md") },
   { slug: "month-plan-prompt", category: "prompt", title: "Month planner", description: "Proposes one brief per slot across a planning window.", file: path.join(PROMPTS_DIR, "month-plan-prompt.md") },
+  { slug: "video-caption-prompt", category: "prompt", title: "Video captions (Remix Studio)", description: "Caption + hashtags + manual posting checklist for generated TikTok/IG videos.", file: path.join(PROMPTS_DIR, "video-caption-prompt.md") },
   { slug: "brand-bible", category: "brand", title: "Brand bible", description: "The full brand voice + rules (drives retail voice).", file: path.join(BRAND_DIR, "brand-bible.md") },
   { slug: "wholesale-voice", category: "brand", title: "Wholesale voice", description: "Voice + rules for wholesale (Christina) emails.", file: path.join(BRAND_DIR, "wholesale-voice.md") },
   { slug: "visual-guidelines", category: "brand", title: "Visual guidelines", description: "Brand visual system reference.", file: path.join(BRAND_DIR, "visual-guidelines.md") },

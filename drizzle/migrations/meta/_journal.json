@@ -43,6 +43,13 @@
       "when": 1781624700000,
       "tag": "0005_breezy_segments",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1783382400000,
+      "tag": "0006_video_remix_studio",
+      "breakpoints": true
     }
   ]
 }

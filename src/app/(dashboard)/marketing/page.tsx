@@ -61,11 +61,12 @@ const MODULES: ModuleCard[] = [
     status: "wip",
   },
   {
-    href: "#",
+    href: "/marketing/videos",
     icon: Share2,
-    title: "Social",
-    description: "Instagram + TikTok scheduling. Not built yet.",
-    status: "planned",
+    title: "Video Remix Studio",
+    description:
+      "TikTok + Instagram content engine — upload tagged clips, auto-mix unique videos from recipes, AI captions + posting checklist.",
+    status: "live",
   },
   {
     href: "#",
