@@ -114,9 +114,12 @@ export async function POST(req: NextRequest) {
           p.subjectAngle ? `SUBJECT ANGLE: ${p.subjectAngle}` : "",
           p.brief.rationale ? `AI RATIONALE: ${p.brief.rationale}` : "",
         ].filter(Boolean).join("\n\n");
+        // Blank briefs (partial-accept planning) still get a findable name —
+        // an empty-name draft is invisible in every list view.
+        const name = p.brief.name.trim() || `Untitled — ${p.scheduledDate} — ${audience}`;
         insert.run(
           id,
-          p.brief.name,
+          name,
           audience,
           p.scheduledDate,
           p.weekOf ?? mondayOf(p.scheduledDate),
@@ -124,7 +127,7 @@ export async function POST(req: NextRequest) {
           p.layoutVariants.sectionAVariant,
           p.layoutVariants.secondaryImageVariant,
           p.layoutVariants.sectionBVariant,
-          p.brief.name,                            // brief_title mirrors name
+          name,                                    // brief_title mirrors name
           p.brief.angle,
           p.brief.productHook || null,
           p.brief.seasonalContext || null,

@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
+import { imagesComplete } from "@/modules/marketing/lib/images-complete";
 import { db, sqlite } from "@/lib/db";
 import { emailCampaigns } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
@@ -194,13 +195,7 @@ export async function PATCH(
   // the same PATCH wins (operator intent beats automation).
   const touchedImages = "heroImagePath" in body || "secondaryImagePath" in body || "secondaryImagePath2" in body;
   if (touchedImages && !("status" in body) && row && row.status === "photography") {
-    const heroReady = !!row.heroDisabled || !!row.heroImagePath;
-    const secondaryReady =
-      !!row.secondaryDisabled ||
-      (row.secondaryImageVariant === "grid_2up"
-        ? !!row.secondaryImagePath && !!row.secondaryImagePath2
-        : !!row.secondaryImagePath);
-    if (heroReady && secondaryReady) {
+    if (imagesComplete(row)) {
       sqlite
         .prepare(`UPDATE marketing_email_campaigns SET status = 'design_review', updated_at = datetime('now') WHERE id = ? AND status = 'photography'`)
         .run(id);

@@ -1242,6 +1242,7 @@ export default function CampaignDetailPage({
               performance data for future planning. */}
           <SendResultsCard
             campaignId={id}
+            audience={(campaign.audience as "retail" | "wholesale") ?? "retail"}
             onRecorded={(status) => {
               // Server may auto-advance sent/scheduled → analyzed.
               if (status) setCampaign((c) => (c ? { ...c, status } : c));
@@ -2153,14 +2154,16 @@ type SendResultRow = {
 
 function SendResultsCard({
   campaignId,
+  audience,
   onRecorded,
 }: {
   campaignId: string;
+  audience: "retail" | "wholesale";
   onRecorded: (newStatus: string | null) => void;
 }) {
   const [results, setResults] = useState<SendResultRow[]>([]);
   const [open, setOpen] = useState(false);
-  const [platform, setPlatform] = useState<"omnisend" | "faire">("omnisend");
+  const [platform, setPlatform] = useState<"omnisend" | "faire">(audience === "wholesale" ? "faire" : "omnisend");
   const [sentAt, setSentAt] = useState("");
   const [recipients, setRecipients] = useState("");
   const [opens, setOpens] = useState("");
@@ -2177,10 +2180,19 @@ function SendResultsCard({
   }, [campaignId]);
 
   async function submit() {
+    // Validate BEFORE submitting: "1,200" → NaN → JSON null → silently
+    // recorded as "—". Digits only (strip commas/spaces first).
+    const clean = (s: string) => s.replace(/[,\s]/g, "");
+    for (const [label, v] of [["Recipients", recipients], ["Opens", opens], ["Clicks", clicks]] as const) {
+      if (v.trim() !== "" && !/^\d+$/.test(clean(v))) {
+        setErr(`${label} must be a whole number (got "${v}")`);
+        return;
+      }
+    }
     setBusy(true);
     setErr(null);
     try {
-      const num = (s: string) => (s.trim() === "" ? undefined : Number(s));
+      const num = (s: string) => (clean(s) === "" ? undefined : Number(clean(s)));
       const res = await fetch(`/api/v1/marketing/email/campaigns/${campaignId}/results`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2198,8 +2210,9 @@ function SendResultsCard({
       setResults((rs) => [data.result, ...rs]);
       setRecipients(""); setOpens(""); setClicks(""); setNotes(""); setSentAt("");
       setOpen(false);
-      // The route advances sent/scheduled → analyzed; reflect locally.
-      onRecorded("analyzed");
+      // Reflect the REAL post-insert status (route only advances from
+      // sent/scheduled — a draft stays draft).
+      onRecorded(typeof data.statusAfter === "string" ? data.statusAfter : null);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to record");
     } finally {

@@ -23,6 +23,7 @@ export const runtime = "nodejs";
 export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from "next/server";
+import { imagesComplete } from "@/modules/marketing/lib/images-complete";
 import { db, sqlite } from "@/lib/db";
 import { emailCampaigns } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
@@ -131,23 +132,31 @@ export async function POST(
     // 2. Re-read inside the transaction for an isolated view
     const row = sqlite
       .prepare(
-        `SELECT status, hero_image_path, secondary_image_path,
+        `SELECT status, hero_disabled, secondary_disabled,
+                hero_image_path, secondary_image_path,
                 secondary_image_path_2, secondary_image_variant
            FROM marketing_email_campaigns WHERE id = ?`,
       )
       .get(cid) as {
         status: string | null;
+        hero_disabled: number | null;
+        secondary_disabled: number | null;
         hero_image_path: string | null;
         secondary_image_path: string | null;
         secondary_image_path_2: string | null;
         secondary_image_variant: string | null;
       } | undefined;
     if (!row) return { status: "photography", allReady: false };
-    const hasHero = !!row.hero_image_path;
-    const hasSecondary = !!row.secondary_image_path;
-    const needsSecondary2 = row.secondary_image_variant === "grid_2up";
-    const hasSecondary2 = !!row.secondary_image_path_2;
-    const allReady = hasHero && hasSecondary && (!needsSecondary2 || hasSecondary2);
+    // Shared "images complete" definition (disabled sections don't block) —
+    // keep in lockstep with the campaign PATCH route via images-complete.ts.
+    const allReady = imagesComplete({
+      heroDisabled: row.hero_disabled,
+      heroImagePath: row.hero_image_path,
+      secondaryDisabled: row.secondary_disabled,
+      secondaryImagePath: row.secondary_image_path,
+      secondaryImagePath2: row.secondary_image_path_2,
+      secondaryImageVariant: row.secondary_image_variant,
+    });
     let newStatus = row.status ?? "photography";
     if (allReady && row.status === "photography") {
       sqlite

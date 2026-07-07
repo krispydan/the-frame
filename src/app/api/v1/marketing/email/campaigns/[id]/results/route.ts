@@ -84,12 +84,16 @@ export async function POST(
   // Lifecycle: recording results is what "analyzed" means. Only advance
   // from sent/scheduled — never yank a campaign backwards or skip the
   // operator's earlier stages.
+  let statusAfter = campaign.status;
   if (campaign.status === "sent" || campaign.status === "scheduled") {
     await db
       .update(emailCampaigns)
       .set({ status: "analyzed" })
       .where(eq(emailCampaigns.id, id));
+    statusAfter = "analyzed";
   }
 
-  return NextResponse.json({ ok: true, result: inserted });
+  // statusAfter tells the client the REAL post-insert status — the editor
+  // must not assume "analyzed" (a draft campaign stays draft).
+  return NextResponse.json({ ok: true, result: inserted, statusAfter });
 }
