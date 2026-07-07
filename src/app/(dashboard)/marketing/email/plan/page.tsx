@@ -63,6 +63,10 @@ export default function PlanMonthPage() {
   const [startDate, setStartDate] = useState(nextMonday());
   const [weeks, setWeeks] = useState(4);
   const [proposals, setProposals] = useState<Proposal[] | null>(null);
+  // Per-proposal approve/reject — slotIndexes the operator excluded.
+  // Rejected briefs stay visible (dimmed) so the decision is reversible;
+  // only the included ones are created.
+  const [rejected, setRejected] = useState<Set<number>>(new Set());
   const [eventsConsidered, setEventsConsidered] = useState<number>(0);
   const [proposing, setProposing] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -89,6 +93,7 @@ export default function PlanMonthPage() {
       }
       if (data.error) { setError(data.error); return; }
       setProposals(data.proposals ?? []);
+      setRejected(new Set());
       setEventsConsidered(data.eventsConsidered ?? 0);
       // Partial-accept path: the AI returned fewer briefs than slots —
       // proposals still render (trailing ones blank), surfaced as a
@@ -156,13 +161,16 @@ export default function PlanMonthPage() {
 
   async function createAll() {
     if (!proposals) return;
-    // Guardrails before a 16-campaign bulk create: warn on blank briefs
-    // (partial-accept planning can leave trailing slots empty) and always
+    const included = proposals.filter((p) => !rejected.has(p.slotIndex));
+    if (included.length === 0) return;
+    // Guardrails: warn on blank briefs among the INCLUDED set and always
     // confirm the count — one click creating a month of drafts deserves
     // an "are you sure".
-    const blank = proposals.filter((p) => !p.brief.name.trim() && !p.brief.angle.trim()).length;
+    const blank = included.filter((p) => !p.brief.name.trim() && !p.brief.angle.trim()).length;
+    const skipped = proposals.length - included.length;
     const msg =
-      `Create ${proposals.length} ${audience} campaign${proposals.length === 1 ? "" : "s"} as drafts?` +
+      `Create ${included.length} of ${proposals.length} ${audience} campaign${included.length === 1 ? "" : "s"} as drafts?` +
+      (skipped > 0 ? ` (${skipped} rejected)` : "") +
       (blank > 0 ? `\n\n⚠ ${blank} slot${blank === 1 ? " has" : "s have"} a blank brief — they'll be created empty.` : "");
     if (!confirm(msg)) return;
     setCreating(true);
@@ -171,7 +179,7 @@ export default function PlanMonthPage() {
       const res = await fetch("/api/v1/marketing/email/plan-month/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audience, proposals, autoFeatureProducts }),
+        body: JSON.stringify({ audience, proposals: included, autoFeatureProducts }),
       });
       const data = await res.json();
       if (data.error) { setError(data.error); return; }
@@ -310,16 +318,16 @@ export default function PlanMonthPage() {
             <div>
               <h2 className="text-lg font-semibold">Proposed briefs</h2>
               <p className="text-xs text-muted-foreground">
-                {proposals.length} slot{proposals.length === 1 ? "" : "s"} ·
+                {proposals.length - rejected.size} of {proposals.length} selected ·
                 {" "}{eventsConsidered} calendar event{eventsConsidered === 1 ? "" : "s"} considered ·
                 {" "}Edit any field below — changes are saved on Create.
               </p>
             </div>
             <div className="flex flex-col items-end gap-2">
-              <Button onClick={createAll} disabled={creating}>
+              <Button onClick={createAll} disabled={creating || proposals.length - rejected.size === 0}>
                 {creating
                   ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Creating…</>
-                  : `Create ${proposals.length} campaign${proposals.length === 1 ? "" : "s"}`}
+                  : `Create ${proposals.length - rejected.size} campaign${proposals.length - rejected.size === 1 ? "" : "s"}`}
               </Button>
               <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
                 <input
@@ -333,8 +341,10 @@ export default function PlanMonthPage() {
           </div>
 
           <div className="space-y-3">
-            {proposals.map(p => (
-              <Card key={p.slotIndex}>
+            {proposals.map(p => {
+              const isRejected = rejected.has(p.slotIndex);
+              return (
+              <Card key={p.slotIndex} className={isRejected ? "opacity-50 border-dashed" : ""}>
                 <CardContent className="p-4 space-y-3">
                   <div className="flex items-center gap-2 flex-wrap text-xs">
                     <Badge>{audience}</Badge>
@@ -343,6 +353,24 @@ export default function PlanMonthPage() {
                     <Badge variant="outline">{p.layoutProfile}</Badge>
                     <Badge variant="outline">{p.imageStyle}</Badge>
                     <Badge variant="outline">angle: {p.subjectAngle}</Badge>
+                    {isRejected && <Badge variant="destructive">rejected — won't be created</Badge>}
+                    <button
+                      type="button"
+                      onClick={() => setRejected(r => {
+                        const next = new Set(r);
+                        if (next.has(p.slotIndex)) next.delete(p.slotIndex);
+                        else next.add(p.slotIndex);
+                        return next;
+                      })}
+                      className={`ml-auto px-3 py-1 rounded border text-xs ${
+                        isRejected
+                          ? "border-input hover:bg-accent"
+                          : "border-input text-muted-foreground hover:text-destructive hover:border-destructive"
+                      }`}
+                      title={isRejected ? "Include this brief when creating" : "Exclude this brief — it won't be created"}
+                    >
+                      {isRejected ? "↩ Include" : "✕ Reject"}
+                    </button>
                   </div>
 
                   <div>
@@ -418,14 +446,15 @@ export default function PlanMonthPage() {
                   </div>
                 </CardContent>
               </Card>
-            ))}
+              );
+            })}
           </div>
 
           <div className="flex justify-end pt-2 sticky bottom-2">
-            <Button onClick={createAll} disabled={creating} size="lg">
+            <Button onClick={createAll} disabled={creating || proposals.length - rejected.size === 0} size="lg">
               {creating
                 ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Creating…</>
-                : `Create ${proposals.length} campaign${proposals.length === 1 ? "" : "s"}`}
+                : `Create ${proposals.length - rejected.size} campaign${proposals.length - rejected.size === 1 ? "" : "s"}`}
             </Button>
           </div>
         </div>
