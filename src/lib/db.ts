@@ -137,6 +137,9 @@ try { sqlite.exec("ALTER TABLE marketing_email_campaigns ADD COLUMN hero_image_f
 // against this to nudge "brief changed since copy was generated".
 try { sqlite.exec("ALTER TABLE marketing_email_campaigns ADD COLUMN copy_brief_fingerprint TEXT"); } catch { /* exists */ }
 
+// Omnisend campaign id — set by the push-omnisend route (latest push wins).
+try { sqlite.exec("ALTER TABLE marketing_email_campaigns ADD COLUMN omnisend_campaign_id TEXT"); } catch { /* exists */ }
+
 // Contact form URL — when scraping a prospect for classification, we ALSO
 // harvest contact info. If we found a contact-us page but no direct email,
 // stash the URL here for later outreach (manual form submission or scraper).

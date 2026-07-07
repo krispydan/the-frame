@@ -4,8 +4,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { emailCampaigns } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
-import type { CampaignData } from "@/modules/marketing/lib/email-template-types";
 import { renderEmailHtml, renderSectionHtml, type SectionKind } from "@/modules/marketing/lib/render-email";
+import { campaignRowToData } from "@/modules/marketing/lib/campaign-render-data";
 
 /**
  * GET /api/v1/marketing/email/campaigns/[id]/preview
@@ -43,36 +43,9 @@ export async function GET(
     return new NextResponse("Not found", { status: 404 });
   }
 
-  const data: CampaignData = {
-    logoImagePath: row.logoImagePath,
-    heroDisabled: row.heroDisabled,
-    sectionADisabled: row.sectionADisabled,
-    secondaryDisabled: row.secondaryDisabled,
-    sectionBDisabled: row.sectionBDisabled,
-    heroVariant: row.heroVariant as CampaignData["heroVariant"],
-    heroImagePath: row.heroImagePath,
-    heroImageAlt: row.heroImageAlt,
-    heroHeadline: row.heroHeadline,
-    heroSubtitle: row.heroSubtitle,
-    heroCtaLabel: row.heroCtaLabel,
-    heroCtaUrl: row.heroCtaUrl,
-    heroScrim: row.heroScrim as CampaignData["heroScrim"],
-    heroTextPlacement: row.heroTextPlacement as CampaignData["heroTextPlacement"],
-    heroImageFocal: row.heroImageFocal,
-    sectionAVariant: row.sectionAVariant as CampaignData["sectionAVariant"],
-    sectionAHeading: row.sectionAHeading,
-    sectionABody: row.sectionABody,
-    secondaryImageVariant: row.secondaryImageVariant as CampaignData["secondaryImageVariant"],
-    secondaryImagePath: row.secondaryImagePath,
-    secondaryImagePath2: row.secondaryImagePath2,
-    secondaryImageAlt: row.secondaryImageAlt,
-    secondaryImageAlt2: row.secondaryImageAlt2,
-    sectionBVariant: row.sectionBVariant as CampaignData["sectionBVariant"],
-    sectionBHeading: row.sectionBHeading,
-    sectionBBody: row.sectionBBody,
-    sectionBCtaLabel: row.sectionBCtaLabel,
-    sectionBCtaUrl: row.sectionBCtaUrl,
-  };
+  // Shared row→CampaignData mapping (also used by push-omnisend) so new
+  // render fields can't silently go missing in one consumer.
+  const data = campaignRowToData(row);
 
   const SECTION_KINDS = ["hero", "sectionA", "secondary", "sectionB"];
   const html =

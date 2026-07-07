@@ -168,6 +168,7 @@ export const emailCampaigns = sqliteTable("marketing_email_campaigns", {
   aiCopyRawJson: text("ai_copy_raw_json"),                   // last Claude response, full
   aiImagePromptRawJson: text("ai_image_prompt_raw_json"),    // last image-prompt response
   exportedHtmlPath: text("exported_html_path"),              // post-export, where the file lives
+  omnisendCampaignId: text("omnisend_campaign_id"),          // set by push-omnisend (latest push wins)
 
   // Timestamps
   createdAt: timestamp("created_at"),
