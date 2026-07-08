@@ -24,6 +24,8 @@ export const tiktokSounds = sqliteTable("marketing_tiktok_sounds", {
   title: text("title").notNull(),
   author: text("author"),
   coverUrl: text("cover_url"),
+  /** Direct audio URL (actor play_url) for inline preview — no TikTok trip. */
+  previewUrl: text("preview_url"),
   /** Link to the sound on TikTok (Creative Center or music page). */
   tiktokLink: text("tiktok_link"),
   durationSec: real("duration_sec"),

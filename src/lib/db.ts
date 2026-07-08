@@ -140,6 +140,19 @@ try { sqlite.exec("ALTER TABLE marketing_email_campaigns ADD COLUMN copy_brief_f
 // Omnisend campaign id — set by the push-omnisend route (latest push wins).
 try { sqlite.exec("ALTER TABLE marketing_email_campaigns ADD COLUMN omnisend_campaign_id TEXT"); } catch { /* exists */ }
 
+// TikTok trending sounds: play_url from the actor lets us preview the
+// audio inline (no trip to TikTok).
+try { sqlite.exec("ALTER TABLE marketing_tiktok_sounds ADD COLUMN preview_url TEXT"); } catch { /* exists */ }
+// Backfill existing rows from the verbatim `raw` payload so preview works
+// without waiting for the next sync.
+try {
+  sqlite.exec(`UPDATE marketing_tiktok_sounds
+    SET preview_url = json_extract(raw, '$.play_url.url_list[0]')
+    WHERE preview_url IS NULL AND raw IS NOT NULL
+      AND json_valid(raw)
+      AND json_extract(raw, '$.play_url.url_list[0]') IS NOT NULL`);
+} catch { /* older sqlite without json1, or no rows */ }
+
 // Contact form URL — when scraping a prospect for classification, we ALSO
 // harvest contact info. If we found a contact-us page but no direct email,
 // stash the URL here for later outreach (manual form submission or scraper).

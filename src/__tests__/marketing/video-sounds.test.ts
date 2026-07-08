@@ -30,6 +30,8 @@ describe("TikTok sounds mapper", () => {
     expect(mapped.title).toContain("Forever");
     expect(mapped.author).toBe("Labrinth");
     expect(mapped.coverUrl).toBe("https://p16.example/thumb.jpeg");
+    // play_url → inline preview (no trip to TikTok)
+    expect(mapped.previewUrl).toBe("https://sf.example/audio");
     expect(mapped.durationSec).toBe(60);
     expect(mapped.usageCount).toBe(3175407);
     expect(mapped.rank).toBe(1); // array order (no rank field)

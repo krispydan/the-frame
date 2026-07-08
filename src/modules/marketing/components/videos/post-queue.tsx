@@ -9,7 +9,7 @@
  * type on-screen text, tag products) written by the AI.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,10 @@ import {
   Check,
   Copy,
   Download,
+  ExternalLink,
   Music,
+  Pause,
+  Play,
   RefreshCw,
   ShoppingBag,
   Sparkles,
@@ -49,7 +52,10 @@ type Instructions = {
 
 type TrendingSound = SuggestedSound & {
   coverUrl: string | null;
+  previewUrl: string | null;
   usageCount: number | null;
+  durationSec: number | null;
+  isPromoted: number | null;
 };
 
 type Post = {
@@ -213,6 +219,27 @@ function TrendingSoundsDialog({ onClose }: { onClose: () => void }) {
   const [configured, setConfigured] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Inline audio preview — one shared element so only one plays at a time.
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playingId, setPlayingId] = useState<string | null>(null);
+
+  const togglePlay = (s: TrendingSound) => {
+    const a = audioRef.current;
+    if (!a || !s.previewUrl) return;
+    if (playingId === s.id) {
+      a.pause();
+      setPlayingId(null);
+      return;
+    }
+    a.src = s.previewUrl;
+    a.play()
+      .then(() => setPlayingId(s.id))
+      .catch(() => {
+        // TikTok CDN links can be region/time-limited or block hotlinking.
+        toast.error("Preview unavailable here — open on TikTok");
+        setPlayingId(null);
+      });
+  };
 
   const load = useCallback(() => {
     fetch("/api/v1/marketing/videos/sounds")
@@ -228,7 +255,10 @@ function TrendingSoundsDialog({ onClose }: { onClose: () => void }) {
             rankType: s.rankType,
             trendDirection: s.trendDirection,
             coverUrl: s.coverUrl,
+            previewUrl: s.previewUrl,
             usageCount: s.usageCount,
+            durationSec: s.durationSec,
+            isPromoted: s.isPromoted,
           })),
         );
         setLastSyncedAt(d.lastSyncedAt ?? null);
@@ -298,37 +328,70 @@ function TrendingSoundsDialog({ onClose }: { onClose: () => void }) {
           </p>
         ) : (
           <div className="space-y-1">
-            {visible.map((s) => (
-              <a
-                key={s.id}
-                href={s.tiktokLink ?? undefined}
-                target="_blank"
-                rel="noreferrer"
-                className={`flex items-center gap-2 rounded border p-2 text-sm ${s.tiktokLink ? "hover:bg-muted" : ""}`}
-              >
-                <span className="w-6 text-right font-semibold text-muted-foreground">{s.rank ?? "–"}</span>
-                {s.coverUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={s.coverUrl} alt="" className="h-8 w-8 rounded object-cover" />
-                ) : (
-                  <span className="flex h-8 w-8 items-center justify-center rounded bg-muted">🎵</span>
-                )}
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{s.title}</span>
-                  {s.author && <span className="block truncate text-xs text-muted-foreground">{s.author}</span>}
-                </span>
-                {(s.trendDirection === "up" || s.trendDirection === "new") && (
-                  <Badge variant="default" className="text-[10px]">
-                    {s.trendDirection === "new" ? "new" : "rising"}
-                  </Badge>
-                )}
-                {s.usageCount != null && (
-                  <span className="text-[11px] text-muted-foreground whitespace-nowrap">
-                    {s.usageCount.toLocaleString()} uses
+            {/* One shared element so only a single preview plays at a time. */}
+            <audio ref={audioRef} onEnded={() => setPlayingId(null)} className="hidden" />
+            {visible.map((s) => {
+              const isPlaying = playingId === s.id;
+              return (
+                <div
+                  key={s.id}
+                  className="flex items-center gap-2 rounded border p-2 text-sm"
+                >
+                  <span className="w-5 text-right font-semibold text-muted-foreground">{s.rank ?? "–"}</span>
+                  {/* Cover doubles as the play/pause control when a preview exists. */}
+                  <button
+                    type="button"
+                    onClick={() => togglePlay(s)}
+                    disabled={!s.previewUrl}
+                    title={s.previewUrl ? (isPlaying ? "Pause" : "Play preview") : "No preview available"}
+                    className="relative h-9 w-9 shrink-0 overflow-hidden rounded bg-muted disabled:opacity-60"
+                  >
+                    {s.coverUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={s.coverUrl} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <span className="flex h-full w-full items-center justify-center">🎵</span>
+                    )}
+                    {s.previewUrl && (
+                      <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-white opacity-0 hover:opacity-100 data-[on=true]:opacity-100" data-on={isPlaying}>
+                        {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                      </span>
+                    )}
+                  </button>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{s.title}</span>
+                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      {s.author && <span className="truncate">{s.author}</span>}
+                      {s.durationSec != null && <span>· {Math.round(s.durationSec)}s</span>}
+                      {s.isPromoted ? <span>· original</span> : null}
+                    </span>
                   </span>
-                )}
-              </a>
-            ))}
+                  <span className="flex flex-col items-end gap-0.5">
+                    {(s.trendDirection === "up" || s.trendDirection === "new") && (
+                      <Badge variant="default" className="text-[10px]">
+                        {s.trendDirection === "new" ? "new" : "rising"}
+                      </Badge>
+                    )}
+                    {s.usageCount != null && (
+                      <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                        {s.usageCount.toLocaleString()} videos
+                      </span>
+                    )}
+                  </span>
+                  {s.tiktokLink && (
+                    <a
+                      href={s.tiktokLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="Open on TikTok"
+                      className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </DialogContent>
