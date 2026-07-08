@@ -22,6 +22,19 @@ export async function GET(request: NextRequest) {
     ${where}
     ORDER BY p.name ASC, s.color_name ASC
     LIMIT 500
-  `).all(...params);
-  return NextResponse.json({ skus: rows });
+  `).all(...params) as Array<{ id: string; sku: string | null; colorName: string | null; productName: string | null; productId: string }>;
+
+  // Group into parent products — we tag products, not color variations.
+  // Each product carries the full set of its SKU ids so tagging a product
+  // stores all its SKUs (weighting/sales signals stay SKU-level).
+  const byProduct = new Map<string, { id: string; name: string | null; skuIds: string[] }>();
+  for (const r of rows) {
+    const p = byProduct.get(r.productId) ?? { id: r.productId, name: r.productName, skuIds: [] };
+    p.skuIds.push(r.id);
+    byProduct.set(r.productId, p);
+  }
+  const products = [...byProduct.values()];
+
+  // `skus` kept for backward compat; `products` is what the pickers use.
+  return NextResponse.json({ products, skus: rows });
 }

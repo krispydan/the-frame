@@ -33,7 +33,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
   if (!clip) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const products = sqlite.prepare(`
-    SELECT cp.sku_id AS skuId, s.sku, s.color_name AS colorName, p.name AS productName
+    SELECT cp.sku_id AS skuId, s.sku, s.color_name AS colorName, p.name AS productName, p.id AS productId
     FROM marketing_video_clip_products cp
     LEFT JOIN catalog_skus s ON s.id = cp.sku_id
     LEFT JOIN catalog_products p ON p.id = s.product_id

@@ -17,7 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RefreshCw, Scissors, Trash2 } from "lucide-react";
-import type { UploaderCategory, UploaderSku } from "./clip-uploader";
+import type { UploaderCategory, UploaderProduct } from "./clip-uploader";
 import { sha256Hex16, directUploadAvailable } from "./direct-upload";
 import "@uppy/core/dist/style.min.css";
 import "@uppy/dashboard/dist/style.min.css";
@@ -48,12 +48,12 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "dest
 
 export function SourceAutoClipper({
   categories,
-  skus,
+  products,
   talents,
   onClipsChanged,
 }: {
   categories: UploaderCategory[];
-  skus: UploaderSku[];
+  products: UploaderProduct[];
   talents: string[];
   onClipsChanged: () => void;
 }) {
@@ -65,9 +65,11 @@ export function SourceAutoClipper({
   const [categoryId, setCategoryId] = useState("");
   const [audioMode, setAudioMode] = useState<"mute" | "keep">("mute");
   const [talent, setTalent] = useState("");
-  const [skuIds, setSkuIds] = useState<string[]>([]);
+  const [productIds, setProductIds] = useState<string[]>([]);
   const [minClipSec, setMinClipSec] = useState(3);
   const [maxClipSec, setMaxClipSec] = useState(5);
+  // Selected products expand to their SKU ids (storage stays SKU-level).
+  const skuIds = productIds.flatMap((pid) => products.find((p) => p.id === pid)?.skuIds ?? []);
   const defaultsRef = useRef({ categoryId, audioMode, talent, skuIds, minClipSec, maxClipSec });
   defaultsRef.current = { categoryId, audioMode, talent, skuIds, minClipSec, maxClipSec };
 
@@ -276,8 +278,8 @@ export function SourceAutoClipper({
     loadSources();
   };
 
-  const toggleSku = (id: string) =>
-    setSkuIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
+  const toggleProduct = (id: string) =>
+    setProductIds((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
 
   return (
     <div className="space-y-3 rounded-lg border p-3">
@@ -324,16 +326,13 @@ export function SourceAutoClipper({
         </label>
         <details className="relative">
           <summary className="cursor-pointer select-none border rounded px-2 py-1 bg-background">
-            Products {skuIds.length > 0 ? `(${skuIds.length})` : ""}
+            Products {productIds.length > 0 ? `(${productIds.length})` : ""}
           </summary>
           <div className="absolute z-20 mt-1 max-h-64 w-72 overflow-y-auto rounded-md border bg-background p-2 shadow-lg">
-            {skus.map((s) => (
-              <label key={s.id} className="flex items-center gap-2 px-1 py-0.5 hover:bg-muted rounded cursor-pointer">
-                <input type="checkbox" checked={skuIds.includes(s.id)} onChange={() => toggleSku(s.id)} />
-                <span className="truncate">
-                  {s.productName ?? s.sku} {s.colorName ? `— ${s.colorName}` : ""}
-                  {s.sku && <span className="text-muted-foreground ml-1">({s.sku})</span>}
-                </span>
+            {products.map((p) => (
+              <label key={p.id} className="flex items-center gap-2 px-1 py-0.5 hover:bg-muted rounded cursor-pointer">
+                <input type="checkbox" checked={productIds.includes(p.id)} onChange={() => toggleProduct(p.id)} />
+                <span className="truncate">{p.name ?? "Unnamed product"}</span>
               </label>
             ))}
           </div>

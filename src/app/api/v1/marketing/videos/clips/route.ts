@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
   `).get(...params) as { n: number }).n;
 
   const productStmt = sqlite.prepare(`
-    SELECT cp.sku_id AS skuId, s.sku, s.color_name AS colorName, p.name AS productName
+    SELECT cp.sku_id AS skuId, s.sku, s.color_name AS colorName, p.name AS productName, p.id AS productId
     FROM marketing_video_clip_products cp
     LEFT JOIN catalog_skus s ON s.id = cp.sku_id
     LEFT JOIN catalog_products p ON p.id = s.product_id
