@@ -34,6 +34,9 @@ The clip sequence (in order):
 Featured products (the video's focus):
 {{focusProducts}}              ← array of {name, color, sku, price, url}
 
+ALL products visible in the video (tag every one for TikTok Shop):
+{{productsInVideo}}            ← array of {name, color, sku}
+
 This week's sales signals:
 {{trendContext}}               ← e.g. "Honey Round: #1 by units this
                                   week, +43% WoW" (may be empty)
@@ -86,7 +89,11 @@ Write the exact manual steps for the person posting:
 - onScreenText: 0-3 short text overlays with timing, written to be
   typed in the TikTok/IG editor. Front-load the hook text in the first
   2 seconds. Empty array if the video speaks for itself.
-- tagProducts: which products to tag / link-in-bio references.
+- tagProducts: list EVERY product from "ALL products visible in the
+  video" (name + color) so the poster tags each one in TikTok Shop.
+  These are the shoppable product tags, not just link-in-bio — if a
+  product appears on screen, it should be taggable. Empty only when no
+  products are tagged on the clips.
 - coverSuggestion: which moment makes the best cover frame.
 - firstComment: optional — a first comment that adds context or a CTA
   (link in bio, sizing note). Omit if it would add nothing.

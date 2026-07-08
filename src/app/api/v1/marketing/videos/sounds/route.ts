@@ -13,7 +13,8 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   getTrendingSounds,
   lastSyncedAt,
-  syncTrendingSounds,
+  enqueueSoundsSync,
+  isSoundsSyncActive,
   type RankType,
 } from "@/modules/marketing/lib/video/tiktok-sounds";
 
@@ -30,22 +31,22 @@ export async function GET(request: NextRequest) {
     sounds,
     lastSyncedAt: lastSyncedAt(),
     configured: Boolean(process.env.APIFY_API_TOKEN),
+    // The chart pull takes minutes and runs as a background job — the UI
+    // polls this to know when a sync is in progress vs finished.
+    syncing: isSoundsSyncActive(),
   });
 }
 
-export async function POST(request: NextRequest) {
-  let body: { countryCode?: string; rankTypes?: RankType[]; limit?: number } = {};
-  try {
-    body = await request.json();
-  } catch {
-    /* empty body = defaults */
+export async function POST() {
+  if (!process.env.APIFY_API_TOKEN) {
+    return NextResponse.json(
+      { error: "Apify not configured — set APIFY_API_TOKEN env" },
+      { status: 503 },
+    );
   }
-  try {
-    const result = await syncTrendingSounds(body);
-    return NextResponse.json(result, { status: 200 });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    const status = /not configured/i.test(message) ? 503 : 502;
-    return NextResponse.json({ error: message }, { status });
-  }
+  // Enqueue a background job (ONE run, guarded against duplicates) and
+  // return immediately — never hold the browser connection open for the
+  // multi-minute actor run.
+  const result = enqueueSoundsSync();
+  return NextResponse.json(result, { status: result.enqueued ? 202 : 200 });
 }

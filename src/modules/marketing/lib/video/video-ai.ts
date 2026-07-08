@@ -177,6 +177,7 @@ function fallbackCopy(
   audioTreatment: string,
   focusProducts: Array<{ name: string; color: string | null }>,
   sounds: TiktokSound[],
+  allProductNames: string[],
 ): VideoCopy {
   const product = focusProducts[0];
   const caption = product
@@ -214,7 +215,7 @@ function fallbackCopy(
           : "Original clip audio is included — post as-is or layer a trending sound at low volume.",
       suggestedSounds: suggested,
       onScreenText: [],
-      tagProducts: focusProducts.map((p) => p.name),
+      tagProducts: allProductNames.length > 0 ? allProductNames : focusProducts.map((p) => p.name),
       coverSuggestion: "Use the opening frame.",
       firstComment: undefined,
     },
@@ -237,13 +238,27 @@ export async function generateVideoCopy(postId: string): Promise<{ ok: boolean; 
     ? db.select().from(videoRecipes).where(eq(videoRecipes.id, post.recipeId)).get()
     : undefined;
 
-  const clipSequence = loadClipContext(clipIds).map((c, i) => ({
+  const clipContext = loadClipContext(clipIds);
+  const clipSequence = clipContext.map((c, i) => ({
     position: i + 1,
     category: c.categorySlug ?? "uncategorized",
     durationSec: c.durationSec ?? 0,
     products: c.products,
   }));
   const focusProducts = loadFocusProducts(aiCtx.focusSkuIds ?? []);
+
+  // EVERY product visible anywhere in the video — the full tag list for
+  // TikTok Shop (not just the featured focus SKUs). Deduped by name+color.
+  const productsInVideo: Array<{ name: string; color: string | null; sku: string | null }> = [];
+  const seenProduct = new Set<string>();
+  for (const clip of clipContext) {
+    for (const p of clip.products) {
+      const key = `${p.name}|${p.color ?? ""}`;
+      if (seenProduct.has(key)) continue;
+      seenProduct.add(key);
+      productsInVideo.push(p);
+    }
+  }
 
   const scheduledFor = post.scheduledDate
     ? `${post.scheduledDate}, ${post.scheduledSlot ? SLOT_TIMES[post.scheduledSlot as Slot] : "any time"}`
@@ -278,6 +293,7 @@ export async function generateVideoCopy(postId: string): Promise<{ ok: boolean; 
     audioState: post.audioTreatment,
     clipSequence: JSON.stringify(clipSequence, null, 2),
     focusProducts: JSON.stringify(focusProducts, null, 2),
+    productsInVideo: productsInVideo.length > 0 ? JSON.stringify(productsInVideo, null, 2) : "(no products tagged on these clips)",
     trendContext: (aiCtx.trendNotes ?? []).join("\n") || "(no trend data this week)",
     events: JSON.stringify(events, null, 2),
     trendingSounds: chartSounds.length > 0 ? trendingSoundsJson : "(no chart synced yet — describe the vibe instead)",
@@ -320,7 +336,8 @@ export async function generateVideoCopy(postId: string): Promise<{ ok: boolean; 
   }
 
   // Fallback: usable placeholder copy, status stays `rendered`.
-  const fallback = fallbackCopy(post.audioTreatment, focusProducts, chartSounds);
+  const allProductLabels = productsInVideo.map((p) => (p.color ? `${p.name} (${p.color})` : p.name));
+  const fallback = fallbackCopy(post.audioTreatment, focusProducts, chartSounds, allProductLabels);
   db.update(videoPosts)
     .set({
       caption: post.caption ?? fallback.caption,

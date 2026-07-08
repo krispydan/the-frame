@@ -19,6 +19,7 @@
 import { db, sqlite } from "@/lib/db";
 import { tiktokSounds, type TiktokSound } from "@/modules/marketing/schema";
 import { and, asc, eq } from "drizzle-orm";
+import { jobQueue } from "@/modules/core/lib/job-queue";
 
 const APIFY_BASE = "https://api.apify.com/v2";
 
@@ -129,18 +130,88 @@ export interface SyncResult {
   synced: number;
   skipped: number;
   countryCode: string;
-  rankTypes: RankType[];
   errors: string[];
 }
 
+// ── Apify run lifecycle (async start + poll — cost-safe) ──
+//
+// We deliberately do NOT use run-sync-get-dataset-items: it holds an
+// HTTP connection open for the whole ~4-5min run, so the browser (or a
+// proxy) times out and RETRIES, spawning duplicate paid runs. Instead:
+//   1. If a run is already in-flight on Apify, attach to it (never
+//      start a second — this is the guard against duplicate runs).
+//   2. Otherwise start ONE run.
+//   3. Poll its status server-side until it finishes, then read the
+//      dataset. A broken poll connection re-reads status; it never
+//      re-triggers the actor.
+
+const POLL_INTERVAL_MS = 8000;
+const MAX_WAIT_MS = 6 * 60_000;
+const IN_FLIGHT = new Set(["READY", "RUNNING"]);
+
+interface ApifyRun {
+  id: string;
+  status: string;
+  defaultDatasetId?: string;
+}
+
+async function apifyJson(url: string, init?: RequestInit): Promise<{ data?: ApifyRun }> {
+  const res = await fetch(url, init);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Apify HTTP ${res.status}: ${text.slice(0, 300)}`);
+  }
+  return res.json();
+}
+
+async function startOrAttachRun(token: string, input: Record<string, unknown>): Promise<ApifyRun> {
+  // Guard: is a run already going? Attach instead of starting another.
+  try {
+    const last = await apifyJson(`${APIFY_BASE}/acts/${ACTOR_TIKTOK_SOUNDS}/runs/last?token=${token}`);
+    if (last.data && IN_FLIGHT.has(last.data.status)) {
+      console.info(`[tiktok-sounds] attaching to in-flight run ${last.data.id} (${last.data.status})`);
+      return last.data;
+    }
+  } catch {
+    /* no prior run / transient — fall through to start */
+  }
+  const started = await apifyJson(
+    `${APIFY_BASE}/acts/${ACTOR_TIKTOK_SOUNDS}/runs?token=${token}&timeout=300`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) },
+  );
+  if (!started.data?.id) throw new Error("Apify did not return a run id");
+  return started.data;
+}
+
+async function waitForRun(token: string, runId: string): Promise<ApifyRun> {
+  const deadline = Date.now() + MAX_WAIT_MS;
+  // Check immediately; only sleep between polls (keeps tests fast).
+  for (;;) {
+    const { data } = await apifyJson(`${APIFY_BASE}/acts/${ACTOR_TIKTOK_SOUNDS}/runs/${runId}?token=${token}`);
+    if (!data) throw new Error("Apify run lookup returned no data");
+    if (!IN_FLIGHT.has(data.status)) return data; // terminal (SUCCEEDED/FAILED/…)
+    if (Date.now() > deadline) {
+      throw new Error(`Apify run ${runId} still ${data.status} after ${MAX_WAIT_MS / 1000}s — leaving it; next sync will attach`);
+    }
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+}
+
+async function fetchDatasetItems(token: string, datasetId: string): Promise<RawItem[]> {
+  const res = await fetch(`${APIFY_BASE}/datasets/${datasetId}/items?token=${token}&clean=true&format=json`);
+  if (!res.ok) throw new Error(`Apify dataset HTTP ${res.status}`);
+  const items = await res.json();
+  return Array.isArray(items) ? (items as RawItem[]) : [];
+}
+
 /**
- * Pull the current charts and REPLACE our snapshot for each
- * (countryCode, rankType) slice. Throws only on config/HTTP failure of
- * the whole call; malformed items are counted in `skipped`.
+ * Sync the trending chart with ONE actor run and replace the whole
+ * country snapshot. "breakout" vs "popular" is derived from each
+ * sound's own trend signal — no second run needed. Safe to retry: an
+ * in-flight run is attached to, never duplicated.
  */
 export async function syncTrendingSounds(opts: {
   countryCode?: string;
-  rankTypes?: RankType[];
   limit?: number;
 } = {}): Promise<SyncResult> {
   const token = resolveApifyToken();
@@ -149,85 +220,93 @@ export async function syncTrendingSounds(opts: {
   }
 
   const countryCode = (opts.countryCode ?? process.env.TIKTOK_SOUNDS_COUNTRY ?? "US").toUpperCase();
-  const rankTypes = opts.rankTypes ?? (["popular", "breakout"] as RankType[]);
-  const limit = Math.min(Math.max(opts.limit ?? 30, 5), 100);
+  const limit = Math.min(Math.max(opts.limit ?? 40, 5), 100);
+  const result: SyncResult = { synced: 0, skipped: 0, countryCode, errors: [] };
 
-  const result: SyncResult = { synced: 0, skipped: 0, countryCode, rankTypes, errors: [] };
+  // Generous aliases — the actor ignores unknown fields.
+  const input = {
+    countryCode,
+    country_code: countryCode,
+    period: 7,
+    limit,
+    maxItems: limit,
+    commercial_music: false,
+  };
 
-  for (const rankType of rankTypes) {
-    // Input mirrors TikTok Creative Center's parameters, which this
-    // actor family passes through. Unknown fields are ignored by the
-    // actor, so sending generous aliases is safe.
-    const input = {
-      countryCode,
-      country_code: countryCode,
-      period: 7,
-      rankType,
-      rank_type: rankType,
-      limit,
-      maxItems: limit,
-      commercial_music: false,
-    };
+  const run = await startOrAttachRun(token, input);
+  const final = await waitForRun(token, run.id);
+  if (final.status !== "SUCCEEDED") {
+    throw new Error(`Apify run ${run.id} ended ${final.status}`);
+  }
+  const datasetId = final.defaultDatasetId ?? run.defaultDatasetId;
+  if (!datasetId) throw new Error("Apify run has no dataset id");
 
-    const url = `${APIFY_BASE}/acts/${ACTOR_TIKTOK_SOUNDS}/run-sync-get-dataset-items?token=${token}&timeout=300`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      result.errors.push(`${rankType}: Apify HTTP ${res.status}: ${text.slice(0, 300)}`);
-      continue;
-    }
-    const items = (await res.json()) as RawItem[];
-    if (!Array.isArray(items)) {
-      result.errors.push(`${rankType}: non-array response`);
-      continue;
-    }
-
-    const mapped = items
-      .map((item, i) => mapSoundItem(item, i))
-      .filter((m): m is MappedSound => m !== null);
-    result.skipped += items.length - mapped.length;
-    if (mapped.length === 0) {
-      result.errors.push(`${rankType}: 0 usable items out of ${items.length}`);
-      continue; // keep the previous snapshot rather than wiping it
-    }
-
-    // Replace this chart slice atomically.
-    const now = new Date().toISOString();
-    const replace = sqlite.transaction(() => {
-      sqlite
-        .prepare(`DELETE FROM marketing_tiktok_sounds WHERE country_code = ? AND rank_type = ?`)
-        .run(countryCode, rankType);
-      const insert = sqlite.prepare(`
-        INSERT INTO marketing_tiktok_sounds
-          (id, external_id, title, author, cover_url, tiktok_link, duration_sec,
-           rank, rank_diff, trend_direction, usage_count, country_code, rank_type,
-           is_promoted, raw, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      for (const m of mapped) {
-        insert.run(
-          crypto.randomUUID(), m.externalId, m.title, m.author, m.coverUrl,
-          m.tiktokLink, m.durationSec, m.rank, m.rankDiff, m.trendDirection,
-          m.usageCount, countryCode, rankType, m.isPromoted ? 1 : 0, m.raw, now,
-        );
-      }
-    });
-    replace();
-    result.synced += mapped.length;
+  const items = await fetchDatasetItems(token, datasetId);
+  const mapped = items
+    .map((item, i) => mapSoundItem(item, i))
+    .filter((m): m is MappedSound => m !== null);
+  result.skipped = items.length - mapped.length;
+  if (mapped.length === 0) {
+    // Keep the previous snapshot rather than wiping it to nothing.
+    throw new Error(`0 usable items out of ${items.length} — snapshot left unchanged`);
   }
 
-  if (result.synced === 0 && result.errors.length > 0) {
-    throw new Error(`TikTok sounds sync failed: ${result.errors.join(" | ")}`);
-  }
-  console.info(
-    `[tiktok-sounds] synced ${result.synced} sounds (${countryCode}, ${rankTypes.join("+")})` +
-    (result.errors.length ? ` — partial errors: ${result.errors.join(" | ")}` : ""),
-  );
+  // A sound is "breakout" if it's climbing or brand new; everything
+  // else is the established "popular" chart. One run feeds both tabs.
+  const rankTypeOf = (m: MappedSound): RankType =>
+    m.trendDirection === "up" || m.trendDirection === "new" ? "breakout" : "popular";
+
+  const now = new Date().toISOString();
+  const replace = sqlite.transaction(() => {
+    sqlite.prepare(`DELETE FROM marketing_tiktok_sounds WHERE country_code = ?`).run(countryCode);
+    const insert = sqlite.prepare(`
+      INSERT INTO marketing_tiktok_sounds
+        (id, external_id, title, author, cover_url, tiktok_link, duration_sec,
+         rank, rank_diff, trend_direction, usage_count, country_code, rank_type,
+         is_promoted, raw, synced_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const m of mapped) {
+      insert.run(
+        crypto.randomUUID(), m.externalId, m.title, m.author, m.coverUrl,
+        m.tiktokLink, m.durationSec, m.rank, m.rankDiff, m.trendDirection,
+        m.usageCount, countryCode, rankTypeOf(m), m.isPromoted ? 1 : 0, m.raw, now,
+      );
+    }
+  });
+  replace();
+  result.synced = mapped.length;
+
+  console.info(`[tiktok-sounds] synced ${result.synced} sounds (${countryCode}, run ${run.id})`);
   return result;
+}
+
+// ── Guarded enqueue (browser + cron entry point) ──
+
+const SYNC_JOB_TYPE = "marketing.tiktok-sounds.sync";
+
+/** Is a sync job already queued or running? */
+export function isSoundsSyncActive(): boolean {
+  try {
+    const row = sqlite
+      .prepare(`SELECT 1 FROM jobs WHERE type = ? AND status IN ('pending','running') LIMIT 1`)
+      .get(SYNC_JOB_TYPE);
+    return Boolean(row);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Enqueue a sync unless one is already in flight. Returning
+ * alreadyRunning (rather than starting a duplicate) is what stops the
+ * "clicked twice → paid twice" problem at the app boundary; the
+ * Apify-side attach guard covers cross-process races.
+ */
+export function enqueueSoundsSync(): { enqueued: boolean; alreadyRunning: boolean; jobId?: string } {
+  if (isSoundsSyncActive()) return { enqueued: false, alreadyRunning: true };
+  const jobId = jobQueue.enqueue(SYNC_JOB_TYPE, "marketing", {}, { priority: 2 });
+  return { enqueued: true, alreadyRunning: false, jobId };
 }
 
 // ── Read ──
