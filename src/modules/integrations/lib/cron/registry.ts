@@ -37,7 +37,7 @@ import { recalculateAllHealthScores } from "@/modules/customers/lib/health-scori
 import { refreshReorderEstimates } from "@/modules/customers/lib/reorder-engine";
 import { topUpVideoQueue } from "@/modules/marketing/lib/video/scheduler";
 import { runVideoStorageHygiene } from "@/modules/marketing/lib/video/cleanup";
-import { syncTrendingSounds } from "@/modules/marketing/lib/video/tiktok-sounds";
+import { enqueueSoundsSync } from "@/modules/marketing/lib/video/tiktok-sounds";
 
 export type CronJob = {
   id: string;                         // stable, kebab-case
@@ -334,9 +334,10 @@ export const CRON_JOBS: CronJob[] = [
   {
     id: "tiktok-sounds-sync",
     schedule: "30 12 * * *",  // 12:30 UTC ≈ 5:30am PT daily — fresh chart before the 6am queue top-up
-    description: "Pull TikTok trending sounds (popular + breakout, US) via Apify so posting instructions can name real audio. Skips when APIFY_API_TOKEN is unset.",
-    handler: () => syncTrendingSounds() as unknown as Promise<unknown>,
-    // Cheap daily run, but useless without the token — guard, don't fail.
+    description: "Pull TikTok trending sounds (US) via Apify so posting instructions can name real audio. One run, guarded against duplicates. Skips when APIFY_API_TOKEN is unset.",
+    // Enqueue the guarded background job rather than running the
+    // multi-minute Apify call inline (and never double-run a manual sync).
+    handler: async () => enqueueSoundsSync(),
     guard: () => Boolean(process.env.APIFY_API_TOKEN),
   },
 ];

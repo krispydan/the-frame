@@ -22,6 +22,7 @@ import {
   Download,
   Music,
   RefreshCw,
+  ShoppingBag,
   Sparkles,
   Trash2,
   Type,
@@ -210,8 +211,8 @@ function TrendingSoundsDialog({ onClose }: { onClose: () => void }) {
   const [sounds, setSounds] = useState<TrendingSound[]>([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [configured, setConfigured] = useState(true);
-  const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [chart, setChart] = useState<"breakout" | "popular">("breakout");
 
   const load = useCallback(() => {
@@ -233,6 +234,7 @@ function TrendingSoundsDialog({ onClose }: { onClose: () => void }) {
         );
         setLastSyncedAt(d.lastSyncedAt ?? null);
         setConfigured(Boolean(d.configured));
+        setSyncing(Boolean(d.syncing));
         setLoading(false);
       });
   }, []);
@@ -241,14 +243,24 @@ function TrendingSoundsDialog({ onClose }: { onClose: () => void }) {
     load();
   }, [load]);
 
+  // While a background sync runs, poll until it finishes, then the fresh
+  // chart appears on its own.
+  useEffect(() => {
+    if (!syncing) return;
+    const t = setInterval(load, 8000);
+    return () => clearInterval(t);
+  }, [syncing, load]);
+
   const sync = async () => {
-    setSyncing(true);
     const res = await fetch("/api/v1/marketing/videos/sounds", { method: "POST" });
     const data = await res.json();
-    setSyncing(false);
     if (res.ok) {
-      toast.success(`Synced ${data.synced} trending sounds`);
-      load();
+      setSyncing(true);
+      toast.success(
+        data.alreadyRunning
+          ? "A sync is already running — it takes a few minutes"
+          : "Sync started — pulling TikTok's chart in the background (a few minutes)",
+      );
     } else {
       toast.error(data.error ?? "Sync failed");
     }
@@ -469,7 +481,13 @@ function PostCard({ post, onChanged }: { post: Post; onChanged: () => void }) {
               </div>
             ))}
             {instructions.tagProducts && instructions.tagProducts.length > 0 && (
-              <div className="flex gap-1.5"><Check className="h-3.5 w-3.5 shrink-0 mt-px" /><span>Tag: {instructions.tagProducts.join(", ")}</span></div>
+              <div className="flex gap-1.5">
+                <ShoppingBag className="h-3.5 w-3.5 shrink-0 mt-px" />
+                <span>
+                  <b>TikTok Shop — tag {instructions.tagProducts.length} product{instructions.tagProducts.length === 1 ? "" : "s"}:</b>{" "}
+                  {instructions.tagProducts.join(", ")}
+                </span>
+              </div>
             )}
             {instructions.coverSuggestion && (
               <div className="text-muted-foreground">Cover: {instructions.coverSuggestion}</div>

@@ -17,6 +17,21 @@ registerJobHandler("marketing.video.normalize-clip", async (input) => {
   return (await normalizeClip(clipId)) as unknown as Record<string, unknown>;
 });
 
+registerJobHandler("marketing.tiktok-sounds.sync", async () => {
+  // Runs the Apify sync server-side so no browser connection is held
+  // open (that hang → proxy-retry → duplicate paid runs was the bug).
+  // Errors are RETURNED, not thrown, so the queue never retries an
+  // external paid API on transient failure.
+  const { syncTrendingSounds } = await import("./tiktok-sounds");
+  try {
+    return (await syncTrendingSounds()) as unknown as Record<string, unknown>;
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    console.warn(`[tiktok-sounds] sync job failed (no retry): ${error}`);
+    return { synced: 0, error };
+  }
+});
+
 registerJobHandler("marketing.video.split-source", async (input) => {
   const sourceId = input.sourceId;
   if (!sourceId || typeof sourceId !== "string") {
