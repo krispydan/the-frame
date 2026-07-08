@@ -13,12 +13,14 @@
  * NORM_VERSION pins the profile. If these flags ever change, bump it —
  * mixed-version concat is forbidden (see render.ts).
  */
+import { unlink } from "fs/promises";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { videoClips } from "@/modules/marketing/schema";
 import {
-  getVideoFullPath,
-  ensureVideoDir,
+  materializeVideo,
+  storeVideoFile,
+  videoScratchPath,
   videoStat,
   normalizedClipPath,
   mutedClipPath,
@@ -74,58 +76,79 @@ export async function normalizeClip(clipId: string): Promise<{
     .where(eq(videoClips.id, clipId))
     .run();
 
+  // Temp files to clean up regardless of outcome (materialized inputs +
+  // ffmpeg scratch outputs). storeVideoFile pushes each output to storage
+  // (R2 or the volume) — nothing is left on local disk beyond these temps.
+  const cleanups: Array<() => Promise<void>> = [];
+  const scratch = (name: string) => {
+    const p = videoScratchPath(name);
+    cleanups.push(() => unlink(p).catch(() => {}));
+    return p;
+  };
+
   try {
-    const rawFull = getVideoFullPath(clip.rawPath);
+    // The normalized file is the input for the muted + poster steps and the
+    // final probe, so we need it on local disk throughout: freshly encoded,
+    // or pulled back from storage. A freshly-encoded one is pushed to storage
+    // LAST (storeVideoFile consumes the temp), after all readers are done.
+    // The raw source is only fetched when a re-encode is actually needed.
+    let normLocal: string;
+    let normIsFresh = false;
+    if (normStat.exists) {
+      const m = await materializeVideo(normRel);
+      cleanups.push(m.cleanup);
+      normLocal = m.path;
+    } else {
+      const raw = await materializeVideo(clip.rawPath);
+      cleanups.push(raw.cleanup);
+      const rawProbe = await ffprobe(raw.path);
+      normLocal = scratch(`${clip.checksum}_norm.mp4`);
+      normIsFresh = true;
+      const inputArgs = rawProbe.hasAudio
+        ? ["-i", raw.path]
+        : // Inject a silent stereo track so every normalized clip has an
+          // identical audio layout (required for stream-copy concat).
+          ["-i", raw.path, "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-shortest", "-map", "0:v", "-map", "1:a"];
+      await runFfmpeg([
+        "-y",
+        ...inputArgs,
+        "-vf", SCALE_FILTER,
+        ...ENCODE_FLAGS,
+        ...AUDIO_FLAGS,
+        "-movflags", "+faststart",
+        normLocal,
+      ]);
+    }
 
-    if (!allExist) {
-      const rawProbe = await ffprobe(rawFull);
+    // ── Muted variant (video stream-copied, silent AAC) ──
+    if (!mutedStat.exists) {
+      const mutedLocal = scratch(`${clip.checksum}_muted.mp4`);
+      await runFfmpeg([
+        "-y",
+        "-i", normLocal,
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+        "-map", "0:v", "-map", "1:a",
+        "-c:v", "copy",
+        ...AUDIO_FLAGS,
+        "-shortest",
+        "-movflags", "+faststart",
+        mutedLocal,
+      ]);
+      await storeVideoFile(mutedLocal, mutedRel);
+    }
 
-      // ── Canonical normalized file ──
-      if (!normStat.exists) {
-        const normFull = await ensureVideoDir(normRel);
-        const inputArgs = rawProbe.hasAudio
-          ? ["-i", rawFull]
-          : // Inject a silent stereo track so every normalized clip has
-            // an identical audio layout (required for stream-copy concat).
-            ["-i", rawFull, "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-shortest", "-map", "0:v", "-map", "1:a"];
-        await runFfmpeg([
-          "-y",
-          ...inputArgs,
-          "-vf", SCALE_FILTER,
-          ...ENCODE_FLAGS,
-          ...AUDIO_FLAGS,
-          "-movflags", "+faststart",
-          normFull,
-        ]);
-      }
-
-      const normFull = getVideoFullPath(normRel);
-
-      // ── Muted variant (video stream-copied, silent AAC) ──
-      if (!mutedStat.exists) {
-        const mutedFull = await ensureVideoDir(mutedRel);
-        await runFfmpeg([
-          "-y",
-          "-i", normFull,
-          "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-          "-map", "0:v", "-map", "1:a",
-          "-c:v", "copy",
-          ...AUDIO_FLAGS,
-          "-shortest",
-          "-movflags", "+faststart",
-          mutedFull,
-        ]);
-      }
-
-      // ── Poster frame ──
-      if (!posterStat.exists) {
-        const posterFull = await ensureVideoDir(posterRel);
-        await runFfmpeg(["-y", "-ss", "0.5", "-i", normFull, "-frames:v", "1", "-q:v", "3", posterFull]);
-      }
+    // ── Poster frame ──
+    if (!posterStat.exists) {
+      const posterLocal = scratch(`${clip.checksum}_poster.jpg`);
+      await runFfmpeg(["-y", "-ss", "0.5", "-i", normLocal, "-frames:v", "1", "-q:v", "3", posterLocal]);
+      await storeVideoFile(posterLocal, posterRel);
     }
 
     // Probe the normalized output — its duration is what concat math uses.
-    const normProbe = await ffprobe(getVideoFullPath(normRel));
+    const normProbe = await ffprobe(normLocal);
+
+    // Push the normalized file last, once every reader above is done with it.
+    if (normIsFresh) await storeVideoFile(normLocal, normRel);
 
     db.update(videoClips)
       .set({
@@ -151,5 +174,7 @@ export async function normalizeClip(clipId: string): Promise<{
       .where(eq(videoClips.id, clipId))
       .run();
     throw e;
+  } finally {
+    for (const c of cleanups) await c();
   }
 }

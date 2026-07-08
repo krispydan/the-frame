@@ -19,6 +19,9 @@
  * Cloudflare's own recommended client).
  */
 import { AwsClient } from "aws4fetch";
+import { createWriteStream } from "fs";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
 
 export interface R2Config {
   accountId: string;
@@ -115,6 +118,20 @@ export async function r2Get(key: string): Promise<Buffer> {
   const res = await c.fetch(objectUrl(cfg, key), { method: "GET" });
   if (!res.ok) throw new Error(`R2 GET ${key} failed: ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
+}
+
+/**
+ * Stream an object straight to a local file — never buffers the whole
+ * body in memory. This is what materializeMedia uses so a 400MB raw
+ * source can be pulled for ffmpeg without a RAM spike (the OOM we're
+ * migrating away from).
+ */
+export async function r2GetToFile(key: string, destPath: string): Promise<void> {
+  const { client: c, cfg } = client();
+  const res = await c.fetch(objectUrl(cfg, key), { method: "GET" });
+  if (!res.ok || !res.body) throw new Error(`R2 GET ${key} failed: ${res.status}`);
+  // Web ReadableStream → Node Readable → file, backpressured by pipeline.
+  await pipeline(Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]), createWriteStream(destPath));
 }
 
 export async function r2Head(key: string): Promise<{ exists: boolean; size: number; contentType?: string }> {

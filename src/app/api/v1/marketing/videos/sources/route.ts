@@ -21,7 +21,7 @@ import path from "path";
 import { db, sqlite } from "@/lib/db";
 import { videoSources } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
-import { saveVideo, sourcePath, getVideoFullPath, videoStat } from "@/lib/storage/videos";
+import { saveVideo, sourcePath, materializeVideo, videoStat } from "@/lib/storage/videos";
 import { ffprobe } from "@/modules/marketing/lib/video/ffmpeg";
 import { jobQueue } from "@/modules/core/lib/job-queue";
 
@@ -98,10 +98,13 @@ export async function POST(request: NextRequest) {
   if (!existingFile.exists) await saveVideo(buffer, rawRel);
 
   let probe;
+  const mat = await materializeVideo(rawRel);
   try {
-    probe = await ffprobe(getVideoFullPath(rawRel));
+    probe = await ffprobe(mat.path);
   } catch {
     return NextResponse.json({ error: "File is not a decodable video" }, { status: 400 });
+  } finally {
+    await mat.cleanup();
   }
   if (probe.durationSec < minClipSec) {
     return NextResponse.json(
