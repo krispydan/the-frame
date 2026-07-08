@@ -18,7 +18,7 @@
  */
 import { db, sqlite } from "@/lib/db";
 import { tiktokSounds, type TiktokSound } from "@/modules/marketing/schema";
-import { and, asc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { jobQueue } from "@/modules/core/lib/job-queue";
 
 const APIFY_BASE = "https://api.apify.com/v2";
@@ -265,19 +265,28 @@ export async function syncTrendingSounds(opts: {
 
   const now = new Date().toISOString();
   const replace = sqlite.transaction(() => {
+    // Snapshot the outgoing chart so each sound remembers its usage/rank
+    // from last sync — that delta is the day-over-day momentum.
+    const priorRows = sqlite
+      .prepare(`SELECT external_id, usage_count, rank, synced_at FROM marketing_tiktok_sounds WHERE country_code = ?`)
+      .all(countryCode) as Array<{ external_id: string; usage_count: number | null; rank: number | null; synced_at: string | null }>;
+    const prior = new Map(priorRows.map((r) => [r.external_id, r]));
+
     sqlite.prepare(`DELETE FROM marketing_tiktok_sounds WHERE country_code = ?`).run(countryCode);
     const insert = sqlite.prepare(`
       INSERT INTO marketing_tiktok_sounds
         (id, external_id, title, author, cover_url, preview_url, tiktok_link, duration_sec,
-         rank, rank_diff, trend_direction, usage_count, country_code, rank_type,
-         is_promoted, raw, synced_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         rank, rank_diff, trend_direction, usage_count, prev_usage_count, prev_rank, prev_synced_at,
+         country_code, rank_type, is_promoted, raw, synced_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const m of mapped) {
+      const p = prior.get(m.externalId);
       insert.run(
         crypto.randomUUID(), m.externalId, m.title, m.author, m.coverUrl,
         m.previewUrl, m.tiktokLink, m.durationSec, m.rank, m.rankDiff, m.trendDirection,
-        m.usageCount, countryCode, rankTypeOf(m), m.isPromoted ? 1 : 0, m.raw, now,
+        m.usageCount, p?.usage_count ?? null, p?.rank ?? null, p?.synced_at ?? null,
+        countryCode, rankTypeOf(m), m.isPromoted ? 1 : 0, m.raw, now,
       );
     }
   });
@@ -316,24 +325,66 @@ export function enqueueSoundsSync(): { enqueued: boolean; alreadyRunning: boolea
   return { enqueued: true, alreadyRunning: false, jobId };
 }
 
+// ── Momentum scoring ──
+
+export interface ScoredSound extends TiktokSound {
+  /** New videos using the sound since the last sync (null before a 2nd sync). */
+  usageDelta: number | null;
+  /** Relative growth since last sync, e.g. 0.12 = +12%. */
+  growthPct: number | null;
+  /** Composite "which will do best" score — higher is a better bet. */
+  momentumScore: number;
+}
+
+/**
+ * Score a sound on how good a bet it is RIGHT NOW. Velocity dominates: a
+ * sound whose usage jumped since yesterday is catching fire and is the
+ * best thing to ride, even at lower absolute counts. Reach (log usage),
+ * the chart's own rising/new flag, and rank position are secondary. Before
+ * the 2nd sync there's no delta, so it degrades to reach + rank.
+ */
+export function scoreSound(row: {
+  usageCount: number | null;
+  prevUsageCount: number | null;
+  rank: number | null;
+  trendDirection: string | null;
+}): { usageDelta: number | null; growthPct: number | null; momentumScore: number } {
+  const usage = row.usageCount ?? 0;
+  const prev = row.prevUsageCount;
+  const usageDelta = prev != null ? usage - prev : null;
+  const growthPct = prev != null && prev > 0 && usageDelta != null ? usageDelta / prev : null;
+
+  let score = 0;
+  // Velocity — relative growth since last sync, clamped so a tiny-base
+  // spike (10→1000) doesn't infinitely dominate a genuinely huge sound.
+  if (growthPct != null) score += Math.max(-0.5, Math.min(growthPct, 5)) * 100;
+  // Reach — log-scaled absolute usage.
+  score += Math.log10(usage + 1) * 6;
+  // The chart's own signal + position.
+  if (row.trendDirection === "up" || row.trendDirection === "new") score += 12;
+  score -= (row.rank ?? 50) * 0.2;
+
+  return { usageDelta, growthPct, momentumScore: Math.round(score * 100) / 100 };
+}
+
 // ── Read ──
 
 export function getTrendingSounds(opts: {
   rankType?: RankType;
   countryCode?: string;
   limit?: number;
-} = {}): TiktokSound[] {
+} = {}): ScoredSound[] {
   const conditions = [
     eq(tiktokSounds.countryCode, (opts.countryCode ?? "US").toUpperCase()),
   ];
   if (opts.rankType) conditions.push(eq(tiktokSounds.rankType, opts.rankType));
-  return db
-    .select()
-    .from(tiktokSounds)
-    .where(and(...conditions))
-    .orderBy(asc(tiktokSounds.rankType), asc(tiktokSounds.rank))
-    .limit(opts.limit ?? 60)
-    .all();
+  const rows = db.select().from(tiktokSounds).where(and(...conditions)).all();
+
+  // Score + sort best-bet first (momentum). Small dataset (tens of rows),
+  // so scoring in JS and slicing the limit after the sort is fine.
+  const scored = rows.map((r) => ({ ...r, ...scoreSound(r) }));
+  scored.sort((a, b) => b.momentumScore - a.momentumScore);
+  return scored.slice(0, opts.limit ?? 60);
 }
 
 /** Newest sync stamp, or null if never synced. */

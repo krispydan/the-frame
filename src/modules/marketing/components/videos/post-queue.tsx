@@ -56,6 +56,8 @@ type TrendingSound = SuggestedSound & {
   usageCount: number | null;
   durationSec: number | null;
   isPromoted: number | null;
+  usageDelta: number | null;
+  growthPct: number | null;
 };
 
 type Post = {
@@ -259,6 +261,8 @@ function TrendingSoundsDialog({ onClose }: { onClose: () => void }) {
             usageCount: s.usageCount,
             durationSec: s.durationSec,
             isPromoted: s.isPromoted,
+            usageDelta: s.usageDelta,
+            growthPct: s.growthPct,
           })),
         );
         setLastSyncedAt(d.lastSyncedAt ?? null);
@@ -330,14 +334,17 @@ function TrendingSoundsDialog({ onClose }: { onClose: () => void }) {
           <div className="space-y-1">
             {/* One shared element so only a single preview plays at a time. */}
             <audio ref={audioRef} onEnded={() => setPlayingId(null)} className="hidden" />
-            {visible.map((s) => {
+            {visible.map((s, i) => {
               const isPlaying = playingId === s.id;
+              // List is sorted best-bet first, so #1 is our top pick.
+              const bestBet = i === 0 && visible.length > 1;
+              const rising = s.growthPct != null && s.growthPct > 0;
               return (
                 <div
                   key={s.id}
-                  className="flex items-center gap-2 rounded border p-2 text-sm"
+                  className={`flex items-center gap-2 rounded border p-2 text-sm ${bestBet ? "border-primary/60 bg-primary/5" : ""}`}
                 >
-                  <span className="w-5 text-right font-semibold text-muted-foreground">{s.rank ?? "–"}</span>
+                  <span className="w-5 text-right font-semibold text-muted-foreground">{i + 1}</span>
                   {/* Cover doubles as the play/pause control when a preview exists. */}
                   <button
                     type="button"
@@ -367,10 +374,17 @@ function TrendingSoundsDialog({ onClose }: { onClose: () => void }) {
                     </span>
                   </span>
                   <span className="flex flex-col items-end gap-0.5">
-                    {(s.trendDirection === "up" || s.trendDirection === "new") && (
+                    {bestBet ? (
+                      <Badge variant="default" className="text-[10px]">🔥 best bet</Badge>
+                    ) : (s.trendDirection === "up" || s.trendDirection === "new") ? (
                       <Badge variant="default" className="text-[10px]">
                         {s.trendDirection === "new" ? "new" : "rising"}
                       </Badge>
+                    ) : null}
+                    {rising && (
+                      <span className="text-[11px] font-medium text-emerald-600 whitespace-nowrap">
+                        ▲ +{Math.round((s.growthPct ?? 0) * 100)}%/day
+                      </span>
                     )}
                     {s.usageCount != null && (
                       <span className="text-[11px] text-muted-foreground whitespace-nowrap">
