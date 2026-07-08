@@ -21,8 +21,13 @@ import { sha256Hex16, directUploadAvailable } from "./direct-upload";
 import "@uppy/core/dist/style.min.css";
 import "@uppy/dashboard/dist/style.min.css";
 
-const PRESIGN_URL = "/api/v1/marketing/videos/clips/presign";
-const REGISTER_URL = "/api/v1/marketing/videos/clips/register";
+// Direct-upload endpoints. "clip" = store the file as one clip; "source"
+// = auto-clip the video into 3–5s clips (split job) then delete the
+// original. The auto-clip toggle picks which pair a given upload uses.
+const CLIP_PRESIGN = "/api/v1/marketing/videos/clips/presign";
+const CLIP_REGISTER = "/api/v1/marketing/videos/clips/register";
+const SOURCE_PRESIGN = "/api/v1/marketing/videos/sources/presign";
+const SOURCE_REGISTER = "/api/v1/marketing/videos/sources/register";
 
 export interface UploaderCategory {
   id: string;
@@ -58,8 +63,11 @@ export function ClipUploader({
   const [audioMode, setAudioMode] = useState<"mute" | "keep">("mute");
   const [skuIds, setSkuIds] = useState<string[]>([]);
   const [talent, setTalent] = useState("");
-  const defaultsRef = useRef({ categoryId, audioMode, skuIds, talent });
-  defaultsRef.current = { categoryId, audioMode, skuIds, talent };
+  // Auto-clip ON (default): each uploaded video is split into 3–5s clips
+  // and the original is deleted. OFF: the file is kept whole as one clip.
+  const [autoClip, setAutoClip] = useState(true);
+  const defaultsRef = useRef({ categoryId, audioMode, skuIds, talent, autoClip });
+  defaultsRef.current = { categoryId, audioMode, skuIds, talent, autoClip };
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -70,7 +78,9 @@ export function ClipUploader({
       // Prefer direct-to-R2 upload (browser → R2, never through this
       // server). Falls back to the through-server multipart route when R2
       // isn't configured (local dev).
-      const direct = await directUploadAvailable(PRESIGN_URL);
+      // R2 gating is identical for both endpoint pairs, so probing one
+      // tells us whether direct upload is available for either.
+      const direct = await directUploadAvailable(CLIP_PRESIGN);
       if (cancelled || !containerRef.current) return;
 
       const [{ default: Uppy }, { default: Dashboard }] = await Promise.all([
@@ -85,8 +95,8 @@ export function ClipUploader({
         // above beforehand, so there's no per-file step to wait for.
         autoProceed: true,
         restrictions: {
-          maxFileSize: 200 * 1024 * 1024,
-          allowedFileTypes: ["video/*", ".mp4", ".mov", ".m4v", ".webm"],
+          maxFileSize: 400 * 1024 * 1024,
+          allowedFileTypes: ["video/*", ".mp4", ".mov", ".m4v", ".webm", ".mkv"],
         },
         meta: {},
       }).use(Dashboard, {
@@ -95,7 +105,7 @@ export function ClipUploader({
         height: 360,
         proudlyDisplayPoweredByUppy: false,
         showProgressDetails: true,
-        note: "5-10s clips, up to 200MB each. Set the batch defaults above FIRST — files upload as soon as you drop them, tagged with those defaults.",
+        note: "Drop videos (up to 400MB each). With Auto-clip on, each one is split into 3–5s clips and the original is deleted. Set the batch defaults above FIRST.",
       });
 
       // After a direct upload lands in R2, we record the DB row via
@@ -113,7 +123,8 @@ export function ClipUploader({
           getUploadParameters: async (file) => {
             const checksum = await sha256Hex16(file.data as Blob);
             uppy.setFileMeta(file.id, { checksum });
-            const res = await fetch(PRESIGN_URL, {
+            const presignUrl = defaultsRef.current.autoClip ? SOURCE_PRESIGN : CLIP_PRESIGN;
+            const res = await fetch(presignUrl, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -143,8 +154,9 @@ export function ClipUploader({
             | string
             | undefined;
           if (!checksum) return;
+          const registerUrl = d.autoClip ? SOURCE_REGISTER : CLIP_REGISTER;
           registerPromises.push(
-            fetch(REGISTER_URL, {
+            fetch(registerUrl, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -154,6 +166,8 @@ export function ClipUploader({
                 skuIds: d.skuIds,
                 audioMode: d.audioMode,
                 talent: d.talent.trim(),
+                // Split settings only used by the source (auto-clip) endpoint.
+                ...(d.autoClip ? { minClipSec: 3, maxClipSec: 5 } : {}),
               }),
             })
               .then(async (res) => {
@@ -168,12 +182,16 @@ export function ClipUploader({
       } else {
         const { default: XHRUpload } = await import("@uppy/xhr-upload");
         if (cancelled) return;
+        // Through-server fallback (local dev, no R2). Endpoint is fixed at
+        // init, so it follows the auto-clip toggle's value at mount.
         uppy.use(XHRUpload, {
-          endpoint: "/api/v1/marketing/videos/clips/upload",
+          endpoint: defaultsRef.current.autoClip
+            ? "/api/v1/marketing/videos/sources"
+            : "/api/v1/marketing/videos/clips/upload",
           formData: true,
           fieldName: "file",
           bundle: false,
-          timeout: 10 * 60_000,
+          timeout: 15 * 60_000,
           // 2 concurrent — uploads buffer server-side; don't spike RAM.
           limit: 2,
           getResponseData: (xhr: XMLHttpRequest) => {
@@ -192,11 +210,18 @@ export function ClipUploader({
             audioMode: d.audioMode,
             skuIds: JSON.stringify(d.skuIds),
             talent: d.talent.trim(),
+            minClipSec: "3",
+            maxClipSec: "5",
           });
         });
       }
 
       uppy.on("complete", async (result) => {
+        const clipped = defaultsRef.current.autoClip;
+        const noun = clipped ? "video" : "clip";
+        const tail = clipped
+          ? " — auto-clipping into 3–5s clips in the background"
+          : " — normalizing in the background";
         const failedUploads = result.failed?.length ?? 0;
         if (direct) {
           // Wait for the register calls kicked off in upload-success.
@@ -206,9 +231,9 @@ export function ClipUploader({
           const failed = failedUploads + registerResults.filter((r) => !r.ok).length;
           if (ok > 0) {
             toast.success(
-              `Uploaded ${ok} clip${ok === 1 ? "" : "s"}` +
+              `Uploaded ${ok} ${noun}${ok === 1 ? "" : "s"}` +
                 (deduped > 0 ? ` (${deduped} already existed)` : "") +
-                " — normalizing in the background",
+                tail,
             );
           }
           if (failed > 0) toast.error(`${failed} upload${failed === 1 ? "" : "s"} failed`);
@@ -219,9 +244,9 @@ export function ClipUploader({
           ).length;
           if (ok > 0) {
             toast.success(
-              `Uploaded ${ok} clip${ok === 1 ? "" : "s"}` +
+              `Uploaded ${ok} ${noun}${ok === 1 ? "" : "s"}` +
                 (deduped > 0 ? ` (${deduped} already existed)` : "") +
-                " — normalizing in the background",
+                tail,
             );
           }
           if (failedUploads > 0) {
@@ -262,6 +287,24 @@ export function ClipUploader({
 
   return (
     <div className="space-y-3">
+      {/* Auto-clip toggle — the primary decision for an upload. */}
+      <label className="flex items-start gap-2 rounded-lg border bg-muted/40 p-3 text-sm cursor-pointer">
+        <input
+          type="checkbox"
+          checked={autoClip}
+          onChange={(e) => setAutoClip(e.target.checked)}
+          className="mt-0.5 h-4 w-4"
+        />
+        <span>
+          <span className="font-medium">Auto-clip into 3–5s clips</span>
+          <span className="block text-xs text-muted-foreground">
+            {autoClip
+              ? "Each video is split at scene changes into short clips, then the original is deleted. Turn off to upload ready-made clips as-is."
+              : "Files are kept whole — one clip per file. Turn on to auto-split long footage."}
+          </span>
+        </span>
+      </label>
+
       {/* Batch defaults bar */}
       <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/40 p-3 text-sm">
         <span className="font-medium">Batch defaults:</span>

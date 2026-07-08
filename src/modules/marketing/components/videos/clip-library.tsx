@@ -164,11 +164,11 @@ export function ClipLibrary() {
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={() => setShowUploader((v) => !v)}>
-          {showUploader ? "Hide uploader" : "Upload clips"}
+          {showUploader ? "Hide uploader" : "Upload videos"}
         </Button>
         <Button variant="outline" onClick={() => setShowAutoClipper((v) => !v)}>
           <Scissors className="h-4 w-4 mr-1" />
-          {showAutoClipper ? "Hide auto-clipper" : "Auto-clip raw footage"}
+          {showAutoClipper ? "Hide clipping status" : "Clipping status"}
         </Button>
         <Button variant="outline" onClick={() => setShowCategories(true)}>
           Categories
