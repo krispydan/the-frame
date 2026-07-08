@@ -8,7 +8,10 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { sqlite } from "@/lib/db";
+import { db, sqlite } from "@/lib/db";
+import { videoClips } from "@/modules/marketing/schema";
+import { eq } from "drizzle-orm";
+import { deleteVideo } from "@/lib/storage/videos";
 
 export async function PATCH(request: NextRequest) {
   let body: {
@@ -101,4 +104,62 @@ export async function PATCH(request: NextRequest) {
   }
 
   return NextResponse.json({ updated, clipCount: clipIds.length });
+}
+
+/**
+ * DELETE /api/v1/marketing/videos/clips/bulk — bulk delete.
+ *
+ * Body: { clipIds: string[], hard?: boolean }
+ * Mirrors the single-clip DELETE: a clip used in any post is archived
+ * (its render history stays intact); an unused clip is hard-deleted (row
+ * + product links + stored files) when hard=true, else archived. Returns
+ * a per-outcome summary so the UI can report "5 deleted, 2 archived".
+ */
+export async function DELETE(request: NextRequest) {
+  let body: { clipIds?: string[]; hard?: boolean };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const clipIds = (body.clipIds ?? []).map(String).filter(Boolean);
+  if (clipIds.length === 0) {
+    return NextResponse.json({ error: "clipIds is required" }, { status: 400 });
+  }
+  const hard = body.hard !== false; // default to hard-delete for unused clips
+
+  const usedStmt = sqlite.prepare(
+    `SELECT COUNT(*) AS n FROM marketing_video_posts WHERE clip_ids LIKE ?`,
+  );
+  const delProducts = sqlite.prepare(`DELETE FROM marketing_video_clip_products WHERE clip_id = ?`);
+
+  let deleted = 0;
+  let archived = 0;
+  let notFound = 0;
+
+  for (const id of clipIds) {
+    const clip = db.select().from(videoClips).where(eq(videoClips.id, id)).get();
+    if (!clip) {
+      notFound++;
+      continue;
+    }
+    const usedInPosts = (usedStmt.get(`%"${id}"%`) as { n: number }).n;
+    if (hard && usedInPosts === 0) {
+      delProducts.run(id);
+      db.delete(videoClips).where(eq(videoClips.id, id)).run();
+      for (const rel of [clip.rawPath, clip.normalizedPath, clip.mutedPath, clip.posterPath]) {
+        if (rel) await deleteVideo(rel).catch(() => {});
+      }
+      deleted++;
+    } else {
+      db.update(videoClips)
+        .set({ status: "archived", updatedAt: new Date().toISOString() })
+        .where(eq(videoClips.id, id))
+        .run();
+      archived++;
+    }
+  }
+
+  return NextResponse.json({ deleted, archived, notFound, clipCount: clipIds.length });
 }

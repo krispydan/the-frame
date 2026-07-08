@@ -130,6 +130,33 @@ export function ClipLibrary() {
     }
   };
 
+  const bulkDelete = async () => {
+    const n = selected.size;
+    if (
+      !window.confirm(
+        `Delete ${n} clip${n === 1 ? "" : "s"}? Unused clips are removed permanently ` +
+          `(files and all); any already used in a post are archived instead.`,
+      )
+    ) {
+      return;
+    }
+    const res = await fetch("/api/v1/marketing/videos/clips/bulk", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clipIds: [...selected], hard: true }),
+    });
+    if (res.ok) {
+      const r = await res.json();
+      toast.success(
+        `Deleted ${r.deleted}` + (r.archived ? `, archived ${r.archived} (in use)` : ""),
+      );
+      setSelected(new Set());
+      load();
+    } else {
+      toast.error((await res.json()).error ?? "Delete failed");
+    }
+  };
+
   if (loading) return <div className="animate-pulse h-96 bg-muted rounded-lg" />;
 
   return (
@@ -217,6 +244,10 @@ export function ClipLibrary() {
           <Button size="sm" variant="outline" onClick={() => bulkPatch({ boost: 1 })}>Boost</Button>
           <Button size="sm" variant="outline" onClick={() => bulkPatch({ boost: 0 })}>Unboost</Button>
           <BulkTalentInput talents={talents} onApply={(t) => bulkPatch({ talent: t })} />
+          <div className="flex-1" />
+          <Button size="sm" variant="destructive" onClick={bulkDelete}>
+            <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
+          </Button>
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Clear</Button>
         </div>
       )}
@@ -401,6 +432,24 @@ function ClipEditDialog({
     onSaved();
   };
 
+  const del = async () => {
+    if (
+      !window.confirm(
+        "Delete this clip permanently? Its files are removed. If it's already used in a post it will be archived instead.",
+      )
+    ) {
+      return;
+    }
+    const res = await fetch(`/api/v1/marketing/videos/clips/${clip.id}?hard=1`, { method: "DELETE" });
+    const r = await res.json().catch(() => ({}));
+    if (res.ok) {
+      toast.success(r.deleted ? "Clip deleted" : "Clip archived (it's used in a post)");
+      onSaved();
+    } else {
+      toast.error(r.error ?? "Delete failed");
+    }
+  };
+
   const renormalize = async () => {
     const res = await fetch(`/api/v1/marketing/videos/clips/${clip.id}/renormalize`, { method: "POST" });
     if (res.ok) toast.success("Re-normalization queued");
@@ -505,7 +554,10 @@ function ClipEditDialog({
               <RefreshCw className="h-3.5 w-3.5 mr-1" /> Re-normalize
             </Button>
             <Button variant="outline" size="sm" onClick={archive}>
-              <Trash2 className="h-3.5 w-3.5 mr-1" /> Archive
+              Archive
+            </Button>
+            <Button variant="destructive" size="sm" onClick={del}>
+              <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
             </Button>
           </div>
           <div className="flex gap-2">
