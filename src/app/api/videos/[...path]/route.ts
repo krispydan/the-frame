@@ -15,7 +15,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stat, open } from "fs/promises";
 import path from "path";
-import { getVideoFullPath } from "@/lib/storage/videos";
+import { getVideoFullPath, videoUrl } from "@/lib/storage/videos";
+import { mediaOnR2 } from "@/lib/storage/media";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,16 @@ export async function GET(
   }
 
   const relPath = segments.map((s) => decodeURIComponent(s)).join("/");
+
+  // When R2 is live, the bytes live on the CDN, not this volume. Redirect
+  // any lingering /api/videos links (old DB rows, cached pages) to the
+  // public R2 URL instead of 404-ing on an empty volume.
+  if (mediaOnR2()) {
+    const u = videoUrl(relPath);
+    if (/^https?:\/\//.test(u)) {
+      return NextResponse.redirect(u, 302);
+    }
+  }
 
   let full: string;
   try {

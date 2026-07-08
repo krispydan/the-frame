@@ -15,10 +15,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { sha256Hex16, directUploadAvailable } from "./direct-upload";
 // Bundled, same-origin Uppy styles. Static imports work in an App Router
 // client component and guarantee the dashboard is always styled.
 import "@uppy/core/dist/style.min.css";
 import "@uppy/dashboard/dist/style.min.css";
+
+const PRESIGN_URL = "/api/v1/marketing/videos/clips/presign";
+const REGISTER_URL = "/api/v1/marketing/videos/clips/register";
 
 export interface UploaderCategory {
   id: string;
@@ -63,12 +67,16 @@ export function ClipUploader({
     let cancelled = false;
 
     (async () => {
-      const [{ default: Uppy }, { default: Dashboard }, { default: XHRUpload }] = await Promise.all([
+      // Prefer direct-to-R2 upload (browser → R2, never through this
+      // server). Falls back to the through-server multipart route when R2
+      // isn't configured (local dev).
+      const direct = await directUploadAvailable(PRESIGN_URL);
+      if (cancelled || !containerRef.current) return;
+
+      const [{ default: Uppy }, { default: Dashboard }] = await Promise.all([
         import("@uppy/core"),
         import("@uppy/dashboard"),
-        import("@uppy/xhr-upload"),
       ]);
-
       if (cancelled || !containerRef.current) return;
 
       const uppy = new Uppy({
@@ -81,16 +89,86 @@ export function ClipUploader({
           allowedFileTypes: ["video/*", ".mp4", ".mov", ".m4v", ".webm"],
         },
         meta: {},
-      })
-        .use(Dashboard, {
-          inline: true,
-          target: containerRef.current,
-          height: 360,
-          proudlyDisplayPoweredByUppy: false,
-          showProgressDetails: true,
-          note: "5-10s clips, up to 200MB each. Set the batch defaults above FIRST — files upload as soon as you drop them, tagged with those defaults.",
-        })
-        .use(XHRUpload, {
+      }).use(Dashboard, {
+        inline: true,
+        target: containerRef.current,
+        height: 360,
+        proudlyDisplayPoweredByUppy: false,
+        showProgressDetails: true,
+        note: "5-10s clips, up to 200MB each. Set the batch defaults above FIRST — files upload as soon as you drop them, tagged with those defaults.",
+      });
+
+      // After a direct upload lands in R2, we record the DB row via
+      // /register. Track those calls so the "complete" summary waits for
+      // them (Uppy doesn't await event handlers).
+      const registerResults: Array<{ ok: boolean; deduped: boolean }> = [];
+      const registerPromises: Array<Promise<void>> = [];
+
+      if (direct) {
+        const { default: AwsS3 } = await import("@uppy/aws-s3");
+        if (cancelled) return;
+        uppy.use(AwsS3, {
+          shouldUseMultipart: false,
+          // Single presigned PUT straight to R2.
+          getUploadParameters: async (file) => {
+            const checksum = await sha256Hex16(file.data as Blob);
+            uppy.setFileMeta(file.id, { checksum });
+            const res = await fetch(PRESIGN_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                fileName: file.name,
+                checksum,
+                contentType: file.type || "video/mp4",
+              }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok || !body.uploadUrl) {
+              throw new Error(body.error || "Could not presign upload");
+            }
+            return {
+              method: "PUT",
+              url: body.uploadUrl as string,
+              fields: {},
+              headers: (body.headers as Record<string, string>) || {
+                "Content-Type": file.type || "video/mp4",
+              },
+            };
+          },
+        });
+
+        uppy.on("upload-success", (file) => {
+          const d = defaultsRef.current;
+          const checksum = (file?.meta as Record<string, unknown> | undefined)?.checksum as
+            | string
+            | undefined;
+          if (!checksum) return;
+          registerPromises.push(
+            fetch(REGISTER_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                checksum,
+                fileName: file?.name,
+                categoryId: d.categoryId,
+                skuIds: d.skuIds,
+                audioMode: d.audioMode,
+                talent: d.talent.trim(),
+              }),
+            })
+              .then(async (res) => {
+                const b = await res.json().catch(() => ({}));
+                registerResults.push({ ok: res.ok, deduped: !!b.deduped });
+              })
+              .catch(() => {
+                registerResults.push({ ok: false, deduped: false });
+              }),
+          );
+        });
+      } else {
+        const { default: XHRUpload } = await import("@uppy/xhr-upload");
+        if (cancelled) return;
+        uppy.use(XHRUpload, {
           endpoint: "/api/v1/marketing/videos/clips/upload",
           formData: true,
           fieldName: "file",
@@ -107,30 +185,48 @@ export function ClipUploader({
           },
         });
 
-      uppy.on("file-added", (file) => {
-        const d = defaultsRef.current;
-        uppy.setFileMeta(file.id, {
-          categoryId: d.categoryId,
-          audioMode: d.audioMode,
-          skuIds: JSON.stringify(d.skuIds),
-          talent: d.talent.trim(),
+        uppy.on("file-added", (file) => {
+          const d = defaultsRef.current;
+          uppy.setFileMeta(file.id, {
+            categoryId: d.categoryId,
+            audioMode: d.audioMode,
+            skuIds: JSON.stringify(d.skuIds),
+            talent: d.talent.trim(),
+          });
         });
-      });
+      }
 
-      uppy.on("complete", (result) => {
-        const ok = result.successful?.length ?? 0;
-        const deduped = (result.successful ?? []).filter(
-          (f) => (f.response?.body as { deduped?: boolean } | undefined)?.deduped,
-        ).length;
-        if (ok > 0) {
-          toast.success(
-            `Uploaded ${ok} clip${ok === 1 ? "" : "s"}` +
-              (deduped > 0 ? ` (${deduped} already existed)` : "") +
-              " — normalizing in the background",
-          );
-        }
-        if (result.failed && result.failed.length > 0) {
-          toast.error(`${result.failed.length} upload${result.failed.length === 1 ? "" : "s"} failed`);
+      uppy.on("complete", async (result) => {
+        const failedUploads = result.failed?.length ?? 0;
+        if (direct) {
+          // Wait for the register calls kicked off in upload-success.
+          await Promise.all(registerPromises);
+          const ok = registerResults.filter((r) => r.ok).length;
+          const deduped = registerResults.filter((r) => r.ok && r.deduped).length;
+          const failed = failedUploads + registerResults.filter((r) => !r.ok).length;
+          if (ok > 0) {
+            toast.success(
+              `Uploaded ${ok} clip${ok === 1 ? "" : "s"}` +
+                (deduped > 0 ? ` (${deduped} already existed)` : "") +
+                " — normalizing in the background",
+            );
+          }
+          if (failed > 0) toast.error(`${failed} upload${failed === 1 ? "" : "s"} failed`);
+        } else {
+          const ok = result.successful?.length ?? 0;
+          const deduped = (result.successful ?? []).filter(
+            (f) => (f.response?.body as { deduped?: boolean } | undefined)?.deduped,
+          ).length;
+          if (ok > 0) {
+            toast.success(
+              `Uploaded ${ok} clip${ok === 1 ? "" : "s"}` +
+                (deduped > 0 ? ` (${deduped} already existed)` : "") +
+                " — normalizing in the background",
+            );
+          }
+          if (failedUploads > 0) {
+            toast.error(`${failedUploads} upload${failedUploads === 1 ? "" : "s"} failed`);
+          }
         }
         onUploadComplete();
       });

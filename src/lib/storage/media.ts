@@ -18,6 +18,7 @@ import {
   isR2Configured,
   r2Put,
   r2Get,
+  r2GetToFile,
   r2Head,
   r2Delete,
   r2PresignPut,
@@ -127,9 +128,9 @@ export async function materializeMedia(key: string): Promise<{ path: string; cle
   if (!mediaOnR2()) {
     return { path: localPath(key), cleanup: async () => {} };
   }
-  const bytes = await r2Get(key);
   const tmp = path.join(os.tmpdir(), `media-${Date.now()}-${Math.round(Math.random() * 1e9)}-${path.basename(key)}`);
-  await writeFile(tmp, bytes);
+  // Stream to disk — a 400MB source must not land in a single Buffer.
+  await r2GetToFile(key, tmp);
   return {
     path: tmp,
     cleanup: async () => {

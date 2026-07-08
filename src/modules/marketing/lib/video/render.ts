@@ -13,17 +13,15 @@
  * output short-circuits the whole render (at-least-once job queue).
  */
 import { eq, sql } from "drizzle-orm";
-import { writeFile, mkdir, unlink } from "fs/promises";
-import path from "path";
+import { writeFile, unlink } from "fs/promises";
 import { db } from "@/lib/db";
 import { videoClips, videoPosts, type VideoClip } from "@/modules/marketing/schema";
 import {
-  getVideoFullPath,
-  ensureVideoDir,
+  materializeVideo,
+  storeVideoFile,
+  videoScratchPath,
   videoStat,
-  promoteVideo,
   renderPath,
-  tmpPath,
 } from "@/lib/storage/videos";
 import { runFfmpeg, ffprobe } from "./ffmpeg";
 import { NORM_VERSION } from "./normalize";
@@ -63,17 +61,22 @@ export async function renderPost(postId: string): Promise<RenderResult> {
     const existing = await videoStat(post.filePath);
     if (existing.exists) {
       try {
-        const probe = await ffprobe(getVideoFullPath(post.filePath));
-        if (probe.durationSec > 0) {
-          return {
-            postId,
-            filePath: post.filePath,
-            posterPath: post.posterPath ?? "",
-            durationSec: probe.durationSec,
-            sizeBytes: existing.size,
-            skipped: true,
-            reencoded: false,
-          };
+        const m = await materializeVideo(post.filePath);
+        try {
+          const probe = await ffprobe(m.path);
+          if (probe.durationSec > 0) {
+            return {
+              postId,
+              filePath: post.filePath,
+              posterPath: post.posterPath ?? "",
+              durationSec: probe.durationSec,
+              sizeBytes: existing.size,
+              skipped: true,
+              reencoded: false,
+            };
+          }
+        } finally {
+          await m.cleanup();
         }
       } catch {
         // fall through and re-render over the broken file
@@ -85,6 +88,16 @@ export async function renderPost(postId: string): Promise<RenderResult> {
     .set({ status: "rendering", error: null, updatedAt: new Date().toISOString() })
     .where(eq(videoPosts.id, postId))
     .run();
+
+  // Temp files (materialized clip inputs + concat list + render/poster
+  // scratch) cleaned up regardless of outcome. storeVideoFile pushes the
+  // finished render + poster to storage (R2 or the volume).
+  const cleanups: Array<() => Promise<void>> = [];
+  const scratch = (name: string) => {
+    const p = videoScratchPath(name);
+    cleanups.push(() => unlink(p).catch(() => {}));
+    return p;
+  };
 
   try {
     // ── Load + validate clips ──
@@ -104,11 +117,17 @@ export async function renderPost(postId: string): Promise<RenderResult> {
       clipsById.set(id, clip);
     }
 
-    const sources = clipIds.map((id) => {
+    // Pull each segment (audible or muted variant) to local disk for the
+    // concat demuxer. Materialize is a no-op copy on the volume; a download
+    // on R2. Runs sequentially so the concat list order is deterministic.
+    const sources: string[] = [];
+    for (const id of clipIds) {
       const clip = clipsById.get(id)!;
       const useOriginalAudio = audibleIds.has(id) && clip.audioMode === "keep";
-      return getVideoFullPath(useOriginalAudio ? clip.normalizedPath! : clip.mutedPath!);
-    });
+      const m = await materializeVideo(useOriginalAudio ? clip.normalizedPath! : clip.mutedPath!);
+      cleanups.push(m.cleanup);
+      sources.push(m.path);
+    }
     const fullySilent = clipIds.every(
       (id) => !(audibleIds.has(id) && clipsById.get(id)!.audioMode === "keep"),
     );
@@ -117,12 +136,9 @@ export async function renderPost(postId: string): Promise<RenderResult> {
       0,
     );
 
-    // ── Concat in tmp/ ──
-    const listRel = tmpPath(`${postId}.txt`);
-    const outTmpRel = tmpPath(`${postId}.mp4`);
-    const listFull = await ensureVideoDir(listRel);
-    const outTmpFull = getVideoFullPath(outTmpRel);
-    await mkdir(path.dirname(outTmpFull), { recursive: true });
+    // ── Concat in scratch temps ──
+    const listFull = scratch(`${postId}.txt`);
+    const outTmpFull = scratch(`${postId}.mp4`);
     await writeFile(listFull, sources.map(concatEntry).join("\n") + "\n");
 
     const concatArgs = (audio: string[]) => [
@@ -164,16 +180,17 @@ export async function renderPost(postId: string): Promise<RenderResult> {
       console.warn(`[video] render for post ${postId} is unusually large: ${probe.sizeBytes} bytes`);
     }
 
-    // ── Promote into renders/{YYYY-MM}/ ──
+    // ── Store into renders/{YYYY-MM}/ (R2 or the volume) ──
     const yyyymm = yyyymmOf(new Date());
     const fileRel = renderPath(postId, yyyymm, "mp4");
     const posterRel = renderPath(postId, yyyymm, "jpg");
-    await promoteVideo(outTmpRel, fileRel);
 
-    const posterFull = await ensureVideoDir(posterRel);
-    await runFfmpeg(["-y", "-i", getVideoFullPath(fileRel), "-frames:v", "1", "-q:v", "3", posterFull]);
-
-    await unlink(listFull).catch(() => {});
+    // Poster is cut from the finished render we already have on local disk,
+    // then both are pushed to storage.
+    const posterTmp = scratch(`${postId}-poster.jpg`);
+    await runFfmpeg(["-y", "-i", outTmpFull, "-frames:v", "1", "-q:v", "3", posterTmp]);
+    await storeVideoFile(outTmpFull, fileRel);
+    await storeVideoFile(posterTmp, posterRel);
 
     // ── Persist. Guard the usage counters behind the status flip so a
     // retry that re-runs a completed render can't double-bump. ──
@@ -220,5 +237,7 @@ export async function renderPost(postId: string): Promise<RenderResult> {
       .where(eq(videoPosts.id, postId))
       .run();
     throw e;
+  } finally {
+    for (const c of cleanups) await c();
   }
 }

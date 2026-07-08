@@ -27,7 +27,7 @@ import path from "path";
 import { db, sqlite } from "@/lib/db";
 import { videoClips } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
-import { saveVideo, rawClipPath, getVideoFullPath, videoStat } from "@/lib/storage/videos";
+import { saveVideo, rawClipPath, materializeVideo, videoStat } from "@/lib/storage/videos";
 import { ffprobe } from "@/modules/marketing/lib/video/ffmpeg";
 import { jobQueue } from "@/modules/core/lib/job-queue";
 
@@ -91,11 +91,15 @@ export async function POST(request: NextRequest) {
   }
 
   // Validate it's actually decodable video before creating a row.
+  // materializeVideo returns the volume path locally, or pulls from R2.
   let probe;
+  const mat = await materializeVideo(rawRel);
   try {
-    probe = await ffprobe(getVideoFullPath(rawRel));
+    probe = await ffprobe(mat.path);
   } catch {
     return NextResponse.json({ error: "File is not a decodable video" }, { status: 400 });
+  } finally {
+    await mat.cleanup();
   }
   if (probe.durationSec < 1 || probe.durationSec > 120) {
     return NextResponse.json(

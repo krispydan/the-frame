@@ -18,8 +18,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RefreshCw, Scissors, Trash2 } from "lucide-react";
 import type { UploaderCategory, UploaderSku } from "./clip-uploader";
+import { sha256Hex16, directUploadAvailable } from "./direct-upload";
 import "@uppy/core/dist/style.min.css";
 import "@uppy/dashboard/dist/style.min.css";
+
+const PRESIGN_URL = "/api/v1/marketing/videos/sources/presign";
+const REGISTER_URL = "/api/v1/marketing/videos/sources/register";
 
 type Source = {
   id: string;
@@ -94,10 +98,14 @@ export function SourceAutoClipper({
     let cancelled = false;
 
     (async () => {
-      const [{ default: Uppy }, { default: Dashboard }, { default: XHRUpload }] = await Promise.all([
+      // Big raw files → prefer direct-to-R2 (browser → R2). Buffering a
+      // 400MB source through the server is exactly the OOM we're fixing.
+      const direct = await directUploadAvailable(PRESIGN_URL);
+      if (cancelled || !containerRef.current) return;
+
+      const [{ default: Uppy }, { default: Dashboard }] = await Promise.all([
         import("@uppy/core"),
         import("@uppy/dashboard"),
-        import("@uppy/xhr-upload"),
       ]);
       if (cancelled || !containerRef.current) return;
 
@@ -109,16 +117,84 @@ export function SourceAutoClipper({
           allowedFileTypes: ["video/*", ".mp4", ".mov", ".m4v", ".webm", ".mkv"],
         },
         meta: {},
-      })
-        .use(Dashboard, {
-          inline: true,
-          target: containerRef.current,
-          height: 260,
-          proudlyDisplayPoweredByUppy: false,
-          showProgressDetails: true,
-          note: "Raw videos up to 400MB each (export long shoots in parts). Set the defaults above FIRST — every clip cut from the video gets them.",
-        })
-        .use(XHRUpload, {
+      }).use(Dashboard, {
+        inline: true,
+        target: containerRef.current,
+        height: 260,
+        proudlyDisplayPoweredByUppy: false,
+        showProgressDetails: true,
+        note: "Raw videos up to 400MB each (export long shoots in parts). Set the defaults above FIRST — every clip cut from the video gets them.",
+      });
+
+      const registerResults: Array<{ ok: boolean; deduped: boolean }> = [];
+      const registerPromises: Array<Promise<void>> = [];
+
+      if (direct) {
+        const { default: AwsS3 } = await import("@uppy/aws-s3");
+        if (cancelled) return;
+        uppy.use(AwsS3, {
+          shouldUseMultipart: false,
+          getUploadParameters: async (file) => {
+            const checksum = await sha256Hex16(file.data as Blob);
+            uppy.setFileMeta(file.id, { checksum });
+            const res = await fetch(PRESIGN_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                fileName: file.name,
+                checksum,
+                contentType: file.type || "video/mp4",
+              }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok || !body.uploadUrl) {
+              throw new Error(body.error || "Could not presign upload");
+            }
+            return {
+              method: "PUT",
+              url: body.uploadUrl as string,
+              fields: {},
+              headers: (body.headers as Record<string, string>) || {
+                "Content-Type": file.type || "video/mp4",
+              },
+            };
+          },
+        });
+
+        uppy.on("upload-success", (file) => {
+          const d = defaultsRef.current;
+          const checksum = (file?.meta as Record<string, unknown> | undefined)?.checksum as
+            | string
+            | undefined;
+          if (!checksum) return;
+          registerPromises.push(
+            fetch(REGISTER_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                checksum,
+                fileName: file?.name,
+                categoryId: d.categoryId,
+                audioMode: d.audioMode,
+                talent: d.talent.trim(),
+                skuIds: d.skuIds,
+                minClipSec: d.minClipSec,
+                maxClipSec: d.maxClipSec,
+              }),
+            })
+              .then(async (res) => {
+                const b = await res.json().catch(() => ({}));
+                registerResults.push({ ok: res.ok, deduped: !!b.deduped });
+              })
+              .catch(() => {
+                registerResults.push({ ok: false, deduped: false });
+              }),
+          );
+        });
+      } else {
+        const { default: XHRUpload } = await import("@uppy/xhr-upload");
+        if (cancelled) return;
+        uppy.use(XHRUpload, {
           endpoint: "/api/v1/marketing/videos/sources",
           formData: true,
           fieldName: "file",
@@ -135,24 +211,33 @@ export function SourceAutoClipper({
           },
         });
 
-      uppy.on("file-added", (file) => {
-        const d = defaultsRef.current;
-        uppy.setFileMeta(file.id, {
-          categoryId: d.categoryId,
-          audioMode: d.audioMode,
-          talent: d.talent.trim(),
-          skuIds: JSON.stringify(d.skuIds),
-          minClipSec: String(d.minClipSec),
-          maxClipSec: String(d.maxClipSec),
+        uppy.on("file-added", (file) => {
+          const d = defaultsRef.current;
+          uppy.setFileMeta(file.id, {
+            categoryId: d.categoryId,
+            audioMode: d.audioMode,
+            talent: d.talent.trim(),
+            skuIds: JSON.stringify(d.skuIds),
+            minClipSec: String(d.minClipSec),
+            maxClipSec: String(d.maxClipSec),
+          });
         });
-      });
+      }
 
-      uppy.on("complete", (result) => {
-        const ok = result.successful?.length ?? 0;
-        if (ok > 0) toast.success(`${ok} video${ok === 1 ? "" : "s"} uploaded — auto-clipping in the background`);
-        if (result.failed && result.failed.length > 0) {
-          toast.error(`${result.failed.length} upload${result.failed.length === 1 ? "" : "s"} failed`);
+      uppy.on("complete", async (result) => {
+        const failedUploads = result.failed?.length ?? 0;
+        let ok: number;
+        let failed: number;
+        if (direct) {
+          await Promise.all(registerPromises);
+          ok = registerResults.filter((r) => r.ok).length;
+          failed = failedUploads + registerResults.filter((r) => !r.ok).length;
+        } else {
+          ok = result.successful?.length ?? 0;
+          failed = failedUploads;
         }
+        if (ok > 0) toast.success(`${ok} video${ok === 1 ? "" : "s"} uploaded — auto-clipping in the background`);
+        if (failed > 0) toast.error(`${failed} upload${failed === 1 ? "" : "s"} failed`);
         loadSources();
       });
 

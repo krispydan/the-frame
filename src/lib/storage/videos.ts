@@ -19,6 +19,18 @@
  */
 import { mkdir, writeFile, unlink, stat, readFile, rename } from "fs/promises";
 import path from "path";
+import { tmpdir } from "os";
+import {
+  saveMedia,
+  readMedia,
+  mediaStat,
+  deleteMedia,
+  materializeMedia,
+  storeLocalFile,
+  mediaUrl,
+  mediaOnR2,
+  presignUpload,
+} from "./media";
 
 /**
  * Read VIDEOS_PATH at call time, not module load time, so tests can set
@@ -53,38 +65,66 @@ export function getVideoFullPath(relPath: string): string {
   return resolvedFull;
 }
 
-/** Write a buffer to <VIDEOS_ROOT>/<relPath>, creating parent dirs as needed. */
+// Video keys in the unified media space are "videos/" + the relative
+// path. The DB keeps storing the unprefixed relative path (e.g.
+// "clips/raw/ab.mp4"); the prefix is added only at the storage boundary,
+// so existing rows and the local-volume layout are untouched.
+function vkey(relPath: string): string {
+  return `videos/${relPath.replace(/^[/\\]+/, "")}`;
+}
+
+/** MIME type from a video/poster extension. */
+export function videoContentType(relPath: string): string {
+  const ext = path.extname(relPath).toLowerCase();
+  if (ext === ".mp4" || ext === ".m4v") return "video/mp4";
+  if (ext === ".mov") return "video/quicktime";
+  if (ext === ".webm") return "video/webm";
+  if (ext === ".mkv") return "video/x-matroska";
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".png") return "image/png";
+  if (ext === ".txt") return "text/plain";
+  return "application/octet-stream";
+}
+
+/** Store a buffer (routes to R2 when configured, else the volume). */
 export async function saveVideo(buffer: Buffer, relPath: string): Promise<void> {
-  const full = getVideoFullPath(relPath);
-  await mkdir(path.dirname(full), { recursive: true });
-  await writeFile(full, buffer);
+  await saveMedia(vkey(relPath), buffer, videoContentType(relPath));
 }
 
-/** Read a stored video/poster as a buffer. Throws ENOENT if missing. */
+/** Read a stored video/poster as a buffer. */
 export async function readVideo(relPath: string): Promise<Buffer> {
-  const full = getVideoFullPath(relPath);
-  return readFile(full);
+  return readMedia(vkey(relPath));
 }
 
-/** Delete a stored file. Silent if the file is already gone. */
+/** Delete a stored file. Silent if already gone. */
 export async function deleteVideo(relPath: string): Promise<void> {
-  const full = getVideoFullPath(relPath);
-  try {
-    await unlink(full);
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
-  }
+  await deleteMedia(vkey(relPath));
 }
 
 /** Return { size, exists } for a stored file. Never throws. */
 export async function videoStat(relPath: string): Promise<{ size: number; exists: boolean }> {
-  try {
-    const full = getVideoFullPath(relPath);
-    const s = await stat(full);
-    return { size: s.size, exists: true };
-  } catch {
-    return { size: 0, exists: false };
-  }
+  const s = await mediaStat(vkey(relPath));
+  return { size: s.size, exists: s.exists };
+}
+
+/**
+ * Ensure a raw/stored video is on local disk for ffmpeg and return its
+ * path + a cleanup(). On R2 it downloads to a temp file; locally it's
+ * the volume path. Always call cleanup() when done.
+ */
+export async function materializeVideo(relPath: string): Promise<{ path: string; cleanup: () => Promise<void> }> {
+  return materializeMedia(vkey(relPath));
+}
+
+/** Upload/move an ffmpeg output (a local temp file) into storage. */
+export async function storeVideoFile(tmpAbsPath: string, relPath: string): Promise<void> {
+  await storeLocalFile(tmpAbsPath, vkey(relPath), videoContentType(relPath));
+}
+
+/** A scratch path in the OS temp dir for ffmpeg working files (never
+ *  the volume — keeps R2 mode diskless beyond transient temps). */
+export function videoScratchPath(name: string): string {
+  return path.join(tmpdir(), `vid-${Date.now()}-${Math.round(Math.random() * 1e9)}-${name.replace(/[^a-zA-Z0-9._-]/g, "_")}`);
 }
 
 /**
@@ -139,7 +179,24 @@ export function tmpPath(name: string): string {
   return `tmp/${name}`;
 }
 
-/** Public URL for a stored video asset (served by /api/videos/[...path]). */
+/** Public URL for a stored video asset — R2 CDN when configured, else
+ *  the /api/videos serving route. */
 export function videoUrl(relPath: string): string {
-  return `/api/videos/${relPath.replace(/^[/\\]+/, "")}`;
+  return mediaUrl(vkey(relPath));
+}
+
+/** True when direct browser→R2 uploads are available (R2 configured). */
+export function videosDirectUpload(): boolean {
+  return mediaOnR2();
+}
+
+/** Presigned PUT URL for a direct browser upload of a video asset.
+ *  R2-only — throws if not configured (callers gate on
+ *  videosDirectUpload()). */
+export async function presignVideoUpload(
+  relPath: string,
+  contentType: string,
+  expiresSec = 3600,
+): Promise<string> {
+  return presignUpload(vkey(relPath), contentType, expiresSec);
 }

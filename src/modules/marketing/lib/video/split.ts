@@ -24,11 +24,10 @@ import { eq } from "drizzle-orm";
 import { db, sqlite } from "@/lib/db";
 import { videoClips, videoSources } from "@/modules/marketing/schema";
 import {
-  ensureVideoDir,
-  getVideoFullPath,
+  materializeVideo,
+  videoScratchPath,
   rawClipPath,
   saveVideo,
-  tmpPath,
 } from "@/lib/storage/videos";
 import { runFfmpeg, ffprobe } from "./ffmpeg";
 import { jobQueue } from "@/modules/core/lib/job-queue";
@@ -166,8 +165,10 @@ export async function splitSource(sourceId: string): Promise<SplitResult> {
     .where(eq(videoSources.id, sourceId))
     .run();
 
+  // Pull the raw source to local disk for ffmpeg (R2 or volume-backed).
+  const src = await materializeVideo(source.rawPath);
   try {
-    const fullPath = getVideoFullPath(source.rawPath);
+    const fullPath = src.path;
     const probe = await ffprobe(fullPath);
 
     const scenes = await detectScenes(fullPath);
@@ -192,9 +193,8 @@ export async function splitSource(sourceId: string): Promise<SplitResult> {
     const baseName = source.fileName.replace(/\.[^.]+$/, "");
 
     for (const [i, window] of windows.entries()) {
-      // Extract to tmp, hash, then content-address into clips/raw/.
-      const tmpRel = tmpPath(`split-${sourceId}-${i}.mp4`);
-      const tmpFull = await ensureVideoDir(tmpRel);
+      // Extract to a scratch temp, hash, then content-address into clips/raw/.
+      const tmpFull = videoScratchPath(`split-${sourceId}-${i}.mp4`);
       await runFfmpeg([
         "-y",
         // Input-side seek: fast, and frame-accurate because we re-encode.
@@ -273,5 +273,7 @@ export async function splitSource(sourceId: string): Promise<SplitResult> {
       .where(eq(videoSources.id, sourceId))
       .run();
     throw e;
+  } finally {
+    await src.cleanup();
   }
 }
