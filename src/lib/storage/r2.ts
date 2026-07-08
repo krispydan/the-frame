@@ -19,6 +19,7 @@
  * Cloudflare's own recommended client).
  */
 import { AwsClient } from "aws4fetch";
+import { createHash } from "crypto";
 import { createWriteStream } from "fs";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
@@ -110,6 +111,45 @@ export async function r2Put(key: string, body: Buffer | Uint8Array, contentType:
   if (!res.ok) {
     throw new Error(`R2 PUT ${key} failed: ${res.status} ${(await res.text().catch(() => "")).slice(0, 300)}`);
   }
+}
+
+/**
+ * Set the bucket's CORS policy so the browser can PUT directly to R2 via
+ * a presigned URL (without this, the cross-origin PUT is blocked and
+ * direct uploads fail). Idempotent — safe to re-run. `origins` defaults
+ * to "*" which is fine here: the presigned URL itself is the auth, so a
+ * wildcard origin doesn't widen access to anything unauthenticated.
+ */
+export async function r2PutBucketCors(origins: string[] = ["*"]): Promise<void> {
+  const { client: c, cfg } = client();
+  const rules = origins
+    .map(
+      (o) =>
+        `<CORSRule><AllowedOrigin>${o}</AllowedOrigin>` +
+        `<AllowedMethod>PUT</AllowedMethod><AllowedMethod>GET</AllowedMethod><AllowedMethod>HEAD</AllowedMethod>` +
+        `<AllowedHeader>*</AllowedHeader><ExposeHeader>ETag</ExposeHeader>` +
+        `<MaxAgeSeconds>3600</MaxAgeSeconds></CORSRule>`,
+    )
+    .join("");
+  const body = `<CORSConfiguration>${rules}</CORSConfiguration>`;
+  const contentMd5 = createHash("md5").update(body).digest("base64");
+  const res = await c.fetch(`${bucketEndpoint(cfg)}?cors`, {
+    method: "PUT",
+    body,
+    headers: { "Content-Type": "application/xml", "Content-MD5": contentMd5 },
+  });
+  if (!res.ok) {
+    throw new Error(`R2 PutBucketCors failed: ${res.status} ${(await res.text().catch(() => "")).slice(0, 300)}`);
+  }
+}
+
+/** Read the bucket's current CORS policy XML (for verification). */
+export async function r2GetBucketCors(): Promise<string> {
+  const { client: c, cfg } = client();
+  const res = await c.fetch(`${bucketEndpoint(cfg)}?cors`, { method: "GET" });
+  if (res.status === 404) return "";
+  if (!res.ok) throw new Error(`R2 GetBucketCors failed: ${res.status}`);
+  return res.text();
 }
 
 /** Download bytes (e.g. pull a raw source to disk for ffmpeg). */
