@@ -4,6 +4,7 @@ import {
   mapSoundItem,
   syncTrendingSounds,
   getTrendingSounds,
+  scoreSound,
 } from "@/modules/marketing/lib/video/tiktok-sounds";
 
 describe("TikTok sounds mapper", () => {
@@ -137,16 +138,48 @@ describe("TikTok sounds sync", () => {
     await expect(syncTrendingSounds()).rejects.toThrow(/not configured/i);
   });
 
-  it("orders reads by chart then rank", async () => {
+  it("scores a fast-rising sound above a bigger but flat one", () => {
+    // Flat giant: huge usage, no growth.
+    const flat = scoreSound({ usageCount: 5_000_000, prevUsageCount: 5_000_000, rank: 1, trendDirection: null });
+    // Smaller but doubling day-over-day → should win on momentum.
+    const rising = scoreSound({ usageCount: 200_000, prevUsageCount: 100_000, rank: 20, trendDirection: "up" });
+    expect(rising.growthPct).toBeCloseTo(1.0);
+    expect(rising.usageDelta).toBe(100_000);
+    expect(rising.momentumScore).toBeGreaterThan(flat.momentumScore);
+  });
+
+  it("degrades to reach + rank before a second sync (no prev data)", () => {
+    const a = scoreSound({ usageCount: 1_000_000, prevUsageCount: null, rank: 3, trendDirection: null });
+    const b = scoreSound({ usageCount: 1_000, prevUsageCount: null, rank: 40, trendDirection: null });
+    expect(a.growthPct).toBeNull();
+    expect(a.momentumScore).toBeGreaterThan(b.momentumScore);
+  });
+
+  it("sorts getTrendingSounds best-bet first (momentum over raw rank)", async () => {
+    mockRunSync([item("a"), item("b")]);
+    await syncTrendingSounds();
+    // Second sync: 'b' explodes in usage, 'a' stays flat.
+    mockRunSync([
+      { id_str: "a", title: "song a", author: "artist", duration: 30, user_count: 1000 },
+      { id_str: "b", title: "song b", author: "artist", duration: 30, user_count: 50000 },
+    ]);
+    await syncTrendingSounds();
+    const sounds = getTrendingSounds({});
+    expect(sounds[0].externalId).toBe("b"); // biggest climber first
+    expect(sounds[0].usageDelta).toBe(49000);
+  });
+
+  it("orders reads best-bet first — reach breaks ties when there's no growth data", () => {
     const db = getTestDb();
     const insert = db.prepare(`
-      INSERT INTO marketing_tiktok_sounds (id, external_id, title, rank, country_code, rank_type)
-      VALUES (?, ?, ?, ?, 'US', ?)
+      INSERT INTO marketing_tiktok_sounds (id, external_id, title, rank, usage_count, country_code, rank_type)
+      VALUES (?, ?, ?, ?, ?, 'US', ?)
     `);
-    insert.run("1", "x1", "pop 2", 2, "popular");
-    insert.run("2", "x2", "pop 1", 1, "popular");
-    insert.run("3", "x3", "brk 1", 1, "breakout");
+    insert.run("1", "x1", "small", 2, 1_000, "popular");
+    insert.run("2", "x2", "huge", 1, 5_000_000, "popular");
+    insert.run("3", "x3", "mid", 1, 100_000, "breakout");
     const rows = getTrendingSounds({});
-    expect(rows.map((r) => r.title)).toEqual(["brk 1", "pop 1", "pop 2"]);
+    // No prev usage → momentum degrades to reach (log usage) + rank.
+    expect(rows.map((r) => r.title)).toEqual(["huge", "mid", "small"]);
   });
 });

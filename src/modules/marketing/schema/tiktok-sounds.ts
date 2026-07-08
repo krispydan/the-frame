@@ -37,6 +37,11 @@ export const tiktokSounds = sqliteTable("marketing_tiktok_sounds", {
   trendDirection: text("trend_direction"),
   /** How many videos/creators used the sound, when the actor exposes it. */
   usageCount: integer("usage_count"),
+  /** The same sound's usage/rank at the PREVIOUS sync — lets us compute
+   *  day-over-day momentum (growth velocity) without a full history table. */
+  prevUsageCount: integer("prev_usage_count"),
+  prevRank: integer("prev_rank"),
+  prevSyncedAt: text("prev_synced_at"),
   countryCode: text("country_code").notNull().default("US"),
   /** popular (established chart) | breakout (surging). */
   rankType: text("rank_type").notNull().default("popular"),
