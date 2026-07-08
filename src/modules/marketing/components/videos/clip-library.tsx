@@ -460,14 +460,17 @@ function ClipEditDialog({
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       {/* sm:max-w-2xl — the base DialogContent pins sm:max-w-sm, and an
-          unprefixed max-w-2xl loses to it at desktop widths. */}
-      <DialogContent className="sm:max-w-2xl">
+          unprefixed max-w-2xl loses to it at desktop widths. max-h + scroll
+          so the tall content is reachable on a phone. */}
+      <DialogContent className="sm:max-w-2xl max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="truncate">{clip.file_name}</DialogTitle>
+          <DialogTitle className="truncate pr-8">{clip.file_name}</DialogTitle>
         </DialogHeader>
         <div className="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-4">
           <div className="space-y-2">
-            <div className="aspect-[9/16] bg-muted rounded overflow-hidden">
+            {/* Capped + centered on mobile so the 9:16 preview doesn't fill
+                the whole screen and push the form out of reach. */}
+            <div className="aspect-[9/16] w-36 mx-auto sm:w-auto bg-muted rounded overflow-hidden">
               {clip.previewUrl ? (
                 <video src={clip.previewUrl} poster={clip.posterUrl ?? undefined} controls muted className="w-full h-full object-cover" />
               ) : clip.posterUrl ? (
@@ -488,15 +491,15 @@ function ClipEditDialog({
                 ))}
               </select>
             </label>
-            <div className="flex gap-3">
-              <label className="block flex-1">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <label className="block flex-1 min-w-0">
                 <span className="text-muted-foreground">Audio</span>
                 <select value={audioMode} onChange={(e) => setAudioMode(e.target.value as "mute" | "keep")} className="mt-1 w-full border rounded px-2 py-1.5 bg-background">
                   <option value="mute">Mute — trending audio will cover it</option>
                   <option value="keep">Keep — audio is worth using</option>
                 </select>
               </label>
-              <label className="block w-32">
+              <label className="block sm:w-32">
                 <span className="text-muted-foreground">Boost</span>
                 <select value={boost} onChange={(e) => setBoost(Number(e.target.value))} className="mt-1 w-full border rounded px-2 py-1.5 bg-background">
                   <option value={0}>Normal</option>
@@ -548,8 +551,8 @@ function ClipEditDialog({
             </label>
           </div>
         </div>
-        <div className="flex justify-between gap-2 pt-2">
-          <div className="flex gap-2">
+        <div className="flex flex-wrap justify-between gap-2 pt-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={renormalize}>
               <RefreshCw className="h-3.5 w-3.5 mr-1" /> Re-normalize
             </Button>
@@ -560,7 +563,7 @@ function ClipEditDialog({
               <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
             </Button>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 ml-auto">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
             <Button onClick={save} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
           </div>
