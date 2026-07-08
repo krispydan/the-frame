@@ -104,30 +104,30 @@ function toMailRow(o: Record<string, string>): MailRow {
 const normName = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
 const digits = (s: string) => (s || "").replace(/\D+/g, "");
 
-// ── prepared matchers ──
-const byEmail = sqlite.prepare(
-  `SELECT company_id AS id FROM contacts WHERE lower(trim(email)) = ? AND company_id IS NOT NULL LIMIT 1`,
-);
-const byName = sqlite.prepare(
-  `SELECT id FROM companies WHERE lower(trim(name)) = ? LIMIT 1`,
-);
-const byPhone = sqlite.prepare(
-  `SELECT company_id AS id FROM company_phones WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone,'(',''),')',''),'-',''),' ',''),'+','') LIKE ? AND company_id IS NOT NULL LIMIT 1`,
-);
-
+// Match a row → frame company. Statements are prepared per call (cheap; and,
+// crucially, NOT at module load — which would run against an empty DB during
+// `next build` page-data collection and fail the build).
 function matchCompany(row: MailRow): { id: string; via: string } | null {
   if (row.email) {
-    const m = byEmail.get(row.email.toLowerCase().trim()) as { id: string } | undefined;
+    const m = sqlite
+      .prepare(`SELECT company_id AS id FROM contacts WHERE lower(trim(email)) = ? AND company_id IS NOT NULL LIMIT 1`)
+      .get(row.email.toLowerCase().trim()) as { id: string } | undefined;
     if (m?.id) return { id: m.id, via: "email" };
   }
   if (row.company) {
-    const m = byName.get(normName(row.company)) as { id: string } | undefined;
+    const m = sqlite
+      .prepare(`SELECT id FROM companies WHERE lower(trim(name)) = ? LIMIT 1`)
+      .get(normName(row.company)) as { id: string } | undefined;
     if (m?.id) return { id: m.id, via: "name" };
   }
   const d = digits(row.phone);
   if (d.length >= 10) {
     const last10 = d.slice(-10);
-    const m = byPhone.get(`%${last10}`) as { id: string } | undefined;
+    const m = sqlite
+      .prepare(
+        `SELECT company_id AS id FROM company_phones WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone,'(',''),')',''),'-',''),' ',''),'+','') LIKE ? AND company_id IS NOT NULL LIMIT 1`,
+      )
+      .get(`%${last10}`) as { id: string } | undefined;
     if (m?.id) return { id: m.id, via: "phone" };
   }
   return null;
