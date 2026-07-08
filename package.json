@@ -23,6 +23,7 @@
     "@uppy/image-editor": "^3.4.2",
     "@uppy/react": "^4.2.3",
     "@uppy/xhr-upload": "^4.3.3",
+    "aws4fetch": "^1.0.20",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.8.0",
     "class-variance-authority": "^0.7.1",
