@@ -162,10 +162,11 @@ export function composeAndInsertPost(
   for (let attempt = 0; attempt < HASH_ATTEMPTS; attempt++) {
     const candidate = composeCandidate(ctx);
     if (!candidate) {
+      // With the freestyle fallback, reaching here means even it couldn't
+      // build — i.e. fewer than 2 ready, categorized clips exist.
       return {
         post: null,
-        warning:
-          "No enabled recipe can be satisfied by the current clip library — upload more clips or relax recipe patterns",
+        warning: "Need at least 2 ready, categorized clips to generate a video — upload and tag a few more",
       };
     }
 

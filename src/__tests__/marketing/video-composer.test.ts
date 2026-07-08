@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   clipWeight,
   composeCandidate,
+  FALLBACK_RECIPE_ID,
   permutationHash,
   pickRecipe,
   recipeSatisfiable,
@@ -191,10 +192,23 @@ describe("Video composer", () => {
     expect(pickRecipe(makeContext(clips, [impossible]), seededRand(1))).toBeNull();
   });
 
-  it("returns null when the library is empty or too thin", () => {
+  it("returns null only when fewer than 2 clips exist", () => {
     expect(composeCandidate(makeContext([], [makeRecipe()]))).toBeNull();
-    const thin = [makeClip(), makeClip()]; // min is 3
-    expect(composeCandidate(makeContext(thin, [makeRecipe()]))).toBeNull();
+    expect(composeCandidate(makeContext([makeClip()], [makeRecipe()]))).toBeNull(); // 1 clip
+  });
+
+  it("falls back to a freestyle mix when no recipe can be satisfied", () => {
+    // Recipe needs 3 clips of a category we don't have; still get a video.
+    const clips = [makeClip(), makeClip(), makeClip()]; // makeRecipe min is 3, wrong category
+    const recipe = makeRecipe({ patternJson: JSON.stringify([{ categories: ["nonexistent"], min: 3, max: 3 }]) });
+    for (let seed = 1; seed <= 5; seed++) {
+      const result = composeCandidate(makeContext(clips, [recipe], seed));
+      expect(result).not.toBeNull();
+      expect(result!.recipeId).toBe(FALLBACK_RECIPE_ID);
+      expect(result!.clipIds.length).toBeGreaterThanOrEqual(2);
+      // No repeated clips within the edit.
+      expect(new Set(result!.clipIds).size).toBe(result!.clipIds.length);
+    }
   });
 
   it("guarantees focus-SKU coverage when the recipe allows it", () => {

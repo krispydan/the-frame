@@ -28,6 +28,7 @@ import {
   videoScratchPath,
   rawClipPath,
   saveVideo,
+  deleteVideo,
 } from "@/lib/storage/videos";
 import { runFfmpeg, ffprobe } from "./ffmpeg";
 import { jobQueue } from "@/modules/core/lib/job-queue";
@@ -248,6 +249,11 @@ export async function splitSource(sourceId: string): Promise<SplitResult> {
       `SELECT COUNT(*) AS n FROM marketing_video_clips WHERE source_id = ?`,
     ).get(sourceId) as { n: number }).n;
 
+    // Once we have clips, the big raw footage is dead weight — the clips
+    // are what get used. Mark done FIRST (so an at-least-once retry
+    // short-circuits on status=done and never needs the raw again), THEN
+    // delete the raw file best-effort.
+    const cleanup = totalClips > 0;
     db.update(videoSources)
       .set({
         status: "done",
@@ -255,15 +261,19 @@ export async function splitSource(sourceId: string): Promise<SplitResult> {
         durationSec: probe.durationSec,
         width: probe.width,
         height: probe.height,
+        rawDeleted: cleanup ? 1 : 0,
         error: null,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(videoSources.id, sourceId))
       .run();
 
+    if (cleanup) await deleteVideo(source.rawPath).catch(() => {});
+
     console.info(
       `[video] split ${source.fileName}: ${scenes.length} scene cuts → ${windows.length} windows, ` +
-      `${created} clips created${deduped ? `, ${deduped} deduped` : ""}`,
+      `${created} clips created${deduped ? `, ${deduped} deduped` : ""}` +
+      (cleanup ? " — raw footage deleted" : ""),
     );
     return { sourceId, scenes: scenes.length, clipsCreated: created, clipsDeduped: deduped, skipped: false };
   } catch (e) {

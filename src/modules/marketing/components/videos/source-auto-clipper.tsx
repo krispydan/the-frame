@@ -34,6 +34,7 @@ type Source = {
   ready_clips: number;
   category_name: string | null;
   talent: string | null;
+  raw_deleted: number;
   error: string | null;
   created_at: string;
 };
@@ -283,7 +284,7 @@ export function SourceAutoClipper({
       <div className="flex items-center gap-2 text-sm font-medium">
         <Scissors className="h-4 w-4" /> Auto-clip raw footage
         <span className="font-normal text-muted-foreground">
-          — drop whole shoot videos; the server cuts them into {minClipSec}-{maxClipSec}s clips at scene changes
+          — drop whole shoot videos; the server cuts them into {minClipSec}-{maxClipSec}s clips at scene changes, then deletes the original
         </span>
       </div>
 
@@ -371,12 +372,14 @@ export function SourceAutoClipper({
               {s.status === "done" && (
                 <span className="whitespace-nowrap text-xs text-muted-foreground">
                   {s.clip_count} clips ({s.ready_clips} ready)
+                  {s.raw_deleted ? <span className="ml-1 opacity-70">· original removed</span> : null}
                 </span>
               )}
               {s.status === "failed" && s.error && (
                 <span className="max-w-[200px] truncate text-xs text-destructive" title={s.error}>{s.error}</span>
               )}
-              {(s.status === "failed" || s.status === "done") && (
+              {/* Re-split needs the raw footage; once it's deleted the button hides. */}
+              {(s.status === "failed" || (s.status === "done" && !s.raw_deleted)) && (
                 <Button size="sm" variant="ghost" title="Re-split" onClick={() => resplit(s.id)}>
                   <RefreshCw className="h-3.5 w-3.5" />
                 </Button>

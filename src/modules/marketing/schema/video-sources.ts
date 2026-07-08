@@ -30,6 +30,9 @@ export const videoSources = sqliteTable("marketing_video_sources", {
     .default("uploaded"),
   /** How many clips the split produced (set when done). */
   clipCount: integer("clip_count").notNull().default(0),
+  /** 1 once the raw footage file has been deleted post-split — the clips
+   *  are all we keep. The row stays as a lightweight record. */
+  rawDeleted: integer("raw_deleted").notNull().default(0),
   // ── Split settings ──
   minClipSec: real("min_clip_sec").notNull().default(3),
   maxClipSec: real("max_clip_sec").notNull().default(5),

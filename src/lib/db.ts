@@ -159,6 +159,10 @@ try { sqlite.exec("ALTER TABLE marketing_tiktok_sounds ADD COLUMN prev_usage_cou
 try { sqlite.exec("ALTER TABLE marketing_tiktok_sounds ADD COLUMN prev_rank INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE marketing_tiktok_sounds ADD COLUMN prev_synced_at TEXT"); } catch { /* exists */ }
 
+// Auto-clipper: after a source is split into clips we delete the big raw
+// footage file and flag it — the clips are all we keep.
+try { sqlite.exec("ALTER TABLE marketing_video_sources ADD COLUMN raw_deleted INTEGER NOT NULL DEFAULT 0"); } catch { /* exists */ }
+
 // Contact form URL — when scraping a prospect for classification, we ALSO
 // harvest contact info. If we found a contact-us page but no direct email,
 // stash the URL here for later outreach (manual form submission or scraper).

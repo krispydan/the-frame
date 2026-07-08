@@ -25,6 +25,12 @@ export async function POST(_request: NextRequest, { params }: Params) {
   if (source.status === "splitting") {
     return NextResponse.json({ error: "Already splitting" }, { status: 409 });
   }
+  if (source.rawDeleted) {
+    return NextResponse.json(
+      { error: "Original footage was removed after clipping — re-upload it to re-clip." },
+      { status: 409 },
+    );
+  }
 
   db.update(videoSources)
     .set({ status: "uploaded", error: null, updatedAt: new Date().toISOString() })
