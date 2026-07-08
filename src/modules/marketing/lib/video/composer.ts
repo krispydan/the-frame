@@ -309,33 +309,98 @@ export function permutationHash(
     .digest("hex");
 }
 
+// ── Fallback ("freestyle") compose ──
+
+/** Marker recipe id for posts built by the no-recipe fallback. */
+export const FALLBACK_RECIPE_ID = "__freestyle__";
+
+const FALLBACK_MAX_DURATION = 30;
+const FALLBACK_MAX_CLIPS = 8;
+
+/**
+ * Build an edit WITHOUT a recipe pattern — just string together available
+ * ready clips (still weighted by focus SKU / boost / fairness). This is the
+ * safety net so generation never dead-ends when the library exists but
+ * matches no enabled recipe (e.g. everything landed in one category, or the
+ * recipes want categories you haven't filled yet). Needs ≥2 ready clips.
+ */
+export function composeFallback(ctx: ComposerContext, rand: () => number): ComposedPost | null {
+  if (ctx.clips.length < 2) return null;
+
+  const focusSkuIds = pickFocusSkus(ctx, rand);
+  const used = new Set<string>();
+  const seq: ComposerClip[] = [];
+  let duration = 0;
+
+  while (seq.length < FALLBACK_MAX_CLIPS) {
+    let candidates = ctx.clips.filter(
+      (c) => !used.has(c.id) && duration + (c.durationSec ?? 0) <= FALLBACK_MAX_DURATION,
+    );
+    // Never fail to reach the 2-clip minimum just to honor the duration cap.
+    if (candidates.length === 0) {
+      if (seq.length < 2) candidates = ctx.clips.filter((c) => !used.has(c.id));
+      if (candidates.length === 0) break;
+    }
+    const pick = weightedPick(candidates, (c) => clipWeight(c, focusSkuIds, ctx.forDate), rand);
+    if (!pick) break;
+    seq.push(pick);
+    used.add(pick.id);
+    duration += pick.durationSec ?? 0;
+    // Once it's a reasonable length, sometimes stop for variety across posts.
+    if (seq.length >= 3 && duration >= 12 && rand() < 0.4) break;
+  }
+
+  if (seq.length < 2) return null;
+
+  const clipIds = seq.map((c) => c.id);
+  const clipsById = new Map(ctx.clips.map((c) => [c.id, c]));
+  // Use each clip's own audio preference (mirrors the "original" policy).
+  const audibleClipIds = clipIds.filter((id) => clipsById.get(id)?.audioMode === "keep");
+  const audioTreatment =
+    audibleClipIds.length === 0 ? "silent" : audibleClipIds.length === clipIds.length ? "full" : "partial";
+
+  return {
+    recipeId: FALLBACK_RECIPE_ID,
+    clipIds,
+    audibleClipIds,
+    audioTreatment,
+    permutationHash: permutationHash(FALLBACK_RECIPE_ID, clipIds, audioTreatment),
+    focusSkuIds,
+    durationSec: duration,
+  };
+}
+
 // ── Top-level compose ──
 
 /**
- * Produce ONE candidate edit. Returns null when the current library
- * can't satisfy any enabled recipe. The caller owns hash-collision
- * retries (it sees the DB).
+ * Produce ONE candidate edit. Prefers a real recipe; when none can be
+ * satisfied (or the picked one can't build this attempt) it falls back to
+ * a freestyle mix of available clips so generation never dead-ends. Returns
+ * null only when the library truly can't make a video (< 2 ready clips).
+ * The caller owns hash-collision retries (it sees the DB).
  */
 export function composeCandidate(ctx: ComposerContext): ComposedPost | null {
   const rand = ctx.rand ?? Math.random;
 
   const recipe = pickRecipe(ctx, rand);
-  if (!recipe) return null;
+  if (recipe) {
+    const focusSkuIds = pickFocusSkus(ctx, rand);
+    const sequence = buildSequence(recipe, ctx, focusSkuIds, rand);
+    if (sequence) {
+      const clipsById = new Map(ctx.clips.map((c) => [c.id, c]));
+      const { audibleClipIds, audioTreatment } = resolveAudio(recipe, sequence.clipIds, clipsById);
+      return {
+        recipeId: recipe.id,
+        clipIds: sequence.clipIds,
+        audibleClipIds,
+        audioTreatment,
+        permutationHash: permutationHash(recipe.id, sequence.clipIds, audioTreatment),
+        focusSkuIds,
+        durationSec: sequence.durationSec,
+      };
+    }
+  }
 
-  const focusSkuIds = pickFocusSkus(ctx, rand);
-  const sequence = buildSequence(recipe, ctx, focusSkuIds, rand);
-  if (!sequence) return null;
-
-  const clipsById = new Map(ctx.clips.map((c) => [c.id, c]));
-  const { audibleClipIds, audioTreatment } = resolveAudio(recipe, sequence.clipIds, clipsById);
-
-  return {
-    recipeId: recipe.id,
-    clipIds: sequence.clipIds,
-    audibleClipIds,
-    audioTreatment,
-    permutationHash: permutationHash(recipe.id, sequence.clipIds, audioTreatment),
-    focusSkuIds,
-    durationSec: sequence.durationSec,
-  };
+  // No satisfiable recipe (or it couldn't build this attempt) → freestyle.
+  return composeFallback(ctx, rand);
 }

@@ -42,7 +42,9 @@ export async function GET(request: NextRequest) {
   }
 
   const rows = sqlite.prepare(`
-    SELECT p.*, r.name AS recipe_name, r.audio_policy AS recipe_audio_policy
+    SELECT p.*,
+      COALESCE(r.name, CASE WHEN p.recipe_id = '__freestyle__' THEN 'Freestyle' END) AS recipe_name,
+      r.audio_policy AS recipe_audio_policy
     FROM marketing_video_posts p
     LEFT JOIN marketing_video_recipes r ON r.id = p.recipe_id
     WHERE ${clauses.join(" AND ")}
