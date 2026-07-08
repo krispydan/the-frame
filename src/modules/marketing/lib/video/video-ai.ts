@@ -246,16 +246,16 @@ export async function generateVideoCopy(postId: string): Promise<{ ok: boolean; 
   }));
   const focusProducts = loadFocusProducts(aiCtx.focusSkuIds ?? []);
 
-  // EVERY product visible anywhere in the video — the full tag list for
-  // TikTok Shop (not just the featured focus SKUs). Deduped by name+color.
+  // EVERY product visible anywhere in the video — the tag list for TikTok
+  // Shop. We tag PARENT PRODUCTS (not color variations), so dedupe by
+  // product name and don't surface a specific color.
   const productsInVideo: Array<{ name: string; color: string | null; sku: string | null }> = [];
   const seenProduct = new Set<string>();
   for (const clip of clipContext) {
     for (const p of clip.products) {
-      const key = `${p.name}|${p.color ?? ""}`;
-      if (seenProduct.has(key)) continue;
-      seenProduct.add(key);
-      productsInVideo.push(p);
+      if (seenProduct.has(p.name)) continue;
+      seenProduct.add(p.name);
+      productsInVideo.push({ name: p.name, color: null, sku: null });
     }
   }
 

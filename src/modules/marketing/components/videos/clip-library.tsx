@@ -15,7 +15,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { RefreshCw, Scissors, Trash2, Volume2, VolumeX, Zap } from "lucide-react";
-import { ClipUploader, type UploaderCategory, type UploaderSku } from "./clip-uploader";
+import { ClipUploader, type UploaderCategory, type UploaderProduct } from "./clip-uploader";
 import { SourceAutoClipper } from "./source-auto-clipper";
 
 type Category = UploaderCategory & {
@@ -42,7 +42,7 @@ type Clip = {
   notes: string | null;
   posterUrl: string | null;
   previewUrl: string | null;
-  products: Array<{ skuId: string; sku: string | null; colorName: string | null; productName: string | null }>;
+  products: Array<{ skuId: string; sku: string | null; colorName: string | null; productName: string | null; productId: string | null }>;
 };
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
@@ -56,7 +56,7 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "dest
 export function ClipLibrary() {
   const [clips, setClips] = useState<Clip[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [skus, setSkus] = useState<UploaderSku[]>([]);
+  const [products, setProducts] = useState<UploaderProduct[]>([]);
   const [talents, setTalents] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterCategory, setFilterCategory] = useState("");
@@ -93,7 +93,7 @@ export function ClipLibrary() {
   useEffect(() => {
     fetch("/api/v1/marketing/videos/skus")
       .then((r) => r.json())
-      .then((d) => setSkus(d.skus ?? []));
+      .then((d) => setProducts(d.products ?? []));
   }, []);
 
   // Poll while anything is normalizing so statuses flip live.
@@ -213,13 +213,13 @@ export function ClipLibrary() {
       </div>
 
       {showUploader && (
-        <ClipUploader categories={activeCategories} skus={skus} talents={talents} onUploadComplete={load} />
+        <ClipUploader categories={activeCategories} products={products} talents={talents} onUploadComplete={load} />
       )}
 
       {showAutoClipper && (
         <SourceAutoClipper
           categories={activeCategories}
-          skus={skus}
+          products={products}
           talents={talents}
           onClipsChanged={load}
         />
@@ -327,7 +327,7 @@ export function ClipLibrary() {
         <ClipEditDialog
           clip={editClip}
           categories={activeCategories}
-          skus={skus}
+          products={products}
           talents={talents}
           onClose={() => setEditClip(null)}
           onSaved={() => {
@@ -378,14 +378,14 @@ function BulkTalentInput({ talents, onApply }: { talents: string[]; onApply: (ta
 function ClipEditDialog({
   clip,
   categories,
-  skus,
+  products,
   talents,
   onClose,
   onSaved,
 }: {
   clip: Clip;
   categories: Category[];
-  skus: UploaderSku[];
+  products: UploaderProduct[];
   talents: string[];
   onClose: () => void;
   onSaved: () => void;
@@ -395,23 +395,22 @@ function ClipEditDialog({
   const [boost, setBoost] = useState(clip.boost);
   const [talent, setTalent] = useState(clip.talent ?? "");
   const [notes, setNotes] = useState(clip.notes ?? "");
-  const [skuIds, setSkuIds] = useState<string[]>(clip.products.map((p) => p.skuId));
-  const [skuSearch, setSkuSearch] = useState("");
+  // Pre-select the parent products this clip's tagged SKUs belong to.
+  const [productIds, setProductIds] = useState<string[]>([
+    ...new Set(clip.products.map((p) => p.productId).filter((x): x is string => !!x)),
+  ]);
+  const [productSearch, setProductSearch] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const visibleSkus = useMemo(() => {
-    const q = skuSearch.toLowerCase();
-    return skus.filter(
-      (s) =>
-        !q ||
-        s.sku?.toLowerCase().includes(q) ||
-        s.colorName?.toLowerCase().includes(q) ||
-        s.productName?.toLowerCase().includes(q),
-    );
-  }, [skus, skuSearch]);
+  const visibleProducts = useMemo(() => {
+    const q = productSearch.toLowerCase();
+    return products.filter((p) => !q || p.name?.toLowerCase().includes(q));
+  }, [products, productSearch]);
 
   const save = async () => {
     setSaving(true);
+    // Products expand to their SKU ids (storage stays SKU-level).
+    const skuIds = productIds.flatMap((pid) => products.find((p) => p.id === pid)?.skuIds ?? []);
     const res = await fetch(`/api/v1/marketing/videos/clips/${clip.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -509,23 +508,19 @@ function ClipEditDialog({
               </label>
             </div>
             <div>
-              <span className="text-muted-foreground">Products in this clip ({skuIds.length})</span>
-              <Input placeholder="Search SKUs…" value={skuSearch} onChange={(e) => setSkuSearch(e.target.value)} className="mt-1 mb-1 h-8" />
+              <span className="text-muted-foreground">Products in this clip ({productIds.length})</span>
+              <Input placeholder="Search products…" value={productSearch} onChange={(e) => setProductSearch(e.target.value)} className="mt-1 mb-1 h-8" />
               <div className="max-h-36 overflow-y-auto rounded border p-1.5 space-y-0.5">
-                {visibleSkus.map((s) => (
-                  <label key={s.id} className="flex items-center gap-2 px-1 hover:bg-muted rounded cursor-pointer">
+                {visibleProducts.map((p) => (
+                  <label key={p.id} className="flex items-center gap-2 px-1 hover:bg-muted rounded cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={skuIds.includes(s.id)}
+                      checked={productIds.includes(p.id)}
                       onChange={() =>
-                        setSkuIds((prev) => (prev.includes(s.id) ? prev.filter((x) => x !== s.id) : [...prev, s.id]))
+                        setProductIds((prev) => (prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id]))
                       }
                     />
-                    <span className="truncate">
-                      {s.productName ?? s.sku} {s.colorName ? `— ${s.colorName}` : ""}
-                      {/* sku code distinguishes same-name variants (sizes, powers) */}
-                      {s.sku && <span className="text-muted-foreground ml-1">({s.sku})</span>}
-                    </span>
+                    <span className="truncate">{p.name ?? "Unnamed product"}</span>
                   </label>
                 ))}
               </div>

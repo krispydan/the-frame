@@ -35,21 +35,22 @@ export interface UploaderCategory {
   name: string;
 }
 
-export interface UploaderSku {
+/** A parent product for tagging. We tag products, not color variations;
+ *  `skuIds` is the full set of the product's SKUs stored under the hood. */
+export interface UploaderProduct {
   id: string;
-  sku: string | null;
-  colorName: string | null;
-  productName: string | null;
+  name: string | null;
+  skuIds: string[];
 }
 
 export function ClipUploader({
   categories,
-  skus,
+  products,
   talents = [],
   onUploadComplete,
 }: {
   categories: UploaderCategory[];
-  skus: UploaderSku[];
+  products: UploaderProduct[];
   /** Known model/actor names — powers the datalist so spelling stays consistent. */
   talents?: string[];
   onUploadComplete: () => void;
@@ -61,11 +62,13 @@ export function ClipUploader({
   // Batch defaults applied to every file added while they're set.
   const [categoryId, setCategoryId] = useState<string>("");
   const [audioMode, setAudioMode] = useState<"mute" | "keep">("mute");
-  const [skuIds, setSkuIds] = useState<string[]>([]);
+  const [productIds, setProductIds] = useState<string[]>([]);
   const [talent, setTalent] = useState("");
   // Auto-clip ON (default): each uploaded video is split into 3–5s clips
   // and the original is deleted. OFF: the file is kept whole as one clip.
   const [autoClip, setAutoClip] = useState(true);
+  // Selected products expand to all their SKU ids (storage stays SKU-level).
+  const skuIds = productIds.flatMap((pid) => products.find((p) => p.id === pid)?.skuIds ?? []);
   const defaultsRef = useRef({ categoryId, audioMode, skuIds, talent, autoClip });
   defaultsRef.current = { categoryId, audioMode, skuIds, talent, autoClip };
 
@@ -281,8 +284,8 @@ export function ClipUploader({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const toggleSku = (id: string) => {
-    setSkuIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
+  const toggleProduct = (id: string) => {
+    setProductIds((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
   };
 
   return (
@@ -349,22 +352,18 @@ export function ClipUploader({
         </label>
         <details className="relative">
           <summary className="cursor-pointer select-none border rounded px-2 py-1 bg-background">
-            Products {skuIds.length > 0 ? `(${skuIds.length})` : ""}
+            Products {productIds.length > 0 ? `(${productIds.length})` : ""}
           </summary>
           <div className="absolute z-20 mt-1 max-h-64 w-72 overflow-y-auto rounded-md border bg-background p-2 shadow-lg">
-            {skus.length === 0 && <div className="text-muted-foreground p-1">No SKUs found</div>}
-            {skus.map((s) => (
-              <label key={s.id} className="flex items-center gap-2 px-1 py-0.5 hover:bg-muted rounded cursor-pointer">
+            {products.length === 0 && <div className="text-muted-foreground p-1">No products found</div>}
+            {products.map((p) => (
+              <label key={p.id} className="flex items-center gap-2 px-1 py-0.5 hover:bg-muted rounded cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={skuIds.includes(s.id)}
-                  onChange={() => toggleSku(s.id)}
+                  checked={productIds.includes(p.id)}
+                  onChange={() => toggleProduct(p.id)}
                 />
-                <span className="truncate">
-                  {s.productName ?? s.sku} {s.colorName ? `— ${s.colorName}` : ""}
-                  {/* sku code distinguishes same-name variants (sizes, powers) */}
-                  {s.sku && <span className="text-muted-foreground ml-1">({s.sku})</span>}
-                </span>
+                <span className="truncate">{p.name ?? "Unnamed product"}</span>
               </label>
             ))}
           </div>
