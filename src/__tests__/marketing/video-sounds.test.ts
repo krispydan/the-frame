@@ -7,61 +7,58 @@ import {
 } from "@/modules/marketing/lib/video/tiktok-sounds";
 
 describe("TikTok sounds mapper", () => {
-  it("maps a TikTok Creative Center shaped item", () => {
+  // The REAL novi~tiktok-music-trend-api item shape (TikTok's raw music
+  // object) — this is what silently broke the old mapper.
+  const realItem = {
+    author: "Labrinth",
+    cover_thumb: { url_list: ["https://p16.example/thumb.jpeg"] },
+    cover_medium: { url_list: ["https://p16.example/med.jpeg"] },
+    duration: 60,
+    id: 6740248251825392000, // numeric — precision-lossy, must NOT be used as id
+    id_str: "6740248251825391617",
+    mid: "6740248251825391617",
+    is_original: false,
+    play_url: { url_list: ["https://sf.example/audio"] },
+    title: 'Forever (From "Euphoria: Season 1" Soundtrack)',
+    user_count: 3175407,
+  };
+
+  it("maps the real actor item using string ids + nested cover", () => {
+    const mapped = mapSoundItem(realItem, 0)!;
+    // id_str, NOT the precision-lossy numeric id
+    expect(mapped.externalId).toBe("6740248251825391617");
+    expect(mapped.title).toContain("Forever");
+    expect(mapped.author).toBe("Labrinth");
+    expect(mapped.coverUrl).toBe("https://p16.example/thumb.jpeg");
+    expect(mapped.durationSec).toBe(60);
+    expect(mapped.usageCount).toBe(3175407);
+    expect(mapped.rank).toBe(1); // array order (no rank field)
+    expect(mapped.trendDirection).toBeNull(); // no trend field in payload
+    // a usable TikTok music link is constructed from title + id
+    expect(mapped.tiktokLink).toContain("tiktok.com/music/");
+    expect(mapped.tiktokLink).toContain("6740248251825391617");
+  });
+
+  it("never uses the precision-lossy numeric id", () => {
+    const mapped = mapSoundItem({ title: "x", id: 6740248251825392000 }, 5)!;
+    // no id_str/mid → falls back to a title-derived slug, NOT String(id)
+    expect(mapped.externalId).not.toContain("6740248251825392000");
+    expect(mapped.externalId).toContain("x");
+  });
+
+  it("still handles older Creative-Center field names", () => {
     const mapped = mapSoundItem(
-      {
-        song_id: "728412",
-        title: "cool song",
-        author: "cool artist",
-        cover_url: "https://p16.example/cover.jpg",
-        link: "https://ads.tiktok.com/business/creativecenter/music/728412",
-        duration: 42,
-        rank: 3,
-        rank_diff: 5,
-        rank_diff_type: 1,
-        if_use_songs: 129000,
-        promoted: false,
-      },
+      { song_id: "728412", title: "cc song", author: "a", duration: 42, rank_diff_type: 1, if_use_songs: 129000 },
       2,
-    );
-    expect(mapped).toMatchObject({
-      externalId: "728412",
-      title: "cool song",
-      author: "cool artist",
-      rank: 3,
-      rankDiff: 5,
-      trendDirection: "up",
-      usageCount: 129000,
-      isPromoted: false,
-    });
-    expect(JSON.parse(mapped!.raw).song_id).toBe("728412");
+    )!;
+    expect(mapped.externalId).toBe("728412");
+    expect(mapped.trendDirection).toBe("up");
+    expect(mapped.usageCount).toBe(129000);
   });
 
-  it("maps an alternate scraper shape (camelCase, different names)", () => {
-    const mapped = mapSoundItem(
-      {
-        musicId: "999",
-        musicName: "other song",
-        authorName: "someone",
-        coverThumb: "https://x/cover.jpg",
-        music_url: "https://www.tiktok.com/music/other-song-999",
-        durationSec: 15,
-        rank_diff_type: 4,
-      },
-      0,
-    );
-    expect(mapped).toMatchObject({
-      externalId: "999",
-      title: "other song",
-      author: "someone",
-      trendDirection: "new",
-      rank: 1, // falls back to position + 1
-    });
-  });
-
-  it("rejects items with no id/title instead of inserting junk", () => {
-    expect(mapSoundItem({ error: "quota" }, 0)).toBeNull();
-    expect(mapSoundItem({ title: "nameless" }, 0)).toBeNull();
+  it("only rejects a truly empty (title-less) row", () => {
+    expect(mapSoundItem({ foo: "bar" }, 0)).toBeNull();
+    expect(mapSoundItem({ title: "kept" }, 0)).not.toBeNull();
   });
 });
 
@@ -75,85 +72,60 @@ describe("TikTok sounds sync", () => {
     vi.restoreAllMocks();
   });
 
-  const item = (id: string, rank: number, diffType = 3) => ({
-    song_id: id,
+  const item = (id: string, diffType?: number) => ({
+    id_str: id,
     title: `song ${id}`,
     author: "artist",
-    rank,
-    rank_diff_type: diffType,
+    duration: 30,
+    user_count: 1000,
+    ...(diffType !== undefined ? { rank_diff_type: diffType } : {}),
   });
 
   /**
-   * Mock the async Apify flow: runs/last (no in-flight run) → POST runs
-   * (start) → runs/{id} (SUCCEEDED) → datasets/{id}/items. Returns the
-   * fetch spy so tests can assert call shapes.
+   * Mock the single run-sync-get-dataset-items call — it returns the
+   * dataset rows directly (the whole point: no run-status polling to
+   * mis-read). Returns the fetch spy for call-shape assertions.
    */
-  function mockApifyFlow(items: unknown[]) {
+  function mockRunSync(items: unknown[]) {
     return vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       const u = String(url);
-      if (u.includes("/runs/last")) {
-        return new Response(JSON.stringify({ data: { id: "old", status: "SUCCEEDED" } }), { status: 200 });
-      }
-      if (u.includes("/datasets/")) {
+      if (u.includes("/run-sync-get-dataset-items")) {
         return new Response(JSON.stringify(items), { status: 200 });
-      }
-      if (/\/runs\/[^/?]+\?/.test(u)) {
-        // status poll for a specific run
-        return new Response(JSON.stringify({ data: { id: "run1", status: "SUCCEEDED", defaultDatasetId: "ds1" } }), { status: 200 });
-      }
-      if (u.includes("/runs?")) {
-        // start run
-        return new Response(JSON.stringify({ data: { id: "run1", status: "READY", defaultDatasetId: "ds1" } }), { status: 201 });
       }
       throw new Error(`unexpected fetch: ${u}`);
     });
   }
 
-  it("runs the actor ONCE and stores the derived chart", async () => {
-    const fetchMock = mockApifyFlow([item("a", 1, 1), item("b", 2, 3)]); // a=up→breakout, b=flat→popular
+  it("runs the actor exactly ONCE via run-sync and stores the chart", async () => {
+    const fetchMock = mockRunSync([item("a"), item("b")]);
     const first = await syncTrendingSounds();
     expect(first.synced).toBe(2);
-    // Exactly one actor RUN was started (not one per rank type).
-    const startCalls = fetchMock.mock.calls.filter((c) => /\/runs\?/.test(String(c[0])));
-    expect(startCalls).toHaveLength(1);
-    expect(String(startCalls[0][0])).toContain("novi~tiktok-music-trend-api");
-
-    expect(getTrendingSounds({ rankType: "breakout" }).map((r) => r.externalId)).toEqual(["a"]);
-    expect(getTrendingSounds({ rankType: "popular" }).map((r) => r.externalId)).toEqual(["b"]);
+    const calls = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/run-sync-get-dataset-items"));
+    expect(calls).toHaveLength(1); // one paid run, not one per chart type
+    expect(String(calls[0][0])).toContain("novi~tiktok-music-trend-api");
+    // no trend field → everything lands on the single trending chart
+    expect(getTrendingSounds({ rankType: "popular" }).map((r) => r.externalId).sort()).toEqual(["a", "b"]);
   });
 
-  it("attaches to an in-flight run instead of starting a duplicate", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
-      const u = String(url);
-      if (u.includes("/runs/last")) {
-        return new Response(JSON.stringify({ data: { id: "live", status: "RUNNING", defaultDatasetId: "dsLive" } }), { status: 200 });
-      }
-      if (u.includes("/datasets/")) {
-        return new Response(JSON.stringify([item("x", 1)]), { status: 200 });
-      }
-      if (/\/runs\/[^/?]+\?/.test(u)) {
-        return new Response(JSON.stringify({ data: { id: "live", status: "SUCCEEDED", defaultDatasetId: "dsLive" } }), { status: 200 });
-      }
-      throw new Error(`should not start a new run: ${u}`);
-    });
-    const result = await syncTrendingSounds();
-    expect(result.synced).toBe(1);
-    // No POST /runs? call was made — it attached to the live run.
-    expect(fetchMock.mock.calls.some((c) => /\/runs\?/.test(String(c[0])))).toBe(false);
+  it("derives breakout vs popular when the item DOES carry a trend", async () => {
+    mockRunSync([item("up", 1), item("flat", 3)]);
+    await syncTrendingSounds();
+    expect(getTrendingSounds({ rankType: "breakout" }).map((r) => r.externalId)).toEqual(["up"]);
+    expect(getTrendingSounds({ rankType: "popular" }).map((r) => r.externalId)).toEqual(["flat"]);
   });
 
   it("replaces the whole snapshot on the next sync", async () => {
-    mockApifyFlow([item("a", 1), item("b", 2)]);
+    mockRunSync([item("a"), item("b")]);
     await syncTrendingSounds();
-    mockApifyFlow([item("c", 1)]);
+    mockRunSync([item("c")]);
     await syncTrendingSounds();
     expect(getTrendingSounds({}).map((r) => r.externalId)).toEqual(["c"]);
   });
 
   it("keeps the previous snapshot when a sync returns nothing usable", async () => {
-    mockApifyFlow([item("a", 1)]);
+    mockRunSync([item("a")]);
     await syncTrendingSounds();
-    mockApifyFlow([]);
+    mockRunSync([]);
     await expect(syncTrendingSounds()).rejects.toThrow(/0 usable/);
     expect(getTrendingSounds({})).toHaveLength(1);
   });

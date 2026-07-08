@@ -213,7 +213,6 @@ function TrendingSoundsDialog({ onClose }: { onClose: () => void }) {
   const [configured, setConfigured] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [chart, setChart] = useState<"breakout" | "popular">("breakout");
 
   const load = useCallback(() => {
     fetch("/api/v1/marketing/videos/sounds")
@@ -266,7 +265,7 @@ function TrendingSoundsDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const visible = sounds.filter((s) => s.rankType === chart);
+  const visible = sounds;
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -275,12 +274,7 @@ function TrendingSoundsDialog({ onClose }: { onClose: () => void }) {
           <DialogTitle>TikTok trending audio</DialogTitle>
         </DialogHeader>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Button size="sm" variant={chart === "breakout" ? "default" : "outline"} onClick={() => setChart("breakout")}>
-            Breaking out
-          </Button>
-          <Button size="sm" variant={chart === "popular" ? "default" : "outline"} onClick={() => setChart("popular")}>
-            Most popular
-          </Button>
+          <span className="font-medium text-foreground">Top {visible.length} trending</span>
           <div className="flex-1" />
           <span>{lastSyncedAt ? `synced ${new Date(lastSyncedAt).toLocaleString()}` : "never synced"}</span>
           <Button size="sm" variant="outline" onClick={sync} disabled={syncing}>

@@ -30,18 +30,29 @@ export interface R2Config {
   publicBaseUrl: string | null;
 }
 
+/** Trim + strip surrounding quotes (Railway UI sometimes keeps literal
+ *  quotes) + drop anything after a comma (guards the common "crammed
+ *  multiple vars into one" mistake). */
+function cleanEnv(v: string | undefined): string | undefined {
+  if (v == null) return undefined;
+  let s = v.trim().replace(/^["']|["']$/g, "").trim();
+  const comma = s.indexOf(",");
+  if (comma >= 0) s = s.slice(0, comma).trim();
+  return s || undefined;
+}
+
 export function readR2Config(): R2Config | null {
-  const accountId = process.env.R2_ACCOUNT_ID?.trim();
-  const accessKeyId = process.env.R2_ACCESS_KEY_ID?.trim();
-  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY?.trim();
-  const bucket = process.env.R2_BUCKET?.trim();
+  const accountId = cleanEnv(process.env.R2_ACCOUNT_ID);
+  const accessKeyId = cleanEnv(process.env.R2_ACCESS_KEY_ID);
+  const secretAccessKey = cleanEnv(process.env.R2_SECRET_ACCESS_KEY);
+  const bucket = cleanEnv(process.env.R2_BUCKET);
   if (!accountId || !accessKeyId || !secretAccessKey || !bucket) return null;
   return {
     accountId,
     accessKeyId,
     secretAccessKey,
     bucket,
-    publicBaseUrl: process.env.R2_PUBLIC_BASE_URL?.trim().replace(/\/+$/, "") || null,
+    publicBaseUrl: cleanEnv(process.env.R2_PUBLIC_BASE_URL)?.replace(/\/+$/, "") || null,
   };
 }
 

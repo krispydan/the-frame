@@ -64,6 +64,34 @@ function num(item: RawItem, ...keys: string[]): number | null {
   return null;
 }
 
+/** String OR number id (accepts numeric ids; number stringified). */
+function idStr(item: RawItem, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const v = item[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  }
+  return null;
+}
+
+/** First URL from either a flat string field or TikTok's nested
+ *  { url_list: [...] } image/audio object. */
+function urlFrom(item: RawItem, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const v = item[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (v && typeof v === "object") {
+      const list = (v as { url_list?: unknown }).url_list;
+      if (Array.isArray(list) && typeof list[0] === "string" && list[0]) return list[0];
+    }
+  }
+  return null;
+}
+
+function slugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+}
+
 export interface MappedSound {
   externalId: string;
   title: string;
@@ -80,46 +108,59 @@ export interface MappedSound {
 }
 
 /**
- * Map one actor dataset item → our columns. Returns null for items with
- * no usable id/title (e.g. actor error rows).
+ * Map one actor dataset item → our columns.
  *
- * Known shapes covered: TikTok Creative Center passthrough
- * ({song_id,title,author,cover_url,duration,rank,rank_diff,
- *   rank_diff_type,if_use_songs,link,promoted}) and common scraper
- * variants ({id,music_id,clip_id,musicName,authorName,coverUrl,...}).
+ * Primary shape (novi~tiktok-music-trend-api = TikTok's raw music
+ * object): {id (number), id_str, mid, title, author, duration (sec),
+ * user_count, cover_thumb/medium/large:{url_list:[…]}, play_url:{…}}.
+ * There's NO rank or trend field — chart position is the array order.
+ *
+ * Also tolerates older Creative-Center / scraper field names via the
+ * alias lists, and never drops an item that has a title (id falls back
+ * to a title-derived slug) so a naming change degrades to sparse rows,
+ * not silent loss.
  */
 export function mapSoundItem(item: RawItem, position: number): MappedSound | null {
+  const title = str(item, "title", "musicName", "music_name", "name", "song_name", "clip_title");
+  if (!title) return null; // truly empty/error row
+
+  // Prefer string ids (id_str/mid). The numeric `id` is deliberately
+  // EXCLUDED — JS rounds it (…392000 vs the real …391617), so it's a
+  // wrong id. No string id → a title-derived slug.
   const externalId =
-    str(item, "song_id", "songId", "music_id", "musicId", "clip_id", "clipId", "id") ??
-    // some revisions only ship a link — derive a stable id from it
-    str(item, "link", "url", "music_url")?.replace(/[^a-zA-Z0-9]+/g, "-") ??
-    null;
-  const title = str(item, "title", "musicName", "music_name", "name", "song_name");
-  if (!externalId || !title) return null;
+    idStr(item, "id_str", "mid", "song_id", "songId", "music_id", "musicId", "clip_id", "clipId") ??
+    `${slugify(title)}-${position}`;
 
   const rankDiff = num(item, "rank_diff", "rankDiff", "rank_change");
   const diffType = num(item, "rank_diff_type", "rankDiffType");
-  // Creative Center diff types: 1=up, 2=down, 3=flat/steady, 4=new.
+  // Creative Center diff types: 1=up, 2=down, 3=flat, 4=new. This actor
+  // ships none of them → trendDirection stays null (no trend signal).
   let trendDirection: string | null = null;
   if (diffType === 4) trendDirection = "new";
   else if (diffType === 1 || (rankDiff ?? 0) > 0) trendDirection = "up";
   else if (diffType === 2 || (rankDiff ?? 0) < 0) trendDirection = "down";
   else if (rankDiff !== null || diffType !== null) trendDirection = "flat";
 
-  const promoted = item["promoted"] ?? item["is_commercial"] ?? item["isCommercial"];
+  const cover = urlFrom(item, "cover_thumb", "cover_medium", "cover_large", "cover_url", "coverUrl", "cover", "avatar");
+  // No share link in the payload — build the standard TikTok music page
+  // URL from title + id (resolves/redirects); fall back to the audio url.
+  const link =
+    str(item, "link", "url", "music_url", "musicUrl", "share_url", "song_url") ??
+    (externalId ? `https://www.tiktok.com/music/${slugify(title)}-${externalId}` : null) ??
+    urlFrom(item, "play_url");
 
   return {
     externalId,
     title,
     author: str(item, "author", "authorName", "author_name", "artist", "artist_name"),
-    coverUrl: str(item, "cover_url", "coverUrl", "cover", "cover_thumb", "coverThumb", "avatar"),
-    tiktokLink: str(item, "link", "url", "music_url", "musicUrl", "share_url", "song_url"),
+    coverUrl: cover,
+    tiktokLink: link,
     durationSec: num(item, "duration", "duration_sec", "durationSec", "music_duration"),
-    rank: num(item, "rank", "position", "chart_rank") ?? position + 1,
+    rank: num(item, "rank", "chart_rank") ?? position + 1, // no rank field → array order
     rankDiff,
     trendDirection,
-    usageCount: num(item, "if_use_songs", "user_count", "userCount", "video_count", "videoCount", "usage_count", "use_count"),
-    isPromoted: promoted === true || promoted === 1,
+    usageCount: num(item, "user_count", "if_use_songs", "userCount", "video_count", "videoCount", "usage_count", "use_count"),
+    isPromoted: item["is_original"] === true,
     raw: JSON.stringify(item),
   };
 }
@@ -133,82 +174,22 @@ export interface SyncResult {
   errors: string[];
 }
 
-// ── Apify run lifecycle (async start + poll — cost-safe) ──
+// ── Sync (run-sync-get-dataset-items — one call, returns items directly) ──
 //
-// We deliberately do NOT use run-sync-get-dataset-items: it holds an
-// HTTP connection open for the whole ~4-5min run, so the browser (or a
-// proxy) times out and RETRIES, spawning duplicate paid runs. Instead:
-//   1. If a run is already in-flight on Apify, attach to it (never
-//      start a second — this is the guard against duplicate runs).
-//   2. Otherwise start ONE run.
-//   3. Poll its status server-side until it finishes, then read the
-//      dataset. A broken poll connection re-reads status; it never
-//      re-triggers the actor.
+// The actor takes ~4-5 min and returns ~26 items. We call it ONCE from a
+// background job (no browser connection to time out → no retry storms),
+// derive breakout/popular from each item's trend, and replace the
+// country snapshot. Every raw item is kept, the first item's shape is
+// LOGGED (actor field naming can't be inspected from CI), and the mapper
+// never drops an item that carries any data — so a naming surprise shows
+// up as saved-but-sparse rows + a log line, not silent nothing.
 
-const POLL_INTERVAL_MS = 8000;
-const MAX_WAIT_MS = 6 * 60_000;
-const IN_FLIGHT = new Set(["READY", "RUNNING"]);
-
-interface ApifyRun {
-  id: string;
-  status: string;
-  defaultDatasetId?: string;
-}
-
-async function apifyJson(url: string, init?: RequestInit): Promise<{ data?: ApifyRun }> {
-  const res = await fetch(url, init);
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Apify HTTP ${res.status}: ${text.slice(0, 300)}`);
-  }
-  return res.json();
-}
-
-async function startOrAttachRun(token: string, input: Record<string, unknown>): Promise<ApifyRun> {
-  // Guard: is a run already going? Attach instead of starting another.
-  try {
-    const last = await apifyJson(`${APIFY_BASE}/acts/${ACTOR_TIKTOK_SOUNDS}/runs/last?token=${token}`);
-    if (last.data && IN_FLIGHT.has(last.data.status)) {
-      console.info(`[tiktok-sounds] attaching to in-flight run ${last.data.id} (${last.data.status})`);
-      return last.data;
-    }
-  } catch {
-    /* no prior run / transient — fall through to start */
-  }
-  const started = await apifyJson(
-    `${APIFY_BASE}/acts/${ACTOR_TIKTOK_SOUNDS}/runs?token=${token}&timeout=300`,
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) },
-  );
-  if (!started.data?.id) throw new Error("Apify did not return a run id");
-  return started.data;
-}
-
-async function waitForRun(token: string, runId: string): Promise<ApifyRun> {
-  const deadline = Date.now() + MAX_WAIT_MS;
-  // Check immediately; only sleep between polls (keeps tests fast).
-  for (;;) {
-    const { data } = await apifyJson(`${APIFY_BASE}/acts/${ACTOR_TIKTOK_SOUNDS}/runs/${runId}?token=${token}`);
-    if (!data) throw new Error("Apify run lookup returned no data");
-    if (!IN_FLIGHT.has(data.status)) return data; // terminal (SUCCEEDED/FAILED/…)
-    if (Date.now() > deadline) {
-      throw new Error(`Apify run ${runId} still ${data.status} after ${MAX_WAIT_MS / 1000}s — leaving it; next sync will attach`);
-    }
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-  }
-}
-
-async function fetchDatasetItems(token: string, datasetId: string): Promise<RawItem[]> {
-  const res = await fetch(`${APIFY_BASE}/datasets/${datasetId}/items?token=${token}&clean=true&format=json`);
-  if (!res.ok) throw new Error(`Apify dataset HTTP ${res.status}`);
-  const items = await res.json();
-  return Array.isArray(items) ? (items as RawItem[]) : [];
-}
+const RUN_TIMEOUT_SECS = 600;
+const FETCH_ABORT_MS = 7 * 60_000;
 
 /**
  * Sync the trending chart with ONE actor run and replace the whole
- * country snapshot. "breakout" vs "popular" is derived from each
- * sound's own trend signal — no second run needed. Safe to retry: an
- * in-flight run is attached to, never duplicated.
+ * country snapshot. Safe to retry (the background job guards duplicates).
  */
 export async function syncTrendingSounds(opts: {
   countryCode?: string;
@@ -233,22 +214,44 @@ export async function syncTrendingSounds(opts: {
     commercial_music: false,
   };
 
-  const run = await startOrAttachRun(token, input);
-  const final = await waitForRun(token, run.id);
-  if (final.status !== "SUCCEEDED") {
-    throw new Error(`Apify run ${run.id} ended ${final.status}`);
+  // run-sync-get-dataset-items returns the dataset rows directly, so
+  // there's no run-status polling to mis-read. The connection is held
+  // ~4-5min server-side (fine — no browser), capped by an abort timer.
+  const url = `${APIFY_BASE}/acts/${ACTOR_TIKTOK_SOUNDS}/run-sync-get-dataset-items?token=${token}&timeout=${RUN_TIMEOUT_SECS}`;
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), FETCH_ABORT_MS);
+  let items: RawItem[];
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Apify HTTP ${res.status}: ${text.slice(0, 300)}`);
+    }
+    const data = await res.json();
+    items = Array.isArray(data) ? (data as RawItem[]) : [];
+  } finally {
+    clearTimeout(abortTimer);
   }
-  const datasetId = final.defaultDatasetId ?? run.defaultDatasetId;
-  if (!datasetId) throw new Error("Apify run has no dataset id");
 
-  const items = await fetchDatasetItems(token, datasetId);
+  // Diagnostic — reveals the actor's REAL field names in Railway logs so
+  // the mapper can be perfected (we can't reach Apify from CI to inspect).
+  if (items.length > 0) {
+    console.info(`[tiktok-sounds] ${items.length} items; first item keys: ${Object.keys(items[0]).join(", ")}`);
+    console.info(`[tiktok-sounds] first item: ${JSON.stringify(items[0]).slice(0, 800)}`);
+  }
+
   const mapped = items
     .map((item, i) => mapSoundItem(item, i))
     .filter((m): m is MappedSound => m !== null);
   result.skipped = items.length - mapped.length;
   if (mapped.length === 0) {
     // Keep the previous snapshot rather than wiping it to nothing.
-    throw new Error(`0 usable items out of ${items.length} — snapshot left unchanged`);
+    throw new Error(`0 usable items out of ${items.length} — snapshot left unchanged (see logs for item shape)`);
   }
 
   // A sound is "breakout" if it's climbing or brand new; everything
@@ -277,7 +280,7 @@ export async function syncTrendingSounds(opts: {
   replace();
   result.synced = mapped.length;
 
-  console.info(`[tiktok-sounds] synced ${result.synced} sounds (${countryCode}, run ${run.id})`);
+  console.info(`[tiktok-sounds] synced ${result.synced} sounds (${countryCode})`);
   return result;
 }
 

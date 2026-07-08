@@ -135,9 +135,8 @@ const SUBMIT_TOOL = {
 
 /** Slim, prompt-ready view of the current chart. */
 function soundsForPrompt(): { list: TiktokSound[]; promptJson: string } {
-  const popular = getTrendingSounds({ rankType: "popular", limit: 8 });
-  const breakout = getTrendingSounds({ rankType: "breakout", limit: 8 });
-  const list = [...breakout, ...popular];
+  // One trending chart (the actor has no breakout/popular split), top 15.
+  const list = getTrendingSounds({ limit: 15 });
   const promptJson = JSON.stringify(
     list.map((s) => ({
       id: s.id,
