@@ -97,6 +97,7 @@ export interface MappedSound {
   title: string;
   author: string | null;
   coverUrl: string | null;
+  previewUrl: string | null;
   tiktokLink: string | null;
   durationSec: number | null;
   rank: number | null;
@@ -142,18 +143,21 @@ export function mapSoundItem(item: RawItem, position: number): MappedSound | nul
   else if (rankDiff !== null || diffType !== null) trendDirection = "flat";
 
   const cover = urlFrom(item, "cover_thumb", "cover_medium", "cover_large", "cover_url", "coverUrl", "cover", "avatar");
+  // Direct audio stream for inline preview (no trip to TikTok).
+  const preview = urlFrom(item, "play_url", "playUrl", "play_url_list", "audio_url", "audioUrl", "music_url_full");
   // No share link in the payload — build the standard TikTok music page
   // URL from title + id (resolves/redirects); fall back to the audio url.
   const link =
     str(item, "link", "url", "music_url", "musicUrl", "share_url", "song_url") ??
     (externalId ? `https://www.tiktok.com/music/${slugify(title)}-${externalId}` : null) ??
-    urlFrom(item, "play_url");
+    preview;
 
   return {
     externalId,
     title,
     author: str(item, "author", "authorName", "author_name", "artist", "artist_name"),
     coverUrl: cover,
+    previewUrl: preview,
     tiktokLink: link,
     durationSec: num(item, "duration", "duration_sec", "durationSec", "music_duration"),
     rank: num(item, "rank", "chart_rank") ?? position + 1, // no rank field → array order
@@ -264,15 +268,15 @@ export async function syncTrendingSounds(opts: {
     sqlite.prepare(`DELETE FROM marketing_tiktok_sounds WHERE country_code = ?`).run(countryCode);
     const insert = sqlite.prepare(`
       INSERT INTO marketing_tiktok_sounds
-        (id, external_id, title, author, cover_url, tiktok_link, duration_sec,
+        (id, external_id, title, author, cover_url, preview_url, tiktok_link, duration_sec,
          rank, rank_diff, trend_direction, usage_count, country_code, rank_type,
          is_promoted, raw, synced_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const m of mapped) {
       insert.run(
         crypto.randomUUID(), m.externalId, m.title, m.author, m.coverUrl,
-        m.tiktokLink, m.durationSec, m.rank, m.rankDiff, m.trendDirection,
+        m.previewUrl, m.tiktokLink, m.durationSec, m.rank, m.rankDiff, m.trendDirection,
         m.usageCount, countryCode, rankTypeOf(m), m.isPromoted ? 1 : 0, m.raw, now,
       );
     }
