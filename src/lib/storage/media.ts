@@ -75,6 +75,24 @@ export async function readMedia(key: string): Promise<Buffer> {
   return readFile(localPath(key));
 }
 
+/**
+ * Read a key from R2 only if R2 is configured AND the object exists;
+ * returns null otherwise. Used by the serving routes as a read-through
+ * fallback so a file that lives only on R2 (migrated, or written after a
+ * cutover) still serves through the app's stable /api/images URL — no
+ * public-URL change for marketplace feeds. Never throws on a miss.
+ */
+export async function readFromR2IfPresent(key: string): Promise<Buffer | null> {
+  if (!isR2Configured()) return null;
+  try {
+    const h = await r2Head(key);
+    if (!h.exists) return null;
+    return await r2Get(key);
+  } catch {
+    return null;
+  }
+}
+
 export async function mediaStat(key: string): Promise<{ exists: boolean; size: number }> {
   try {
     if (mediaOnR2()) {
