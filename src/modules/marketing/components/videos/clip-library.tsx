@@ -130,6 +130,31 @@ export function ClipLibrary() {
     }
   };
 
+  const bulkReclip = async () => {
+    const n = selected.size;
+    if (
+      !window.confirm(
+        `Auto-clip ${n} selected video${n === 1 ? "" : "s"} into 3–5s clips? Each original is archived and replaced by the short clips.`,
+      )
+    ) {
+      return;
+    }
+    let ok = 0;
+    let failed = 0;
+    for (const id of selected) {
+      const res = await fetch(`/api/v1/marketing/videos/clips/${id}/reclip`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      if (res.ok) ok++;
+      else failed++;
+    }
+    toast.success(`Clipping queued for ${ok}${failed ? `, ${failed} couldn't be clipped` : ""}`);
+    setSelected(new Set());
+    load();
+  };
+
   const bulkDelete = async () => {
     const n = selected.size;
     if (
@@ -245,6 +270,9 @@ export function ClipLibrary() {
           <Button size="sm" variant="outline" onClick={() => bulkPatch({ boost: 0 })}>Unboost</Button>
           <BulkTalentInput talents={talents} onApply={(t) => bulkPatch({ talent: t })} />
           <div className="flex-1" />
+          <Button size="sm" variant="outline" onClick={bulkReclip}>
+            <Scissors className="h-3.5 w-3.5 mr-1" /> Clip into 3–5s
+          </Button>
           <Button size="sm" variant="destructive" onClick={bulkDelete}>
             <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
           </Button>
@@ -456,6 +484,28 @@ function ClipEditDialog({
     onSaved();
   };
 
+  const reclip = async () => {
+    if (
+      !window.confirm(
+        "Auto-clip this video into 3–5s clips? The original is archived and replaced by the short clips.",
+      )
+    ) {
+      return;
+    }
+    const res = await fetch(`/api/v1/marketing/videos/clips/${clip.id}/reclip`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const r = await res.json().catch(() => ({}));
+    if (res.ok) {
+      toast.success("Clipping queued — short clips will appear shortly");
+      onSaved();
+    } else {
+      toast.error(r.error ?? "Couldn't clip this video");
+    }
+  };
+
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       {/* sm:max-w-2xl — the base DialogContent pins sm:max-w-sm, and an
@@ -548,6 +598,9 @@ function ClipEditDialog({
         </div>
         <div className="flex flex-wrap justify-between gap-2 pt-2">
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={reclip}>
+              <Scissors className="h-3.5 w-3.5 mr-1" /> Clip into 3–5s
+            </Button>
             <Button variant="outline" size="sm" onClick={renormalize}>
               <RefreshCw className="h-3.5 w-3.5 mr-1" /> Re-normalize
             </Button>
