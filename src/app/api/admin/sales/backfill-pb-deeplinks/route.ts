@@ -34,6 +34,12 @@ export async function POST(req: NextRequest) {
            ON pfp.company_id = c.id
           AND pfp.pb_contact_id IS NOT NULL AND TRIM(pfp.pb_contact_id) <> ''
         WHERE c.pipedrive_person_id IS NOT NULL
+          -- only rows not yet linked (no cached phoneId), so each batch
+          -- advances instead of re-processing the same top-N every time.
+          AND NOT EXISTS (
+            SELECT 1 FROM phoneburner_folder_pushes p2
+             WHERE p2.company_id = c.id AND p2.pb_phone_id IS NOT NULL AND TRIM(p2.pb_phone_id) <> ''
+          )
         ORDER BY c.updated_at DESC
         LIMIT ?`,
     )
