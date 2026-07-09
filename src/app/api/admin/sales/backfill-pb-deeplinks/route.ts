@@ -58,9 +58,22 @@ export async function POST(req: NextRequest) {
     .get() as Record<string, number>;
 
   if (dryRun) {
+    // Surface a sample of the "have contact id but no phoneId" set for diagnosis.
+    const stuck = sqlite
+      .prepare(
+        `SELECT c.name, pfp.pb_contact_id, pfp.error
+           FROM phoneburner_folder_pushes pfp
+           JOIN companies c ON c.id = pfp.company_id
+          WHERE pfp.pb_contact_id IS NOT NULL AND TRIM(pfp.pb_contact_id) <> ''
+            AND c.pipedrive_person_id IS NOT NULL
+            AND (pfp.pb_phone_id IS NULL OR TRIM(pfp.pb_phone_id) = '')
+          ORDER BY pfp.pushed_at DESC LIMIT 8`,
+      )
+      .all() as Array<{ name: string | null; pb_contact_id: string; error: string | null }>;
     return NextResponse.json({
       ok: true, dry_run: true, cohort: rows.length, totals,
       sample: rows.slice(0, 5).map((r) => r.name),
+      missing_phoneid_sample: stuck,
     });
   }
 
