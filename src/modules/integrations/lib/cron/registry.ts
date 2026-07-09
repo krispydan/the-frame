@@ -340,6 +340,17 @@ export const CRON_JOBS: CronJob[] = [
     handler: async () => enqueueSoundsSync(),
     guard: () => Boolean(process.env.APIFY_API_TOKEN),
   },
+
+  // ── Sales: Pipedrive call activities → PhoneBurner rep folders ──
+  {
+    id: "build-call-folders",
+    schedule: "0 13 * * *",  // 13:00 UTC ≈ 6am PT — before the reps start dialing
+    description: "Build each rep's PhoneBurner daily follow-up folder from their open Pipedrive call activities (create PB contact if missing, move in, stamp activity id, clear completed) + post the #sales-leads digest.",
+    handler: async () => {
+      const { buildDailyCallFolders } = await import("@/modules/sales/lib/pipedrive-call-sync");
+      return buildDailyCallFolders({ dryRun: false });
+    },
+  },
 ];
 
 function baseUrl(): string {

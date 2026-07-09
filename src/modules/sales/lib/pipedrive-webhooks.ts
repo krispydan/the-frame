@@ -199,6 +199,25 @@ async function resolveCompanyFromDeal(orgId: number | null): Promise<string | nu
 
 // ── deal handler ──────────────────────────────────────────────────────────────
 
+/**
+ * Activity done/deleted in Pipedrive → drop the contact from the rep's
+ * PhoneBurner call folder (the reverse of the daily builder). This keeps
+ * the call list in sync when a rep completes an activity in Pipedrive
+ * rather than by dialing in PhoneBurner.
+ */
+async function handleActivity(body: PdWebhookBody, action: string, activityId: number): Promise<string> {
+  const cur = (body.current || body.data || {}) as Record<string, unknown>;
+  const done = cur.done === true || cur.done === 1 || String(cur.done) === "true";
+  if (action === "deleted" || done) {
+    const { removeFromCallListByActivity } = await import("./pipedrive-call-sync");
+    const removed = await removeFromCallListByActivity(activityId);
+    return removed
+      ? `activity ${activityId} ${action}${done ? " (done)" : ""} → removed from call list`
+      : `activity ${activityId} — not on a call list`;
+  }
+  return `activity ${action} — no action`;
+}
+
 async function handleDeal(body: PdWebhookBody, dealId: number): Promise<string> {
   const f = dealFields(body);
   const status = String(f.status ?? "");
@@ -322,6 +341,7 @@ async function handlePipedriveWebhook(payload: WebhookPayload): Promise<{ ok: bo
     let message = "";
     if (object === "deal") message = await handleDeal(body, id);
     else if (object === "person") message = handlePerson(action, id);
+    else if (object === "activity") message = await handleActivity(body, action, id);
     else message = `${object} ${action} — no handler`;
 
     sqlite

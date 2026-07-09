@@ -346,6 +346,28 @@ export async function handleCallActivityFeedback(
   }
 }
 
+/**
+ * A Pipedrive activity was completed/deleted (e.g. the rep marked it done
+ * in Pipedrive, or a call closed it) — drop the contact from the call
+ * folder and restore its home folder. Called from the Pipedrive webhook.
+ * Best-effort; no-op if the activity isn't on any call list.
+ */
+export async function removeFromCallListByActivity(activityId: string | number): Promise<boolean> {
+  const rows = sqlite
+    .prepare("SELECT id, pb_contact_id, original_folder_id FROM pb_call_queue WHERE activity_id = ?")
+    .all(String(activityId)) as Array<{ id: string; pb_contact_id: string; original_folder_id: string | null }>;
+  if (!rows.length) return false;
+  for (const r of rows) {
+    try {
+      if (r.original_folder_id) await moveContact(r.pb_contact_id, r.original_folder_id);
+    } catch (e) {
+      console.warn("[pipedrive-call-sync] remove-by-activity move failed:", e instanceof Error ? e.message : e);
+    }
+    sqlite.prepare("DELETE FROM pb_call_queue WHERE id = ?").run(r.id);
+  }
+  return true;
+}
+
 async function postCallListDigest(through: string, reps: RepSyncResult[]): Promise<void> {
   const lines = reps.map((r) => {
     const extras: string[] = [];
