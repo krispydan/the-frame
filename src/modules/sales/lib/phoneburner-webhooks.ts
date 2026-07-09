@@ -393,6 +393,17 @@ async function handlePhoneBurnerWebhook(
       );
       message = `call_end ${outcome} disposition=${disposition ?? "(none)"}`;
 
+      // Reverse loop: if this contact is on a rep's Pipedrive-driven call
+      // list, close or reschedule the stamped Pipedrive activity + tidy
+      // the folder. Best-effort, independent of pipeline progression.
+      try {
+        const { handleCallActivityFeedback } = await import("./pipedrive-call-sync");
+        const dur = typeof body.duration === "number" ? Math.round(body.duration) : null;
+        await handleCallActivityFeedback(pbContactUserId(body), disposition, dur);
+      } catch (e) {
+        console.error("[phoneburner-webhook] activity feedback failed:", e);
+      }
+
       // Pipeline progression — if the disposition implies a status
       // change (Set Appointment → interested, Not Interested / Do Not
       // Call → not_interested), upgrade the company. progressCompanyStatus

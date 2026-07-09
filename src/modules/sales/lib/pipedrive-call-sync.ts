@@ -16,6 +16,7 @@
 import { sqlite } from "@/lib/db";
 import {
   listActivities,
+  updateActivity,
   type PdActivity,
 } from "./pipedrive-client";
 import { phoneBurnerClient } from "./phoneburner-client";
@@ -284,6 +285,65 @@ export async function buildDailyCallFolders(opts: { dryRun?: boolean; through?: 
   }
 
   return { ok: true, dry_run: dryRun, through, reps };
+}
+
+/**
+ * Reverse loop: a PhoneBurner call happened for a contact that's on a rep's
+ * call list — update the stamped Pipedrive activity and tidy the folder.
+ *   - Non-final disposition (no answer / voicemail / busy / callback) →
+ *     bump the activity's due_date to tomorrow so it reappears next rebuild.
+ *   - Final disposition (anything else) → mark the activity done with the
+ *     outcome, move the contact back to its home folder, drop it from the
+ *     queue (so it leaves the call list).
+ * No-op if the contact isn't on any rep's list. Best-effort; never throws.
+ */
+const RETRY_DISPOSITIONS = new Set(
+  [
+    "no answer", "left voicemail", "voicemail", "busy", "call back", "callback",
+    "no contact", "hang up", "hung up", "not available", "gatekeeper",
+  ].map((s) => s.toLowerCase()),
+);
+
+function tomorrow(): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+export async function handleCallActivityFeedback(
+  pbContactId: string | null,
+  disposition: string | null,
+  durationSeconds: number | null,
+): Promise<{ handled: boolean; action?: string; activityId?: string }> {
+  if (!pbContactId) return { handled: false };
+  const cid = String(pbContactId).replace(/\.0$/, "");
+  const q = sqlite
+    .prepare("SELECT id, activity_id, original_folder_id FROM pb_call_queue WHERE pb_contact_id = ? LIMIT 1")
+    .get(cid) as { id: string; activity_id: string | null; original_folder_id: string | null } | undefined;
+  if (!q || !q.activity_id) return { handled: false };
+  const activityId = Number(q.activity_id);
+  const disp = (disposition || "").trim();
+  const isRetry = RETRY_DISPOSITIONS.has(disp.toLowerCase());
+  const durTxt = durationSeconds ? ` · ${Math.floor(durationSeconds / 60)}m${String(durationSeconds % 60).padStart(2, "0")}s` : "";
+
+  try {
+    if (isRetry) {
+      await updateActivity(activityId, { due_date: tomorrow(), note: `PhoneBurner: ${disp || "no disposition"}${durTxt} — rescheduled` });
+      return { handled: true, action: "rescheduled", activityId: q.activity_id };
+    }
+    // Final → mark done + remove from the call folder + drop from queue.
+    await updateActivity(activityId, { done: true, note: `PhoneBurner: ${disp || "completed"}${durTxt}` });
+    try {
+      if (q.original_folder_id) await moveContact(cid, q.original_folder_id);
+    } catch (e) {
+      console.warn("[pipedrive-call-sync] restore folder failed:", e instanceof Error ? e.message : e);
+    }
+    sqlite.prepare("DELETE FROM pb_call_queue WHERE id = ?").run(q.id);
+    return { handled: true, action: "completed", activityId: q.activity_id };
+  } catch (e) {
+    console.error("[pipedrive-call-sync] activity feedback failed:", e instanceof Error ? e.message : e);
+    return { handled: false };
+  }
 }
 
 async function postCallListDigest(through: string, reps: RepSyncResult[]): Promise<void> {
