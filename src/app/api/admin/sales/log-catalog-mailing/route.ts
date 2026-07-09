@@ -104,30 +104,30 @@ function toMailRow(o: Record<string, string>): MailRow {
 const normName = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
 const digits = (s: string) => (s || "").replace(/\D+/g, "");
 
-// ── prepared matchers ──
-const byEmail = sqlite.prepare(
-  `SELECT company_id AS id FROM contacts WHERE lower(trim(email)) = ? AND company_id IS NOT NULL LIMIT 1`,
-);
-const byName = sqlite.prepare(
-  `SELECT id FROM companies WHERE lower(trim(name)) = ? LIMIT 1`,
-);
-const byPhone = sqlite.prepare(
-  `SELECT company_id AS id FROM company_phones WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone,'(',''),')',''),'-',''),' ',''),'+','') LIKE ? AND company_id IS NOT NULL LIMIT 1`,
-);
-
+// Match a row → frame company. Statements are prepared per call (cheap; and,
+// crucially, NOT at module load — which would run against an empty DB during
+// `next build` page-data collection and fail the build).
 function matchCompany(row: MailRow): { id: string; via: string } | null {
   if (row.email) {
-    const m = byEmail.get(row.email.toLowerCase().trim()) as { id: string } | undefined;
+    const m = sqlite
+      .prepare(`SELECT company_id AS id FROM contacts WHERE lower(trim(email)) = ? AND company_id IS NOT NULL LIMIT 1`)
+      .get(row.email.toLowerCase().trim()) as { id: string } | undefined;
     if (m?.id) return { id: m.id, via: "email" };
   }
   if (row.company) {
-    const m = byName.get(normName(row.company)) as { id: string } | undefined;
+    const m = sqlite
+      .prepare(`SELECT id FROM companies WHERE lower(trim(name)) = ? LIMIT 1`)
+      .get(normName(row.company)) as { id: string } | undefined;
     if (m?.id) return { id: m.id, via: "name" };
   }
   const d = digits(row.phone);
   if (d.length >= 10) {
     const last10 = d.slice(-10);
-    const m = byPhone.get(`%${last10}`) as { id: string } | undefined;
+    const m = sqlite
+      .prepare(
+        `SELECT company_id AS id FROM company_phones WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone,'(',''),')',''),'-',''),' ',''),'+','') LIKE ? AND company_id IS NOT NULL LIMIT 1`,
+      )
+      .get(`%${last10}`) as { id: string } | undefined;
     if (m?.id) return { id: m.id, via: "phone" };
   }
   return null;
@@ -211,15 +211,17 @@ export async function POST(req: NextRequest) {
   const pdReady = getPipedriveConnectionStatus().connected && isSyncEnabled();
   if (!pdReady) return NextResponse.json({ error: "Pipedrive not connected / sync disabled" }, { status: 409 });
 
-  const total = companyIds.length;
-  setSetting(RUN_KEY, JSON.stringify({ state: "running", total, done: 0, logged: 0, pushed: 0, skipped: 0, errors: 0, startedAt: new Date().toISOString(), mailedDate }));
-
   const owner = getPipedriveOwner()?.id;
-  const entries = [...matchedCompanies.entries()];
+  const limitParam = parseInt(url.searchParams.get("limit") || "0", 10);
+  let entries = [...matchedCompanies.entries()];
+  if (limitParam > 0) entries = entries.slice(0, limitParam);
+  const total = entries.length;
+  setSetting(RUN_KEY, JSON.stringify({ state: "running", total, done: 0, logged: 0, pushed: 0, skipped: 0, errors: 0, startedAt: new Date().toISOString(), mailedDate }));
 
   // Not awaited — the Node process keeps running after the response on Railway.
   void (async () => {
     let done = 0, logged = 0, pushed = 0, skipped = 0, errors = 0;
+    const errSamples: string[] = [];
     for (const [companyId, { row }] of entries) {
       done++;
       try {
@@ -241,11 +243,10 @@ export async function POST(req: NextRequest) {
         await createActivity({
           subject: "📬 Physical catalog mailed (Uprinting)",
           type: "task",
-          done: 1,
+          done: true,
           due_date: mailedDate,
           org_id: orgId,
           deal_id: dealId ?? undefined,
-          owner_id: owner,
           note: `Summer catalog mailed via ${VENDOR} on ${mailedDate}.${addr ? `<br>Mailed to: ${addr}` : ""}`,
         });
         logged++;
@@ -259,13 +260,15 @@ export async function POST(req: NextRequest) {
           .run(crypto.randomUUID(), MARKER, companyId, JSON.stringify({ key: `${VENDOR}:${mailedDate}`, vendor: VENDOR, date: mailedDate, address: addr }));
       } catch (e) {
         errors++;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (errSamples.length < 5 && !errSamples.includes(msg)) errSamples.push(msg);
         console.error("[catalog-mailing] log failed", companyId, e);
       }
       if (done % 10 === 0 || done === total) {
-        setSetting(RUN_KEY, JSON.stringify({ state: done === total ? "done" : "running", total, done, logged, pushed, skipped, errors, mailedDate, updatedAt: new Date().toISOString() }));
+        setSetting(RUN_KEY, JSON.stringify({ state: done === total ? "done" : "running", total, done, logged, pushed, skipped, errors, errSamples, mailedDate, updatedAt: new Date().toISOString() }));
       }
     }
-    setSetting(RUN_KEY, JSON.stringify({ state: "done", total, done, logged, pushed, skipped, errors, mailedDate, finishedAt: new Date().toISOString() }));
+    setSetting(RUN_KEY, JSON.stringify({ state: "done", total, done, logged, pushed, skipped, errors, errSamples, mailedDate, finishedAt: new Date().toISOString() }));
   })();
 
   return NextResponse.json({ ok: true, started: true, total, alreadySyncedToPipedrive: syncedCount, note: "Running in background — poll GET on this route for progress." });
