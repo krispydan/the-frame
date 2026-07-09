@@ -106,7 +106,10 @@ export async function r2Put(key: string, body: Buffer | Uint8Array, contentType:
     // Buffer/Uint8Array are valid fetch bodies at runtime; the cast side-
     // steps TS 5.7's strict ArrayBuffer-vs-ArrayBufferLike BodyInit typing.
     body: body as unknown as BodyInit,
-    headers: { "Content-Type": contentType },
+    // R2 rejects chunked PUTs (411 MissingContentLength). Node's fetch
+    // otherwise streams a Buffer body with chunked transfer-encoding, so
+    // set the length explicitly — the body is fully in memory here.
+    headers: { "Content-Type": contentType, "Content-Length": String(body.byteLength) },
   });
   if (!res.ok) {
     throw new Error(`R2 PUT ${key} failed: ${res.status} ${(await res.text().catch(() => "")).slice(0, 300)}`);
