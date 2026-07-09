@@ -317,6 +317,9 @@ try {
   )`);
 } catch { /* exists */ }
 try { sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_pb_folder_pushes ON phoneburner_folder_pushes (company_id, folder_id)"); } catch { /* exists */ }
+// PhoneBurner per-phone id (primary_phone.user_phone_id) — used to build
+// the click-to-call c2c URL that gets synced onto the Pipedrive person.
+try { sqlite.exec("ALTER TABLE phoneburner_folder_pushes ADD COLUMN pb_phone_id TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_pb_folder_pushes_folder ON phoneburner_folder_pushes (folder_id, pushed_at DESC)"); } catch { /* exists */ }
 // e.g. "shopify" / "woocommerce" / "magento" / "bigcommerce" / "custom".
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN ecom_platform TEXT"); } catch { /* exists */ }

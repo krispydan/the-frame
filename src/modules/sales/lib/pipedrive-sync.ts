@@ -82,7 +82,10 @@ interface PdFieldDef {
  * ids on frame records; only the secondary search-based recovery and inbound
  * manual-deal linking lose their custom-field fallback.
  */
-async function ensureField(endpoint: "/organizationFields" | "/dealFields", name: string): Promise<string> {
+async function ensureField(
+  endpoint: "/organizationFields" | "/dealFields" | "/personFields",
+  name: string,
+): Promise<string> {
   try {
     const existing = (await pdRequest<PdFieldDef[]>("GET", endpoint)) || [];
     const found = existing.find((f) => f.name.trim().toLowerCase() === name.toLowerCase());
@@ -1226,6 +1229,14 @@ export async function syncStatusToPipedrive(
     // stages). ensureOutreachDeal only advances forward, never backward.
     const stageName = status === "catalog_sent" ? "Catalog Sent" : "Interested";
     const r = await ensureOutreachDeal(companyId, pipeline, stageName);
+    // Best-effort: stamp the PhoneBurner deep links onto the person so
+    // the team can jump into PB (view / one-click call) from Pipedrive.
+    try {
+      const { syncPbDeeplinks } = await import("./pb-pipedrive-deeplinks");
+      await syncPbDeeplinks(companyId);
+    } catch (e) {
+      console.warn("[pipedrive-sync] pb deeplink sync failed:", e instanceof Error ? e.message : e);
+    }
     return { ...r };
   }
   // interested_later / not_interested / ghosted → mark the open outreach deal Lost.
