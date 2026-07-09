@@ -1,11 +1,16 @@
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const FROM_ADDRESS = "The Frame <noreply@theframe.getjaxy.com>";
 
-async function sendEmail(to: string, subject: string, html: string) {
+type Attachment = { filename: string; content: string }; // content = base64
+
+async function sendEmail(to: string, subject: string, html: string, attachments?: Attachment[]) {
   if (!RESEND_API_KEY) {
     console.error("[email] RESEND_API_KEY not set, skipping email to", to);
     return { ok: false, error: "RESEND_API_KEY not configured" };
   }
+
+  const body: Record<string, unknown> = { from: FROM_ADDRESS, to: [to], subject, html };
+  if (attachments?.length) body.attachments = attachments;
 
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -13,7 +18,7 @@ async function sendEmail(to: string, subject: string, html: string) {
       Authorization: `Bearer ${RESEND_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ from: FROM_ADDRESS, to: [to], subject, html }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
@@ -58,6 +63,35 @@ export async function sendLeadConvertedEmail(
     </div>
   `;
   return sendEmail(to, subject, html);
+}
+
+/**
+ * Weekly Faire customer-upload digest. Attaches a CSV of interested leads to
+ * upload into Faire's Customers bulk uploader (Faire Direct + Campaigns), so
+ * they get added to Faire and subscribed to the brand's Faire emails.
+ */
+export async function sendFaireCustomerExportEmail(
+  to: string,
+  opts: { count: number; withoutEmail: number; csv: string; filename: string; weekLabel: string },
+) {
+  const subject =
+    opts.count > 0
+      ? `📇 ${opts.count} interested lead${opts.count === 1 ? "" : "s"} to add to Faire (${opts.weekLabel})`
+      : `📇 No new interested leads to add to Faire (${opts.weekLabel})`;
+  const html = `
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:560px;margin:0 auto;padding:32px 20px;">
+      <h2 style="margin-bottom:8px;">Weekly Faire customer upload</h2>
+      ${
+        opts.count > 0
+          ? `<p style="color:#3f3f46;">Attached is a CSV of <strong>${opts.count}</strong> interested lead${opts.count === 1 ? "" : "s"} with an email on file. Upload it in the Faire brand portal under <strong>Customers → Add customers (bulk upload)</strong>, then use <strong>Campaigns</strong> to email them. The <em>Source</em> column carries where each lead came from.</p>
+             <p style="color:#71717a;font-size:14px;">These are marked as exported, so next week's email only includes new interested leads.</p>`
+          : `<p style="color:#3f3f46;">No new interested leads with an email since last week — nothing to upload. You'll get the next batch when new leads come in.</p>`
+      }
+      ${opts.withoutEmail > 0 ? `<p style="color:#b45309;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:10px;font-size:14px;">${opts.withoutEmail} interested lead${opts.withoutEmail === 1 ? " has" : "s have"} no email on file and were skipped (Faire needs an email to subscribe them).</p>` : ""}
+    </div>`;
+  const attachments =
+    opts.count > 0 ? [{ filename: opts.filename, content: Buffer.from(opts.csv, "utf-8").toString("base64") }] : undefined;
+  return sendEmail(to, subject, html, attachments);
 }
 
 export async function sendInviteEmail(to: string, name: string, tempPassword: string, loginUrl: string) {
