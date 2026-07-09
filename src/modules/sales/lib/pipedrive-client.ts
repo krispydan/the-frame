@@ -402,6 +402,41 @@ export async function createActivity(input: {
   return pdRequest<PdCreated>("POST", "/activities", input);
 }
 
+export async function updateActivity(id: number, patch: Record<string, unknown>): Promise<PdCreated> {
+  return pdRequest<PdCreated>("PUT", `/activities/${id}`, patch);
+}
+
+export async function getActivity(id: number): Promise<PdActivity | null> {
+  try {
+    return await pdRequest<PdActivity>("GET", `/activities/${id}`);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * List activities with server-side filters. Pass user_id=0 for ALL users
+ * (default is the authenticated user only). Common filters: done (0|1),
+ * type (e.g. "call"), start_date/end_date (YYYY-MM-DD, filter by due_date),
+ * limit, start (pagination). Returns the flat activity list.
+ */
+export async function listActivities(params: {
+  user_id?: number;
+  done?: 0 | 1;
+  type?: string;
+  start_date?: string;
+  end_date?: string;
+  limit?: number;
+  start?: number;
+} = {}): Promise<PdActivity[]> {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null) q.set(k, String(v));
+  }
+  const qs = q.toString();
+  return (await pdRequest<PdActivity[]>("GET", `/activities${qs ? `?${qs}` : ""}`)) || [];
+}
+
 /** Attach a free-text note to a deal / org / person. */
 export async function createNote(input: {
   content: string; // supports basic HTML
