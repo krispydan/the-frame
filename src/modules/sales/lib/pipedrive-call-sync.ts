@@ -20,6 +20,7 @@ import {
 } from "./pipedrive-client";
 import { phoneBurnerClient } from "./phoneburner-client";
 import { formatToPbPhone } from "./phone-utils";
+import { postSlack, type SlackBlock } from "@/modules/integrations/lib/slack/client";
 
 const REP_FOLDERS: Record<string, { folder: string; name: string }> = {
   "25572381": { folder: "66251717", name: "Christina" },
@@ -275,5 +276,39 @@ export async function buildDailyCallFolders(opts: { dryRun?: boolean; through?: 
     reps.push(res);
   }
 
+  // Daily Slack digest to #sales-leads — one line per rep.
+  if (!dryRun) {
+    try { await postCallListDigest(through, reps); } catch (e) {
+      console.error("[pipedrive-call-sync] slack digest failed:", e instanceof Error ? e.message : e);
+    }
+  }
+
   return { ok: true, dry_run: dryRun, through, reps };
+}
+
+async function postCallListDigest(through: string, reps: RepSyncResult[]): Promise<void> {
+  const lines = reps.map((r) => {
+    const extras: string[] = [];
+    if (r.created) extras.push(`${r.created} new`);
+    if (r.removed) extras.push(`${r.removed} cleared`);
+    if (r.no_phone) extras.push(`${r.no_phone} no phone`);
+    const suffix = extras.length ? ` _(${extras.join(", ")})_` : "";
+    return `• *${r.rep}* — *${r.queued}* call${r.queued === 1 ? "" : "s"} queued${suffix}`;
+  });
+  const total = reps.reduce((s, r) => s + r.queued, 0);
+  const blocks: SlackBlock[] = [
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: `📞 *Daily follow-up call lists* — ${through}\n${lines.join("\n")}` },
+    },
+    {
+      type: "context",
+      elements: [{ type: "mrkdwn", text: `${total} total queued · <https://www.phoneburner.com|Open PhoneBurner> and dial your folder` }],
+    },
+  ];
+  await postSlack({
+    topic: "sales.phoneburner_interested",
+    text: `📞 Daily call lists — ${reps.map((r) => `${r.rep} ${r.queued}`).join(", ")}`,
+    blocks,
+  });
 }

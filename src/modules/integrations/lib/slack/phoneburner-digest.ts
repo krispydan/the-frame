@@ -93,20 +93,6 @@ export async function postPhoneBurnerCallDigest(): Promise<{
     )
     .all(startIso, endIso) as { label: string; n: number }[];
 
-  // Agent breakdown
-  const agentRows = sqlite
-    .prepare(
-      `SELECT COALESCE(NULLIF(TRIM(agent_email), ''), agent_id, '(unknown agent)') AS agent,
-              COUNT(*) AS n,
-              SUM(CASE WHEN connected = 1 THEN 1 ELSE 0 END) AS connected
-         FROM phoneburner_call_log
-        WHERE datetime(called_at) >= datetime(?) AND datetime(called_at) < datetime(?)
-        GROUP BY agent
-        ORDER BY n DESC
-        LIMIT 6`,
-    )
-    .all(startIso, endIso) as { agent: string; n: number; connected: number }[];
-
   // Interested leads — every call in the window whose disposition is a
   // "Set Appointment" (they requested the catalog). These are the wins
   // the team cares about; replaces the old "most recent calls" list.
@@ -165,15 +151,8 @@ export async function postPhoneBurnerCallDigest(): Promise<{
     });
   }
 
-  if (agentRows.length) {
-    const agentLines = agentRows
-      .map((a) => `• ${a.agent} — ${a.n} (${a.connected} connected, ${pct(a.connected, a.n)})`)
-      .join("\n");
-    blocks.push({
-      type: "section",
-      text: { type: "mrkdwn", text: `*Calls by agent*\n${agentLines}` },
-    });
-  }
+  // (Removed the "Calls by agent" breakdown — there's only one PhoneBurner
+  // agent account, so the per-agent split was redundant.)
 
   // Interested leads — the headline of the cold-calling digest.
   const appBase = (
