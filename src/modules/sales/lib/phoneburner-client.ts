@@ -476,6 +476,13 @@ class PhoneBurnerClient {
     return await this.request<PbContactResponse>("PUT", `/contacts/${id}`, patch);
   }
 
+  /** Fetch a contact (raw). Used to read the phone-record ids PB assigns
+   *  (needed for the click-to-call phoneId), which create/update don't
+   *  return in a documented shape. */
+  async getContact(id: string): Promise<Record<string, unknown>> {
+    return await this.request<Record<string, unknown>>("GET", `/contacts/${id}`);
+  }
+
   /**
    * Look up a contact by phone in the connected PhoneBurner account.
    *
