@@ -1475,3 +1475,273 @@ mcpRegistry.register(
     }
   }
 );
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 15. catalog.images.upload — Ingest an image from URL or base64 → R2
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//
+// The API-first ingestion path for the R2 image migration: bytes go through
+// the media facade (saveMedia → R2 when configured, volume otherwise) and
+// the catalog_images row stores the R2 public URL in `url`. Assets from the
+// Drive pipeline are already final-processed, so `process` defaults false —
+// bytes are stored as-is and sharp only reads metadata.
+
+const SOURCE_TAGS = ["white_bg", "square", "card", "google_hero", "lifestyle", "collection", "upload"] as const;
+
+interface IngestSpec {
+  sourceUrl?: string;
+  base64?: string;
+  sourceTag: string;
+  imageTypeSlug?: string;
+  position?: number;
+  isBest?: boolean;
+  altText?: string;
+  process?: boolean;
+  fileName?: string;
+}
+
+function resolveSkuId(args: { sku?: string; skuId?: string }): { id: string; sku: string } {
+  if (args.skuId) {
+    const row = sqlite.prepare("SELECT id, sku FROM catalog_skus WHERE id = ?").get(args.skuId) as { id: string; sku: string } | undefined;
+    if (!row) throw new Error(`SKU id not found: ${args.skuId}`);
+    return row;
+  }
+  if (args.sku) {
+    const row = sqlite.prepare("SELECT id, sku FROM catalog_skus WHERE sku = ?").get(args.sku) as { id: string; sku: string } | undefined;
+    if (!row) throw new Error(`SKU not found: ${args.sku}`);
+    return row;
+  }
+  throw new Error("Provide sku or skuId");
+}
+
+const EXT_BY_MIME: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "image/avif": "avif",
+};
+
+/** Core ingestion shared by upload + replace_set. Returns the inserted (or
+ *  deduped) catalog_images summary. */
+async function ingestImage(skuId: string, spec: IngestSpec): Promise<Record<string, unknown>> {
+  const { createHash } = await import("crypto");
+  const sharp = (await import("sharp")).default;
+  const { saveMedia, mediaUrl } = await import("@/lib/storage/media");
+
+  // ── bytes ──
+  let raw: Buffer;
+  if (spec.base64) {
+    raw = Buffer.from(spec.base64, "base64");
+  } else if (spec.sourceUrl) {
+    const res = await fetch(spec.sourceUrl, { headers: { "User-Agent": "Mozilla/5.0 (TheFrame image ingest)" } });
+    if (!res.ok) throw new Error(`Fetch ${spec.sourceUrl} → HTTP ${res.status}`);
+    raw = Buffer.from(await res.arrayBuffer());
+  } else {
+    throw new Error("Provide sourceUrl or base64");
+  }
+  if (raw.length === 0) throw new Error("Empty image payload");
+  if (raw.length > 25 * 1024 * 1024) throw new Error(`Image too large (${raw.length} bytes, max 25MB)`);
+
+  // ── process or pass through ──
+  let buffer = raw;
+  let mime: string;
+  let width: number;
+  let height: number;
+  if (spec.process) {
+    const { processImage } = await import("@/lib/storage/image-processing");
+    const p = await processImage(raw);
+    buffer = p.buffer;
+    mime = "image/jpeg";
+    width = p.width;
+    height = p.height;
+  } else {
+    const meta = await sharp(raw).metadata();
+    if (!meta.format) throw new Error("Not a decodable image");
+    mime = `image/${meta.format === "jpg" ? "jpeg" : meta.format}`;
+    width = meta.width ?? 0;
+    height = meta.height ?? 0;
+  }
+  const ext = EXT_BY_MIME[mime] ?? "jpg";
+  const checksum = createHash("sha256").update(buffer).digest("hex");
+
+  // ── dedup on (skuId, checksum) ──
+  const existing = sqlite.prepare(
+    "SELECT id, file_path, url FROM catalog_images WHERE sku_id = ? AND checksum = ?"
+  ).get(skuId, checksum) as { id: string; file_path: string; url: string | null } | undefined;
+  if (existing) {
+    return { id: existing.id, deduped: true, filePath: existing.file_path, url: existing.url, checksum };
+  }
+
+  // ── store via media facade (R2 when configured) ──
+  const tag = SOURCE_TAGS.includes(spec.sourceTag as typeof SOURCE_TAGS[number]) ? spec.sourceTag : "upload";
+  const relPath = `${skuId}/${tag}/${checksum}.${ext}`;
+  const key = `images/${relPath}`;
+  await saveMedia(key, buffer, mime);
+  const url = mediaUrl(key);
+
+  // ── image type ──
+  let imageTypeId: string | null = null;
+  if (spec.imageTypeSlug) {
+    const t = sqlite.prepare("SELECT id FROM catalog_image_types WHERE slug = ?").get(spec.imageTypeSlug) as { id: string } | undefined;
+    if (!t) throw new Error(`Unknown imageTypeSlug: ${spec.imageTypeSlug}`);
+    imageTypeId = t.id;
+  }
+
+  // ── insert ──
+  const id = crypto.randomUUID();
+  if (spec.isBest) {
+    sqlite.prepare("UPDATE catalog_images SET is_best = 0 WHERE sku_id = ?").run(skuId);
+  }
+  sqlite.prepare(`
+    INSERT INTO catalog_images
+      (id, sku_id, file_path, url, file_size, mime_type, checksum, image_type_id,
+       position, alt_text, width, height, status, is_best, uploaded_by, source, pipeline_status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, 'mcp', ?, 'completed', datetime('now'))
+  `).run(
+    id, skuId, relPath, url, buffer.length, mime, checksum, imageTypeId,
+    spec.position ?? 0, spec.altText ?? null, width, height,
+    spec.isBest ? 1 : 0, tag,
+  );
+
+  return { id, filePath: relPath, url, fileSize: buffer.length, width, height, checksum, sourceTag: tag };
+}
+
+mcpRegistry.register(
+  "catalog.images.upload",
+  "Upload a product image from a URL or base64 payload. Stores bytes on R2 (via the media facade) and inserts an approved catalog_images row whose `url` is the public R2 URL. Assets are stored AS-IS by default (process=false) — set process=true to run the sharp square pipeline. Dedupes per (sku, checksum). Example: upload the front white-bg shot for JX1001-BLK.",
+  z.object({
+    sku: z.string().optional().describe("SKU code, e.g. JX1001-BLK (provide this or skuId)"),
+    skuId: z.string().optional().describe("catalog_skus.id (provide this or sku)"),
+    sourceUrl: z.string().optional().describe("HTTPS URL to fetch the image from (provide this or base64)"),
+    base64: z.string().optional().describe("Base64-encoded image bytes (provide this or sourceUrl)"),
+    sourceTag: z.string().describe("Asset kind: white_bg | square | card | google_hero | lifestyle | collection | upload"),
+    imageTypeSlug: z.string().optional().describe("Angle slug: front|side|other-side|top|inside|crossed|back-crossed|name|closed|above"),
+    position: z.number().optional().describe("Sort position (default 0)"),
+    isBest: z.boolean().optional().describe("Mark as the SKU's hero image (clears is_best on siblings)"),
+    altText: z.string().optional().describe("Alt text"),
+    process: z.boolean().optional().describe("Run the sharp 2000x2000 square pipeline (default false — store as-is)"),
+    fileName: z.string().optional().describe("Original filename, recorded for traceability only"),
+  }),
+  async (args) => {
+    try {
+      const sku = resolveSkuId(args);
+      const result = await ingestImage(sku.id, args as IngestSpec);
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({ sku: sku.sku, skuId: sku.id, fileName: args.fileName, ...result }, null, 2),
+        }],
+      };
+    } catch (e: any) {
+      return { content: [{ type: "text" as const, text: JSON.stringify({ error: e.message }) }], isError: true };
+    }
+  }
+);
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 16. catalog.images.replace_set — Atomically delete a SKU's images (+files)
+//     and optionally upload a replacement set
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//
+// The bulk-replace primitive for the R2 migration. Pass imagesJson="[]" to
+// use it as a pure per-SKU delete (then stream individual uploads through
+// catalog.images.upload — large base64 sets don't fit one JSON-RPC body).
+// Old rows may reference volume files, new rows R2 keys, so deletion tries
+// both backends and is silent on misses.
+
+async function deleteImageEverywhere(filePath: string): Promise<void> {
+  const { deleteImage } = await import("@/lib/storage/local");
+  const { deleteMedia } = await import("@/lib/storage/media");
+  try { await deleteImage(filePath); } catch { /* not on volume */ }
+  try { await deleteMedia(`images/${filePath}`); } catch { /* not on R2 */ }
+}
+
+mcpRegistry.register(
+  "catalog.images.replace_set",
+  "Delete a SKU's (or whole product's) existing catalog images — DB rows, pipeline/variation children, and files on both volume and R2 — then upload an optional replacement set. Use sourceTag to scope deletion to one asset kind. Pass imagesJson='[]' for delete-only. Example: replace all images for JX1001-BLK.",
+  z.object({
+    sku: z.string().optional().describe("SKU code, e.g. JX1001-BLK"),
+    skuId: z.string().optional().describe("catalog_skus.id"),
+    productId: z.string().optional().describe("Product id — targets ALL its SKUs (alternative to sku/skuId)"),
+    sourceTag: z.string().optional().describe("Only delete images with this source tag (default: all)"),
+    deleteExisting: z.boolean().optional().describe("Delete existing images first (default true)"),
+    imagesJson: z.string().describe("JSON array of upload specs: [{sourceUrl|base64, sourceTag, imageTypeSlug?, position?, isBest?, altText?, process?, fileName?}] — may be '[]'"),
+  }),
+  async (args) => {
+    try {
+      // ── resolve target SKUs ──
+      let skuRows: Array<{ id: string; sku: string }>;
+      if (args.productId) {
+        skuRows = sqlite.prepare("SELECT id, sku FROM catalog_skus WHERE product_id = ? ORDER BY sku").all(args.productId) as Array<{ id: string; sku: string }>;
+        if (skuRows.length === 0) throw new Error(`No SKUs for product ${args.productId}`);
+      } else {
+        skuRows = [resolveSkuId(args)];
+      }
+      const skuIds = skuRows.map((s) => s.id);
+
+      // ── delete existing ──
+      let deletedRows = 0;
+      let deletedFiles = 0;
+      if (args.deleteExisting !== false) {
+        const ph = skuIds.map(() => "?").join(",");
+        const filter = args.sourceTag ? " AND source = ?" : "";
+        const params = args.sourceTag ? [...skuIds, args.sourceTag] : skuIds;
+        const rows = sqlite.prepare(
+          `SELECT id, file_path FROM catalog_images WHERE sku_id IN (${ph})${filter}`
+        ).all(...params) as Array<{ id: string; file_path: string | null }>;
+
+        for (const row of rows) {
+          const children = sqlite.prepare(
+            "SELECT file_path FROM catalog_image_pipelines WHERE image_id = ? UNION ALL SELECT file_path FROM catalog_image_variations WHERE image_id = ?"
+          ).all(row.id, row.id) as Array<{ file_path: string }>;
+          for (const c of children) {
+            if (c.file_path) { await deleteImageEverywhere(c.file_path); deletedFiles++; }
+          }
+          if (row.file_path) { await deleteImageEverywhere(row.file_path); deletedFiles++; }
+          sqlite.prepare("DELETE FROM catalog_image_pipelines WHERE image_id = ?").run(row.id);
+          sqlite.prepare("DELETE FROM catalog_image_variations WHERE image_id = ?").run(row.id);
+          sqlite.prepare("DELETE FROM catalog_product_listing_images WHERE image_id = ?").run(row.id);
+          sqlite.prepare("DELETE FROM catalog_images WHERE id = ?").run(row.id);
+          deletedRows++;
+        }
+      }
+
+      // ── upload replacements (attach to the first/only SKU) ──
+      let specs: IngestSpec[];
+      try {
+        specs = JSON.parse(args.imagesJson);
+        if (!Array.isArray(specs)) throw new Error("not an array");
+      } catch (e: any) {
+        throw new Error(`imagesJson must be a JSON array: ${e.message}`);
+      }
+      const targetSkuId = skuRows[0].id;
+      const uploaded: Array<Record<string, unknown>> = [];
+      const failures: Array<{ fileName?: string; error: string }> = [];
+      for (const spec of specs) {
+        try {
+          uploaded.push({ fileName: spec.fileName, ...(await ingestImage(targetSkuId, spec)) });
+        } catch (e: any) {
+          failures.push({ fileName: spec.fileName, error: e.message });
+        }
+      }
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            skus: skuRows.map((s) => s.sku),
+            deletedRows,
+            deletedFiles,
+            uploadedCount: uploaded.length,
+            failedCount: failures.length,
+            uploaded,
+            failures,
+          }, null, 2),
+        }],
+      };
+    } catch (e: any) {
+      return { content: [{ type: "text" as const, text: JSON.stringify({ error: e.message }) }], isError: true };
+    }
+  }
+);

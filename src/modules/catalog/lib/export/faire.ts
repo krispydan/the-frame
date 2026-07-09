@@ -146,8 +146,9 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function absoluteImageUrl(filePath: string | null): string {
-  return catalogImageUrl(filePath) || "";
+function absoluteImageUrl(img: { filePath: string | null; url?: string | null } | null): string {
+  // Prefer the row's absolute URL (R2 CDN) over the app-proxied path.
+  return catalogImageUrl(img?.filePath, img?.url) || "";
 }
 
 // ── Tag/attribute extraction ──
@@ -531,7 +532,7 @@ export function generateFaireCsv(exportProducts: ExportProduct[]): string {
     for (const sku of ep.skus) {
       // Best image for this specific variant — prefer cropped, then square, then any
       const variantImg = pickVariantImage(ep.images, sku.id);
-      const optionImageUrl = absoluteImageUrl(variantImg?.filePath || null);
+      const optionImageUrl = absoluteImageUrl(variantImg ?? null);
 
       const row = blankRow();
       row.product_name_english = title;
@@ -591,7 +592,7 @@ export function generateFaireXlsx(exportProducts: ExportProduct[]): Buffer {
 
     for (const sku of ep.skus) {
       const variantImg = pickVariantImage(ep.images, sku.id);
-      const optionImageUrl = absoluteImageUrl(variantImg?.filePath || null);
+      const optionImageUrl = absoluteImageUrl(variantImg ?? null);
 
       const row = blankRow();
       row.product_name_english = title;
@@ -645,7 +646,7 @@ function buildFaireImageList(ep: ExportProduct): string[] {
   // 1. Collection image first (hero)
   const collectionImg = approved.find((i) => i.source === "collection");
   if (collectionImg) {
-    urls.push(absoluteImageUrl(collectionImg.filePath));
+    urls.push(absoluteImageUrl(collectionImg));
     usedIds.add(collectionImg.id);
   }
 
@@ -665,7 +666,7 @@ function buildFaireImageList(ep: ExportProduct): string[] {
       if (urls.length >= 10) break;
       const img = skuSquare.find((i) => i.imageTypeSlug === angle);
       if (img) {
-        urls.push(absoluteImageUrl(img.filePath));
+        urls.push(absoluteImageUrl(img));
         usedIds.add(img.id);
       }
     }

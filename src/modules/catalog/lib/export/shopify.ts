@@ -5,8 +5,9 @@ import type { ExportProduct, ValidationIssue, ProductValidationResult } from "./
 import Papa from "papaparse";
 import { catalogImageUrl } from "@/lib/storage/image-url";
 
-function absUrl(filePath: string | null | undefined): string {
-  return catalogImageUrl(filePath) || "";
+function absUrl(img: { filePath: string | null; url?: string | null } | null | undefined): string {
+  // Prefer the row's absolute URL (R2 CDN) over the app-proxied path.
+  return catalogImageUrl(img?.filePath, img?.url) || "";
 }
 
 const SHAPE_TAGS = new Set(["aviator", "cat-eye", "round", "square", "oversized", "rectangle", "wayfarer", "oval", "geometric"]);
@@ -609,8 +610,8 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       compareAt: compareAtPrice,
       costPerItem: landedCostFor(firstSku?.costPrice ?? null),
       inventoryQty: firstSku ? String(firstSku.inventoryQuantity ?? 0) : "",
-      variantImage: absUrl(firstVariantImage?.filePath),
-      imageUrl: absUrl(firstImage?.filePath),
+      variantImage: absUrl(firstVariantImage),
+      imageUrl: absUrl(firstImage),
       imagePosition: firstImage ? "1" : "",
       imageAlt: altFor(firstImage),
       seoTitle: seoTitle,
@@ -642,7 +643,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
         compareAt: compareAtPrice,
         costPerItem: landedCostFor(sku.costPrice ?? null),
         inventoryQty: String(sku.inventoryQuantity ?? 0),
-        variantImage: absUrl(variantImage?.filePath),
+        variantImage: absUrl(variantImage),
         lensType: "",
         hsCode: JAXY_CONSTANTS.hsCode,
         countryOfOrigin: JAXY_CONSTANTS.countryOfOrigin,
@@ -653,7 +654,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
     //    Shopify associates them by URL handle + Image position.
     for (let i = 1; i < productImages.length; i++) {
       rows.push(makeRow({
-        imageUrl: absUrl(productImages[i].filePath),
+        imageUrl: absUrl(productImages[i]),
         imagePosition: String(i + 1),
         imageAlt: altFor(productImages[i]),
       }));

@@ -68,6 +68,8 @@ export interface ExportProduct {
     id: string;
     skuId: string;
     filePath: string | null;
+    /** Absolute public URL (R2 CDN) when set — preferred over filePath. */
+    url: string | null;
     width: number | null;
     height: number | null;
     status: string | null;

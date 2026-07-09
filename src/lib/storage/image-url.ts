@@ -19,8 +19,19 @@ function getBase(): string {
  * Convert a stored filePath (relative to IMAGES_ROOT) into a full CDN URL.
  * Handles legacy rows where filePath already starts with "http" or with
  * "data/images/" (the old Gemini generator wrote paths like that).
+ *
+ * When the row carries an absolute `url` (R2 public URL written by the
+ * catalog.images.upload MCP tool), pass it as `preferredUrl` — it wins
+ * over the app-proxied /api/images route so feeds/exports serve straight
+ * from the R2 CDN, same pattern as videos.
  */
-export function catalogImageUrl(filePath: string | null | undefined): string | null {
+export function catalogImageUrl(
+  filePath: string | null | undefined,
+  preferredUrl?: string | null,
+): string | null {
+  if (preferredUrl && (preferredUrl.startsWith("http://") || preferredUrl.startsWith("https://"))) {
+    return preferredUrl;
+  }
   if (!filePath) return null;
   if (filePath.startsWith("http://") || filePath.startsWith("https://")) {
     return filePath;

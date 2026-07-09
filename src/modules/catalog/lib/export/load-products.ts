@@ -22,6 +22,7 @@ export async function loadExportProducts(productIds?: string[]): Promise<ExportP
     ? await db
         .select({
           id: images.id, skuId: images.skuId, filePath: images.filePath,
+          url: images.url,
           width: images.width, height: images.height, status: images.status,
           isBest: images.isBest, source: images.source,
           imageTypeSlug: imageTypes.slug,
@@ -86,7 +87,8 @@ export async function loadExportProducts(productIds?: string[]): Promise<ExportP
         costPrice: s.costPrice,
       })),
       images: productImages.map((i) => ({
-        id: i.id, skuId: i.skuId, filePath: i.filePath, width: i.width,
+        id: i.id, skuId: i.skuId, filePath: i.filePath, url: i.url ?? null,
+        width: i.width,
         height: i.height, status: i.status, isBest: i.isBest,
         source: i.source, imageTypeSlug: i.imageTypeSlug,
       })),
