@@ -320,6 +320,27 @@ try { sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_pb_folder_pushes ON phon
 // PhoneBurner per-phone id (primary_phone.user_phone_id) — used to build
 // the click-to-call c2c URL that gets synced onto the Pipedrive person.
 try { sqlite.exec("ALTER TABLE phoneburner_folder_pushes ADD COLUMN pb_phone_id TEXT"); } catch { /* exists */ }
+
+// Daily Pipedrive-activity → PhoneBurner call queue. Tracks which contacts
+// we moved into which rep folder for which activity, plus the contact's
+// original folder so we can restore it when the activity is done/removed.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS pb_call_queue (
+    id TEXT PRIMARY KEY NOT NULL,
+    company_id TEXT,
+    pb_contact_id TEXT NOT NULL,
+    rep_user_id TEXT NOT NULL,          /* Pipedrive owner user id */
+    folder_id TEXT NOT NULL,            /* rep's PB folder */
+    activity_id TEXT,                   /* Pipedrive activity id */
+    activity_due TEXT,
+    original_folder_id TEXT,            /* contact's folder before we moved it */
+    added_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+} catch { /* exists */ }
+try { sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_pb_call_queue_contact ON pb_call_queue (pb_contact_id, folder_id)"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_pb_call_queue_activity ON pb_call_queue (activity_id)"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_pb_call_queue_folder ON pb_call_queue (folder_id)"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_pb_folder_pushes_folder ON phoneburner_folder_pushes (folder_id, pushed_at DESC)"); } catch { /* exists */ }
 // e.g. "shopify" / "woocommerce" / "magento" / "bigcommerce" / "custom".
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN ecom_platform TEXT"); } catch { /* exists */ }
