@@ -35,6 +35,7 @@ import { runOrderDealSweep, runActivitySweep } from "@/modules/sales/lib/pipedri
 import { enrichViaGoogleMaps } from "@/modules/sales/lib/google-maps-enrichment";
 import { recalculateAllHealthScores } from "@/modules/customers/lib/health-scoring";
 import { refreshReorderEstimates } from "@/modules/customers/lib/reorder-engine";
+import { runWeeklyFaireExport } from "@/modules/sales/lib/faire-customer-export";
 import { topUpVideoQueue } from "@/modules/marketing/lib/video/scheduler";
 import { runVideoStorageHygiene } from "@/modules/marketing/lib/video/cleanup";
 import { enqueueSoundsSync } from "@/modules/marketing/lib/video/tiktok-sounds";
@@ -87,6 +88,12 @@ export const CRON_JOBS: CronJob[] = [
     schedule: "20 11 * * *",  // 11:20 UTC ≈ 4:20am PT (after health scores)
     description: "Refresh next-reorder-date estimates for all customer accounts",
     handler: async () => ({ updated: refreshReorderEstimates() }),
+  },
+  {
+    id: "faire-interested-export",
+    schedule: "0 14 * * 1",  // Mondays 14:00 UTC ≈ 7am PT
+    description: "Email a CSV of new interested leads to add to Faire (Customers bulk upload + Campaigns). First run carries the current interested backlog; then only new leads each week.",
+    handler: runWeeklyFaireExport,
   },
 
   // ── Catalog metafield sync ──

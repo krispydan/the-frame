@@ -430,6 +430,9 @@ try { sqlite.exec("CREATE INDEX idx_companies_ajm_last_order ON companies (ajm_l
 // Shopify customer id — the stable identity for a retailer, esp. Faire-via-
 // Shopify orders that share a relay email / carry no company name. Used to key
 // distinct customers so they don't collapse under one company.
+// Stamp set when an interested lead has been included in a weekly Faire
+// customer-upload export, so each week's export only carries the new ones.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN faire_exported_at TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN shopify_customer_id TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_shopify_customer ON companies (shopify_customer_id)"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN pipedrive_org_id INTEGER"); } catch { /* exists */ }
