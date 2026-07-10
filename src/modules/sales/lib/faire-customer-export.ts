@@ -130,6 +130,19 @@ export function buildFaireExport(opts: { limit?: number } = {}): {
   return { rows, csv: toCsv(rows), count: rows.length, withoutEmail, companyIds };
 }
 
+/** Why the export is the size it is: where interested leads drop off. */
+export function faireExportDiagnostics(): Record<string, number> {
+  const n = (sql: string) => (sqlite.prepare(sql).get() as { n: number }).n;
+  return {
+    interestedTotal: n(`SELECT COUNT(*) n FROM companies WHERE status IN ('interested','catalog_sent')`),
+    alreadyExported: n(`SELECT COUNT(*) n FROM companies WHERE status IN ('interested','catalog_sent') AND faire_exported_at IS NOT NULL`),
+    notExportedYet: n(`SELECT COUNT(*) n FROM companies WHERE status IN ('interested','catalog_sent') AND faire_exported_at IS NULL`),
+    readyWithEmail: n(`SELECT COUNT(*) n FROM companies c WHERE c.status IN ('interested','catalog_sent') AND c.faire_exported_at IS NULL AND EXISTS (SELECT 1 FROM contacts ct WHERE ct.company_id=c.id AND TRIM(COALESCE(ct.email,''))<>'' AND lower(ct.email) NOT LIKE '%@relay.faire.com%')`),
+    interestedTotalStatus: n(`SELECT COUNT(*) n FROM companies WHERE status = 'interested'`),
+    catalogSentStatus: n(`SELECT COUNT(*) n FROM companies WHERE status = 'catalog_sent'`),
+  };
+}
+
 export function stampExported(companyIds: string[]): void {
   if (!companyIds.length) return;
   const stmt = sqlite.prepare("UPDATE companies SET faire_exported_at = datetime('now') WHERE id = ?");

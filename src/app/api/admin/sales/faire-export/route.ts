@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 import { NextRequest, NextResponse } from "next/server";
-import { buildFaireExport, runWeeklyFaireExport } from "@/modules/sales/lib/faire-customer-export";
+import { buildFaireExport, faireExportDiagnostics, runWeeklyFaireExport } from "@/modules/sales/lib/faire-customer-export";
 
 /**
  * POST /api/admin/sales/faire-export
@@ -25,7 +25,9 @@ export async function POST(req: NextRequest) {
 
   if (dryRun) {
     const { csv, count, withoutEmail } = buildFaireExport();
-    return NextResponse.json({ ok: true, dryRun: true, count, withoutEmail, csv });
+    // breakdown explains the count: how many interested leads exist, how many
+    // were already exported (stamped) by a prior run, how many remain new.
+    return NextResponse.json({ ok: true, dryRun: true, count, withoutEmail, breakdown: faireExportDiagnostics(), csv });
   }
 
   const r = await runWeeklyFaireExport();
