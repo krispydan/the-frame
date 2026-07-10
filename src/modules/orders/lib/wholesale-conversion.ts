@@ -10,6 +10,95 @@
  */
 
 import { sqlite } from "@/lib/db";
+import type { LeadTouchpoints } from "@/lib/email";
+
+const CHANNEL_SHORT: Record<string, string> = { instantly: "Email", phoneburner: "Calls", direct_mail: "Mail" };
+
+function channelLabel(json: string | null): string {
+  if (!json) return "";
+  try {
+    return (JSON.parse(json) as string[]).map((c) => CHANNEL_SHORT[c] || c).join(" · ");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Full campaign + activity history for a company: every campaign it was a lead
+ * in (with email opens/replies + call rollups) plus the individual PhoneBurner
+ * call log. Powers the "How we won them" section of the conversion email so we
+ * can see which campaigns and touchpoints drove the order.
+ */
+export function buildLeadTouchpoints(companyId: string): LeadTouchpoints {
+  const campaignRows = sqlite
+    .prepare(
+      `SELECT cl.sent_at, cl.opened_at, cl.replied_at, cl.reply_classification,
+              cl.call_count, cl.last_called_at, cl.last_call_disposition, cl.created_at,
+              c.name AS campaign_name, c.channels AS campaign_channels
+         FROM campaign_leads cl
+         LEFT JOIN campaigns c ON c.id = cl.campaign_id
+        WHERE cl.company_id = ?
+        ORDER BY COALESCE(cl.sent_at, cl.created_at) ASC`,
+    )
+    .all(companyId) as Array<{
+    sent_at: string | null;
+    opened_at: string | null;
+    replied_at: string | null;
+    reply_classification: string | null;
+    call_count: number | null;
+    last_called_at: string | null;
+    last_call_disposition: string | null;
+    created_at: string | null;
+    campaign_name: string | null;
+    campaign_channels: string | null;
+  }>;
+
+  const callRows = sqlite
+    .prepare(
+      `SELECT called_at, disposition_label, duration_seconds, connected
+         FROM phoneburner_call_log
+        WHERE company_id = ?
+        ORDER BY called_at ASC`,
+    )
+    .all(companyId) as Array<{
+    called_at: string | null;
+    disposition_label: string | null;
+    duration_seconds: number | null;
+    connected: number | null;
+  }>;
+
+  const campaigns = campaignRows.map((r) => ({
+    name: r.campaign_name || "Campaign",
+    channelLabel: channelLabel(r.campaign_channels),
+    firstTouchAt: r.sent_at || r.created_at,
+    openedAt: r.opened_at,
+    repliedAt: r.replied_at,
+    replyClassification: r.reply_classification,
+    callCount: r.call_count || 0,
+    lastCalledAt: r.last_called_at,
+    lastCallDisposition: r.last_call_disposition,
+  }));
+
+  const calls = callRows.map((r) => ({
+    calledAt: r.called_at,
+    disposition: r.disposition_label,
+    durationSeconds: r.duration_seconds,
+    connected: r.connected === 1,
+  }));
+
+  return {
+    campaigns,
+    calls,
+    totals: {
+      campaigns: campaigns.length,
+      emailsSent: campaignRows.filter((r) => r.sent_at).length,
+      opens: campaignRows.filter((r) => r.opened_at).length,
+      replies: campaignRows.filter((r) => r.replied_at).length,
+      calls: calls.length,
+      connectedCalls: calls.filter((c) => c.connected).length,
+    },
+  };
+}
 
 function money(amount: number, currency = "USD"): string {
   try {
@@ -134,6 +223,10 @@ export async function detectWholesaleConversion(orderId: string): Promise<void> 
 
   try {
     const { sendLeadConvertedEmail } = await import("@/lib/email");
+    // Touchpoints live on the worked prospect: the company itself when it was
+    // worked directly, otherwise the fuzzy-matched duplicate that we worked.
+    const touchpointCompanyId = wasWorked ? order.company_id : duplicate?.id ?? null;
+    const touchpoints = touchpointCompanyId ? buildLeadTouchpoints(touchpointCompanyId) : null;
     await sendLeadConvertedEmail(recipient, {
       companyName: company.name || "A store",
       contactEmail: cl?.email ?? null,
@@ -143,6 +236,7 @@ export async function detectWholesaleConversion(orderId: string): Promise<void> 
       channel: order.channel,
       prospectUrl,
       duplicate: duplicate ? { name: duplicate.name, url: dupUrl } : null,
+      touchpoints,
     });
   } catch (e) {
     console.error("[wholesale-conversion] email failed:", e);

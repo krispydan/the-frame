@@ -30,6 +30,93 @@ async function sendEmail(to: string, subject: string, html: string, attachments?
   return { ok: true, data: await res.json() };
 }
 
+/** One campaign the lead was part of, with its email + call touchpoints. */
+export interface CampaignTouch {
+  name: string;
+  channelLabel: string; // "Email · Calls"
+  firstTouchAt: string | null;
+  openedAt: string | null;
+  repliedAt: string | null;
+  replyClassification: string | null;
+  callCount: number;
+  lastCalledAt: string | null;
+  lastCallDisposition: string | null;
+}
+
+/** One logged phone call touchpoint. */
+export interface CallTouch {
+  calledAt: string | null;
+  disposition: string | null;
+  durationSeconds: number | null;
+  connected: boolean;
+}
+
+/** The full campaign + activity history for a converted lead. */
+export interface LeadTouchpoints {
+  campaigns: CampaignTouch[];
+  calls: CallTouch[];
+  totals: { campaigns: number; emailsSent: number; opens: number; replies: number; calls: number; connectedCalls: number };
+}
+
+function fmtDate(s: string | null | undefined): string {
+  if (!s) return "";
+  const d = new Date(s.includes("T") || s.includes(" ") ? s.replace(" ", "T") : s);
+  return isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function esc(s: string | null | undefined): string {
+  return (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** Renders the "how we won them" section: every campaign + touchpoint. */
+function renderTouchpoints(tp?: LeadTouchpoints | null): string {
+  if (!tp || (!tp.campaigns.length && !tp.calls.length)) return "";
+  const t = tp.totals;
+  const summary = [
+    `${t.campaigns} campaign${t.campaigns === 1 ? "" : "s"}`,
+    t.emailsSent ? `${t.emailsSent} email${t.emailsSent === 1 ? "" : "s"} sent` : "",
+    t.opens ? `${t.opens} open${t.opens === 1 ? "" : "s"}` : "",
+    t.replies ? `${t.replies} repl${t.replies === 1 ? "y" : "ies"}` : "",
+    t.calls ? `${t.calls} call${t.calls === 1 ? "" : "s"}${t.connectedCalls ? ` (${t.connectedCalls} connected)` : ""}` : "",
+  ].filter(Boolean);
+
+  const campaignRows = tp.campaigns
+    .map((c) => {
+      const line2: string[] = [];
+      if (c.firstTouchAt) line2.push(`First touch ${fmtDate(c.firstTouchAt)}`);
+      if (c.openedAt) line2.push(`Opened ${fmtDate(c.openedAt)}`);
+      if (c.repliedAt) line2.push(`Replied ${fmtDate(c.repliedAt)}${c.replyClassification ? ` · ${esc(c.replyClassification)}` : ""}`);
+      if (c.callCount) line2.push(`${c.callCount} call${c.callCount === 1 ? "" : "s"}${c.lastCallDisposition ? ` · last: ${esc(c.lastCallDisposition)}` : ""}`);
+      return `
+        <tr>
+          <td style="padding:8px 0;border-top:1px solid #f0f0f0;">
+            <div style="font-weight:600;color:#18181b;">${esc(c.name)}${c.channelLabel ? ` <span style="font-weight:400;color:#a1a1aa;font-size:12px;">${esc(c.channelLabel)}</span>` : ""}</div>
+            ${line2.length ? `<div style="color:#71717a;font-size:13px;margin-top:2px;">${line2.join(" &nbsp;·&nbsp; ")}</div>` : ""}
+          </td>
+        </tr>`;
+    })
+    .join("");
+
+  // Individual call log (recent first), only if there are logged calls.
+  const callRows = tp.calls
+    .slice()
+    .reverse()
+    .slice(0, 8)
+    .map((c) => {
+      const dur = c.durationSeconds ? ` · ${Math.round(c.durationSeconds / 60)}m` : "";
+      return `<div style="color:#71717a;font-size:13px;margin:2px 0;">📞 ${fmtDate(c.calledAt) || "—"} — ${esc(c.disposition) || (c.connected ? "connected" : "no answer")}${dur}</div>`;
+    })
+    .join("");
+
+  return `
+    <div style="margin-top:24px;padding-top:16px;border-top:2px solid #e4e4e7;">
+      <h3 style="margin:0 0 4px;">How we won them</h3>
+      <p style="margin:0 0 12px;color:#3f3f46;font-size:14px;">${summary.join(" &nbsp;·&nbsp; ")}</p>
+      <table style="width:100%;border-collapse:collapse;">${campaignRows}</table>
+      ${callRows ? `<div style="margin-top:12px;"><div style="font-weight:600;color:#18181b;font-size:14px;margin-bottom:4px;">Call log</div>${callRows}</div>` : ""}
+    </div>`;
+}
+
 export async function sendLeadConvertedEmail(
   to: string,
   opts: {
@@ -41,6 +128,7 @@ export async function sendLeadConvertedEmail(
     channel: string;
     prospectUrl?: string | null;
     duplicate?: { name: string; url?: string | null } | null;
+    touchpoints?: LeadTouchpoints | null;
   },
 ) {
   const subject = `🎉 Lead converted: ${opts.companyName} placed a wholesale order`;
@@ -60,6 +148,7 @@ export async function sendLeadConvertedEmail(
       ${opts.prospectUrl ? `<a href="${opts.prospectUrl}" style="display:inline-block;background:#18181b;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;margin:16px 0;">View in the frame</a>` : ""}
       ${dupNote}
       ${faireNote}
+      ${renderTouchpoints(opts.touchpoints)}
     </div>
   `;
   return sendEmail(to, subject, html);
