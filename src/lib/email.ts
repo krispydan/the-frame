@@ -58,6 +58,15 @@ export interface LeadTouchpoints {
   totals: { campaigns: number; emailsSent: number; opens: number; replies: number; calls: number; connectedCalls: number };
 }
 
+/** Pipedrive org + deal links for a converted lead, when synced. */
+export interface LeadPipedrive {
+  orgUrl: string | null;
+  dealUrl: string | null;
+  dealTitle: string | null;
+  dealValue: number | null;
+  dealStatus: string | null; // open | won | lost
+}
+
 function fmtDate(s: string | null | undefined): string {
   if (!s) return "";
   const d = new Date(s.includes("T") || s.includes(" ") ? s.replace(" ", "T") : s);
@@ -117,6 +126,18 @@ function renderTouchpoints(tp?: LeadTouchpoints | null): string {
     </div>`;
 }
 
+/** Renders the Pipedrive deal + org links, when the lead is synced. */
+function renderPipedrive(pd?: LeadPipedrive | null): string {
+  if (!pd || (!pd.orgUrl && !pd.dealUrl)) return "";
+  const links: string[] = [];
+  if (pd.dealUrl) {
+    const label = `View deal${pd.dealStatus ? ` (${esc(pd.dealStatus)})` : ""} in Pipedrive →`;
+    links.push(`<a href="${pd.dealUrl}" style="color:#18181b;font-weight:600;">${label}</a>`);
+  }
+  if (pd.orgUrl) links.push(`<a href="${pd.orgUrl}" style="color:#18181b;font-weight:600;">View organization →</a>`);
+  return `<p style="margin:12px 0 0;font-size:14px;">🟢 ${links.join(" &nbsp;·&nbsp; ")}</p>`;
+}
+
 export async function sendLeadConvertedEmail(
   to: string,
   opts: {
@@ -129,6 +150,7 @@ export async function sendLeadConvertedEmail(
     prospectUrl?: string | null;
     duplicate?: { name: string; url?: string | null } | null;
     touchpoints?: LeadTouchpoints | null;
+    pipedrive?: LeadPipedrive | null;
   },
 ) {
   const subject = `🎉 Lead converted: ${opts.companyName} placed a wholesale order`;
@@ -146,6 +168,7 @@ export async function sendLeadConvertedEmail(
       ${opts.contactEmail ? `<p style="margin:2px 0;color:#52525b;">Contact: ${opts.contactEmail}</p>` : ""}
       <p style="margin:2px 0;color:#52525b;">${opts.isFirstOrder ? "Opening order size" : "Order size"}: <strong>${opts.orderTotal}</strong></p>
       ${opts.prospectUrl ? `<a href="${opts.prospectUrl}" style="display:inline-block;background:#18181b;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;margin:16px 0;">View in the frame</a>` : ""}
+      ${renderPipedrive(opts.pipedrive)}
       ${dupNote}
       ${faireNote}
       ${renderTouchpoints(opts.touchpoints)}

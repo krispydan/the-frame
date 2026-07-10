@@ -11,6 +11,7 @@
  */
 
 import { postSlack, type SlackBlock } from "./client";
+import type { LeadTouchpoints, LeadPipedrive } from "@/lib/email";
 
 /* ── Formatters ── */
 
@@ -384,6 +385,8 @@ export async function notifyLeadConverted(opts: {
   channel: string;
   isFirstOrder: boolean;
   duplicate?: { name: string; url?: string | null } | null;
+  touchpoints?: LeadTouchpoints | null;
+  pipedrive?: LeadPipedrive | null;
 }) {
   const who = opts.companyName || "A prospect";
   const total = money(opts.orderTotal, opts.currency);
@@ -403,6 +406,43 @@ export async function notifyLeadConverted(opts: {
     },
     { type: "context", elements: [{ type: "mrkdwn", text: lines.join("  ·  ") }] },
   ];
+
+  // Pipedrive deal + org links, when synced.
+  if (opts.pipedrive && (opts.pipedrive.dealUrl || opts.pipedrive.orgUrl)) {
+    const pd = opts.pipedrive;
+    const parts: string[] = [];
+    if (pd.dealUrl) parts.push(`<${pd.dealUrl}|View deal${pd.dealStatus ? ` (${pd.dealStatus})` : ""}>`);
+    if (pd.orgUrl) parts.push(`<${pd.orgUrl}|View organization>`);
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `🟢 Pipedrive: ${parts.join("  ·  ")}` }] });
+  }
+
+  // "How we won them" — campaigns + touchpoints that drove the order.
+  if (opts.touchpoints && (opts.touchpoints.campaigns.length || opts.touchpoints.calls.length)) {
+    const t = opts.touchpoints.totals;
+    const summary = [
+      `${t.campaigns} campaign${t.campaigns === 1 ? "" : "s"}`,
+      t.emailsSent ? `${t.emailsSent} email${t.emailsSent === 1 ? "" : "s"} sent` : "",
+      t.opens ? `${t.opens} open${t.opens === 1 ? "" : "s"}` : "",
+      t.replies ? `${t.replies} repl${t.replies === 1 ? "y" : "ies"}` : "",
+      t.calls ? `${t.calls} call${t.calls === 1 ? "" : "s"}${t.connectedCalls ? ` (${t.connectedCalls} connected)` : ""}` : "",
+    ]
+      .filter(Boolean)
+      .join("  ·  ");
+    const MAX = 8;
+    const campLines = opts.touchpoints.campaigns.slice(0, MAX).map((c) => {
+      const bits: string[] = [];
+      if (c.openedAt) bits.push("opened");
+      if (c.repliedAt) bits.push(`replied${c.replyClassification ? ` (${c.replyClassification})` : ""}`);
+      if (c.callCount) bits.push(`${c.callCount} call${c.callCount === 1 ? "" : "s"}${c.lastCallDisposition ? `, last: ${c.lastCallDisposition}` : ""}`);
+      return `• *${c.name}*${c.channelLabel ? ` _${c.channelLabel}_` : ""}${bits.length ? ` — ${bits.join(", ")}` : ""}`;
+    });
+    if (opts.touchpoints.campaigns.length > MAX) campLines.push(`_…and ${opts.touchpoints.campaigns.length - MAX} more_`);
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: `*How we won them*\n${summary}${campLines.length ? `\n${campLines.join("\n")}` : ""}` },
+    });
+  }
+
   if (opts.duplicate) {
     blocks.push({
       type: "context",
