@@ -10,7 +10,8 @@
  */
 
 import { sqlite } from "@/lib/db";
-import type { LeadTouchpoints } from "@/lib/email";
+import type { LeadTouchpoints, LeadPipedrive } from "@/lib/email";
+import { getPipedriveConnectionStatus } from "@/modules/sales/lib/pipedrive-client";
 
 const CHANNEL_SHORT: Record<string, string> = { instantly: "Email", phoneburner: "Calls", direct_mail: "Mail" };
 
@@ -97,6 +98,43 @@ export function buildLeadTouchpoints(companyId: string): LeadTouchpoints {
       calls: calls.length,
       connectedCalls: calls.filter((c) => c.connected).length,
     },
+  };
+}
+
+/**
+ * Pipedrive deal + org links for the converted lead, if it's synced. Prefers
+ * the deal tied to THIS order, else the company's most recent/open deal.
+ */
+export function buildLeadPipedrive(companyId: string, orderId: string): LeadPipedrive | null {
+  const apiDomain = (getPipedriveConnectionStatus().apiDomain || "").replace(/\/$/, "") || null;
+
+  const company = sqlite.prepare("SELECT pipedrive_org_id FROM companies WHERE id = ?").get(companyId) as
+    | { pipedrive_org_id: number | null }
+    | undefined;
+  const orgId = company?.pipedrive_org_id ?? null;
+
+  const deal = sqlite
+    .prepare(
+      `SELECT pipedrive_deal_id, title, value, status
+         FROM pipedrive_deals
+        WHERE company_id = ?
+        ORDER BY (order_id = ?) DESC, is_open DESC, updated_at DESC
+        LIMIT 1`,
+    )
+    .get(companyId, orderId) as
+    | { pipedrive_deal_id: number | null; title: string | null; value: number | null; status: string | null }
+    | undefined;
+
+  const orgUrl = apiDomain && orgId ? `${apiDomain}/organization/${orgId}` : null;
+  const dealUrl = apiDomain && deal?.pipedrive_deal_id ? `${apiDomain}/deal/${deal.pipedrive_deal_id}` : null;
+  if (!orgUrl && !dealUrl) return null;
+
+  return {
+    orgUrl,
+    dealUrl,
+    dealTitle: deal?.title ?? null,
+    dealValue: deal?.value ?? null,
+    dealStatus: deal?.status ?? null,
   };
 }
 
@@ -204,6 +242,20 @@ export async function detectWholesaleConversion(orderId: string): Promise<void> 
   const dupUrl = duplicate && base ? `${base}/prospects/${duplicate.id}` : null;
   const recipient = getSetting("lead_conversion_alert_email") || process.env.CONVERSION_ALERT_EMAIL || "daniel@getjaxy.com";
 
+  // Campaign + activity history lives on the worked prospect: the company
+  // itself when worked directly, otherwise the fuzzy-matched duplicate we
+  // worked. Pipedrive deal/org links come from the actual buying company (where
+  // the won deal is). Both shared by the Slack + email notifications.
+  const touchpointCompanyId = wasWorked ? order.company_id : duplicate?.id ?? null;
+  let touchpoints = null;
+  let pipedrive = null;
+  try {
+    touchpoints = touchpointCompanyId ? buildLeadTouchpoints(touchpointCompanyId) : null;
+    pipedrive = buildLeadPipedrive(order.company_id, order.id);
+  } catch (e) {
+    console.error("[wholesale-conversion] touchpoint/pipedrive build failed:", e);
+  }
+
   try {
     const { notifyLeadConverted } = await import("@/modules/integrations/lib/slack/notifications");
     await notifyLeadConverted({
@@ -216,6 +268,8 @@ export async function detectWholesaleConversion(orderId: string): Promise<void> 
       channel: order.channel,
       isFirstOrder: true,
       duplicate: duplicate ? { name: duplicate.name, url: dupUrl } : null,
+      touchpoints,
+      pipedrive,
     });
   } catch (e) {
     console.error("[wholesale-conversion] slack alert failed:", e);
@@ -223,10 +277,6 @@ export async function detectWholesaleConversion(orderId: string): Promise<void> 
 
   try {
     const { sendLeadConvertedEmail } = await import("@/lib/email");
-    // Touchpoints live on the worked prospect: the company itself when it was
-    // worked directly, otherwise the fuzzy-matched duplicate that we worked.
-    const touchpointCompanyId = wasWorked ? order.company_id : duplicate?.id ?? null;
-    const touchpoints = touchpointCompanyId ? buildLeadTouchpoints(touchpointCompanyId) : null;
     await sendLeadConvertedEmail(recipient, {
       companyName: company.name || "A store",
       contactEmail: cl?.email ?? null,
@@ -237,6 +287,7 @@ export async function detectWholesaleConversion(orderId: string): Promise<void> 
       prospectUrl,
       duplicate: duplicate ? { name: duplicate.name, url: dupUrl } : null,
       touchpoints,
+      pipedrive,
     });
   } catch (e) {
     console.error("[wholesale-conversion] email failed:", e);
