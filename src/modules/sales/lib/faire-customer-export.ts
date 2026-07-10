@@ -147,8 +147,7 @@ export function stampExported(companyIds: string[]): void {
 
 /** Cron handler: build, email the CSV, and stamp on success. */
 export async function runWeeklyFaireExport(): Promise<Record<string, unknown>> {
-  const recipient =
-    process.env.FAIRE_EXPORT_EMAIL || process.env.CONVERSION_ALERT_EMAIL || "daniel.seeff@gmail.com";
+  const recipient = process.env.FAIRE_EXPORT_EMAIL || "daniel@getjaxy.com";
   const weekLabel = new Date().toISOString().slice(0, 10);
   const { csv, count, withoutEmail, companyIds } = buildFaireExport();
 
