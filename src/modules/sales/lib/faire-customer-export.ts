@@ -15,18 +15,15 @@
 import { sqlite } from "@/lib/db";
 import { sendFaireCustomerExportEmail } from "@/lib/email";
 
+// Matches Faire's Customers bulk-upload template exactly:
+//   Contact Name, Store Name, Email Address, Street Address, Custom Tags (comma-sep)
 export interface FaireExportRow {
   companyId: string;
+  contactName: string;
   storeName: string;
-  firstName: string;
-  lastName: string;
   email: string;
-  phone: string;
-  address: string;
-  city: string;
-  state: string;
-  zip: string;
-  source: string;
+  streetAddress: string;
+  tags: string; // comma-separated tags inside one CSV field
 }
 
 interface CompanyRow {
@@ -40,8 +37,9 @@ interface CompanyRow {
   tags: string | null;
 }
 
-/** A concise "where this lead came from" label for the CSV Source column. */
-function sourceLabel(c: CompanyRow): string {
+/** Comma-separated Faire tags: always "interested" plus a source tag (no commas
+ *  inside a tag, since Faire splits the field on commas). */
+function sourceTags(c: CompanyRow): string {
   const src = (c.source || "").toLowerCase();
   let tags: string[] = [];
   try {
@@ -50,11 +48,13 @@ function sourceLabel(c: CompanyRow): string {
     /* ignore */
   }
   const has = (s: string) => src.includes(s) || tags.some((t) => t.includes(s));
-  if (has("instantly")) return "Instantly (email)";
-  if (has("phoneburner")) return "Cold call (PhoneBurner)";
-  if (has("ajm")) return "AJM reactivation";
-  if (has("faire")) return "Faire";
-  return c.source || "The Frame";
+  const out = ["interested"];
+  if (has("instantly")) out.push("instantly");
+  else if (has("phoneburner")) out.push("cold-call");
+  else if (has("ajm")) out.push("ajm");
+  else if (has("faire")) out.push("faire");
+  else if (c.source) out.push(c.source.replace(/,/g, " ").trim());
+  return out.join(",");
 }
 
 function csvField(v: string | null | undefined): string {
@@ -62,16 +62,12 @@ function csvField(v: string | null | undefined): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-const HEADERS = ["Store Name", "First Name", "Last Name", "Email", "Phone", "Address", "City", "State", "Zip", "Source"];
+const HEADERS = ["Contact Name", "Store Name", "Email Address", "Street Address", "Custom Tags (separate with commas)"];
 
 function toCsv(rows: FaireExportRow[]): string {
   const lines = [HEADERS.join(",")];
   for (const r of rows) {
-    lines.push(
-      [r.storeName, r.firstName, r.lastName, r.email, r.phone, r.address, r.city, r.state, r.zip, r.source]
-        .map(csvField)
-        .join(","),
-    );
+    lines.push([r.contactName, r.storeName, r.email, r.streetAddress, r.tags].map(csvField).join(","));
   }
   return lines.join("\r\n");
 }
@@ -104,10 +100,6 @@ export function buildFaireExport(opts: { limit?: number } = {}): {
          AND lower(email) NOT LIKE '%@relay.faire.com%'
        ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
   );
-  const phoneStmt = sqlite.prepare(
-    `SELECT phone FROM company_phones WHERE company_id = ?
-       ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
-  );
 
   const rows: FaireExportRow[] = [];
   const companyIds: string[] = [];
@@ -118,19 +110,19 @@ export function buildFaireExport(opts: { limit?: number } = {}): {
       withoutEmail++;
       continue;
     }
-    const phone = (phoneStmt.get(c.id) as { phone: string | null } | undefined)?.phone ?? "";
+    const contactName = [contact.first_name, contact.last_name].filter(Boolean).join(" ").trim() || (c.name ?? "");
+    // Faire's Street Address is one field: "street, city, state zip".
+    const streetAddress = [c.address, c.city, [c.state, c.zip].filter(Boolean).join(" ").trim()]
+      .map((s) => (s || "").trim())
+      .filter(Boolean)
+      .join(", ");
     rows.push({
       companyId: c.id,
+      contactName,
       storeName: c.name ?? "",
-      firstName: contact.first_name ?? "",
-      lastName: contact.last_name ?? "",
       email: contact.email,
-      phone,
-      address: c.address ?? "",
-      city: c.city ?? "",
-      state: c.state ?? "",
-      zip: c.zip ?? "",
-      source: sourceLabel(c),
+      streetAddress,
+      tags: sourceTags(c),
     });
     companyIds.push(c.id);
   }
