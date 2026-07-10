@@ -156,6 +156,12 @@ export async function runWeeklyFaireExport(): Promise<Record<string, unknown>> {
   const weekLabel = new Date().toISOString().slice(0, 10);
   const { csv, count, withoutEmail, companyIds } = buildFaireExport();
 
+  // Nothing new this week → don't send an empty CSV. The backlog is stamped, so
+  // most weeks will only carry the handful of newly-interested leads.
+  if (count === 0) {
+    return { ok: true, sent: false, skipped: "no new leads", count, withoutEmail, recipient, stamped: 0 };
+  }
+
   const r = await sendFaireCustomerExportEmail(recipient, {
     count,
     withoutEmail,
