@@ -109,7 +109,7 @@ function normState(s: string | null | undefined): string {
   return v.length === 2 ? v.toUpperCase() : v.slice(0, 2).toUpperCase();
 }
 
-interface ExistingMatch {
+export interface ExistingMatch {
   id: string;
   tags: string | null;
   status: string | null;
@@ -125,7 +125,7 @@ interface ExistingMatch {
  * build these maps once (a few full scans) and then match in O(1) per row.
  * "First write wins" mirrors the old `LIMIT 1` queries.
  */
-interface DedupeIndex {
+export interface DedupeIndex {
   byId: Map<string, { tags: string | null; status: string | null }>;
   email: Map<string, string>;     // normEmail -> companyId
   domain: Map<string, string>;    // domain -> companyId
@@ -133,7 +133,7 @@ interface DedupeIndex {
   phone: Map<string, string>;     // 10-digit -> companyId
 }
 
-function buildDedupeIndex(): DedupeIndex {
+export function buildDedupeIndex(): DedupeIndex {
   const idx: DedupeIndex = {
     byId: new Map(),
     email: new Map(),
@@ -174,7 +174,7 @@ function buildDedupeIndex(): DedupeIndex {
   return idx;
 }
 
-function findExistingCompany(row: AjmRow, idx: DedupeIndex): ExistingMatch | null {
+export function findExistingCompany(row: AjmRow, idx: DedupeIndex): ExistingMatch | null {
   const email = normEmail(row.email);
   const phone = normPhone(row.phone);
   const nameNorm = normName(row.name);
