@@ -1,10 +1,10 @@
 /**
  * AJ Morgan Faire export → segmented reactivation call lists.
  *
- * Ingests the AJM Faire customer export (Store Name / Contact / Email / Email
- * from AI / Order Volume / Total Orders / Last Ordered / Store Type) and, using
- * the frame to exclude anyone who has ALREADY ordered with Jaxy, produces two
- * value-segmented cohorts for the pre-Faire-Marketplace calling push:
+ * Ingests the full Faire "Customers" export (~17k rows, mostly never-ordered
+ * email leads), keeps only stores that actually ordered on AJM's Faire, and —
+ * using the frame to exclude anyone who has ALREADY ordered with Jaxy —
+ * produces two value-segmented cohorts for the pre-Faire-Marketplace push:
  *   - high spend  → Christina
  *   - low spend   → Sandra
  *
@@ -27,8 +27,9 @@ export interface FaireAnalysisRow extends FaireRow {
 
 export interface FaireAnalysis {
   params: { recencyYears: number; highMinSpend: number; cutoffIso: string };
-  parsed: { rows: number; skipped: number };
+  parsed: { rows: number; skipped: number; neverOrdered: number; ordered: number };
   funnel: {
+    orderedTotal: number; // rows that have ever ordered on AJM Faire
     matchedToFrame: number;
     alreadyJaxyCustomers: number; // excluded
     notJaxy: number;
@@ -37,22 +38,26 @@ export interface FaireAnalysis {
     notJaxy_tooOld: number;
   };
   target: {
-    size: number; // not-Jaxy AND within window
+    size: number; // ordered AND not-Jaxy AND within window
     withEmail: number;
+    matchedInFrame: number;
+    callable_hasPhone: number; // reachable by phone via frame match
     high_Christina: number;
     low_Sandra: number;
     highSpendTotal: number;
     lowSpendTotal: number;
   };
   spendPercentiles: { p10: number; p25: number; median: number; p75: number; p90: number; max: number } | null;
-  sampleHigh: Array<{ store: string; spend: number; last: string | null; email: string | null }>;
-  sampleLow: Array<{ store: string; spend: number; last: string | null; email: string | null }>;
+  sampleHigh: Array<{ store: string | null; spend: number; last: string | null; state: string | null; hasPhone: boolean }>;
+  sampleLow: Array<{ store: string | null; spend: number; last: string | null; state: string | null; hasPhone: boolean }>;
   rows?: FaireAnalysisRow[]; // included only when opts.includeRows
 }
 
 /**
- * Match every Faire row against the frame, exclude existing Jaxy customers,
- * apply the recency window, and split the survivors by spend.
+ * Keep only stores that ORDERED, match each against the frame, exclude existing
+ * Jaxy customers, apply the recency window, and split the survivors by spend.
+ * Contact reachability (phone) comes from the matched frame company, since the
+ * Faire export carries no phone column.
  */
 export function analyzeFaireExport(
   text: string,
@@ -64,19 +69,28 @@ export function analyzeFaireExport(
   cutoff.setFullYear(cutoff.getFullYear() - recencyYears);
   const cutoffTs = cutoff.getTime();
 
-  const { rows, skipped } = parseFaireExport(text);
+  const { rows: allRows, skipped } = parseFaireExport(text);
+  // We only care about stores that have actually ordered on AJM's Faire — the
+  // export is mostly never-ordered email leads.
+  const rows = allRows.filter((r) => r.ordered);
   const idx = buildDedupeIndex();
 
-  // Which matched frame companies have actually ordered with Jaxy? Pull the set
-  // of company_ids with a non-cancelled order once (cheap set membership).
+  // Company_ids that have ordered with Jaxy (non-cancelled) — the exclusion set.
   const jaxyOrderCompanyIds = new Set(
     (sqlite.prepare("SELECT DISTINCT company_id FROM orders WHERE status != 'cancelled' AND company_id IS NOT NULL").all() as Array<{
       company_id: string;
     }>).map((r) => r.company_id),
   );
+  // Frame companies that have at least one phone on file (for callability).
+  const companiesWithPhone = new Set(
+    (sqlite.prepare("SELECT DISTINCT company_id FROM company_phones WHERE TRIM(COALESCE(phone,'')) <> ''").all() as Array<{
+      company_id: string;
+    }>).map((r) => r.company_id),
+  );
 
   const analyzed: FaireAnalysisRow[] = rows.map((row) => {
-    const probe = { name: row.storeName, email: row.email, phone: null, state: null } as AjmRow;
+    // Name + state + email all help the frame matcher (this export has no phone).
+    const probe = { name: row.storeName, email: row.email, phone: null, state: row.state } as AjmRow;
     const match = findExistingCompany(probe, idx);
     let alreadyJaxy = false;
     if (match) {
@@ -97,6 +111,7 @@ export function analyzeFaireExport(
     };
   });
 
+  const hasPhone = (r: FaireAnalysisRow) => !!r.frameCompanyId && companiesWithPhone.has(r.frameCompanyId);
   const matchedToFrame = analyzed.filter((r) => r.frameCompanyId).length;
   const alreadyJaxy = analyzed.filter((r) => r.alreadyJaxy);
   const notJaxy = analyzed.filter((r) => !r.alreadyJaxy);
@@ -114,12 +129,13 @@ export function analyzeFaireExport(
       .slice()
       .sort((x, y) => y.spend - x.spend)
       .slice(0, 10)
-      .map((r) => ({ store: r.storeName, spend: r.spend, last: r.lastOrdered, email: r.email }));
+      .map((r) => ({ store: r.storeName, spend: r.spend, last: r.lastOrdered, state: r.state, hasPhone: hasPhone(r) }));
 
   return {
     params: { recencyYears, highMinSpend, cutoffIso: cutoff.toISOString().slice(0, 10) },
-    parsed: { rows: rows.length, skipped },
+    parsed: { rows: allRows.length, skipped, neverOrdered: allRows.length - rows.length, ordered: rows.length },
     funnel: {
+      orderedTotal: rows.length,
       matchedToFrame,
       alreadyJaxyCustomers: alreadyJaxy.length,
       notJaxy: notJaxy.length,
@@ -130,6 +146,8 @@ export function analyzeFaireExport(
     target: {
       size: target.length,
       withEmail: target.filter((r) => r.email).length,
+      matchedInFrame: target.filter((r) => r.frameCompanyId).length,
+      callable_hasPhone: target.filter(hasPhone).length,
       high_Christina: high.length,
       low_Sandra: low.length,
       highSpendTotal: sum(high),

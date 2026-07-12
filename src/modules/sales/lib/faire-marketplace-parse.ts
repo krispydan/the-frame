@@ -1,85 +1,154 @@
 /**
- * Pure parser for the AJ Morgan Faire customer export (no DB deps, so it's
- * unit-testable in isolation). The DB-backed analysis (frame matching, Jaxy
- * exclusion, value split) lives in faire-marketplace-import.ts.
+ * Pure parser for the AJ Morgan Faire brand-portal customer export (CSV, no DB
+ * deps, so it's unit-testable in isolation). The DB-backed analysis (frame
+ * matching, Jaxy exclusion, value split) lives in faire-marketplace-import.ts.
+ *
+ * This is the full Faire "Customers" export — ~17k rows, most of which are
+ * never-ordered email leads. Only rows that have ACTUALLY ordered (Faire
+ * Activity = "Has ordered", or a positive Order Amount / Order Count) are the
+ * reactivation target; the parser flags each row's `ordered` so the analysis
+ * can drop the pure leads.
  */
 
 export interface FaireRow {
-  storeName: string;
-  contact: string | null;
-  email: string | null; // Email, else "Email from AI"
-  spend: number; // Order Volume, dollars
-  totalOrders: number | null;
-  lastOrdered: string | null; // raw, e.g. "Nov 28, 2025"
-  lastOrderedTs: number | null; // parsed epoch ms, null if unparseable/blank
+  email: string | null;
+  storeName: string | null;
   storeType: string | null;
+  contact: string | null;
+  spend: number; // Order Amount, dollars
+  orderCount: number;
+  lastOrdered: string | null; // raw ISO, e.g. "2023-10-04" (or "NA")
+  lastOrderedTs: number | null; // parsed epoch ms, null if NA/blank/unparseable
+  firstOrdered: string | null;
+  address1: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  customTags: string | null;
+  faireActivity: string | null; // "Has ordered" | "Never ordered"
+  ordered: boolean; // derived: has this store ever placed an order?
 }
 
 function money(v: string | null | undefined): number {
-  if (!v) return 0;
-  const n = parseFloat(v.replace(/[$,\s]/g, ""));
+  const n = parseFloat(String(v ?? "").replace(/[$,\s]/g, ""));
   return isNaN(n) ? 0 : n;
 }
 
-function parseDate(v: string | null | undefined): number | null {
+function naStr(v: string | null | undefined): string | null {
   const s = (v ?? "").trim();
+  return !s || s.toUpperCase() === "NA" ? null : s;
+}
+
+function parseTs(v: string | null | undefined): number | null {
+  const s = naStr(v);
   if (!s) return null;
   const d = new Date(s);
   return isNaN(d.getTime()) ? null : d.getTime();
 }
 
-/** Split one TSV line, trimming each cell. */
-function splitTsv(line: string): string[] {
-  return line.split("\t").map((c) => c.trim());
+/** RFC4180-ish CSV parser: handles quotes, escaped quotes, embedded commas/newlines. */
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let field = "";
+  let row: string[] = [];
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else inQuotes = false;
+      } else field += c;
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ",") {
+      row.push(field);
+      field = "";
+    } else if (c === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else if (c !== "\r") {
+      field += c;
+    }
+  }
+  if (field.length || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows;
 }
 
 /**
- * Parse the pasted/exported TSV. Header-driven (column names, not positions) so
- * trailing padding columns and reordering don't break it. Skips the TOTAL
- * footer row and rows with no usable store name.
+ * Parse the Faire customer export CSV. Header-driven (column names, not
+ * positions). Skips rows with neither a store name nor an email. Every returned
+ * row carries `ordered` so the caller can keep only real customers.
  */
 export function parseFaireExport(text: string): { rows: FaireRow[]; skipped: number } {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim().length);
-  if (!lines.length) return { rows: [], skipped: 0 };
+  const grid = parseCsv(text);
+  if (grid.length < 2) return { rows: [], skipped: 0 };
 
-  const header = splitTsv(lines[0]);
-  const col = (name: string) =>
-    header.findIndex((h) => h.toLowerCase().replace(/\s+/g, " ").trim() === name.toLowerCase());
+  const header = grid[0].map((h) => h.trim());
+  const col = (name: string) => header.findIndex((h) => h.toLowerCase() === name.toLowerCase());
   const idx = {
+    email: col("Email Address"),
     store: col("Store Name"),
-    contact: col("Contact"),
-    email: col("Email"),
-    emailAi: col("Email from AI"),
-    volume: col("Order Volume"),
-    orders: col("Total Orders"),
+    storeType: col("Store Type"),
+    contact: col("Contact Name"),
+    amt: col("Order Amount"),
+    cnt: col("Order Count"),
     last: col("Last Ordered"),
-    type: col("Store Type"),
+    first: col("First Ordered"),
+    address1: col("Address 1"),
+    city: col("City"),
+    state: col("State"),
+    zip: col("Zip Code"),
+    tags: col("Custom Tags"),
+    activity: col("Faire Activity"),
   };
   const get = (r: string[], i: number) => (i >= 0 && i < r.length ? r[i] : "");
 
   const rows: FaireRow[] = [];
   let skipped = 0;
-  for (let i = 1; i < lines.length; i++) {
-    const r = splitTsv(lines[i]);
-    const storeName = get(r, idx.store).trim();
-    // Drop the footer TOTAL row and blank / name-less rows.
-    if (!storeName || storeName.toUpperCase() === "TOTAL") {
+  for (let i = 1; i < grid.length; i++) {
+    const r = grid[i];
+    if (!r || r.length < 3) {
       skipped++;
       continue;
     }
-    const emailPrimary = get(r, idx.email).trim();
-    const emailAi = get(r, idx.emailAi).trim();
-    const email = emailPrimary || emailAi || null;
-    const last = get(r, idx.last).trim() || null;
+    const store = naStr(get(r, idx.store));
+    const emailRaw = (get(r, idx.email) || "").trim().toLowerCase();
+    const email = emailRaw && emailRaw.includes("@") ? emailRaw : null;
+    // Drop rows with no way to identify the store at all (and the TOTAL footer).
+    if ((!store && !email) || (store && store.toUpperCase() === "TOTAL")) {
+      skipped++;
+      continue;
+    }
+    const spend = money(get(r, idx.amt));
+    const orderCount = parseInt(get(r, idx.cnt) || "0", 10) || 0;
+    const activity = naStr(get(r, idx.activity));
+    const ordered = activity === "Has ordered" || spend > 0 || orderCount > 0;
+
     rows.push({
-      storeName,
-      contact: get(r, idx.contact).trim() || null,
-      email: email && email.includes("@") ? email.toLowerCase() : null,
-      spend: money(get(r, idx.volume)),
-      totalOrders: idx.orders >= 0 ? parseInt(get(r, idx.orders) || "0", 10) || 0 : null,
-      lastOrdered: last,
-      lastOrderedTs: parseDate(last),
-      storeType: get(r, idx.type).trim() || null,
+      email,
+      storeName: store,
+      storeType: naStr(get(r, idx.storeType)),
+      contact: naStr(get(r, idx.contact)),
+      spend,
+      orderCount,
+      lastOrdered: naStr(get(r, idx.last)),
+      lastOrderedTs: parseTs(get(r, idx.last)),
+      firstOrdered: naStr(get(r, idx.first)),
+      address1: naStr(get(r, idx.address1)),
+      city: naStr(get(r, idx.city)),
+      state: naStr(get(r, idx.state)),
+      zip: naStr(get(r, idx.zip)),
+      customTags: naStr(get(r, idx.tags)),
+      faireActivity: activity,
+      ordered,
     });
   }
   return { rows, skipped };

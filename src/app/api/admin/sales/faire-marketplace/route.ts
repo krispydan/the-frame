@@ -7,14 +7,14 @@ import { analyzeFaireExport } from "@/modules/sales/lib/faire-marketplace-import
 /**
  * POST /api/admin/sales/faire-marketplace
  *
- * Dry-run analysis of the AJ Morgan Faire export for the pre-Faire-Marketplace
- * calling push. Body = the raw export TSV (tab-separated, as pasted/exported).
- * Reports the funnel (matched to frame → excluded existing Jaxy customers →
- * within recency window) and the value split into Christina (high) / Sandra
- * (low). NO writes — inspect before committing.
+ * Dry-run analysis of the AJ Morgan Faire customers export for the
+ * pre-Faire-Marketplace calling push. Body = the raw Faire "Customers" export
+ * CSV. Keeps only stores that ordered, reports the funnel (ordered → matched to
+ * frame → excluded existing Jaxy customers → within recency window) and the
+ * value split into Christina (high) / Sandra (low). NO writes.
  *
  *   curl -X POST "$URL/api/admin/sales/faire-marketplace?years=4&highMin=1500" \
- *        -H "x-admin-key: jaxy2026" --data-binary @ajm-faire-export.tsv
+ *        -H "x-admin-key: jaxy2026" --data-binary @fairecustomers.csv
  *
  * Auth: x-admin-key: jaxy2026
  */
