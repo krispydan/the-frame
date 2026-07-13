@@ -232,7 +232,7 @@ export async function POST(req: NextRequest) {
             type: "call",
             deal_id: r.dealId,
             org_id: orgId ?? undefined,
-            owner_id: owner,
+            user_id: owner, // Pipedrive activities assign via user_id (not owner_id)
             due_date: dueDate,
             note: message,
             done: false,
