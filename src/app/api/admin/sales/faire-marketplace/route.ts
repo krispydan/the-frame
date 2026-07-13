@@ -13,8 +13,14 @@ import { analyzeFaireExport } from "@/modules/sales/lib/faire-marketplace-import
  * frame → excluded existing Jaxy customers → within recency window) and the
  * value split into Christina (high) / Sandra (low). NO writes.
  *
+ * Raw body (customers CSV only):
  *   curl -X POST "$URL/api/admin/sales/faire-marketplace?years=4&highMin=1500" \
  *        -H "x-admin-key: jaxy2026" --data-binary @fairecustomers.csv
+ *
+ * With the manually looked-up email overlay (fills missing emails):
+ *   curl -X POST "$URL/api/admin/sales/faire-marketplace?years=4&highMin=1500" \
+ *        -H "x-admin-key: jaxy2026" \
+ *        -F customers=@fairecustomers.csv -F emails=@emails-found.tsv
  *
  * Auth: x-admin-key: jaxy2026
  */
@@ -26,11 +32,21 @@ export async function POST(req: NextRequest) {
   const years = Math.max(1, parseInt(url.searchParams.get("years") || "4", 10));
   const highMin = Math.max(0, parseFloat(url.searchParams.get("highMin") || "1500"));
 
-  const text = await req.text();
+  let text = "";
+  let emailOverlay: string | undefined;
+  if ((req.headers.get("content-type") || "").includes("multipart/form-data")) {
+    const form = await req.formData();
+    const customers = form.get("customers");
+    const emails = form.get("emails");
+    if (customers instanceof File) text = await customers.text();
+    if (emails instanceof File) emailOverlay = await emails.text();
+  } else {
+    text = await req.text();
+  }
   if (!text || text.trim().length < 20) {
-    return NextResponse.json({ error: "empty body — POST the export TSV as the request body" }, { status: 400 });
+    return NextResponse.json({ error: "empty body — POST the customers CSV (raw body, or -F customers=@file)" }, { status: 400 });
   }
 
-  const analysis = analyzeFaireExport(text, { recencyYears: years, highMinSpend: highMin });
+  const analysis = analyzeFaireExport(text, { recencyYears: years, highMinSpend: highMin, emailOverlay });
   return NextResponse.json({ ok: true, dryRun: true, ...analysis });
 }
