@@ -20,6 +20,7 @@ import {
   normStoreKey,
   formatInstantlyCsv,
   splitName,
+  firstNameForMerge,
   type FaireRow,
   type InstantlyLead,
 } from "./faire-marketplace-parse";
@@ -285,7 +286,10 @@ export function buildFaireInstantlyCsv(
   const leads: InstantlyLead[] = [...byEmail.values()]
     .sort((a, b) => b.spend - a.spend)
     .map((r) => {
-      const { firstName, lastName } = splitName(r.contact);
+      // Proper-cased first name for {{firstName}} — blank when the contact
+      // isn't a real person (Instantly's fallback handles the greeting).
+      const firstName = firstNameForMerge(r.contact, r.storeName);
+      const lastName = firstName ? splitName(r.contact).lastName : "";
       return {
         email: r.email!.toLowerCase(),
         firstName,

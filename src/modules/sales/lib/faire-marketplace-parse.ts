@@ -137,6 +137,37 @@ export function properCase(s: string | null | undefined): string {
     .trim();
 }
 
+// Contact-field tokens that mean it's a role/business, not a person.
+const NON_PERSON_TOKENS = new Set([
+  "buyer", "accounts", "account", "payable", "owner", "manager", "info", "sales", "admin",
+  "team", "staff", "support", "service", "customer", "purchasing", "store", "shop", "boutique",
+]);
+
+/**
+ * The first name to use for the {{firstName}} merge — proper-cased, or "" when
+ * the contact clearly isn't a person (so Instantly's fallback kicks in rather
+ * than "Hi ZERBO'S"). Blanks on: empty / email-in-field / non-alphabetic first
+ * token / a role word anywhere / a business suffix / an ALL-CAPS contact that
+ * echoes the store name.
+ */
+export function firstNameForMerge(contact: string | null | undefined, storeName?: string | null): string {
+  const c = (contact ?? "").trim();
+  if (!c || c.includes("@")) return "";
+  const tokens = c.split(/\s+/).filter(Boolean);
+  const firstRaw = tokens[0];
+  if (!/^[A-Za-z][A-Za-z'’.-]*$/.test(firstRaw)) return "";
+  if (tokens.some((t) => NON_PERSON_TOKENS.has(t.toLowerCase()))) return "";
+  if (/\b(llc|inc|ltd|corp|co|company)\b/i.test(c)) return "";
+  // ALL-CAPS contact that is a subset of the store name → it's the business.
+  const isAllCaps = c === c.toUpperCase() && c !== c.toLowerCase();
+  if (isAllCaps && storeName) {
+    const ck = normStoreKey(c);
+    const sk = normStoreKey(storeName);
+    if (ck && sk && sk.includes(ck)) return "";
+  }
+  return properCase(firstRaw);
+}
+
 /** Split a contact name into a proper-cased first/last (first token vs rest). */
 export function splitName(name: string | null | undefined): { firstName: string; lastName: string } {
   const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
