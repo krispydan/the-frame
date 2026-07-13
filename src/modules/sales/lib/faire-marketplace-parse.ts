@@ -85,6 +85,56 @@ export function parseEmailOverlay(text: string): Map<string, string> {
   return map;
 }
 
+/** One Instantly lead row (upload columns). */
+export interface InstantlyLead {
+  email: string;
+  firstName: string;
+  lastName: string;
+  companyName: string;
+  city: string;
+  state: string;
+  lastOrdered: string;
+  lifetimeSpend: string;
+  tier: string; // "high" | "low"
+}
+
+const INSTANTLY_HEADERS = [
+  "email",
+  "first_name",
+  "last_name",
+  "company_name",
+  "city",
+  "state",
+  "last_ordered",
+  "lifetime_spend",
+  "tier",
+];
+
+function csvCell(v: string | null | undefined): string {
+  const s = (v ?? "").toString();
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** Format Instantly leads into an upload-ready CSV (CRLF, quoted as needed). */
+export function formatInstantlyCsv(leads: InstantlyLead[]): string {
+  const lines = [INSTANTLY_HEADERS.join(",")];
+  for (const l of leads) {
+    lines.push(
+      [l.email, l.firstName, l.lastName, l.companyName, l.city, l.state, l.lastOrdered, l.lifetimeSpend, l.tier]
+        .map(csvCell)
+        .join(","),
+    );
+  }
+  return lines.join("\r\n");
+}
+
+/** Split a contact name into first/last (first token vs the rest). */
+export function splitName(name: string | null | undefined): { firstName: string; lastName: string } {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return { firstName: "", lastName: "" };
+  return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
+}
+
 /** RFC4180-ish CSV parser: handles quotes, escaped quotes, embedded commas/newlines. */
 function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
