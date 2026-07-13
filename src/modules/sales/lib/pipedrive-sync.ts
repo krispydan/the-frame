@@ -583,7 +583,7 @@ export async function ensureOutreachDeal(
   companyId: string,
   pipeline: "ajm" | "catalog",
   stageName: string,
-  opts: { dryRun?: boolean } = {},
+  opts: { dryRun?: boolean; ownerOverride?: number } = {},
 ): Promise<OutreachResult> {
   const { config, ownerId } = requireConfig();
   const meta = pipelineMeta(config, pipeline);
@@ -615,7 +615,7 @@ export async function ensureOutreachDeal(
   // Owner is per-pipeline (e.g. catalog → Sandra), falling back to the global
   // default. Apply it to the org + person + deal so the whole record belongs to
   // the right rep, not just the deal. (Deals use user_id; orgs/persons owner_id.)
-  const dealOwnerId = getPipelineOwner(pipeline)?.id ?? ownerId;
+  const dealOwnerId = opts.ownerOverride ?? getPipelineOwner(pipeline)?.id ?? ownerId;
   const orgId = await resolveOrg(companyId, dealOwnerId);
   const personId = await resolvePerson(companyId, orgId, dealOwnerId);
   const title = `${c?.name || "Company"} — ${pipeline === "ajm" ? "AJM reactivation" : "catalog interest"}`;

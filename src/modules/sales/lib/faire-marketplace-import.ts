@@ -24,6 +24,7 @@ export interface FaireAnalysisRow extends FaireRow {
   alreadyJaxy: boolean;
   withinWindow: boolean;
   inAjmPipeline: boolean; // already has an open deal in AJM Reactivation
+  hasPhone: boolean; // matched frame company has a phone (callable)
   segment: "high" | "low";
 }
 
@@ -135,11 +136,12 @@ export function analyzeFaireExport(
       alreadyJaxy,
       withinWindow,
       inAjmPipeline: !!match && inAjmPipeline.has(match.id),
+      hasPhone: !!match && companiesWithPhone.has(match.id),
       segment: row.spend >= highMinSpend ? "high" : "low",
     };
   });
 
-  const hasPhone = (r: FaireAnalysisRow) => !!r.frameCompanyId && companiesWithPhone.has(r.frameCompanyId);
+  const hasPhone = (r: FaireAnalysisRow) => r.hasPhone;
   const matchedToFrame = analyzed.filter((r) => r.frameCompanyId).length;
   const alreadyJaxy = analyzed.filter((r) => r.alreadyJaxy);
   const notJaxy = analyzed.filter((r) => !r.alreadyJaxy);
