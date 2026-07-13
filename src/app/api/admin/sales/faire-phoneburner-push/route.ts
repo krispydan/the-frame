@@ -4,26 +4,23 @@ export const maxDuration = 300;
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { buildFairePhoneBurnerLeads, type FairePhoneBurnerLead } from "@/modules/sales/lib/faire-marketplace-import";
-import { phoneBurnerClient, type PbContactPayload } from "@/modules/sales/lib/phoneburner-client";
+import { phoneBurnerClientFor, PB_ACCOUNTS, type PbContactPayload, type PbRep } from "@/modules/sales/lib/phoneburner-client";
 import { dedupeTagsArray } from "@/modules/sales/lib/dedupe-tags";
 
 /**
  * POST /api/admin/sales/faire-phoneburner-push
  *
- * Uploads the callable Faire cohort into PhoneBurner, split by value: high →
- * Christina, low → Sandra. One API key (the account both reps belong to);
- * contacts are routed to each rep via owner_id and land in a per-rep folder
- * named after the campaign. Body = customers CSV (raw) or multipart
- * (customers + emails overlay).
+ * Uploads the callable Faire cohort into PhoneBurner, split by value into each
+ * caller's OWN account: high → Christina's account, low → Sandra's (existing)
+ * account. Body = customers CSV (raw) or multipart (customers + emails overlay).
  *
- *   commit=false (default): resolve reps + counts, no upload.
+ *   commit=false (default): resolve both accounts + counts, no upload.
  *   commit=true: kick a background push; poll GET for progress.
- *   limit=N: cap the number of contacts per rep (test a small batch first).
- *   christina=<match>, sandra=<match>: substring to match the member name/username
- *     (defaults "christ" / "sandra"); or christinaId / sandraId for exact user ids.
+ *   limit=N: cap contacts per rep (test a small batch first).
  *   folder=NAME to override the folder name.
  *
- * Idempotent via a faire_phoneburner_pushed company tag. Auth: x-admin-key.
+ * Christina's account must be set up first (POST /phoneburner-setup). Idempotent
+ * via a faire_phoneburner_pushed company tag. Auth: x-admin-key: jaxy2026.
  */
 
 const RUN_KEY = "faire_phoneburner_push_run";
@@ -31,8 +28,7 @@ const PUSHED_TAG = "faire_phoneburner_pushed";
 const DEFAULT_FOLDER = "AJM - Faire Customers - Faire Market";
 
 function getSetting(key: string): string | null {
-  const r = sqlite.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string | null } | undefined;
-  return r?.value ?? null;
+  return (sqlite.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined)?.value ?? null;
 }
 function setSetting(key: string, value: string): void {
   sqlite
@@ -58,28 +54,22 @@ function companyHasTag(companyId: string, tag: string): boolean {
   return (row?.tags || "").toLowerCase().includes(tag.toLowerCase());
 }
 
-interface Member { userId: string; username: string | null; name: string | null; email: string | null }
-function matchMember(members: Member[], needleOrId: string): Member | null {
-  const n = needleOrId.toLowerCase();
-  return (
-    members.find((m) => m.userId === needleOrId) ||
-    members.find((m) => `${m.name ?? ""} ${m.username ?? ""} ${m.email ?? ""}`.toLowerCase().includes(n)) ||
-    null
-  );
+/** Resolve the caller's account: client, owner_id (from settings or discovery),
+ *  username fallback, and whether it's usable. */
+async function resolveAccount(rep: PbRep) {
+  const cfg = PB_ACCOUNTS[rep];
+  const client = phoneBurnerClientFor(rep);
+  const configured = !client.isMock;
+  let ownerId = getSetting(cfg.ownerSetting);
+  if (configured && !ownerId) {
+    ownerId = await client.discoverOwnerId().catch(() => null);
+    if (ownerId) setSetting(cfg.ownerSetting, ownerId);
+  }
+  const username = getSetting(`phoneburner_username_${rep}`);
+  return { rep, cfg, client, configured, ownerId, username, usable: configured && (!!ownerId || !!username) };
 }
 
-/** Resolve (creating once, cached in settings) the rep's campaign folder. */
-async function ensureRepFolder(repKey: string, folderName: string, ownerId: string): Promise<string> {
-  const cacheKey = `faire_pb_folder_${repKey}`;
-  const cached = getSetting(cacheKey);
-  if (cached) return cached;
-  const existing = (await phoneBurnerClient.listFolders()).find((f) => (f.name || "").trim().toLowerCase() === folderName.trim().toLowerCase());
-  const id = existing ? existing.id : (await phoneBurnerClient.createFolder({ folder_name: folderName, owner_id: ownerId })).id;
-  setSetting(cacheKey, id);
-  return id;
-}
-
-function toPayload(l: FairePhoneBurnerLead, ownerId: string, folderId: string): PbContactPayload {
+function toPayload(l: FairePhoneBurnerLead, ownerId: string | null, username: string | null, folderId: string | null): PbContactPayload {
   const notes = [
     l.store ? `Store: ${l.store}` : "",
     l.spend ? `AJM lifetime: $${Math.round(l.spend)}` : "",
@@ -90,9 +80,7 @@ function toPayload(l: FairePhoneBurnerLead, ownerId: string, folderId: string): 
   ]
     .filter(Boolean)
     .join(" | ");
-  return {
-    owner_id: ownerId,
-    category_id: folderId,
+  const p: PbContactPayload = {
     first_name: l.firstName || l.store || undefined,
     last_name: l.lastName || undefined,
     email: l.email || undefined,
@@ -109,6 +97,10 @@ function toPayload(l: FairePhoneBurnerLead, ownerId: string, folderId: string): 
       { name: "Tier", value: l.tier },
     ],
   };
+  if (ownerId) p.owner_id = ownerId;
+  else if (username) p.owner_username = username;
+  if (folderId) p.category_id = folderId;
+  return p;
 }
 
 export async function GET() {
@@ -120,17 +112,12 @@ export async function POST(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  if (phoneBurnerClient.isMock) {
-    return NextResponse.json({ error: "PhoneBurner not configured — set PHONEBURNER_API_KEY or settings.phoneburner_api_key" }, { status: 400 });
-  }
   const url = new URL(req.url);
   const commit = url.searchParams.get("commit") === "true";
   const years = Math.max(1, parseInt(url.searchParams.get("years") || "4", 10));
   const highMin = Math.max(0, parseFloat(url.searchParams.get("highMin") || "1500"));
   const limit = url.searchParams.get("limit") ? Math.max(1, parseInt(url.searchParams.get("limit")!, 10)) : null;
   const folderName = url.searchParams.get("folder") || DEFAULT_FOLDER;
-  const christinaMatch = url.searchParams.get("christinaId") || url.searchParams.get("christina") || "christ";
-  const sandraMatch = url.searchParams.get("sandraId") || url.searchParams.get("sandra") || "sandra";
 
   let text = "";
   let emailOverlay: string | undefined;
@@ -147,45 +134,47 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "empty body — POST the customers CSV (raw, or -F customers=@file)" }, { status: 400 });
   }
 
-  const members = await phoneBurnerClient.listMembers();
-  const christina = matchMember(members, christinaMatch);
-  const sandra = matchMember(members, sandraMatch);
+  const christina = await resolveAccount("christina");
+  const sandra = await resolveAccount("sandra");
 
   const { high, low } = buildFairePhoneBurnerLeads(text, { recencyYears: years, highMinSpend: highMin, emailOverlay });
   const notPushed = (l: FairePhoneBurnerLead) => !(l.frameCompanyId && companyHasTag(l.frameCompanyId, PUSHED_TAG));
-  let highTo = high.filter(notPushed);
-  let lowTo = low.filter(notPushed);
-  if (limit) {
-    highTo = highTo.slice(0, limit);
-    lowTo = lowTo.slice(0, limit);
-  }
+  const highAfter = high.filter(notPushed);
+  const lowAfter = low.filter(notPushed);
+  const highTo = limit ? highAfter.slice(0, limit) : highAfter;
+  const lowTo = limit ? lowAfter.slice(0, limit) : lowAfter;
+
+  const accountView = (a: Awaited<ReturnType<typeof resolveAccount>>) => ({
+    rep: a.rep,
+    accountConfigured: a.configured,
+    ownerId: a.ownerId,
+    username: a.username,
+    usable: a.usable,
+  });
 
   if (!commit) {
     return NextResponse.json({
       ok: true,
       commit: false,
-      teamMembers: members,
-      resolved: { christina: christina ?? "NOT FOUND", sandra: sandra ?? "NOT FOUND" },
+      accounts: { christina: accountView(christina), sandra: accountView(sandra) },
       counts: { high_christina: highTo.length, low_sandra: lowTo.length, high_total: high.length, low_total: low.length },
       folderName,
       sample: { christina: highTo.slice(0, 2), sandra: lowTo.slice(0, 2) },
       note:
-        !christina || !sandra
-          ? "Could not match one/both reps — pass ?christina= / ?sandra= (name substring) or christinaId= / sandraId=."
+        !christina.usable
+          ? "Christina's account isn't set up — POST /phoneburner-setup with her apiKey (+ username) first."
           : "Resolve only. Re-run with commit=true (start with &limit=5) to upload.",
     });
   }
 
-  if (!christina || !sandra) {
-    return NextResponse.json(
-      { error: "could not resolve both reps", teamMembers: members, hint: "pass ?christina= / ?sandra= or christinaId= / sandraId=" },
-      { status: 400 },
-    );
-  }
+  const blockers: string[] = [];
+  if (highTo.length && !christina.usable) blockers.push("Christina's account not usable (set up her apiKey/username via /phoneburner-setup)");
+  if (lowTo.length && !sandra.usable) blockers.push("Sandra's account not usable");
+  if (blockers.length) return NextResponse.json({ error: "cannot commit", blockers }, { status: 400 });
 
-  const jobs: Array<{ rep: Member; repKey: string; leads: FairePhoneBurnerLead[] }> = [
-    { rep: christina, repKey: "christina", leads: highTo },
-    { rep: sandra, repKey: "sandra", leads: lowTo },
+  const jobs = [
+    { acct: christina, repKey: "christina" as const, leads: highTo },
+    { acct: sandra, repKey: "sandra" as const, leads: lowTo },
   ];
   const total = highTo.length + lowTo.length;
   setSetting(RUN_KEY, JSON.stringify({ state: "running", total, done: 0, added: 0, errors: 0, startedAt: new Date().toISOString() }));
@@ -196,23 +185,42 @@ export async function POST(req: NextRequest) {
       errors = 0;
     const errSamples: string[] = [];
     for (const job of jobs) {
-      let folderId: string;
-      try {
-        folderId = await ensureRepFolder(job.repKey, folderName, job.rep.userId);
-      } catch (e) {
-        errors += job.leads.length;
-        done += job.leads.length;
-        if (errSamples.length < 15) errSamples.push(`${job.repKey} folder: ${e instanceof Error ? e.message : String(e)}`);
-        continue;
+      if (!job.leads.length) continue;
+      const { client, cfg } = job.acct;
+      let ownerId = job.acct.ownerId;
+      const username = job.acct.username;
+      // Create the campaign folder once, owned by this rep (needs owner_id).
+      let folderId: string | null = null;
+      const folderCacheKey = `faire_pb_folder_${job.repKey}`;
+      const cachedFolder = getSetting(folderCacheKey);
+      if (cachedFolder) folderId = cachedFolder;
+      else if (ownerId) {
+        try {
+          const existing = (await client.listFolders()).find((f) => (f.name || "").trim().toLowerCase() === folderName.trim().toLowerCase());
+          folderId = existing ? existing.id : (await client.createFolder({ folder_name: folderName, owner_id: ownerId })).id;
+          setSetting(folderCacheKey, folderId);
+        } catch (e) {
+          if (errSamples.length < 15) errSamples.push(`${job.repKey} folder: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
+
       for (const l of job.leads) {
         try {
-          await phoneBurnerClient.createContact(toPayload(l, job.rep.userId, folderId));
+          const resp = await client.createContact(toPayload(l, ownerId, username, folderId));
           added++;
           if (l.frameCompanyId) tagCompany(l.frameCompanyId, PUSHED_TAG);
+          // Backfill owner_id from the first created contact if we didn't have it
+          // (fresh account) so folders work on later runs.
+          if (!ownerId) {
+            const oid = (resp as Record<string, unknown>).owner_id;
+            if (typeof oid === "string" && oid) {
+              ownerId = oid;
+              setSetting(cfg.ownerSetting, oid);
+            }
+          }
         } catch (e) {
           errors++;
-          if (errSamples.length < 15) errSamples.push(`${l.store} (${l.phone}): ${e instanceof Error ? e.message : String(e)}`);
+          if (errSamples.length < 15) errSamples.push(`${l.store} (${l.phone}) [${job.repKey}]: ${e instanceof Error ? e.message : String(e)}`);
         }
         done++;
         if (done % 10 === 0) setSetting(RUN_KEY, JSON.stringify({ state: "running", total, done, added, errors, errSamples, updatedAt: new Date().toISOString() }));
@@ -225,8 +233,8 @@ export async function POST(req: NextRequest) {
     ok: true,
     commit: true,
     started: true,
-    reps: { christina: christina.name || christina.username, sandra: sandra.name || sandra.username },
+    counts: { high_christina: highTo.length, low_sandra: lowTo.length },
     total,
-    note: "Uploading in background — poll GET on this route for progress.",
+    note: "Uploading in background (each rep to their own account) — poll GET for progress.",
   });
 }

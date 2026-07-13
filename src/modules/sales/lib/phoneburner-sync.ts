@@ -19,7 +19,7 @@
  *     activity_feed for the prospect timeline.
  */
 import { sqlite } from "@/lib/db";
-import { phoneBurnerClient, type PbContactPayload, type PbCall } from "./phoneburner-client";
+import { phoneBurnerClient, phoneBurnerAccounts, type PbContactPayload, type PbCall } from "./phoneburner-client";
 import { formatToPbPhone } from "./phone-utils";
 import {
   resolveByCampaignLeadId,
@@ -784,42 +784,48 @@ export async function pullPhoneBurnerCallResults(opts?: {
     errors: [],
   };
 
-  let page = 1;
-  while (true) {
-    let batch: PbCall[];
-    try {
-      batch = await phoneBurnerClient.listRecentCalls({
-        since: sinceIso,
-        page,
-        page_size: 100,
-      });
-    } catch (e) {
-      summary.errors.push({
-        callId: `(page ${page})`,
-        reason: e instanceof Error ? e.message : String(e),
-      });
-      summary.ok = false;
-      break;
-    }
-    if (batch.length === 0) break;
-
-    for (const call of batch) {
+  // Poll EVERY configured caller's account (Sandra's default account + Christina's
+  // separate account, when her key is set) so both callers' results sync. Calls
+  // are dedup'd by PB call id in ingestOneCall, so overlap between accounts (there
+  // shouldn't be any) is harmless.
+  for (const acct of phoneBurnerAccounts()) {
+    let page = 1;
+    while (true) {
+      let batch: PbCall[];
       try {
-        const outcome = ingestOneCall(call);
-        if (outcome === "ingested") summary.ingested++;
-        else if (outcome === "skipped_existing") summary.skipped_existing++;
-        else summary.unmatched++;
+        batch = await acct.client.listRecentCalls({
+          since: sinceIso,
+          page,
+          page_size: 100,
+        });
       } catch (e) {
         summary.errors.push({
-          callId: call.id || call.call_id || "(unknown)",
+          callId: `(${acct.rep} page ${page})`,
           reason: e instanceof Error ? e.message : String(e),
         });
+        summary.ok = false;
+        break;
       }
-    }
+      if (batch.length === 0) break;
 
-    if (batch.length < 100) break;
-    page++;
-    if (page > 50) break; // safety cap — 5000 calls per poll
+      for (const call of batch) {
+        try {
+          const outcome = ingestOneCall(call);
+          if (outcome === "ingested") summary.ingested++;
+          else if (outcome === "skipped_existing") summary.skipped_existing++;
+          else summary.unmatched++;
+        } catch (e) {
+          summary.errors.push({
+            callId: call.id || call.call_id || "(unknown)",
+            reason: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+
+      if (batch.length < 100) break;
+      page++;
+      if (page > 50) break; // safety cap — 5000 calls per poll per account
+    }
   }
 
   return summary;
