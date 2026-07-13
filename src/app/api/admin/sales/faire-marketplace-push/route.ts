@@ -160,7 +160,9 @@ export async function POST(req: NextRequest) {
   const years = Math.max(1, parseInt(url.searchParams.get("years") || "4", 10));
   const highMin = Math.max(0, parseFloat(url.searchParams.get("highMin") || "1500"));
   const limit = url.searchParams.get("limit") ? Math.max(1, parseInt(url.searchParams.get("limit")!, 10)) : null;
-  const dueDays = Math.max(0, parseInt(url.searchParams.get("dueDays") || "3", 10));
+  // Default due TODAY so the daily-folder builder (which pulls activities due
+  // through today) stages them into the reps' PhoneBurner folders right away.
+  const dueDays = Math.max(0, parseInt(url.searchParams.get("dueDays") || "0", 10));
   // resetTasks=true ignores the "already tasked" marker so a re-run recreates
   // the call task with an updated note (delete the old ones in Pipedrive first
   // to avoid duplicates).
@@ -277,6 +279,7 @@ export async function POST(req: NextRequest) {
             type: "call",
             deal_id: r.dealId,
             org_id: orgId ?? undefined,
+            person_id: personId ?? undefined, // needed so the daily-folder builder resolves the company
             user_id: owner, // Pipedrive activities assign via user_id (not owner_id)
             due_date: dueDate,
             note: renderNote(message, row),
