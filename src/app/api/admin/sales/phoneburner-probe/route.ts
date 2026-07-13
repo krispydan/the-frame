@@ -24,9 +24,10 @@ export async function GET(req: NextRequest) {
   const currentOwnerId =
     (sqlite.prepare("SELECT value FROM settings WHERE key = 'phoneburner_owner_id' LIMIT 1").get() as { value: string } | undefined)?.value ?? null;
 
-  const [members, folders] = await Promise.all([
+  const [members, folders, membersRaw] = await Promise.all([
     phoneBurnerClient.listMembers().catch((e) => ({ error: e instanceof Error ? e.message : String(e) })),
     phoneBurnerClient.listFolders().catch((e) => ({ error: e instanceof Error ? e.message : String(e) })),
+    phoneBurnerClient.membersDiagnostic().catch((e) => ({ error: e instanceof Error ? e.message : String(e) })),
   ]);
 
   const memberList = Array.isArray(members) ? members : members;
@@ -35,6 +36,7 @@ export async function GET(req: NextRequest) {
     currentOwnerId,
     teamMembers: memberList,
     memberCount: Array.isArray(members) ? members.length : "unavailable",
+    membersDiagnostic: membersRaw,
     folders: Array.isArray(folders) ? folders.map((f) => ({ id: f.id, name: f.name })) : folders,
     interpretation:
       Array.isArray(members) && members.length > 1

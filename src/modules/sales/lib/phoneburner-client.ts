@@ -420,6 +420,25 @@ class PhoneBurnerClient {
     return out;
   }
 
+  /**
+   * Raw diagnostic for member/team discovery: tries the likely endpoints and
+   * returns each one's raw response or error, so we can see whether this is a
+   * team account (members present) or an individual account (404 / empty).
+   */
+  async membersDiagnostic(): Promise<Array<{ path: string; ok: boolean; raw?: unknown; error?: string }>> {
+    const paths = ["/members", "/users", "/team", "/account/members"];
+    const out: Array<{ path: string; ok: boolean; raw?: unknown; error?: string }> = [];
+    for (const p of paths) {
+      try {
+        const raw = await this.request<unknown>("GET", p, undefined, { page_size: 100 });
+        out.push({ path: p, ok: true, raw });
+      } catch (e) {
+        out.push({ path: p, ok: false, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    return out;
+  }
+
   async createFolder(opts: {
     folder_name: string;
     description?: string;
