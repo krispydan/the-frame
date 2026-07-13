@@ -14,6 +14,7 @@
 import { sqlite } from "@/lib/db";
 import { buildDedupeIndex, findExistingCompany, type AjmRow } from "./ajm-import";
 import { getPipelineOwner } from "./pipedrive-setup";
+import type { InstantlyLead as InstantlyApiLead } from "./instantly-client";
 import {
   parseFaireExport,
   parseEmailOverlay,
@@ -87,6 +88,71 @@ export interface FaireAnalysis {
   sampleHigh: Array<{ store: string | null; spend: number; last: string | null; state: string | null; hasPhone: boolean }>;
   sampleLow: Array<{ store: string | null; spend: number; last: string | null; state: string | null; hasPhone: boolean }>;
   rows?: FaireAnalysisRow[]; // included only when opts.includeRows
+}
+
+export interface FaireInstantlyLead {
+  frameCompanyId: string | null;
+  lead: InstantlyApiLead;
+}
+
+/**
+ * Build the rich Instantly leads for the target cohort (deduped by email),
+ * including phone + website from the matched frame company and a full set of
+ * custom variables for the sequence merge fields.
+ */
+export function buildFaireInstantlyLeads(
+  text: string,
+  opts: { recencyYears?: number; highMinSpend?: number; emailOverlay?: string } = {},
+): { leads: FaireInstantlyLead[]; count: number } {
+  const analysis = analyzeFaireExport(text, { ...opts, includeRows: true });
+  const target = (analysis.rows || []).filter((r) => !r.alreadyJaxy && r.withinWindow && r.email);
+
+  const byEmail = new Map<string, FaireAnalysisRow>();
+  for (const r of target) {
+    const k = r.email!.toLowerCase();
+    const cur = byEmail.get(k);
+    if (!cur || r.spend > cur.spend) byEmail.set(k, r);
+  }
+
+  const christina = getPipelineOwner("ajm")?.name || "Christina";
+  const sandra = getPipelineOwner("catalog")?.name || "Sandra";
+  const phoneStmt = sqlite.prepare("SELECT phone FROM company_phones WHERE company_id = ? ORDER BY is_primary DESC, created_at ASC LIMIT 1");
+  const webStmt = sqlite.prepare("SELECT website FROM companies WHERE id = ?");
+
+  const leads: FaireInstantlyLead[] = [...byEmail.values()]
+    .sort((a, b) => b.spend - a.spend)
+    .map((r) => {
+      const firstName = firstNameForMerge(r.contact, r.storeName);
+      const lastName = firstName ? splitName(r.contact).lastName : "";
+      const phone = r.frameCompanyId ? ((phoneStmt.get(r.frameCompanyId) as { phone: string } | undefined)?.phone ?? "") : "";
+      const website = r.frameCompanyId ? ((webStmt.get(r.frameCompanyId) as { website: string | null } | undefined)?.website ?? "") : "";
+      const custom_variables: Record<string, string> = {
+        city: r.city ?? "",
+        state: r.state ?? "",
+        store_type: r.storeType ?? "",
+        lifetime_spend: r.spend ? `$${Math.round(r.spend)}` : "",
+        order_count: r.orderCount != null ? String(r.orderCount) : "",
+        last_ordered: r.lastOrdered ?? "",
+        first_ordered: r.firstOrdered ?? "",
+        tier: r.segment,
+        owner: r.segment === "high" ? christina : sandra,
+        source: "AJM Faire",
+      };
+      return {
+        frameCompanyId: r.frameCompanyId,
+        lead: {
+          email: r.email!.toLowerCase(),
+          first_name: firstName || undefined,
+          last_name: lastName || undefined,
+          company_name: r.storeName || undefined,
+          phone: phone || undefined,
+          website: website || undefined,
+          custom_variables,
+        },
+      };
+    });
+
+  return { leads, count: leads.length };
 }
 
 /**
