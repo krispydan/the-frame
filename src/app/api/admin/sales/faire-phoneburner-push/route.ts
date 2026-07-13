@@ -61,7 +61,10 @@ async function resolveAccount(rep: PbRep) {
   const client = phoneBurnerClientFor(rep);
   const configured = !client.isMock;
   let ownerId = getSetting(cfg.ownerSetting);
-  if (configured && !ownerId) {
+  // Only auto-discover for the default account owner (Sandra). For a second
+  // user on the SAME account (Christina), discovery would return the account's
+  // default owner — wrong — so her owner_id must be set explicitly via setup.
+  if (rep === "sandra" && configured && !ownerId) {
     ownerId = await client.discoverOwnerId().catch(() => null);
     if (ownerId) setSetting(cfg.ownerSetting, ownerId);
   }

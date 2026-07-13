@@ -3,7 +3,7 @@ export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
-import { phoneBurnerClientFor, PB_ACCOUNTS, type PbRep } from "@/modules/sales/lib/phoneburner-client";
+import { phoneBurnerClientFor, pbOwnerFor, PB_ACCOUNTS, type PbRep } from "@/modules/sales/lib/phoneburner-client";
 
 /**
  * PhoneBurner second-caller setup.
@@ -33,6 +33,9 @@ function setSetting(key: string, value: string): void {
     )
     .run(key, value);
 }
+function deleteSetting(key: string): void {
+  sqlite.prepare("DELETE FROM settings WHERE key = ?").run(key);
+}
 function accountStatus() {
   const rows: Record<string, unknown> = {};
   for (const rep of Object.keys(PB_ACCOUNTS) as PbRep[]) {
@@ -57,33 +60,46 @@ export async function POST(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const body = (await req.json().catch(() => ({}))) as { rep?: string; apiKey?: string; username?: string };
+  const body = (await req.json().catch(() => ({}))) as { rep?: string; apiKey?: string; ownerId?: string; username?: string };
   const rep = (body.rep || "christina") as PbRep;
   if (!PB_ACCOUNTS[rep]) return NextResponse.json({ error: `unknown rep "${rep}"` }, { status: 400 });
-  if (!body.apiKey || body.apiKey.trim().length < 8) return NextResponse.json({ error: "apiKey required" }, { status: 400 });
-
   const cfg = PB_ACCOUNTS[rep];
-  setSetting(cfg.keySetting, body.apiKey.trim());
+
+  // Two ways a second caller can exist:
+  //   (a) same shared account, distinguished by owner_id (the common case) —
+  //       provide ownerId (their PhoneBurner user id).
+  //   (b) a genuinely separate account with its own token — provide apiKey.
+  // A numeric "apiKey" is really a user_id (PB tokens aren't short digit
+  // strings), so we auto-correct it to ownerId and keep the shared key.
+  let ownerId = (body.ownerId || "").trim() || null;
+  let apiKey = (body.apiKey || "").trim() || null;
+  if (apiKey && /^\d{5,12}$/.test(apiKey)) {
+    ownerId = ownerId || apiKey;
+    apiKey = null;
+  }
+  if (!ownerId && !apiKey) {
+    return NextResponse.json({ error: "provide ownerId (shared account) or apiKey (separate account)" }, { status: 400 });
+  }
+
+  if (apiKey) setSetting(cfg.keySetting, apiKey);
+  else deleteSetting(cfg.keySetting); // shared account — no per-rep key
+  if (ownerId) setSetting(cfg.ownerSetting, ownerId);
   if (body.username) setSetting(`phoneburner_username_${rep}`, body.username.trim());
 
-  // Verify the key works, then try to discover the owner_id (may be null on a
-  // brand-new empty account — the push falls back to owner_username until a
-  // contact exists to read owner_id from).
+  // Verify with the client that will actually be used (shared key unless a
+  // separate key was set).
   const client = phoneBurnerClientFor(rep);
   const probe = await client.authProbe().catch((e) => ({ ok: false, raw: e instanceof Error ? e.message : String(e) }));
-  let ownerId: string | null = null;
-  if (probe.ok) {
-    ownerId = await client.discoverOwnerId().catch(() => null);
-    if (ownerId) setSetting(cfg.ownerSetting, ownerId);
-  }
 
   return NextResponse.json({
     ok: probe.ok,
     rep,
-    keySaved: true,
+    mode: apiKey ? "separate_account" : "shared_account_owner_routing",
+    ownerId: pbOwnerFor(rep),
     authOk: probe.ok,
-    ownerId,
-    ownerNote: ownerId ? "discovered + saved" : "not discovered yet (empty account) — push will use owner_username until a contact exists",
     accounts: accountStatus(),
+    note: probe.ok
+      ? "Ready — contacts route to this rep by owner_id on the shared account."
+      : "Saved, but the shared account key failed auth — check the existing PHONEBURNER_API_KEY.",
   });
 }
