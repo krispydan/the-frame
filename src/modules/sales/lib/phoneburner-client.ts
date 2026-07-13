@@ -370,6 +370,56 @@ class PhoneBurnerClient {
     return out;
   }
 
+  /**
+   * List team members of the account this API key belongs to. Used to route
+   * contacts to a specific rep (Christina vs Sandra) via owner_id/owner_username.
+   * PB's members list shape varies (array, { members: {...} } numeric-keyed
+   * object, etc.), so we walk it the same defensive way as folders. Returns
+   * [] if the account has no team/members endpoint (single-user account).
+   */
+  async listMembers(): Promise<Array<{ userId: string; username: string | null; name: string | null; email: string | null }>> {
+    let raw: unknown;
+    try {
+      raw = await this.request<unknown>("GET", "/members", undefined, { page_size: 100 });
+    } catch {
+      return [];
+    }
+    function asArray(x: unknown): unknown[] {
+      if (Array.isArray(x)) return x;
+      if (x && typeof x === "object") {
+        const o = x as Record<string, unknown>;
+        for (const key of ["members", "data", "users", "items", "result"]) {
+          if (Array.isArray(o[key])) return o[key] as unknown[];
+          const inner = o[key];
+          if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+            const innerO = inner as Record<string, unknown>;
+            const numeric = Object.keys(innerO).filter((k) => /^\d+$/.test(k));
+            if (numeric.length) return numeric.map((k) => innerO[k]);
+          }
+        }
+        const topNumeric = Object.keys(o).filter((k) => /^\d+$/.test(k));
+        if (topNumeric.length) return topNumeric.map((k) => o[k]);
+      }
+      return [];
+    }
+    const out: Array<{ userId: string; username: string | null; name: string | null; email: string | null }> = [];
+    for (const item of asArray(raw)) {
+      if (!item || typeof item !== "object") continue;
+      const o = item as Record<string, unknown>;
+      const userId = o.user_id ?? o.id ?? o.member_id;
+      if (userId == null) continue;
+      const first = (o.first_name ?? "") as string;
+      const last = (o.last_name ?? "") as string;
+      out.push({
+        userId: String(userId),
+        username: (o.username ?? o.user_name ?? null) as string | null,
+        name: ((o.name as string) || `${first} ${last}`.trim() || null) as string | null,
+        email: (o.email ?? null) as string | null,
+      });
+    }
+    return out;
+  }
+
   async createFolder(opts: {
     folder_name: string;
     description?: string;

@@ -14,6 +14,7 @@
 import { sqlite } from "@/lib/db";
 import { buildDedupeIndex, findExistingCompany, type AjmRow } from "./ajm-import";
 import { getPipelineOwner } from "./pipedrive-setup";
+import type { InstantlyLead as InstantlyApiLead } from "./instantly-client";
 import {
   parseFaireExport,
   parseEmailOverlay,
@@ -87,6 +88,135 @@ export interface FaireAnalysis {
   sampleHigh: Array<{ store: string | null; spend: number; last: string | null; state: string | null; hasPhone: boolean }>;
   sampleLow: Array<{ store: string | null; spend: number; last: string | null; state: string | null; hasPhone: boolean }>;
   rows?: FaireAnalysisRow[]; // included only when opts.includeRows
+}
+
+export interface FaireInstantlyLead {
+  frameCompanyId: string | null;
+  lead: InstantlyApiLead;
+}
+
+export interface FairePhoneBurnerLead {
+  frameCompanyId: string | null;
+  tier: "high" | "low";
+  firstName: string;
+  lastName: string;
+  store: string;
+  phone: string;
+  email: string;
+  city: string;
+  state: string;
+  zip: string;
+  spend: number;
+  orderCount: string;
+  lastOrdered: string;
+}
+
+/**
+ * Callable target cohort for PhoneBurner: target stores with a phone (from the
+ * matched frame company), deduped by phone number, split by tier (high →
+ * Christina, low → Sandra). Names are proper-cased; business/role contacts get
+ * a blank first name (the store name still carries in `store`).
+ */
+export function buildFairePhoneBurnerLeads(
+  text: string,
+  opts: { recencyYears?: number; highMinSpend?: number; emailOverlay?: string } = {},
+): { high: FairePhoneBurnerLead[]; low: FairePhoneBurnerLead[] } {
+  const analysis = analyzeFaireExport(text, { ...opts, includeRows: true });
+  const target = (analysis.rows || []).filter((r) => !r.alreadyJaxy && r.withinWindow && r.frameCompanyId);
+
+  const phoneStmt = sqlite.prepare("SELECT phone FROM company_phones WHERE company_id = ? ORDER BY is_primary DESC, created_at ASC LIMIT 1");
+  const zipStmt = sqlite.prepare("SELECT zip FROM companies WHERE id = ?");
+
+  const byPhone = new Map<string, FairePhoneBurnerLead>();
+  for (const r of target) {
+    const phoneRaw = (phoneStmt.get(r.frameCompanyId) as { phone: string } | undefined)?.phone ?? "";
+    const digits = phoneRaw.replace(/\D/g, "");
+    if (digits.length < 10) continue; // no callable number
+    const key = digits.slice(-10);
+    const first = firstNameForMerge(r.contact, r.storeName);
+    const last = first ? splitName(r.contact).lastName : "";
+    const zip = (zipStmt.get(r.frameCompanyId) as { zip: string | null } | undefined)?.zip ?? "";
+    const lead: FairePhoneBurnerLead = {
+      frameCompanyId: r.frameCompanyId,
+      tier: r.segment,
+      firstName: first,
+      lastName: last,
+      store: r.storeName ?? "",
+      phone: phoneRaw,
+      email: r.email ?? "",
+      city: r.city ?? "",
+      state: r.state ?? "",
+      zip: r.zip ?? zip ?? "",
+      spend: r.spend,
+      orderCount: r.orderCount != null ? String(r.orderCount) : "",
+      lastOrdered: r.lastOrdered ?? "",
+    };
+    const cur = byPhone.get(key);
+    if (!cur || r.spend > cur.spend) byPhone.set(key, lead);
+  }
+
+  const all = [...byPhone.values()].sort((a, b) => b.spend - a.spend);
+  return { high: all.filter((l) => l.tier === "high"), low: all.filter((l) => l.tier === "low") };
+}
+
+/**
+ * Build the rich Instantly leads for the target cohort (deduped by email),
+ * including phone + website from the matched frame company and a full set of
+ * custom variables for the sequence merge fields.
+ */
+export function buildFaireInstantlyLeads(
+  text: string,
+  opts: { recencyYears?: number; highMinSpend?: number; emailOverlay?: string } = {},
+): { leads: FaireInstantlyLead[]; count: number } {
+  const analysis = analyzeFaireExport(text, { ...opts, includeRows: true });
+  const target = (analysis.rows || []).filter((r) => !r.alreadyJaxy && r.withinWindow && r.email);
+
+  const byEmail = new Map<string, FaireAnalysisRow>();
+  for (const r of target) {
+    const k = r.email!.toLowerCase();
+    const cur = byEmail.get(k);
+    if (!cur || r.spend > cur.spend) byEmail.set(k, r);
+  }
+
+  const christina = getPipelineOwner("ajm")?.name || "Christina";
+  const sandra = getPipelineOwner("catalog")?.name || "Sandra";
+  const phoneStmt = sqlite.prepare("SELECT phone FROM company_phones WHERE company_id = ? ORDER BY is_primary DESC, created_at ASC LIMIT 1");
+  const webStmt = sqlite.prepare("SELECT website FROM companies WHERE id = ?");
+
+  const leads: FaireInstantlyLead[] = [...byEmail.values()]
+    .sort((a, b) => b.spend - a.spend)
+    .map((r) => {
+      const firstName = firstNameForMerge(r.contact, r.storeName);
+      const lastName = firstName ? splitName(r.contact).lastName : "";
+      const phone = r.frameCompanyId ? ((phoneStmt.get(r.frameCompanyId) as { phone: string } | undefined)?.phone ?? "") : "";
+      const website = r.frameCompanyId ? ((webStmt.get(r.frameCompanyId) as { website: string | null } | undefined)?.website ?? "") : "";
+      const custom_variables: Record<string, string> = {
+        city: r.city ?? "",
+        state: r.state ?? "",
+        store_type: r.storeType ?? "",
+        lifetime_spend: r.spend ? `$${Math.round(r.spend)}` : "",
+        order_count: r.orderCount != null ? String(r.orderCount) : "",
+        last_ordered: r.lastOrdered ?? "",
+        first_ordered: r.firstOrdered ?? "",
+        tier: r.segment,
+        owner: r.segment === "high" ? christina : sandra,
+        source: "AJM Faire",
+      };
+      return {
+        frameCompanyId: r.frameCompanyId,
+        lead: {
+          email: r.email!.toLowerCase(),
+          first_name: firstName || undefined,
+          last_name: lastName || undefined,
+          company_name: r.storeName || undefined,
+          phone: phone || undefined,
+          website: website || undefined,
+          custom_variables,
+        },
+      };
+    });
+
+  return { leads, count: leads.length };
 }
 
 /**
