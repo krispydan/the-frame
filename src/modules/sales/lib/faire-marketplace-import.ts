@@ -13,15 +13,17 @@
  */
 import { sqlite } from "@/lib/db";
 import { buildDedupeIndex, findExistingCompany, type AjmRow } from "./ajm-import";
-import { parseFaireExport, type FaireRow } from "./faire-marketplace-parse";
+import { parseFaireExport, parseEmailOverlay, normStoreKey, type FaireRow } from "./faire-marketplace-parse";
 
 export { parseFaireExport, type FaireRow };
 
 export interface FaireAnalysisRow extends FaireRow {
   frameCompanyId: string | null;
   matchedBy: string | null;
+  emailFromLookup: boolean;
   alreadyJaxy: boolean;
   withinWindow: boolean;
+  inAjmPipeline: boolean; // already has an open deal in AJM Reactivation
   segment: "high" | "low";
 }
 
@@ -40,8 +42,12 @@ export interface FaireAnalysis {
   target: {
     size: number; // ordered AND not-Jaxy AND within window
     withEmail: number;
+    emailFromLookup: number; // emails supplied by the overlay
     matchedInFrame: number;
     callable_hasPhone: number; // reachable by phone via frame match
+    alreadyInAjmPipeline: number; // already have an open AJM Reactivation deal
+    notInPipeline_toAdd: number; // need adding to AJM Reactivation
+    toAdd_needNewCompany: number; // of those, not even in the frame yet
     high_Christina: number;
     low_Sandra: number;
     highSpendTotal: number;
@@ -61,7 +67,7 @@ export interface FaireAnalysis {
  */
 export function analyzeFaireExport(
   text: string,
-  opts: { recencyYears?: number; highMinSpend?: number; includeRows?: boolean } = {},
+  opts: { recencyYears?: number; highMinSpend?: number; includeRows?: boolean; emailOverlay?: string } = {},
 ): FaireAnalysis {
   const recencyYears = opts.recencyYears ?? 4;
   const highMinSpend = opts.highMinSpend ?? 1500;
@@ -73,6 +79,9 @@ export function analyzeFaireExport(
   // We only care about stores that have actually ordered on AJM's Faire — the
   // export is mostly never-ordered email leads.
   const rows = allRows.filter((r) => r.ordered);
+  // Optional manually-looked-up email overlay (normStoreKey → email), used to
+  // fill missing emails (improves both reachability and frame matching).
+  const overlay = opts.emailOverlay ? parseEmailOverlay(opts.emailOverlay) : null;
   const idx = buildDedupeIndex();
 
   // Company_ids that have ordered with Jaxy (non-cancelled) — the exclusion set.
@@ -87,10 +96,26 @@ export function analyzeFaireExport(
       company_id: string;
     }>).map((r) => r.company_id),
   );
+  // Company_ids that already have an OPEN deal in AJM Reactivation.
+  const inAjmPipeline = new Set(
+    (sqlite.prepare("SELECT DISTINCT company_id FROM pipedrive_deals WHERE pipeline = 'ajm' AND is_open = 1 AND company_id IS NOT NULL").all() as Array<{
+      company_id: string;
+    }>).map((r) => r.company_id),
+  );
 
   const analyzed: FaireAnalysisRow[] = rows.map((row) => {
+    // Fill a missing email from the overlay (matched on normalized store name).
+    let email = row.email;
+    let emailFromLookup = false;
+    if (!email && overlay) {
+      const found = overlay.get(normStoreKey(row.storeName));
+      if (found) {
+        email = found;
+        emailFromLookup = true;
+      }
+    }
     // Name + state + email all help the frame matcher (this export has no phone).
-    const probe = { name: row.storeName, email: row.email, phone: null, state: row.state } as AjmRow;
+    const probe = { name: row.storeName, email, phone: null, state: row.state } as AjmRow;
     const match = findExistingCompany(probe, idx);
     let alreadyJaxy = false;
     if (match) {
@@ -103,10 +128,13 @@ export function analyzeFaireExport(
     const withinWindow = row.lastOrderedTs != null && row.lastOrderedTs >= cutoffTs;
     return {
       ...row,
+      email,
       frameCompanyId: match?.id ?? null,
       matchedBy: match?.matched_by ?? null,
+      emailFromLookup,
       alreadyJaxy,
       withinWindow,
+      inAjmPipeline: !!match && inAjmPipeline.has(match.id),
       segment: row.spend >= highMinSpend ? "high" : "low",
     };
   });
@@ -146,8 +174,12 @@ export function analyzeFaireExport(
     target: {
       size: target.length,
       withEmail: target.filter((r) => r.email).length,
+      emailFromLookup: target.filter((r) => r.emailFromLookup).length,
       matchedInFrame: target.filter((r) => r.frameCompanyId).length,
       callable_hasPhone: target.filter(hasPhone).length,
+      alreadyInAjmPipeline: target.filter((r) => r.inAjmPipeline).length,
+      notInPipeline_toAdd: target.filter((r) => !r.inAjmPipeline).length,
+      toAdd_needNewCompany: target.filter((r) => !r.inAjmPipeline && !r.frameCompanyId).length,
       high_Christina: high.length,
       low_Sandra: low.length,
       highSpendTotal: sum(high),

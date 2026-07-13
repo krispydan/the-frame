@@ -46,6 +46,45 @@ function parseTs(v: string | null | undefined): number | null {
   return isNaN(d.getTime()) ? null : d.getTime();
 }
 
+/** Normalize a store name to a match key (lowercase, drop punctuation + common
+ *  suffix/filler words) so an overlay email can be matched to an export row. */
+export function normStoreKey(s: string | null | undefined): string {
+  if (!s) return "";
+  return String(s)
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\b(llc|inc|ltd|co|corp|company|the|boutique|store|shop|shoppe)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Parse a supplementary "emails found" overlay (the manually looked-up list):
+ * any TSV/CSV that has a Store Name column and an email column (e.g. "Email
+ * Found" / "Email"). Returns normStoreKey(store) → email. Tolerant of tab or
+ * comma delimiters and header naming.
+ */
+export function parseEmailOverlay(text: string): Map<string, string> {
+  const map = new Map<string, string>();
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length);
+  if (!lines.length) return map;
+  const delim = lines[0].includes("\t") ? "\t" : ",";
+  const cells = (line: string) =>
+    delim === "\t" ? line.split("\t").map((c) => c.trim()) : parseCsv(line)[0]?.map((c) => c.trim()) ?? [];
+  const header = cells(lines[0]).map((h) => h.toLowerCase());
+  const storeCol = header.findIndex((h) => h.includes("store"));
+  const emailCol = header.findIndex((h) => h.includes("email"));
+  if (storeCol < 0 || emailCol < 0) return map;
+  for (let i = 1; i < lines.length; i++) {
+    const r = cells(lines[i]);
+    const store = normStoreKey(r[storeCol]);
+    const email = (r[emailCol] || "").trim().toLowerCase();
+    if (store && email.includes("@") && !map.has(store)) map.set(store, email);
+  }
+  return map;
+}
+
 /** RFC4180-ish CSV parser: handles quotes, escaped quotes, embedded commas/newlines. */
 function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
