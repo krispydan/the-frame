@@ -125,7 +125,7 @@ export async function POST(req: NextRequest) {
   const highMin = Math.max(0, parseFloat(url.searchParams.get("highMin") || "1500"));
   const limit = url.searchParams.get("limit") ? Math.max(1, parseInt(url.searchParams.get("limit")!, 10)) : null;
   const dueDays = Math.max(0, parseInt(url.searchParams.get("dueDays") || "3", 10));
-  const message = url.searchParams.get("message") || "";
+  let message = url.searchParams.get("message") || "";
   const christinaId = url.searchParams.get("christinaId")
     ? parseInt(url.searchParams.get("christinaId")!, 10)
     : getPipelineOwner("ajm")?.id;
@@ -142,6 +142,10 @@ export async function POST(req: NextRequest) {
     const emails = form.get("emails");
     if (customers instanceof File) text = await customers.text();
     if (emails instanceof File) emailOverlay = await emails.text();
+    // Allow the call-task message as a form field so spaces/punctuation don't
+    // need URL-encoding (query param still works and wins if set).
+    const formMsg = form.get("message");
+    if (!message && typeof formMsg === "string") message = formMsg;
   } else {
     text = await req.text();
   }
