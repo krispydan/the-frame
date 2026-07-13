@@ -128,11 +128,20 @@ export function formatInstantlyCsv(leads: InstantlyLead[]): string {
   return lines.join("\r\n");
 }
 
-/** Split a contact name into first/last (first token vs the rest). */
+/** Proper-case a name so mail merge reads "Hi Daniel", not "Hi DANIEL" / "Hi
+ *  daniel". Handles apostrophes and hyphens (O'Brien, Anne-Marie). */
+export function properCase(s: string | null | undefined): string {
+  return (s ?? "")
+    .toLowerCase()
+    .replace(/(^|[\s'’.-])([a-z])/g, (_m, sep: string, ch: string) => sep + ch.toUpperCase())
+    .trim();
+}
+
+/** Split a contact name into a proper-cased first/last (first token vs rest). */
 export function splitName(name: string | null | undefined): { firstName: string; lastName: string } {
   const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return { firstName: "", lastName: "" };
-  return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
+  return { firstName: properCase(parts[0]), lastName: properCase(parts.slice(1).join(" ")) };
 }
 
 /** RFC4180-ish CSV parser: handles quotes, escaped quotes, embedded commas/newlines. */
