@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 import { NextRequest, NextResponse } from "next/server";
-import { analyzeFaireExport } from "@/modules/sales/lib/faire-marketplace-import";
+import { analyzeFaireExport, debugFaireStore } from "@/modules/sales/lib/faire-marketplace-import";
 
 /**
  * POST /api/admin/sales/faire-marketplace
@@ -45,6 +45,12 @@ export async function POST(req: NextRequest) {
   }
   if (!text || text.trim().length < 20) {
     return NextResponse.json({ error: "empty body — POST the customers CSV (raw body, or -F customers=@file)" }, { status: 400 });
+  }
+
+  // ?debug=StoreName → explain why that store is/isn't on the list.
+  const debug = url.searchParams.get("debug");
+  if (debug) {
+    return NextResponse.json({ ok: true, ...debugFaireStore(text, debug, { recencyYears: years, highMinSpend: highMin, emailOverlay }) });
   }
 
   const analysis = analyzeFaireExport(text, { recencyYears: years, highMinSpend: highMin, emailOverlay });
