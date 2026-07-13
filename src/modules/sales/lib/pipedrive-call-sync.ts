@@ -195,8 +195,12 @@ async function ensurePbContact(companyId: string, ownerId: string, poolId: strin
   return { contactId, originalFolder: poolId, created: true };
 }
 
-async function moveContact(contactId: string, folderId: string, activityId?: string): Promise<void> {
+async function moveContact(contactId: string, folderId: string, activityId?: string, ownerId?: string): Promise<void> {
   const patch: Record<string, unknown> = { category_id: folderId };
+  // Re-assign the contact to the rep who's dialing it — in PhoneBurner a user
+  // only sees/dials contacts they OWN, so a contact merely moved into a rep's
+  // folder (but owned by someone else) won't appear for them.
+  if (ownerId) patch.owner_id = ownerId;
   if (activityId) patch.custom_fields = [{ name: ACTIVITY_FIELD, type: "text", value: activityId }];
   await phoneBurnerClient.updateContact(contactId, patch);
 }
@@ -273,7 +277,7 @@ export async function buildDailyCallFolders(opts: { dryRun?: boolean; through?: 
       );
       for (const [contactId, t] of target) {
         try {
-          await moveContact(contactId, repFolder, t.activityId);
+          await moveContact(contactId, repFolder, t.activityId, repOwnerId);
           upsert.run(t.companyId, contactId, userId, repFolder, t.activityId, t.due ?? null, t.originalFolder);
         } catch (e) {
           res.errors.push(`move ${contactId}: ${e instanceof Error ? e.message : e}`);
