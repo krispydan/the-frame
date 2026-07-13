@@ -262,6 +262,30 @@ registerJobHandler(
   },
 );
 
+// Follow-up call → transcript summary posted to the Pipedrive deal note.
+// Runs for repeat calls (the first interested call gets full enrichment).
+registerJobHandler(
+  "sales.summarize_followup_call",
+  async (input): Promise<Record<string, unknown>> => {
+    const callId = String(input.callId || "");
+    if (!callId) return { skipped: "no callId" };
+    const { summarizeFollowupCall } = await import("./followup-call-summary");
+    return summarizeFollowupCall(callId);
+  },
+);
+
+/** Enqueue a follow-up call summary (transcript → Pipedrive deal note).
+ *  Scheduled ~90s out so the recording is finalized + transcribable. */
+export function enqueueFollowupSummary(callId: string): void {
+  if (!callId) return;
+  void jobQueue.enqueue(
+    "sales.summarize_followup_call",
+    "sales",
+    { callId },
+    { priority: 3, scheduledFor: new Date(Date.now() + 90_000).toISOString() },
+  );
+}
+
 /** Enqueue transcription of a call recording. Defaults to ~60s out so
  *  PB has time to finalize the recording for a just-ended call; pass
  *  delayMs=0 for backfilling historical calls. */

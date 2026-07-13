@@ -47,7 +47,7 @@ import {
   type ResolveResult,
 } from "./lead-resolution";
 import { progressCompanyStatus, type CompanyStatus } from "./status-progression";
-import { enqueueCallTranscription } from "./status-sync";
+import { enqueueCallTranscription, enqueueFollowupSummary } from "./status-sync";
 
 /**
  * Map a PhoneBurner disposition label to a companies.status value, or
@@ -410,6 +410,7 @@ async function handlePhoneBurnerWebhook(
       // is forward-only, so re-firing the same disposition is a no-op,
       // and a company already at "customer" or further along is never
       // downgraded.
+      let firstInterestedEdge = false;
       const targetStatus = dispositionToStatus(disposition);
       if (targetStatus && match?.companyId) {
         try {
@@ -419,6 +420,7 @@ async function handlePhoneBurnerWebhook(
             // Forward edge into 'interested' only — so re-asserting the
             // same disposition doesn't re-fire.
             if (r.to === "interested" && disposition) {
+              firstInterestedEdge = true;
               // Always transcribe + save the recording for interested calls,
               // independent of the AI-enrichment flag — good data on file.
               try { enqueueCallTranscription(callId); } catch (e) {
@@ -434,6 +436,16 @@ async function handlePhoneBurnerWebhook(
           }
         } catch (e) {
           console.error("[phoneburner-webhook] progressCompanyStatus failed:", e);
+        }
+      }
+
+      // Follow-up (repeat) calls → transcribe + summarize the transcript
+      // to the Pipedrive deal note. The FIRST interested call gets full
+      // enrichment instead, so skip it here. Connected calls only; the job
+      // self-skips when there's no open deal / no transcript.
+      if (match?.companyId && pbConnected(body) && !firstInterestedEdge) {
+        try { enqueueFollowupSummary(callId); } catch (e) {
+          console.error("[phoneburner-webhook] enqueue followup summary failed:", e);
         }
       }
     } else {
