@@ -109,6 +109,8 @@ export function buildFaireCampaignPlan(
   interface PlanRow {
     channel: string;
     channelRank: number;
+    instantly: boolean;
+    phoneburner: boolean;
     owner: string;
     tier: string;
     store: string;
@@ -129,12 +131,19 @@ export function buildFaireCampaignPlan(
   const rows: PlanRow[] = target.map((r) => {
     const phone = r.frameCompanyId ? ((phoneStmt.get(r.frameCompanyId) as { phone: string } | undefined)?.phone ?? "") : "";
     const frameCompany = r.frameCompanyId ? ((nameStmt.get(r.frameCompanyId) as { name: string | null } | undefined)?.name ?? "") : "";
-    // Channel: email → Instantly; else phone → PhoneBurner; else needs contact info.
-    const channel = r.email ? "Instantly (email)" : phone ? "PhoneBurner (call)" : "Needs enrichment";
-    const channelRank = r.email ? 0 : phone ? 1 : 2;
+    // Channels are additive — an email puts them in Instantly, a phone puts them
+    // in PhoneBurner; if they have both, they go in both ("all platforms").
+    const instantly = !!r.email;
+    const phoneburner = !!phone;
+    const channel =
+      instantly && phoneburner ? "Instantly + PhoneBurner" : instantly ? "Instantly" : phoneburner ? "PhoneBurner" : "Needs enrichment";
+    // Sort order: both-platforms first, then call-only, then email-only, then gaps.
+    const channelRank = instantly && phoneburner ? 0 : phoneburner ? 1 : instantly ? 2 : 3;
     return {
       channel,
       channelRank,
+      instantly,
+      phoneburner,
       owner: r.segment === "high" ? christina : sandra,
       tier: r.segment,
       store: r.storeName ?? "",
@@ -153,13 +162,12 @@ export function buildFaireCampaignPlan(
     };
   });
 
-  // Group by channel (Instantly, then PhoneBurner, then enrichment), then by
-  // spend so the biggest accounts are at the top of each block.
+  // Group by channel block, then by spend so the biggest accounts are on top.
   rows.sort((a, b) => a.channelRank - b.channelRank || b.spend - a.spend);
 
   const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
   const HEADERS = [
-    "channel", "owner", "tier", "store_name", "contact_name", "city", "state", "store_type",
+    "channel", "instantly", "phoneburner", "owner", "tier", "store_name", "contact_name", "city", "state", "store_type",
     "lifetime_ajm_spend", "order_count", "last_ordered", "email", "email_source", "phone",
     "already_in_pipedrive", "frame_company",
   ];
@@ -167,7 +175,7 @@ export function buildFaireCampaignPlan(
   for (const r of rows) {
     lines.push(
       [
-        r.channel, r.owner, r.tier, r.store, r.contact, r.city, r.state, r.storeType,
+        r.channel, r.instantly ? "yes" : "no", r.phoneburner ? "yes" : "no", r.owner, r.tier, r.store, r.contact, r.city, r.state, r.storeType,
         r.spend ? `$${Math.round(r.spend)}` : "", r.orders, r.lastOrdered, r.email, r.emailSource, r.phone,
         r.inPipedrive, r.frameCompany,
       ]
@@ -178,9 +186,12 @@ export function buildFaireCampaignPlan(
 
   const summary = {
     total: rows.length,
-    instantly_email: rows.filter((r) => r.channelRank === 0).length,
-    phoneburner_call: rows.filter((r) => r.channelRank === 1).length,
-    needs_enrichment: rows.filter((r) => r.channelRank === 2).length,
+    on_instantly: rows.filter((r) => r.instantly).length,
+    on_phoneburner: rows.filter((r) => r.phoneburner).length,
+    on_both: rows.filter((r) => r.instantly && r.phoneburner).length,
+    email_only: rows.filter((r) => r.instantly && !r.phoneburner).length,
+    call_only: rows.filter((r) => !r.instantly && r.phoneburner).length,
+    needs_enrichment: rows.filter((r) => !r.instantly && !r.phoneburner).length,
     christina_high: rows.filter((r) => r.tier === "high").length,
     sandra_low: rows.filter((r) => r.tier === "low").length,
   };
