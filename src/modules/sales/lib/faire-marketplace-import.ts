@@ -13,7 +13,15 @@
  */
 import { sqlite } from "@/lib/db";
 import { buildDedupeIndex, findExistingCompany, type AjmRow } from "./ajm-import";
-import { parseFaireExport, parseEmailOverlay, normStoreKey, type FaireRow } from "./faire-marketplace-parse";
+import {
+  parseFaireExport,
+  parseEmailOverlay,
+  normStoreKey,
+  formatInstantlyCsv,
+  splitName,
+  type FaireRow,
+  type InstantlyLead,
+} from "./faire-marketplace-parse";
 
 export { parseFaireExport, type FaireRow };
 
@@ -58,6 +66,53 @@ export interface FaireAnalysis {
   sampleHigh: Array<{ store: string | null; spend: number; last: string | null; state: string | null; hasPhone: boolean }>;
   sampleLow: Array<{ store: string | null; spend: number; last: string | null; state: string | null; hasPhone: boolean }>;
   rows?: FaireAnalysisRow[]; // included only when opts.includeRows
+}
+
+/**
+ * Build an Instantly-ready CSV of the target cohort (ordered, not-Jaxy, within
+ * window) that has an email. Deduped by email (keeps the highest-spend store
+ * per address), so Instantly gets one clean row per inbox.
+ */
+export function buildFaireInstantlyCsv(
+  text: string,
+  opts: { recencyYears?: number; highMinSpend?: number; emailOverlay?: string } = {},
+): { csv: string; count: number; targetTotal: number; withoutEmail: number; deduped: number } {
+  const analysis = analyzeFaireExport(text, { ...opts, includeRows: true });
+  const target = (analysis.rows || []).filter((r) => !r.alreadyJaxy && r.withinWindow);
+  const withEmail = target.filter((r) => r.email);
+
+  // Dedupe by email — keep the highest-spend row for a shared inbox.
+  const byEmail = new Map<string, FaireAnalysisRow>();
+  for (const r of withEmail) {
+    const key = r.email!.toLowerCase();
+    const cur = byEmail.get(key);
+    if (!cur || r.spend > cur.spend) byEmail.set(key, r);
+  }
+
+  const leads: InstantlyLead[] = [...byEmail.values()]
+    .sort((a, b) => b.spend - a.spend)
+    .map((r) => {
+      const { firstName, lastName } = splitName(r.contact);
+      return {
+        email: r.email!.toLowerCase(),
+        firstName,
+        lastName,
+        companyName: r.storeName ?? "",
+        city: r.city ?? "",
+        state: r.state ?? "",
+        lastOrdered: r.lastOrdered ?? "",
+        lifetimeSpend: r.spend ? `$${Math.round(r.spend)}` : "",
+        tier: r.segment,
+      };
+    });
+
+  return {
+    csv: formatInstantlyCsv(leads),
+    count: leads.length,
+    targetTotal: target.length,
+    withoutEmail: target.length - withEmail.length,
+    deduped: withEmail.length - leads.length,
+  };
 }
 
 /**
