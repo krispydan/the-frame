@@ -240,7 +240,10 @@ export async function detectWholesaleConversion(orderId: string): Promise<void> 
   const base = (process.env.SHOPIFY_APP_URL || process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
   const prospectUrl = base ? `${base}/prospects/${order.company_id}` : null;
   const dupUrl = duplicate && base ? `${base}/prospects/${duplicate.id}` : null;
-  const recipient = getSetting("lead_conversion_alert_email") || process.env.CONVERSION_ALERT_EMAIL || "daniel@getjaxy.com";
+  // Lead-conversion alerts go to the wholesale team inbox (+ Daniel), not
+  // just Daniel's personal inbox. Override via the lead_conversion_alert_email
+  // setting (comma-separated) or CONVERSION_ALERT_EMAIL env.
+  const recipient = getSetting("lead_conversion_alert_email") || process.env.CONVERSION_ALERT_EMAIL || "wholesale@getjaxy.com,daniel@getjaxy.com";
 
   // Campaign + activity history lives on the worked prospect: the company
   // itself when worked directly, otherwise the fuzzy-matched duplicate we

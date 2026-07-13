@@ -9,7 +9,11 @@ async function sendEmail(to: string, subject: string, html: string, attachments?
     return { ok: false, error: "RESEND_API_KEY not configured" };
   }
 
-  const body: Record<string, unknown> = { from: FROM_ADDRESS, to: [to], subject, html };
+  // `to` may be a comma/semicolon-separated list (e.g. a shared team inbox +
+  // an individual). Split into the array Resend expects; a single address
+  // just yields a one-element array (unchanged behavior for existing callers).
+  const recipients = to.split(/[,;]/).map((r) => r.trim()).filter(Boolean);
+  const body: Record<string, unknown> = { from: FROM_ADDRESS, to: recipients, subject, html };
   if (attachments?.length) body.attachments = attachments;
 
   const res = await fetch("https://api.resend.com/emails", {
