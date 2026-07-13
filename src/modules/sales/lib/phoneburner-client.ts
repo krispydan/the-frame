@@ -181,28 +181,41 @@ class PhoneBurnerClient {
   private envKey: string | null;
   private rateLimiter = new RateLimiter();
   private maxRetries = 3;
+  /** Explicit key for a per-rep account (e.g. Christina). When set it wins over
+   *  env / settings so a second caller's account is fully isolated. */
+  private explicitKey: string | null;
+  /** Which settings key holds this account's fallback API key (default account
+   *  uses `phoneburner_api_key`; Christina uses `phoneburner_api_key_christina`). */
+  private keySettingName: string;
+  /** Human label for logs/diagnostics ("default"/"sandra"/"christina"). */
+  readonly label: string;
 
-  constructor() {
-    this.envKey = process.env.PHONEBURNER_API_KEY || null;
+  constructor(opts?: { apiKey?: string | null; keySettingName?: string; label?: string }) {
+    // The default (Sandra) account keeps reading the env var; a per-rep client
+    // is constructed with an explicit key and does NOT fall back to Sandra's env.
+    this.explicitKey = opts?.apiKey ?? null;
+    this.envKey = opts?.apiKey ? null : process.env.PHONEBURNER_API_KEY || null;
+    this.keySettingName = opts?.keySettingName ?? "phoneburner_api_key";
+    this.label = opts?.label ?? "default";
   }
 
   /**
-   * Resolve token for this request. Env wins (immutable per deploy),
-   * then settings.phoneburner_api_key so the settings UI works without
-   * a restart. Per-call lookup, same pattern as Instantly client.
+   * Resolve token for this request. Explicit per-rep key wins, then env
+   * (default account only), then the settings row for this account's key.
    */
   private resolveApiKey(): string | null {
+    if (this.explicitKey) return this.explicitKey;
     if (this.envKey) return this.envKey;
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { sqlite } = require("@/lib/db") as {
         sqlite: {
-          prepare: (s: string) => { get: () => { value?: string } | undefined };
+          prepare: (s: string) => { get: (k: string) => { value?: string } | undefined };
         };
       };
       const row = sqlite
-        .prepare(`SELECT value FROM settings WHERE key='phoneburner_api_key' LIMIT 1`)
-        .get();
+        .prepare(`SELECT value FROM settings WHERE key=? LIMIT 1`)
+        .get(this.keySettingName);
       const val = row?.value?.trim();
       return val && val.length > 0 ? val : null;
     } catch {
@@ -660,4 +673,53 @@ class PhoneBurnerClient {
   }
 }
 
+/** Default account (Sandra) — env PHONEBURNER_API_KEY → settings.phoneburner_api_key. */
 export const phoneBurnerClient = new PhoneBurnerClient();
+
+// ── Multi-caller accounts ────────────────────────────────────────────────────
+//
+// Two callers now dial their OWN PhoneBurner accounts: Sandra keeps the existing
+// account (the default client above); Christina has a separate account with her
+// own API key, stored in settings.phoneburner_api_key_christina and her owner in
+// settings.phoneburner_owner_christina. Each rep's account is fully isolated.
+
+export type PbRep = "sandra" | "christina";
+
+/** Per-rep account config: which settings hold the key and the owner_id. */
+export const PB_ACCOUNTS: Record<PbRep, { keySetting: string; ownerSetting: string; label: string }> = {
+  sandra: { keySetting: "phoneburner_api_key", ownerSetting: "phoneburner_owner_id", label: "sandra" },
+  christina: { keySetting: "phoneburner_api_key_christina", ownerSetting: "phoneburner_owner_christina", label: "christina" },
+};
+
+function pbGetSetting(key: string): string | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { sqlite } = require("@/lib/db") as {
+      sqlite: { prepare: (s: string) => { get: (k: string) => { value?: string } | undefined } };
+    };
+    const v = sqlite.prepare("SELECT value FROM settings WHERE key=? LIMIT 1").get(key)?.value?.trim();
+    return v && v.length > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A PhoneBurner client bound to a specific rep's account. Sandra returns the
+ *  default client (env/settings); Christina gets a client bound to her key. */
+export function phoneBurnerClientFor(rep: PbRep): PhoneBurnerClient {
+  if (rep === "sandra") return phoneBurnerClient;
+  const cfg = PB_ACCOUNTS[rep];
+  return new PhoneBurnerClient({ apiKey: pbGetSetting(cfg.keySetting), keySettingName: cfg.keySetting, label: cfg.label });
+}
+
+/** All configured accounts (Christina only if her key is set). Used by the call
+ *  poller so BOTH callers' call results sync into the frame. */
+export function phoneBurnerAccounts(): Array<{ rep: PbRep; client: PhoneBurnerClient; ownerSetting: string }> {
+  const out: Array<{ rep: PbRep; client: PhoneBurnerClient; ownerSetting: string }> = [
+    { rep: "sandra", client: phoneBurnerClient, ownerSetting: PB_ACCOUNTS.sandra.ownerSetting },
+  ];
+  if (pbGetSetting(PB_ACCOUNTS.christina.keySetting)) {
+    out.push({ rep: "christina", client: phoneBurnerClientFor("christina"), ownerSetting: PB_ACCOUNTS.christina.ownerSetting });
+  }
+  return out;
+}
