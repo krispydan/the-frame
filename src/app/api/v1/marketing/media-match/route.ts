@@ -39,11 +39,16 @@ export async function GET(request: NextRequest) {
   const filter = searchParams.get("filter") === "all" ? "all" : "queue";
   const limit = Math.min(Math.max(Number(searchParams.get("limit")) || 100, 1), 300);
 
-  const queueClause =
-    filter === "queue" ? `AND (m.status IS NULL OR m.status IN ('pending','suggested','failed'))` : "";
-
   let items: Array<Record<string, unknown>>;
   if (type === "clip") {
+    // "Untagged only" (queue) = clips with NO product tags yet, minus ones
+    // already reviewed as "no product". "All" shows tagged clips too so you
+    // can change/add their products.
+    const queueClause =
+      filter === "queue"
+        ? `AND NOT EXISTS (SELECT 1 FROM marketing_video_clip_products cp2 WHERE cp2.clip_id = c.id)
+           AND (m.status IS NULL OR m.status != 'no_product')`
+        : "";
     const rows = sqlite.prepare(`
       SELECT c.id, c.file_name AS fileName, c.poster_path AS posterPath,
              c.normalized_path AS normalizedPath, c.duration_sec AS durationSec,
@@ -77,6 +82,12 @@ export async function GET(request: NextRequest) {
       matchError: r.matchError ?? null,
     }));
   } else {
+    // Catalog images already belong to a SKU, so "untagged" = no SKU
+    // assigned. Use "All" to review/reassign images that already have one.
+    const queueClause =
+      filter === "queue"
+        ? `AND i.sku_id IS NULL AND (m.status IS NULL OR m.status != 'no_product')`
+        : "";
     const rows = sqlite.prepare(`
       SELECT i.id, i.file_path AS filePath, i.alt_text AS altText,
              s.sku, s.color_name AS colorName, p.name AS productName, p.id AS productId,
@@ -140,10 +151,12 @@ export async function POST(request: NextRequest) {
     // re-runs items that already have one (or failed).
     const skipStatuses = force ? `('confirmed')` : `('confirmed','suggested','no_product')`;
     if (mediaType === "clip") {
+      // Only spend AI on clips that still have NO product tags.
       ids = (sqlite.prepare(`
         SELECT c.id FROM marketing_video_clips c
         LEFT JOIN marketing_media_matches m ON m.media_type = 'clip' AND m.media_id = c.id
         WHERE c.status = 'ready' AND c.poster_path IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM marketing_video_clip_products cp WHERE cp.clip_id = c.id)
           AND (m.status IS NULL OR m.status NOT IN ${skipStatuses})
         LIMIT 500
       `).all() as Array<{ id: string }>).map((r) => r.id);
@@ -151,7 +164,7 @@ export async function POST(request: NextRequest) {
       ids = (sqlite.prepare(`
         SELECT i.id FROM catalog_images i
         LEFT JOIN marketing_media_matches m ON m.media_type = 'image' AND m.media_id = i.id
-        WHERE i.file_path IS NOT NULL
+        WHERE i.file_path IS NOT NULL AND i.sku_id IS NULL
           AND (m.status IS NULL OR m.status NOT IN ${skipStatuses})
         LIMIT 500
       `).all() as Array<{ id: string }>).map((r) => r.id);
