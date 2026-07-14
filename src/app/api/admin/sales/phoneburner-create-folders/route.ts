@@ -4,6 +4,7 @@ export const maxDuration = 60;
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { phoneBurnerClientFor, pbOwnerFor, PB_ACCOUNTS, type PbRep } from "@/modules/sales/lib/phoneburner-client";
+import { ensureFreshPhoneBurnerToken } from "@/modules/sales/lib/phoneburner-oauth";
 
 /**
  * POST /api/admin/sales/phoneburner-create-folders?rep=christina
@@ -61,6 +62,8 @@ export async function POST(req: NextRequest) {
   const force = url.searchParams.get("force") === "true";
   if (!PB_ACCOUNTS[rep]) return NextResponse.json({ error: `unknown rep "${rep}"` }, { status: 400 });
 
+  // Renew the OAuth token if it's near expiry so this call uses a valid one.
+  await ensureFreshPhoneBurnerToken(rep).catch(() => null);
   const client = phoneBurnerClientFor(rep);
   if (client.isMock) return NextResponse.json({ error: "PhoneBurner account key not configured" }, { status: 400 });
   const ownerId = pbOwnerFor(rep);

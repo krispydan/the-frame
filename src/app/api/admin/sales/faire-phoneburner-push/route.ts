@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { buildFairePhoneBurnerLeads, type FairePhoneBurnerLead } from "@/modules/sales/lib/faire-marketplace-import";
 import { phoneBurnerClientFor, PB_ACCOUNTS, type PbContactPayload, type PbRep } from "@/modules/sales/lib/phoneburner-client";
+import { ensureFreshPhoneBurnerToken } from "@/modules/sales/lib/phoneburner-oauth";
 import { dedupeTagsArray } from "@/modules/sales/lib/dedupe-tags";
 
 /**
@@ -137,6 +138,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "empty body — POST the customers CSV (raw, or -F customers=@file)" }, { status: 400 });
   }
 
+  // Renew Christina's OAuth token if near expiry before we resolve her client.
+  await ensureFreshPhoneBurnerToken("christina").catch(() => null);
   const christina = await resolveAccount("christina");
   const sandra = await resolveAccount("sandra");
 
