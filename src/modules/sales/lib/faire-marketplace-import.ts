@@ -160,6 +160,79 @@ export function buildFairePhoneBurnerLeads(
 }
 
 /**
+ * DB-sourced callable cohort — the same shape as buildFairePhoneBurnerLeads, but
+ * read straight from the frame instead of re-parsing a CSV. Uses the companies
+ * the campaign push already tagged (faire_market_2026 + faire_high|faire_low),
+ * their persisted AJM spend/last-order, primary phone, and primary contact.
+ * Deduped by phone, split by tier. This is the normal path for the PhoneBurner
+ * push — no local file required.
+ */
+export function buildFairePhoneBurnerLeadsFromDb(
+  opts: { campaignTag?: string } = {},
+): { high: FairePhoneBurnerLead[]; low: FairePhoneBurnerLead[] } {
+  const campaignTag = opts.campaignTag || "faire_market_2026";
+  const companies = sqlite
+    .prepare(
+      `SELECT id, name, city, state, zip, ajm_total_spend AS spend, ajm_last_order AS lastOrdered, tags
+       FROM companies
+       WHERE tags LIKE '%' || ? || '%'`,
+    )
+    .all(campaignTag) as Array<{
+    id: string;
+    name: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+    spend: number | null;
+    lastOrdered: string | null;
+    tags: string | null;
+  }>;
+
+  const phoneStmt = sqlite.prepare("SELECT phone FROM company_phones WHERE company_id = ? ORDER BY is_primary DESC, created_at ASC LIMIT 1");
+  const contactStmt = sqlite.prepare(
+    "SELECT first_name, last_name, email FROM contacts WHERE company_id = ? ORDER BY is_primary DESC, created_at ASC LIMIT 1",
+  );
+
+  const byPhone = new Map<string, FairePhoneBurnerLead>();
+  for (const c of companies) {
+    const tagText = (c.tags || "").toLowerCase();
+    if (!tagText.includes("faire_high") && !tagText.includes("faire_low")) continue;
+    const tier: "high" | "low" = tagText.includes("faire_high") ? "high" : "low";
+
+    const phoneRaw = (phoneStmt.get(c.id) as { phone: string } | undefined)?.phone ?? "";
+    const digits = phoneRaw.replace(/\D/g, "");
+    if (digits.length < 10) continue; // no callable number
+    const key = digits.slice(-10);
+
+    const contact = contactStmt.get(c.id) as { first_name: string | null; last_name: string | null; email: string | null } | undefined;
+    const fullName = [contact?.first_name, contact?.last_name].filter(Boolean).join(" ").trim();
+    const first = firstNameForMerge(fullName, c.name || "");
+    const last = first ? splitName(fullName).lastName : "";
+
+    const lead: FairePhoneBurnerLead = {
+      frameCompanyId: c.id,
+      tier,
+      firstName: first,
+      lastName: last,
+      store: c.name ?? "",
+      phone: phoneRaw,
+      email: contact?.email ?? "",
+      city: c.city ?? "",
+      state: c.state ?? "",
+      zip: c.zip ?? "",
+      spend: c.spend ?? 0,
+      orderCount: "",
+      lastOrdered: c.lastOrdered ?? "",
+    };
+    const cur = byPhone.get(key);
+    if (!cur || lead.spend > cur.spend) byPhone.set(key, lead);
+  }
+
+  const all = [...byPhone.values()].sort((a, b) => b.spend - a.spend);
+  return { high: all.filter((l) => l.tier === "high"), low: all.filter((l) => l.tier === "low") };
+}
+
+/**
  * Build the rich Instantly leads for the target cohort (deduped by email),
  * including phone + website from the matched frame company and a full set of
  * custom variables for the sequence merge fields.

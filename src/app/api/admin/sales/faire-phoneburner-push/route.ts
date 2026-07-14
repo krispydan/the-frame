@@ -3,7 +3,7 @@ export const maxDuration = 300;
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
-import { buildFairePhoneBurnerLeads, type FairePhoneBurnerLead } from "@/modules/sales/lib/faire-marketplace-import";
+import { buildFairePhoneBurnerLeads, buildFairePhoneBurnerLeadsFromDb, type FairePhoneBurnerLead } from "@/modules/sales/lib/faire-marketplace-import";
 import { phoneBurnerClientFor, PB_ACCOUNTS, type PbContactPayload, type PbRep } from "@/modules/sales/lib/phoneburner-client";
 import { ensureFreshPhoneBurnerToken } from "@/modules/sales/lib/phoneburner-oauth";
 import { dedupeTagsArray } from "@/modules/sales/lib/dedupe-tags";
@@ -13,7 +13,13 @@ import { dedupeTagsArray } from "@/modules/sales/lib/dedupe-tags";
  *
  * Uploads the callable Faire cohort into PhoneBurner, split by value into each
  * caller's OWN account: high → Christina's account, low → Sandra's (existing)
- * account. Body = customers CSV (raw) or multipart (customers + emails overlay).
+ * account.
+ *
+ * Cohort source: by default, read from the frame — the companies the campaign
+ * push already tagged (faire_market_2026 + faire_high|faire_low) with their AJM
+ * spend/phone/contact. No local file needed. Optionally POST a customers CSV
+ * (raw, or multipart customers + emails overlay) to drive it from a fresh export
+ * instead.
  *
  *   commit=false (default): resolve both accounts + counts, no upload.
  *   commit=true: kick a background push; poll GET for progress.
@@ -123,6 +129,11 @@ export async function POST(req: NextRequest) {
   const limit = url.searchParams.get("limit") ? Math.max(1, parseInt(url.searchParams.get("limit")!, 10)) : null;
   const folderName = url.searchParams.get("folder") || DEFAULT_FOLDER;
 
+  // Cohort source: by default we read the cohort straight from the frame (the
+  // companies the campaign push already tagged faire_market_2026 + faire_high|
+  // faire_low, with their AJM spend/phone/contact) — no local file needed.
+  // Posting a customers CSV is still supported as an override for a fresh export
+  // that hasn't been imported yet.
   let text = "";
   let emailOverlay: string | undefined;
   if ((req.headers.get("content-type") || "").includes("multipart/form-data")) {
@@ -134,9 +145,7 @@ export async function POST(req: NextRequest) {
   } else {
     text = await req.text();
   }
-  if (!text || text.trim().length < 20) {
-    return NextResponse.json({ error: "empty body — POST the customers CSV (raw, or -F customers=@file)" }, { status: 400 });
-  }
+  const fromCsv = !!text && text.trim().length >= 20;
 
   // Renew Christina's OAuth token if near expiry before we resolve her client.
   await ensureFreshPhoneBurnerToken("christina").catch(() => null);
@@ -146,7 +155,9 @@ export async function POST(req: NextRequest) {
   // Optional rep filter — push only one caller's leads (e.g. just Christina's
   // to her own account) without touching the other's.
   const onlyRep = url.searchParams.get("rep");
-  const { high, low } = buildFairePhoneBurnerLeads(text, { recencyYears: years, highMinSpend: highMin, emailOverlay });
+  const { high, low } = fromCsv
+    ? buildFairePhoneBurnerLeads(text, { recencyYears: years, highMinSpend: highMin, emailOverlay })
+    : buildFairePhoneBurnerLeadsFromDb();
   const notPushed = (l: FairePhoneBurnerLead) => !(l.frameCompanyId && companyHasTag(l.frameCompanyId, PUSHED_TAG));
   const highAfter = (onlyRep === "sandra" ? [] : high).filter(notPushed);
   const lowAfter = (onlyRep === "christina" ? [] : low).filter(notPushed);
@@ -165,6 +176,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       commit: false,
+      source: fromCsv ? "csv" : "frame_db",
       accounts: { christina: accountView(christina), sandra: accountView(sandra) },
       counts: { high_christina: highTo.length, low_sandra: lowTo.length, high_total: high.length, low_total: low.length },
       folderName,
@@ -257,6 +269,7 @@ export async function POST(req: NextRequest) {
     ok: true,
     commit: true,
     started: true,
+    source: fromCsv ? "csv" : "frame_db",
     counts: { high_christina: highTo.length, low_sandra: lowTo.length },
     total,
     note: "Uploading in background (each rep to their own account) — poll GET for progress.",
