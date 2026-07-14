@@ -39,6 +39,26 @@ export async function GET(request: NextRequest) {
   const filter = searchParams.get("filter") === "all" ? "all" : "queue";
   const limit = Math.min(Math.max(Number(searchParams.get("limit")) || 100, 1), 300);
 
+  // Best catalog image for a colorway (or the parent product) — shown on the
+  // candidate cards so a reviewer can eyeball the media against the product.
+  const skuImageStmt = sqlite.prepare(
+    `SELECT file_path AS filePath FROM catalog_images WHERE sku_id = ? AND file_path IS NOT NULL
+     ORDER BY is_best DESC, CASE status WHEN 'approved' THEN 0 WHEN 'review' THEN 1 ELSE 2 END, position ASC LIMIT 1`,
+  );
+  const productImageStmt = sqlite.prepare(
+    `SELECT i.file_path AS filePath FROM catalog_images i JOIN catalog_skus s ON s.id = i.sku_id
+     WHERE s.product_id = ? AND i.file_path IS NOT NULL
+     ORDER BY i.is_best DESC, CASE i.status WHEN 'approved' THEN 0 WHEN 'review' THEN 1 ELSE 2 END, i.position ASC LIMIT 1`,
+  );
+  const imgUrlFor = (skuId?: string | null, productId?: string | null): string | null => {
+    let fp: string | undefined;
+    if (skuId) fp = (skuImageStmt.get(skuId) as { filePath?: string } | undefined)?.filePath;
+    if (!fp && productId) fp = (productImageStmt.get(productId) as { filePath?: string } | undefined)?.filePath;
+    return fp ? `/api/images/${fp}` : null;
+  };
+  const enrichCandidates = (cands: Array<Record<string, unknown>>) =>
+    cands.map((c) => ({ ...c, imageUrl: imgUrlFor(c.skuId as string, c.productId as string) }));
+
   let items: Array<Record<string, unknown>>;
   if (type === "clip") {
     // "Untagged only" (queue) = clips with NO product tags yet, minus ones
@@ -75,9 +95,12 @@ export async function GET(request: NextRequest) {
       mediaUrl: r.posterPath ? videoUrl(String(r.posterPath)) : null,
       previewUrl: r.normalizedPath ? videoUrl(String(r.normalizedPath)) : null,
       durationSec: r.durationSec,
-      currentProducts: productStmt.all(r.id),
+      currentProducts: (productStmt.all(r.id) as Array<{ id: string; name: string }>).map((p) => ({
+        ...p,
+        imageUrl: imgUrlFor(null, p.id),
+      })),
       matchStatus: r.matchStatus ?? null,
-      candidates: r.candidatesJson ? JSON.parse(String(r.candidatesJson)) : [],
+      candidates: r.candidatesJson ? enrichCandidates(JSON.parse(String(r.candidatesJson))) : [],
       confirmedProductIds: r.confirmedProductIds ? JSON.parse(String(r.confirmedProductIds)) : [],
       matchError: r.matchError ?? null,
     }));
@@ -107,10 +130,12 @@ export async function GET(request: NextRequest) {
       fileName: r.altText || r.filePath,
       mediaUrl: r.filePath ? `/api/images/${r.filePath}` : null,
       previewUrl: null,
-      currentProducts: r.productId ? [{ id: r.productId, name: r.productName }] : [],
+      currentProducts: r.productId
+        ? [{ id: r.productId, name: r.productName, imageUrl: imgUrlFor(null, String(r.productId)) }]
+        : [],
       currentSku: r.sku ?? null,
       matchStatus: r.matchStatus ?? null,
-      candidates: r.candidatesJson ? JSON.parse(String(r.candidatesJson)) : [],
+      candidates: r.candidatesJson ? enrichCandidates(JSON.parse(String(r.candidatesJson))) : [],
       confirmedProductIds: r.confirmedProductIds ? JSON.parse(String(r.confirmedProductIds)) : [],
       matchError: r.matchError ?? null,
     }));
@@ -127,10 +152,13 @@ export async function GET(request: NextRequest) {
     e.skuIds.push(r.id);
     byProduct.set(r.productId, e);
   }
+  const products = [...byProduct.values()]
+    .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""))
+    .map((p) => ({ ...p, imageUrl: imgUrlFor(null, p.id) }));
 
   return NextResponse.json({
     items,
-    products: [...byProduct.values()].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")),
+    products,
     aiConfigured: Boolean(process.env.ANTHROPIC_API_KEY),
   });
 }
