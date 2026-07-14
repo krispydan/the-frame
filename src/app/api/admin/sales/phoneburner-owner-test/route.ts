@@ -50,7 +50,18 @@ export async function POST(req: NextRequest) {
     }
     return null;
   }
-  const actualOwner = readOwnerId(created);
+  // Read the contact back (the create response is minimal), so we get the
+  // authoritative owner_id.
+  const contactId = String(created.id ?? "").replace(/\.0$/, "");
+  let actualOwner: string | null = readOwnerId(created);
+  if (contactId) {
+    try {
+      const fetched = await phoneBurnerClient.getContact(contactId);
+      actualOwner = readOwnerId(fetched) ?? actualOwner;
+    } catch {
+      /* keep create-response value */
+    }
+  }
   const sticks = actualOwner === requestedOwner;
 
   return NextResponse.json({
@@ -58,11 +69,12 @@ export async function POST(req: NextRequest) {
     rep,
     requestedOwner,
     actualOwner,
+    accountOwner: pbOwnerFor("sandra"),
     ownerSticksOnCreate: sticks,
     verdict: sticks
       ? "SHARED account — owner works at create. Fix: recreate her contacts owned by her."
-      : "SEPARATE account — key can't assign to her user. Fix: use her own API key.",
-    testContactId: created.id ?? readOwnerId(created) ?? "(see raw)",
-    note: "Delete the 'ZZ Owner Test' contact in PhoneBurner afterward.",
+      : "Sandra's key CANNOT own contacts as Christina — need Christina's own API key.",
+    testContactId: contactId || "(unknown)",
+    note: "Delete the 'ZZ Owner Test' contact(s) in PhoneBurner afterward.",
   });
 }
