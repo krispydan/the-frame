@@ -13,15 +13,23 @@
  * with base64 image blocks (media bytes live server-side, not at URLs
  * the API could fetch).
  */
+import { readFile, unlink } from "fs/promises";
 import sharp from "sharp";
 import { db, sqlite } from "@/lib/db";
 import { mediaMatches } from "@/modules/marketing/schema";
 import { and, eq } from "drizzle-orm";
-import { readVideo } from "@/lib/storage/videos";
+import { readVideo, materializeVideo, videoScratchPath } from "@/lib/storage/videos";
 import { readImage } from "@/lib/storage/local";
 import { readFromR2IfPresent } from "@/lib/storage/media";
 import { videoModel } from "@/modules/marketing/lib/ai-model";
+import { runFfmpeg } from "./ffmpeg";
 import { getReferenceSheets, type ReferenceSku } from "./sku-reference";
+
+// Progressive frame sampling for clips: if the poster (≈0.5s) isn't a
+// clear shot of a product, keep pulling a frame every 2s until one is, up
+// to this many EXTRA frames (so at most 1 + MAX_EXTRA_FRAMES vision calls).
+const CONFIDENT_THRESHOLD = 55;
+const MAX_EXTRA_FRAMES = 4;
 
 export type MediaType = "clip" | "image";
 
@@ -143,15 +151,12 @@ async function callVision(content: unknown[]): Promise<{ candidates: RawCandidat
 
 // ── Media frame loading ──
 
-async function loadFrame(mediaType: MediaType, mediaId: string): Promise<Buffer> {
-  if (mediaType === "clip") {
-    const clip = sqlite
-      .prepare(`SELECT poster_path AS posterPath FROM marketing_video_clips WHERE id = ?`)
-      .get(mediaId) as { posterPath: string | null } | undefined;
-    if (!clip) throw new Error(`Clip not found: ${mediaId}`);
-    if (!clip.posterPath) throw new Error("Clip has no poster frame yet (still normalizing?)");
-    return readVideo(clip.posterPath);
-  }
+/** Normalize any frame to a bounded JPEG for the vision request. */
+async function normFrame(buf: Buffer): Promise<Buffer> {
+  return sharp(buf).resize(1000, 1000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
+}
+
+async function loadImageBytes(mediaId: string): Promise<Buffer> {
   const image = sqlite
     .prepare(`SELECT file_path AS filePath FROM catalog_images WHERE id = ?`)
     .get(mediaId) as { filePath: string | null } | undefined;
@@ -163,6 +168,56 @@ async function loadFrame(mediaType: MediaType, mediaId: string): Promise<Buffer>
     if (!r2) throw new Error(`Image bytes unreadable: ${image.filePath}`);
     return r2;
   }
+}
+
+/**
+ * Lazy frame source for a clip: the poster (≈0.5s) up front, then extra
+ * frames every 2s pulled from the normalized video ON DEMAND — the
+ * (expensive) materialize + ffmpeg only happens if the first frame wasn't
+ * a clear shot. Always call cleanup().
+ */
+async function clipFrameSource(mediaId: string): Promise<{
+  poster: Buffer;
+  extraTimestamps: number[];
+  getExtra: (i: number) => Promise<Buffer | null>;
+  cleanup: () => Promise<void>;
+}> {
+  const clip = sqlite
+    .prepare(`SELECT poster_path AS posterPath, normalized_path AS normalizedPath, duration_sec AS durationSec FROM marketing_video_clips WHERE id = ?`)
+    .get(mediaId) as { posterPath: string | null; normalizedPath: string | null; durationSec: number | null } | undefined;
+  if (!clip) throw new Error(`Clip not found: ${mediaId}`);
+  if (!clip.posterPath) throw new Error("Clip has no poster frame yet (still normalizing?)");
+  const poster = await readVideo(clip.posterPath);
+
+  const dur = clip.durationSec ?? 0;
+  const extraTimestamps: number[] = [];
+  for (let t = 2; t < dur - 0.1 && extraTimestamps.length < MAX_EXTRA_FRAMES; t += 2) extraTimestamps.push(t);
+
+  let mat: { path: string; cleanup: () => Promise<void> } | null = null;
+  const getExtra = async (i: number): Promise<Buffer | null> => {
+    if (!clip.normalizedPath || i >= extraTimestamps.length) return null;
+    if (!mat) mat = await materializeVideo(clip.normalizedPath);
+    const out = videoScratchPath(`match-${i}.jpg`);
+    await runFfmpeg(["-y", "-ss", extraTimestamps[i].toFixed(2), "-i", mat.path, "-frames:v", "1", "-q:v", "3", out]);
+    const buf = await readFile(out);
+    await unlink(out).catch(() => {});
+    return buf;
+  };
+
+  return {
+    poster,
+    extraTimestamps,
+    getExtra,
+    cleanup: async () => {
+      if (mat) await mat.cleanup();
+    },
+  };
+}
+
+interface FrameResult {
+  candidates: MatchCandidate[];
+  noProductVisible: boolean;
+  top: number;
 }
 
 // ── Public API ──
@@ -219,29 +274,55 @@ export async function identifyMedia(
   }
 
   try {
-    const [{ sheets, skus }, frameRaw] = await Promise.all([
-      getReferenceSheets(),
-      loadFrame(mediaType, mediaId),
-    ]);
-    // Normalize the frame: bounded size, JPEG (posters already are; catalog
-    // images may be large PNGs).
-    const frame = await sharp(frameRaw).resize(1000, 1000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
+    const { sheets, skus } = await getReferenceSheets();
+    const sheetPreamble = {
+      type: "text",
+      text:
+        `CATALOG REFERENCE SHEETS (${skus.length} colorways across ${sheets.length} sheets). ` +
+        `Each cell: product photo, product name, SKU code.`,
+    };
 
-    const content: unknown[] = [
-      {
-        type: "text",
-        text:
-          `CATALOG REFERENCE SHEETS (${skus.length} colorways across ${sheets.length} sheets). ` +
-          `Each cell: product photo, product name, SKU code.`,
-      },
-      ...sheets.map(b64Image),
-      { type: "text", text: "MEDIA FRAME TO IDENTIFY — which catalog product(s) appear here?" },
-      b64Image(frame),
-    ];
+    // One vision request against a single media frame.
+    const askFrame = async (frame: Buffer): Promise<FrameResult> => {
+      const content: unknown[] = [
+        sheetPreamble,
+        ...sheets.map(b64Image),
+        { type: "text", text: "MEDIA FRAME TO IDENTIFY — which catalog product(s) appear here?" },
+        b64Image(await normFrame(frame)),
+      ];
+      const answer = await callVision(content);
+      const candidates = mapCandidates(answer.candidates, skus);
+      return { candidates, noProductVisible: answer.noProductVisible, top: candidates[0]?.confidence ?? -1 };
+    };
 
-    const answer = await callVision(content);
-    const candidates = mapCandidates(answer.candidates, skus);
-    const status = answer.noProductVisible || candidates.length === 0 ? "no_product" : "suggested";
+    let best: FrameResult = { candidates: [], noProductVisible: true, top: -1 };
+    const keepBest = (r: FrameResult) => {
+      if (r.top > best.top) best = r;
+    };
+    const clear = (r: FrameResult) => !r.noProductVisible && r.candidates.length > 0 && r.top >= CONFIDENT_THRESHOLD;
+
+    if (mediaType === "image") {
+      // Static images are a single full frame — no sampling.
+      keepBest(await askFrame(await loadImageBytes(mediaId)));
+    } else {
+      // Clips: poster first, then escalate a frame every 2s until a clear
+      // shot (or we run out of frames). Most clips resolve on the poster.
+      const src = await clipFrameSource(mediaId);
+      try {
+        keepBest(await askFrame(src.poster));
+        let i = 0;
+        while (!clear(best) && i < src.extraTimestamps.length) {
+          const extra = await src.getExtra(i++);
+          if (!extra) break;
+          keepBest(await askFrame(extra));
+        }
+      } finally {
+        await src.cleanup();
+      }
+    }
+
+    const candidates = best.candidates;
+    const status = candidates.length === 0 ? "no_product" : "suggested";
     upsertMatch(mediaType, mediaId, {
       status,
       candidatesJson: JSON.stringify(candidates),

@@ -48,6 +48,7 @@ const API = "/api/v1/marketing/media-match";
 
 export function SkuIdentifier() {
   const [type, setType] = useState<"clip" | "image">("clip");
+  const [filter, setFilter] = useState<"queue" | "all">("queue");
   const [items, setItems] = useState<Item[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [aiConfigured, setAiConfigured] = useState(true);
@@ -60,38 +61,45 @@ export function SkuIdentifier() {
   // Only auto-apply the model's top pick to the selection once per item.
   const autoSelectedFor = useRef<string | null>(null);
 
-  const load = useCallback(async (t: "clip" | "image") => {
-    const res = await fetch(`${API}?type=${t}`);
+  const load = useCallback(async () => {
+    const res = await fetch(`${API}?type=${type}&filter=${filter}`);
     const d = await res.json();
     setItems(d.items ?? []);
     setProducts(d.products ?? []);
     setAiConfigured(Boolean(d.aiConfigured));
     setLoading(false);
-  }, []);
+  }, [type, filter]);
 
   useEffect(() => {
     setLoading(true);
     setCurrent(0);
     autoSelectedFor.current = null;
-    load(type);
-  }, [type, load]);
+    load();
+  }, [load]);
 
   // Poll while identification jobs are outstanding so suggestions stream in.
   const hasPending = items.some((i) => i.matchStatus === "pending" || (identifying && i.matchStatus === null));
   useEffect(() => {
     if (!hasPending) return;
-    const t = setInterval(() => load(type), 5000);
+    const t = setInterval(load, 5000);
     return () => clearInterval(t);
-  }, [hasPending, type, load]);
+  }, [hasPending, load]);
 
   const item = items[current] ?? null;
 
-  // Pre-select the model's confident picks when arriving on an item.
+  // Pre-select when arriving on an item: existing tags first (so a tagged
+  // item shows its products checked and editable), else the model's
+  // confident top pick.
   useEffect(() => {
     if (!item || autoSelectedFor.current === item.mediaId) return;
     autoSelectedFor.current = item.mediaId;
-    const confident = item.candidates.filter((c) => c.confidence >= 75).map((c) => c.productId);
-    setSelected(confident.length > 0 ? [confident[0]] : []);
+    const current = item.currentProducts.map((p) => p.id).filter(Boolean);
+    if (current.length > 0) {
+      setSelected(current);
+    } else {
+      const confident = item.candidates.filter((c) => c.confidence >= 75).map((c) => c.productId);
+      setSelected(confident.length > 0 ? [confident[0]] : []);
+    }
     setManualSearch("");
   }, [item]);
 
@@ -105,7 +113,7 @@ export function SkuIdentifier() {
     const d = await res.json();
     if (res.ok) {
       toast.success(d.enqueued > 0 ? `AI identifying ${d.enqueued} item${d.enqueued === 1 ? "" : "s"} in the background` : "Nothing new to identify");
-      load(type);
+      load();
     } else {
       toast.error(d.error ?? "Could not start identification");
     }
@@ -183,8 +191,19 @@ export function SkuIdentifier() {
             </button>
           ))}
         </div>
+        <div className="flex rounded-md border overflow-hidden">
+          {(["queue", "all"] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`px-3 py-1.5 text-sm ${filter === f ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}
+            >
+              {f === "queue" ? "Untagged only" : "All"}
+            </button>
+          ))}
+        </div>
         <span className="text-sm text-muted-foreground">
-          {items.length} in queue · {suggested} AI-suggested · {unidentified} not yet identified
+          {items.length} shown · {suggested} AI-suggested · {unidentified} not yet identified
         </span>
         <div className="flex-1" />
         <Button onClick={() => identifyAll(false)} disabled={!aiConfigured}>
