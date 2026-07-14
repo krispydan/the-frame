@@ -20,7 +20,10 @@ export default function DashboardLayout({
         <AppSidebar />
         <SidebarInset>
           <AppHeader />
-          <main className="flex-1 overflow-auto p-4 md:p-6">{children}</main>
+          {/* min-w-0: without it this flex child grows to its widest
+              descendant (e.g. a horizontal-scroll strip), pushing the whole
+              page wider than the viewport instead of scrolling internally. */}
+          <main className="min-w-0 flex-1 overflow-auto p-4 md:p-6">{children}</main>
         </SidebarInset>
         <ChatPanel />
         <CommandPalette />

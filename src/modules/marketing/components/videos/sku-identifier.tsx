@@ -229,7 +229,7 @@ export function SkuIdentifier() {
   if (loading) return <div className="animate-pulse h-96 bg-muted rounded-lg" />;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex rounded-md border overflow-hidden">
@@ -302,9 +302,9 @@ export function SkuIdentifier() {
           </div>
 
           {/* Review panel */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 min-w-0">
             {/* Media */}
-            <div className="space-y-2">
+            <div className="space-y-2 min-w-0">
               <div className="aspect-[9/16] max-w-[280px] mx-auto bg-muted rounded-lg overflow-hidden">
                 {item.previewUrl ? (
                   <video
@@ -330,7 +330,7 @@ export function SkuIdentifier() {
             </div>
 
             {/* Candidates */}
-            <div className="space-y-2">
+            <div className="space-y-2 min-w-0">
               {item.matchStatus === "pending" && (
                 <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-sm">
                   <RefreshCw className="h-4 w-4 animate-spin text-primary" />
