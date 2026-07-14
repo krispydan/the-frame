@@ -140,10 +140,13 @@ export async function POST(req: NextRequest) {
   const christina = await resolveAccount("christina");
   const sandra = await resolveAccount("sandra");
 
+  // Optional rep filter — push only one caller's leads (e.g. just Christina's
+  // to her own account) without touching the other's.
+  const onlyRep = url.searchParams.get("rep");
   const { high, low } = buildFairePhoneBurnerLeads(text, { recencyYears: years, highMinSpend: highMin, emailOverlay });
   const notPushed = (l: FairePhoneBurnerLead) => !(l.frameCompanyId && companyHasTag(l.frameCompanyId, PUSHED_TAG));
-  const highAfter = high.filter(notPushed);
-  const lowAfter = low.filter(notPushed);
+  const highAfter = (onlyRep === "sandra" ? [] : high).filter(notPushed);
+  const lowAfter = (onlyRep === "christina" ? [] : low).filter(notPushed);
   const highTo = limit ? highAfter.slice(0, limit) : highAfter;
   const lowTo = limit ? lowAfter.slice(0, limit) : lowAfter;
 
