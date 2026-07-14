@@ -23,7 +23,7 @@ import { readImage } from "@/lib/storage/local";
 import { readFromR2IfPresent } from "@/lib/storage/media";
 import { videoModel } from "@/modules/marketing/lib/ai-model";
 import { runFfmpeg } from "./ffmpeg";
-import { getReferenceSheets, type ReferenceSku } from "./sku-reference";
+import { getReferenceSheets, loadReferenceSkus, type ReferenceSku } from "./sku-reference";
 
 // Progressive frame sampling for clips: if the poster (≈0.5s) isn't a
 // clear shot of a product, keep pulling a frame every 2s until one is, up
@@ -42,6 +42,86 @@ export interface MatchCandidate {
   colorName: string | null;
   /** 0-100. */
   confidence: number;
+  /** Where the match came from — shown in the UI. */
+  via?: "filename" | "vision" | "both";
+}
+
+// ── Filename signal ──
+//
+// Shoot files are named with the product, e.g.
+// "05_21_26_studio_Solstice_02__10.mp4" → Solstice. That's a far stronger
+// signal than matching a worn frame against 100+ tiny thumbnails, so when a
+// catalog product name appears in the filename we lead with it. These words
+// are shoot descriptors, not products — ignored even when a product happens
+// to share the name (e.g. the "Studio" product vs a "studio" shoot).
+const SHOOT_TERMS = new Set([
+  "studio", "video", "reel", "final", "edit", "raw", "export", "render",
+  "clip", "master", "take", "shoot", "footage", "story", "post", "ad", "ugc",
+]);
+
+function normToken(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Find catalog products whose name appears in the media filename. Returns
+ * `strong` when a real (non-shoot-term) product name matched — that's a
+ * confident answer we can use without vision. A shoot-term-only match
+ * (e.g. just "studio") comes back weak so vision can still lead.
+ */
+export function matchFilenameToProducts(
+  fileName: string | null | undefined,
+  refs: ReferenceSku[],
+): { candidates: MatchCandidate[]; strong: boolean } {
+  if (!fileName) return { candidates: [], strong: false };
+  const fn = normToken(fileName);
+  const firstByProduct = new Map<string, ReferenceSku>();
+  for (const r of refs) if (!firstByProduct.has(r.productId)) firstByProduct.set(r.productId, r);
+
+  const hits: Array<{ ref: ReferenceSku; generic: boolean }> = [];
+  for (const ref of firstByProduct.values()) {
+    const pn = normToken(ref.productName ?? "");
+    if (pn.length < 4) continue;
+    // Also try the name without a leading "the" (e.g. "The Regent" → "regent").
+    const alt = pn.startsWith("the") && pn.length > 6 ? pn.slice(3) : null;
+    if (fn.includes(pn) || (alt && alt.length >= 4 && fn.includes(alt))) {
+      hits.push({ ref, generic: SHOOT_TERMS.has(pn) });
+    }
+  }
+
+  const nonGeneric = hits.filter((h) => !h.generic);
+  const strong = nonGeneric.length > 0;
+  const chosen = strong ? nonGeneric : hits;
+  const candidates: MatchCandidate[] = chosen.map((h) => ({
+    productId: h.ref.productId,
+    productName: h.ref.productName,
+    sku: h.ref.sku,
+    skuId: h.ref.skuId,
+    colorName: h.ref.colorName,
+    confidence: strong ? 90 : 55,
+    via: "filename",
+  }));
+  return { candidates, strong };
+}
+
+/** Merge filename candidates with vision candidates (highest confidence per
+ *  product wins; agreement is marked "both"), best-first. */
+export function mergeCandidates(fnCands: MatchCandidate[], visionCands: MatchCandidate[]): MatchCandidate[] {
+  const map = new Map<string, MatchCandidate>();
+  for (const c of fnCands) map.set(c.productId, { ...c });
+  for (const c of visionCands) {
+    const existing = map.get(c.productId);
+    if (existing) {
+      map.set(c.productId, {
+        ...c,
+        confidence: Math.max(existing.confidence, c.confidence),
+        via: "both",
+      });
+    } else {
+      map.set(c.productId, { ...c, via: "vision" });
+    }
+  }
+  return [...map.values()].sort((a, b) => b.confidence - a.confidence);
 }
 
 // ── Model answer → catalog candidates ──
@@ -251,10 +331,31 @@ function upsertMatch(
   }
 }
 
+function getMediaFileName(mediaType: MediaType, mediaId: string): string | null {
+  if (mediaType === "clip") {
+    const r = sqlite.prepare(`SELECT file_name AS fileName FROM marketing_video_clips WHERE id = ?`).get(mediaId) as
+      | { fileName: string | null }
+      | undefined;
+    return r?.fileName ?? null;
+  }
+  const r = sqlite.prepare(`SELECT alt_text AS altText, file_path AS filePath FROM catalog_images WHERE id = ?`).get(mediaId) as
+    | { altText: string | null; filePath: string | null }
+    | undefined;
+  return r?.altText || r?.filePath || null;
+}
+
 /**
  * Run identification for one media item and store the suggestion.
- * Idempotent for the job queue: an already-confirmed row is never
- * overwritten; a suggested row is only re-run with force.
+ *
+ * Strategy: the shoot filename usually NAMES the product (e.g.
+ * "…_Solstice_02.mp4"), which is far more reliable than matching a worn
+ * frame against 100+ tiny thumbnails — so a confident filename hit is used
+ * directly (no vision call). Otherwise we run the vision matcher (poster,
+ * escalating frames for clips) with the filename passed as a hint, and
+ * merge in any weak filename signal.
+ *
+ * Idempotent for the job queue: a confirmed row is never overwritten; a
+ * suggested row is only re-run with force.
  */
 export async function identifyMedia(
   mediaType: MediaType,
@@ -274,6 +375,21 @@ export async function identifyMedia(
   }
 
   try {
+    const fileName = getMediaFileName(mediaType, mediaId);
+    const fn = matchFilenameToProducts(fileName, loadReferenceSkus());
+
+    // Strong filename match → trust the shoot naming; skip vision entirely.
+    if (fn.strong) {
+      upsertMatch(mediaType, mediaId, {
+        status: "suggested",
+        candidatesJson: JSON.stringify(fn.candidates),
+        error: null,
+        model: "filename",
+      });
+      return { status: "suggested", candidates: fn.candidates };
+    }
+
+    // Otherwise fall back to vision (with the filename as a hint).
     const { sheets, skus } = await getReferenceSheets();
     const sheetPreamble = {
       type: "text",
@@ -281,13 +397,15 @@ export async function identifyMedia(
         `CATALOG REFERENCE SHEETS (${skus.length} colorways across ${sheets.length} sheets). ` +
         `Each cell: product photo, product name, SKU code.`,
     };
+    const frameLabel =
+      `MEDIA FRAME TO IDENTIFY${fileName ? ` (file name: "${fileName}")` : ""} — which catalog product(s) appear here? ` +
+      `If a catalog product name appears in the file name, prioritize confirming that exact product.`;
 
-    // One vision request against a single media frame.
     const askFrame = async (frame: Buffer): Promise<FrameResult> => {
       const content: unknown[] = [
         sheetPreamble,
         ...sheets.map(b64Image),
-        { type: "text", text: "MEDIA FRAME TO IDENTIFY — which catalog product(s) appear here?" },
+        { type: "text", text: frameLabel },
         b64Image(await normFrame(frame)),
       ];
       const answer = await callVision(content);
@@ -302,11 +420,8 @@ export async function identifyMedia(
     const clear = (r: FrameResult) => !r.noProductVisible && r.candidates.length > 0 && r.top >= CONFIDENT_THRESHOLD;
 
     if (mediaType === "image") {
-      // Static images are a single full frame — no sampling.
       keepBest(await askFrame(await loadImageBytes(mediaId)));
     } else {
-      // Clips: poster first, then escalate a frame every 2s until a clear
-      // shot (or we run out of frames). Most clips resolve on the poster.
       const src = await clipFrameSource(mediaId);
       try {
         keepBest(await askFrame(src.poster));
@@ -321,7 +436,8 @@ export async function identifyMedia(
       }
     }
 
-    const candidates = best.candidates;
+    // Fold in a weak filename signal (e.g. only "studio" matched).
+    const candidates = mergeCandidates(fn.candidates, best.candidates);
     const status = candidates.length === 0 ? "no_product" : "suggested";
     upsertMatch(mediaType, mediaId, {
       status,

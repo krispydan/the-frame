@@ -71,7 +71,8 @@ describe("SKU identifier — plumbing", () => {
       for (const [code, color] of p.skus) {
         const skuId = `s-${code}`;
         sku.run(skuId, p.pid, code, color);
-        const rel = `${p.pid}/${code}.jpg`;
+        // Realistic catalog path: checksum-ish, NOT the product name.
+        const rel = `catimg/${ci}-${code}.jpg`;
         await writeProductImage(path.join(IMAGES_DIR, rel), { r: (ci * 40) % 255, g: (ci * 70) % 255, b: (ci * 100) % 255 });
         img.run(`i-${code}`, skuId, rel);
         ci++;
@@ -144,7 +145,7 @@ describe("SKU identifier — plumbing", () => {
     expect(row.status).toBe("suggested");
   });
 
-  async function seedClip(id: string, durationSec: number) {
+  async function seedClip(id: string, durationSec: number, fileName = `${id}.mp4`) {
     const db = getTestDb();
     const norm = `clips/normalized/${id}_v1.mp4`;
     const poster = `clips/posters/${id}.jpg`;
@@ -156,8 +157,21 @@ describe("SKU identifier — plumbing", () => {
     execFileSync("ffmpeg", ["-y", "-f", "lavfi", "-i", `color=c=blue:s=240x426:d=${durationSec}`, "-pix_fmt", "yuv420p", normAbs], { stdio: "ignore" });
     writeFileSync(posterAbs, await sharp({ create: { width: 240, height: 426, channels: 3, background: { r: 10, g: 20, b: 30 } } }).jpeg().toBuffer());
     db.prepare(`INSERT INTO marketing_video_clips (id, file_name, checksum, raw_path, normalized_path, poster_path, duration_sec, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'ready')`).run(id, `${id}.mp4`, `sum-${id}`, `clips/raw/${id}.mp4`, norm, poster, durationSec);
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'ready')`).run(id, fileName, `sum-${id}`, `clips/raw/${id}.mp4`, norm, poster, durationSec);
   }
+
+  it("resolves a named clip from the filename with ZERO api calls", async () => {
+    await seedWithImages();
+    // Filename carries the product name (the real shoot convention).
+    await seedClip("clip-named", 6, "05_21_26_studio_Windsor_02__10.mp4");
+    const m = mockAnthropic([{ candidates: [], noProductVisible: true }]);
+    const { identifyMedia } = await import("@/modules/marketing/lib/video/sku-match");
+
+    const res = await identifyMedia("clip", "clip-named");
+    expect(res.status).toBe("suggested");
+    expect(res.candidates[0]).toMatchObject({ productId: "p-windsor", via: "filename", confidence: 90 });
+    expect(m.calls()).toBe(0); // vision skipped entirely — no wrong guesses, no cost
+  });
 
   it("escalates clip frames until a clear shot, then stops (real ffmpeg)", async () => {
     await seedWithImages();

@@ -25,6 +25,7 @@ type Candidate = {
   sku: string;
   colorName: string | null;
   confidence: number;
+  via?: "filename" | "vision" | "both";
 };
 
 type Item = {
@@ -60,11 +61,19 @@ export function SkuIdentifier() {
   const [identifying, setIdentifying] = useState(false);
   // Only auto-apply the model's top pick to the selection once per item.
   const autoSelectedFor = useRef<string | null>(null);
+  // Media we've queued this session — shown as "processing" until a real
+  // status comes back (the server has no match row while a job is mid-run).
+  const inFlight = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     const res = await fetch(`${API}?type=${type}&filter=${filter}`);
     const d = await res.json();
-    setItems(d.items ?? []);
+    const mapped: Item[] = (d.items ?? []).map((i: Item) => {
+      const real = i.matchStatus;
+      if (real && real !== "pending") inFlight.current.delete(i.mediaId);
+      return { ...i, matchStatus: real ?? (inFlight.current.has(i.mediaId) ? "pending" : null) };
+    });
+    setItems(mapped);
     setProducts(d.products ?? []);
     setAiConfigured(Boolean(d.aiConfigured));
     setLoading(false);
@@ -112,8 +121,20 @@ export function SkuIdentifier() {
     });
     const d = await res.json();
     if (res.ok) {
+      // Optimistically mark the queued items as processing so the panel
+      // shows movement immediately (the poll flips them as jobs finish).
+      if (d.enqueued > 0) {
+        setItems((prev) =>
+          prev.map((i) => {
+            if (i.matchStatus === null || (force && i.matchStatus !== "confirmed")) {
+              inFlight.current.add(i.mediaId);
+              return { ...i, matchStatus: "pending" };
+            }
+            return i;
+          }),
+        );
+      }
       toast.success(d.enqueued > 0 ? `AI identifying ${d.enqueued} item${d.enqueued === 1 ? "" : "s"} in the background` : "Nothing new to identify");
-      load();
     } else {
       toast.error(d.error ?? "Could not start identification");
     }
@@ -126,6 +147,7 @@ export function SkuIdentifier() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mediaType: type, mediaIds: [item.mediaId], force: true }),
     });
+    inFlight.current.add(item.mediaId);
     setItems((prev) => prev.map((i) => (i.mediaId === item.mediaId ? { ...i, matchStatus: "pending" } : i)));
     setIdentifying(true);
     toast.success("Re-running AI on this item");
@@ -280,8 +302,14 @@ export function SkuIdentifier() {
             {/* Candidates */}
             <div className="space-y-2">
               {item.matchStatus === "pending" && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <RefreshCw className="h-4 w-4 animate-spin" /> AI is looking at this one…
+                <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-sm">
+                  <RefreshCw className="h-4 w-4 animate-spin text-primary" />
+                  <span>
+                    <span className="font-medium">Analyzing…</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Checking the file name, then sampling video frames against the catalog.
+                    </span>
+                  </span>
                 </div>
               )}
               {item.matchStatus === "failed" && item.matchError && (
@@ -312,7 +340,11 @@ export function SkuIdentifier() {
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-medium">{c.productName}</span>
                           <span className="block truncate text-xs text-muted-foreground">
-                            looks like {c.sku}{c.colorName ? ` (${c.colorName})` : ""}
+                            {c.via === "filename"
+                              ? "📄 matched from the file name"
+                              : c.via === "both"
+                                ? `looks like ${c.sku} · confirmed by file name`
+                                : `looks like ${c.sku}${c.colorName ? ` (${c.colorName})` : ""}`}
                           </span>
                         </span>
                         <span className="w-24 shrink-0">
