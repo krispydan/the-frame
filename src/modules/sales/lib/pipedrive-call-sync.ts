@@ -19,13 +19,18 @@ import {
   updateActivity,
   type PdActivity,
 } from "./pipedrive-client";
-import { phoneBurnerClient } from "./phoneburner-client";
+import { phoneBurnerClient, pbOwnerFor, type PbRep } from "./phoneburner-client";
 import { formatToPbPhone } from "./phone-utils";
 import { postSlack, type SlackBlock } from "@/modules/integrations/lib/slack/client";
 
-const REP_FOLDERS: Record<string, { folder: string; name: string }> = {
-  "25572381": { folder: "66251717", name: "Christina" },
-  "25572392": { folder: "66251718", name: "Sandra" },
+// One shared PhoneBurner account, two callers (users) separated by folder AND
+// owner_id. Folder ids are overridable via settings pb_daily_folder_<rep> so a
+// rep's folder can be re-pointed without a deploy. Each rep's contacts are
+// created owned by that rep's owner_id (Sandra = phoneburner_owner_id, Christina
+// = phoneburner_owner_christina) so leads show up as theirs, not the account's.
+const REP_FOLDERS: Record<string, { folder: string; name: string; repKey: PbRep }> = {
+  "25572381": { folder: "66251717", name: "Christina", repKey: "christina" },
+  "25572392": { folder: "66251718", name: "Sandra", repKey: "sandra" },
 };
 const ACTIVITY_FIELD = "Pipedrive Activity ID";
 
@@ -87,11 +92,23 @@ function resolveCompanyByPerson(pid: number): { id: string; name: string | null 
     .get(pid) as { id: string; name: string | null } | undefined;
 }
 
-const REP_FOLDER_IDS = new Set(Object.values(REP_FOLDERS).map((r) => r.folder));
+/** Rep call-folder ids — hardcoded defaults plus any per-rep settings override
+ *  (pb_daily_folder_<rep>), so an overridden folder is still treated as a rep
+ *  folder (not mistaken for a contact's "home"). */
+function repFolderIds(): Set<string> {
+  const s = new Set<string>();
+  for (const meta of Object.values(REP_FOLDERS)) {
+    s.add(meta.folder);
+    const ov = getSetting(`pb_daily_folder_${meta.repKey}`);
+    if (ov) s.add(ov);
+  }
+  return s;
+}
 
 /** The contact's home folder = latest non-rep, non-pool push folder
  *  (falls back to the pool folder). */
 function homeFolder(companyId: string, poolId: string): string {
+  const repIds = repFolderIds();
   const rows = sqlite
     .prepare(
       `SELECT folder_id FROM phoneburner_folder_pushes
@@ -99,7 +116,7 @@ function homeFolder(companyId: string, poolId: string): string {
     )
     .all(companyId) as Array<{ folder_id: string }>;
   for (const r of rows) {
-    if (!REP_FOLDER_IDS.has(r.folder_id) && r.folder_id !== poolId) return r.folder_id;
+    if (!repIds.has(r.folder_id) && r.folder_id !== poolId) return r.folder_id;
   }
   return poolId;
 }
@@ -178,8 +195,12 @@ async function ensurePbContact(companyId: string, ownerId: string, poolId: strin
   return { contactId, originalFolder: poolId, created: true };
 }
 
-async function moveContact(contactId: string, folderId: string, activityId?: string): Promise<void> {
+async function moveContact(contactId: string, folderId: string, activityId?: string, ownerId?: string): Promise<void> {
   const patch: Record<string, unknown> = { category_id: folderId };
+  // Re-assign the contact to the rep who's dialing it — in PhoneBurner a user
+  // only sees/dials contacts they OWN, so a contact merely moved into a rep's
+  // folder (but owned by someone else) won't appear for them.
+  if (ownerId) patch.owner_id = ownerId;
   if (activityId) patch.custom_fields = [{ name: ACTIVITY_FIELD, type: "text", value: activityId }];
   await phoneBurnerClient.updateContact(contactId, patch);
 }
@@ -211,8 +232,12 @@ export async function buildDailyCallFolders(opts: { dryRun?: boolean; through?: 
 
   const reps: RepSyncResult[] = [];
   for (const [userId, meta] of Object.entries(REP_FOLDERS)) {
+    // Per-rep folder (settings override → hardcoded) and owner_id (their PB user
+    // on the shared account → fall back to the account default owner).
+    const repFolder = getSetting(`pb_daily_folder_${meta.repKey}`) || meta.folder;
+    const repOwnerId = pbOwnerFor(meta.repKey) || ownerId;
     const res: RepSyncResult = {
-      rep: meta.name, folder: meta.folder, activities: 0, queued: 0, created: 0,
+      rep: meta.name, folder: repFolder, activities: 0, queued: 0, created: 0,
       removed: 0, unresolved_company: 0, no_phone: 0, errors: [],
     };
     let acts: PdActivity[] = [];
@@ -233,7 +258,7 @@ export async function buildDailyCallFolders(opts: { dryRun?: boolean; through?: 
       try {
         const ec = dryRun
           ? (latestPbContactId(co.id) ? { contactId: latestPbContactId(co.id)!, originalFolder: homeFolder(co.id, poolId), created: !latestPbContactId(co.id) } : (companyPhone(co.id) ? { contactId: "(new)", originalFolder: poolId, created: true } : null))
-          : await ensurePbContact(co.id, ownerId, poolId);
+          : await ensurePbContact(co.id, repOwnerId, poolId);
         if (!ec) { res.no_phone++; continue; }
         if (ec.created) res.created++;
         target.set(ec.contactId, { activityId: String(a.id), companyId: co.id, due: a.due_date, originalFolder: ec.originalFolder });
@@ -252,8 +277,8 @@ export async function buildDailyCallFolders(opts: { dryRun?: boolean; through?: 
       );
       for (const [contactId, t] of target) {
         try {
-          await moveContact(contactId, meta.folder, t.activityId);
-          upsert.run(t.companyId, contactId, userId, meta.folder, t.activityId, t.due ?? null, t.originalFolder);
+          await moveContact(contactId, repFolder, t.activityId, repOwnerId);
+          upsert.run(t.companyId, contactId, userId, repFolder, t.activityId, t.due ?? null, t.originalFolder);
         } catch (e) {
           res.errors.push(`move ${contactId}: ${e instanceof Error ? e.message : e}`);
         }
@@ -261,7 +286,7 @@ export async function buildDailyCallFolders(opts: { dryRun?: boolean; through?: 
       // Remove stale (in folder queue but no longer targeted) → restore home folder.
       const current = sqlite
         .prepare("SELECT id, pb_contact_id, original_folder_id FROM pb_call_queue WHERE folder_id = ?")
-        .all(meta.folder) as Array<{ id: string; pb_contact_id: string; original_folder_id: string | null }>;
+        .all(repFolder) as Array<{ id: string; pb_contact_id: string; original_folder_id: string | null }>;
       const del = sqlite.prepare("DELETE FROM pb_call_queue WHERE id = ?");
       for (const c of current) {
         if (target.has(c.pb_contact_id)) continue;

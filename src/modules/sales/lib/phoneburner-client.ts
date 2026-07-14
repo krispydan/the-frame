@@ -176,7 +176,7 @@ class RateLimiter {
 }
 
 // ── Client ──
-class PhoneBurnerClient {
+export class PhoneBurnerClient {
   private baseUrl = "https://www.phoneburner.com/rest/1";
   private envKey: string | null;
   private rateLimiter = new RateLimiter();
@@ -704,12 +704,22 @@ function pbGetSetting(key: string): string | null {
   }
 }
 
-/** A PhoneBurner client bound to a specific rep's account. Sandra returns the
- *  default client (env/settings); Christina gets a client bound to her key. */
+/** A PhoneBurner client for a rep. Both reps normally share ONE account (the
+ *  default key) and are distinguished by owner_id (see pbOwnerFor). Only if a
+ *  rep-specific key is explicitly configured (a genuinely separate account) do
+ *  we bind a dedicated client. */
 export function phoneBurnerClientFor(rep: PbRep): PhoneBurnerClient {
   if (rep === "sandra") return phoneBurnerClient;
   const cfg = PB_ACCOUNTS[rep];
-  return new PhoneBurnerClient({ apiKey: pbGetSetting(cfg.keySetting), keySettingName: cfg.keySetting, label: cfg.label });
+  const key = pbGetSetting(cfg.keySetting);
+  if (!key) return phoneBurnerClient; // shared account — route by owner_id
+  return new PhoneBurnerClient({ apiKey: key, keySettingName: cfg.keySetting, label: cfg.label });
+}
+
+/** The PhoneBurner owner_id (user) to assign a rep's contacts to. Sandra =
+ *  phoneburner_owner_id, Christina = phoneburner_owner_christina. */
+export function pbOwnerFor(rep: PbRep): string | null {
+  return pbGetSetting(PB_ACCOUNTS[rep].ownerSetting);
 }
 
 /** All configured accounts (Christina only if her key is set). Used by the call

@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { buildFairePhoneBurnerLeads, type FairePhoneBurnerLead } from "@/modules/sales/lib/faire-marketplace-import";
 import { phoneBurnerClientFor, PB_ACCOUNTS, type PbContactPayload, type PbRep } from "@/modules/sales/lib/phoneburner-client";
+import { ensureFreshPhoneBurnerToken } from "@/modules/sales/lib/phoneburner-oauth";
 import { dedupeTagsArray } from "@/modules/sales/lib/dedupe-tags";
 
 /**
@@ -61,7 +62,10 @@ async function resolveAccount(rep: PbRep) {
   const client = phoneBurnerClientFor(rep);
   const configured = !client.isMock;
   let ownerId = getSetting(cfg.ownerSetting);
-  if (configured && !ownerId) {
+  // Only auto-discover for the default account owner (Sandra). For a second
+  // user on the SAME account (Christina), discovery would return the account's
+  // default owner — wrong — so her owner_id must be set explicitly via setup.
+  if (rep === "sandra" && configured && !ownerId) {
     ownerId = await client.discoverOwnerId().catch(() => null);
     if (ownerId) setSetting(cfg.ownerSetting, ownerId);
   }
@@ -134,13 +138,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "empty body — POST the customers CSV (raw, or -F customers=@file)" }, { status: 400 });
   }
 
+  // Renew Christina's OAuth token if near expiry before we resolve her client.
+  await ensureFreshPhoneBurnerToken("christina").catch(() => null);
   const christina = await resolveAccount("christina");
   const sandra = await resolveAccount("sandra");
 
+  // Optional rep filter — push only one caller's leads (e.g. just Christina's
+  // to her own account) without touching the other's.
+  const onlyRep = url.searchParams.get("rep");
   const { high, low } = buildFairePhoneBurnerLeads(text, { recencyYears: years, highMinSpend: highMin, emailOverlay });
   const notPushed = (l: FairePhoneBurnerLead) => !(l.frameCompanyId && companyHasTag(l.frameCompanyId, PUSHED_TAG));
-  const highAfter = high.filter(notPushed);
-  const lowAfter = low.filter(notPushed);
+  const highAfter = (onlyRep === "sandra" ? [] : high).filter(notPushed);
+  const lowAfter = (onlyRep === "christina" ? [] : low).filter(notPushed);
   const highTo = limit ? highAfter.slice(0, limit) : highAfter;
   const lowTo = limit ? lowAfter.slice(0, limit) : lowAfter;
 
@@ -170,6 +179,21 @@ export async function POST(req: NextRequest) {
   const blockers: string[] = [];
   if (highTo.length && !christina.usable) blockers.push("Christina's account not usable (set up her apiKey/username via /phoneburner-setup)");
   if (lowTo.length && !sandra.usable) blockers.push("Sandra's account not usable");
+  // Fail fast on a bad/expired token rather than 401ing through every lead.
+  // One cheap auth probe per rep we're about to write to.
+  if (highTo.length && christina.usable) {
+    const probe = await christina.client.authProbe().catch((e) => ({ ok: false, raw: e instanceof Error ? e.message : String(e) }));
+    if (!probe.ok) {
+      blockers.push(
+        `Christina's PhoneBurner token is invalid/expired (${String((probe as { raw?: unknown }).raw).slice(0, 120)}). ` +
+          `Re-authorize at ${req.nextUrl.origin}/api/auth/phoneburner?rep=christina (logged in as Christina), then re-run.`,
+      );
+    }
+  }
+  if (lowTo.length && sandra.usable) {
+    const probe = await sandra.client.authProbe().catch((e) => ({ ok: false, raw: e instanceof Error ? e.message : String(e) }));
+    if (!probe.ok) blockers.push(`Sandra's PhoneBurner token is invalid/expired (${String((probe as { raw?: unknown }).raw).slice(0, 120)}).`);
+  }
   if (blockers.length) return NextResponse.json({ error: "cannot commit", blockers }, { status: 400 });
 
   const jobs = [

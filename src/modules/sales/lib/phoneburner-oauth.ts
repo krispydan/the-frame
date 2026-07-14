@@ -1,32 +1,55 @@
-/**
- * PhoneBurner OAuth2 (authorization_code + refresh_token).
- *
- * PhoneBurner has no client-credentials grant, so each PhoneBurner account
- * (Sandra, Christina) must authorize the shared app ONCE. We then hold a
- * refresh token and renew the access token forever without re-consent.
- *
- * Endpoints (per PB docs):
- *   authorize:  https://www.phoneburner.com/oauth/authorize
- *   token:      https://www.phoneburner.com/oauth/accesstoken
- *   refresh:    https://www.phoneburner.com/oauth/refreshtoken
- *
- * The current access token is stored in the SAME settings key the per-rep
- * PhoneBurnerClient already reads (`phoneburner_api_key_<rep>`), so no call
- * site changes are needed. Refresh state lives in `phoneburner_oauth_<rep>`.
- */
 import { sqlite } from "@/lib/db";
+import { PhoneBurnerClient, PB_ACCOUNTS, type PbRep } from "@/modules/sales/lib/phoneburner-client";
 
-const AUTHORIZE_URL = "https://www.phoneburner.com/oauth/authorize";
-const TOKEN_URL = "https://www.phoneburner.com/oauth/accesstoken";
-const REFRESH_URL = "https://www.phoneburner.com/oauth/refreshtoken";
-const DEFAULT_REDIRECT = "https://theframe.getjaxy.com/api/auth/phoneburner/callback";
+/**
+ * PhoneBurner OAuth 2.0 authorization-code flow (per rep).
+ *
+ * PhoneBurner's REST API is OAuth2-only and its access tokens EXPIRE (they
+ * arrive with a refresh_token). A hand-pasted token therefore can't work — the
+ * account has to go through authorize → code → token exchange, and we must keep
+ * the refresh_token so the access token can be renewed before it lapses.
+ *
+ * Endpoints (verified against PhoneBurner developer docs, 2026-07):
+ *   authorize:  https://www.phoneburner.com/oauth/authorize
+ *   token:      https://www.phoneburner.com/oauth/accesstoken   (code + refresh)
+ *
+ * Per-rep settings written here:
+ *   phoneburner_client_id_<rep>      OAuth app client id
+ *   phoneburner_client_secret_<rep>  OAuth app client secret
+ *   <keySetting>                     access token (e.g. phoneburner_api_key_christina)
+ *   phoneburner_refresh_token_<rep>  refresh token
+ *   phoneburner_token_expires_<rep>  epoch ms when the access token expires
+ *   <ownerSetting>                   discovered owner user_id
+ */
 
-export type PbRep = "sandra" | "christina" | "default";
+export const PB_AUTHORIZE_URL = "https://www.phoneburner.com/oauth/authorize";
+export const PB_TOKEN_URL = "https://www.phoneburner.com/oauth/accesstoken";
+
+/** The redirect_uri must match EXACTLY across app registration, the authorize
+ *  request, and the token exchange. Keep it stable. */
+/**
+ * Base URL for the OAuth redirect. This MUST equal the host registered as the
+ * app's Authorization callback URL in PhoneBurner, or the token exchange 400s on
+ * a redirect_uri mismatch. The registered callback is
+ * https://theframe.getjaxy.com/api/auth/phoneburner/callback, so we pin to that
+ * host by default and only honor an explicit PHONEBURNER_APP_URL override (not
+ * the generic Shopify/Pipedrive app-url vars, which may point at a railway.app
+ * domain that wouldn't match the registration).
+ */
+export function pbAppBaseUrl(): string {
+  return (process.env.PHONEBURNER_APP_URL || "https://theframe.getjaxy.com").replace(/\/$/, "");
+}
+export function pbRedirectUri(): string {
+  return `${pbAppBaseUrl()}/api/auth/phoneburner/callback`;
+}
+/** The URL a rep visits to START the flow (sets the CSRF state cookie, then
+ *  bounces to PhoneBurner's authorize page). */
+export function pbInitiateUrl(rep: PbRep): string {
+  return `${pbAppBaseUrl()}/api/auth/phoneburner?rep=${rep}`;
+}
 
 function getSetting(key: string): string | null {
-  const r = sqlite.prepare("SELECT value FROM settings WHERE key = ? LIMIT 1").get(key) as
-    | { value: string | null } | undefined;
-  return r?.value ?? null;
+  return (sqlite.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined)?.value?.trim() || null;
 }
 function setSetting(key: string, value: string): void {
   sqlite
@@ -38,144 +61,134 @@ function setSetting(key: string, value: string): void {
     .run(key, value);
 }
 
-/** Settings key the per-rep PhoneBurnerClient reads for its Bearer token. */
-function apiKeySetting(rep: PbRep): string {
-  return rep === "default" || rep === "sandra" ? "phoneburner_api_key" : `phoneburner_api_key_${rep}`;
+export function pbClientId(rep: PbRep): string | null {
+  return getSetting(`phoneburner_client_id_${rep}`);
 }
-function oauthStateSetting(rep: PbRep): string {
-  return `phoneburner_oauth_${rep}`;
+export function pbClientSecret(rep: PbRep): string | null {
+  return getSetting(`phoneburner_client_secret_${rep}`);
 }
-
-export interface PbOAuthConfig {
-  clientId: string;
-  clientSecret: string;
-  redirectUri: string;
-}
-export function getOAuthConfig(): PbOAuthConfig | null {
-  const clientId = getSetting("phoneburner_oauth_client_id");
-  const clientSecret = getSetting("phoneburner_oauth_client_secret");
-  if (!clientId || !clientSecret) return null;
-  return { clientId, clientSecret, redirectUri: getSetting("phoneburner_oauth_redirect_uri") || DEFAULT_REDIRECT };
-}
-export function setOAuthConfig(clientId: string, clientSecret: string, redirectUri?: string): void {
-  setSetting("phoneburner_oauth_client_id", clientId.trim());
-  setSetting("phoneburner_oauth_client_secret", clientSecret.trim());
-  setSetting("phoneburner_oauth_redirect_uri", (redirectUri || DEFAULT_REDIRECT).trim());
+export function setPbClientCreds(rep: PbRep, clientId: string, clientSecret: string): void {
+  setSetting(`phoneburner_client_id_${rep}`, clientId.trim());
+  setSetting(`phoneburner_client_secret_${rep}`, clientSecret.trim());
 }
 
-/** Build the URL a rep opens (logged into THAT PhoneBurner account) to consent. */
-export function buildAuthorizeUrl(rep: PbRep): string | null {
-  const cfg = getOAuthConfig();
-  if (!cfg) return null;
-  const p = new URLSearchParams({
-    client_id: cfg.clientId,
-    redirect_uri: cfg.redirectUri,
-    response_type: "code",
-    state: rep,
-  });
-  return `${AUTHORIZE_URL}?${p.toString()}`;
+/** Build the authorize URL a rep visits in their browser to grant access. */
+export function pbAuthorizeUrl(rep: PbRep, state: string): string {
+  const clientId = pbClientId(rep);
+  if (!clientId) throw new Error(`no client_id for ${rep} — POST it to /phoneburner-setup first`);
+  const u = new URL(PB_AUTHORIZE_URL);
+  u.searchParams.set("client_id", clientId);
+  u.searchParams.set("redirect_uri", pbRedirectUri());
+  u.searchParams.set("response_type", "code");
+  u.searchParams.set("state", state);
+  return u.toString();
 }
 
-interface TokenResponse {
+type TokenResponse = {
   access_token?: string;
-  refresh_token?: string;
-  expires_in?: number;
   token_type?: string;
-  [k: string]: unknown;
-}
+  expires?: number | string;
+  expires_in?: number | string;
+  refresh_token?: string;
+  error?: string;
+  error_description?: string;
+};
 
-function persistTokens(rep: PbRep, t: TokenResponse): void {
-  if (t.access_token) setSetting(apiKeySetting(rep), t.access_token);
-  const expiresAt = t.expires_in ? Date.now() + t.expires_in * 1000 : Date.now() + 3600_000;
-  setSetting(
-    oauthStateSetting(rep),
-    JSON.stringify({
-      refresh_token: t.refresh_token ?? (readOAuthState(rep)?.refresh_token ?? null),
-      expires_at: expiresAt,
-      connected_at: new Date().toISOString(),
-    }),
-  );
-}
-function readOAuthState(rep: PbRep): { refresh_token: string | null; expires_at: number } | null {
-  const raw = getSetting(oauthStateSetting(rep));
-  if (!raw) return null;
-  try { return JSON.parse(raw); } catch { return null; }
-}
-
-/** Exchange an authorization code for tokens and persist them for a rep. */
-export async function exchangeCode(rep: PbRep, code: string): Promise<{ ok: boolean; error?: string }> {
-  const cfg = getOAuthConfig();
-  if (!cfg) return { ok: false, error: "PhoneBurner OAuth app not configured" };
-  const body = new URLSearchParams({
-    client_id: cfg.clientId,
-    client_secret: cfg.clientSecret,
-    code,
-    redirect_uri: cfg.redirectUri,
-    grant_type: "authorization_code",
-  });
-  const res = await fetch(TOKEN_URL, {
+async function postToken(form: Record<string, string>): Promise<TokenResponse> {
+  const body = new URLSearchParams(form).toString();
+  const res = await fetch(PB_TOKEN_URL, {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
     body,
   });
   const text = await res.text();
-  if (!res.ok) return { ok: false, error: `token exchange ${res.status}: ${text.slice(0, 300)}` };
-  let json: TokenResponse;
-  try { json = JSON.parse(text); } catch { return { ok: false, error: `bad token response: ${text.slice(0, 200)}` }; }
-  if (!json.access_token) return { ok: false, error: `no access_token in response: ${text.slice(0, 200)}` };
-  persistTokens(rep, json);
-  return { ok: true };
-}
-
-/** Refresh a rep's access token using the stored refresh token. */
-export async function refreshRep(rep: PbRep): Promise<{ ok: boolean; error?: string }> {
-  const cfg = getOAuthConfig();
-  if (!cfg) return { ok: false, error: "not configured" };
-  const st = readOAuthState(rep);
-  if (!st?.refresh_token) return { ok: false, error: "no refresh token" };
-  const body = new URLSearchParams({
-    client_id: cfg.clientId,
-    client_secret: cfg.clientSecret,
-    refresh_token: st.refresh_token,
-    grant_type: "refresh_token",
-    redirect_uri: cfg.redirectUri,
-  });
-  const res = await fetch(REFRESH_URL, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body,
-  });
-  const text = await res.text();
-  if (!res.ok) return { ok: false, error: `refresh ${res.status}: ${text.slice(0, 200)}` };
+  let json: TokenResponse = {};
   try {
-    const json = JSON.parse(text) as TokenResponse;
-    if (!json.access_token) return { ok: false, error: "no access_token on refresh" };
-    persistTokens(rep, json);
-    return { ok: true };
-  } catch { return { ok: false, error: `bad refresh response: ${text.slice(0, 200)}` }; }
-}
-
-/** Refresh any rep tokens within `withinMs` of expiry. Cron entrypoint. */
-export async function refreshExpiringTokens(withinMs = 20 * 60_000): Promise<Record<string, unknown>> {
-  const out: Record<string, unknown> = {};
-  for (const rep of ["christina", "sandra"] as PbRep[]) {
-    const st = readOAuthState(rep);
-    if (!st?.refresh_token) { out[rep] = "no oauth"; continue; }
-    if (Date.now() < st.expires_at - withinMs) { out[rep] = "still fresh"; continue; }
-    out[rep] = (await refreshRep(rep)).ok ? "refreshed" : "refresh failed";
+    json = text ? (JSON.parse(text) as TokenResponse) : {};
+  } catch {
+    throw new Error(`PhoneBurner token endpoint ${res.status}: ${text.slice(0, 400)}`);
   }
-  return out;
+  if (!res.ok || json.error || !json.access_token) {
+    throw new Error(`PhoneBurner token exchange failed (${res.status}): ${json.error_description || json.error || text.slice(0, 400)}`);
+  }
+  return json;
 }
 
-export function oauthStatus(): Record<string, unknown> {
-  const cfg = getOAuthConfig();
-  const rep = (r: PbRep) => {
-    const st = readOAuthState(r);
-    return {
-      connected: !!getSetting(apiKeySetting(r)),
-      has_refresh: !!st?.refresh_token,
-      expires_at: st?.expires_at ? new Date(st.expires_at).toISOString() : null,
-    };
+function persistTokens(rep: PbRep, tok: TokenResponse): void {
+  const cfg = PB_ACCOUNTS[rep];
+  if (tok.access_token) setSetting(cfg.keySetting, tok.access_token);
+  if (tok.refresh_token) setSetting(`phoneburner_refresh_token_${rep}`, tok.refresh_token);
+  const expiresInSec = Number(tok.expires_in) || (Number(tok.expires) ? Number(tok.expires) * 1000 - Date.now() : 0);
+  if (expiresInSec > 0) {
+    setSetting(`phoneburner_token_expires_${rep}`, String(Date.now() + expiresInSec * (Number(tok.expires_in) ? 1000 : 1)));
+  }
+}
+
+/** Exchange an authorization code for tokens and persist them. Also discovers
+ *  and stores the rep's owner user_id. Returns a small status summary. */
+export async function exchangePhoneBurnerCode(rep: PbRep, code: string): Promise<{ ownerId: string | null; expiresAt: string | null }> {
+  const clientId = pbClientId(rep);
+  const clientSecret = pbClientSecret(rep);
+  if (!clientId || !clientSecret) throw new Error(`missing client_id/client_secret for ${rep}`);
+  const tok = await postToken({
+    grant_type: "authorization_code",
+    client_id: clientId,
+    client_secret: clientSecret,
+    redirect_uri: pbRedirectUri(),
+    code,
+  });
+  persistTokens(rep, tok);
+
+  // Discover the owner user_id with the fresh token so folders/contacts assign
+  // to the right user. Best-effort — a brand-new account with no contacts yet
+  // returns null; the first created contact backfills it later.
+  let ownerId: string | null = null;
+  try {
+    const client = new PhoneBurnerClient({ apiKey: tok.access_token!, label: rep });
+    ownerId = await client.discoverOwnerId();
+    if (ownerId) setSetting(PB_ACCOUNTS[rep].ownerSetting, ownerId);
+  } catch {
+    /* ignore — owner backfills on first contact create */
+  }
+  const expiresRaw = getSetting(`phoneburner_token_expires_${rep}`);
+  return { ownerId, expiresAt: expiresRaw ? new Date(Number(expiresRaw)).toISOString() : null };
+}
+
+/** Refresh the access token if it's missing or within `skewMs` of expiry.
+ *  Returns the current (possibly refreshed) access token, or null if we can't
+ *  refresh (no refresh token / creds). Safe to call before any PB request. */
+export async function ensureFreshPhoneBurnerToken(rep: PbRep, skewMs = 5 * 60_000): Promise<string | null> {
+  const cfg = PB_ACCOUNTS[rep];
+  const current = getSetting(cfg.keySetting);
+  const expiresAt = Number(getSetting(`phoneburner_token_expires_${rep}`)) || 0;
+  const refreshToken = getSetting(`phoneburner_refresh_token_${rep}`);
+  const clientId = pbClientId(rep);
+  const clientSecret = pbClientSecret(rep);
+
+  const stillValid = current && expiresAt && expiresAt - Date.now() > skewMs;
+  if (stillValid) return current;
+  if (!refreshToken || !clientId || !clientSecret) return current; // nothing to refresh with
+
+  const tok = await postToken({
+    grant_type: "refresh_token",
+    client_id: clientId,
+    client_secret: clientSecret,
+    refresh_token: refreshToken,
+  });
+  persistTokens(rep, tok);
+  return tok.access_token || current;
+}
+
+/** Status view for diagnostics (no secrets). */
+export function pbOAuthStatus(rep: PbRep) {
+  const expiresAt = Number(getSetting(`phoneburner_token_expires_${rep}`)) || 0;
+  return {
+    clientIdConfigured: !!pbClientId(rep),
+    clientSecretConfigured: !!pbClientSecret(rep),
+    accessTokenConfigured: !!getSetting(PB_ACCOUNTS[rep].keySetting),
+    refreshTokenConfigured: !!getSetting(`phoneburner_refresh_token_${rep}`),
+    expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+    expired: expiresAt ? expiresAt < Date.now() : null,
+    redirectUri: pbRedirectUri(),
   };
-  return { app_configured: !!cfg, redirect_uri: cfg?.redirectUri ?? DEFAULT_REDIRECT, christina: rep("christina"), sandra: rep("sandra") };
 }

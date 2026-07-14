@@ -394,7 +394,9 @@ export async function createActivity(input: {
   org_id?: number;
   person_id?: number;
   deal_id?: number;
-  owner_id?: number;
+  /** Assignee — Pipedrive activities use user_id (NOT owner_id, which the
+   *  Activities API rejects as an invalid field). */
+  user_id?: number;
   due_date?: string;
   note?: string;
   [k: string]: unknown;

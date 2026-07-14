@@ -25,6 +25,7 @@ import { syncShipHeroOrders } from "@/modules/operations/lib/shiphero/sync-order
 import { syncShipHeroInventory, isDuringBusinessHours } from "@/modules/operations/lib/shiphero/sync-inventory";
 import { refreshIfExpiringSoon as refreshShipHeroToken } from "@/modules/operations/lib/shiphero/auth";
 import { pullPhoneBurnerCallResults } from "@/modules/sales/lib/phoneburner-sync";
+import { ensureFreshPhoneBurnerToken } from "@/modules/sales/lib/phoneburner-oauth";
 import { postPhoneBurnerCallDigest } from "@/modules/integrations/lib/slack/phoneburner-digest";
 import { runShopifyMetafieldSync } from "@/modules/catalog/lib/shopify-metafields/bulk-sync-job";
 import { syncSettlementsAllShops } from "@/modules/finance/lib/shopify-settlements";
@@ -258,6 +259,23 @@ export const CRON_JOBS: CronJob[] = [
     description: "Safety-net poll for PhoneBurner calls (webhooks are primary). Re-ingestion is idempotent on call_id PK.",
     handler: () => pullPhoneBurnerCallResults({ sinceMinutes: 60 }),
   },
+  // Keep Christina's OAuth access token fresh. PhoneBurner tokens expire (they
+  // arrive with a refresh_token); the hourly daily-folder builder and the call
+  // poller read the stored token, so without renewal her account goes dark when
+  // the token lapses. Refreshes only when within ~5 min of expiry — a no-op
+  // otherwise, and a no-op entirely if she hasn't connected via OAuth. Sandra's
+  // account uses a long-lived env key and isn't touched here.
+  {
+    id: "phoneburner-token-refresh-christina",
+    schedule: "*/20 * * * *",  // every 20 min — well inside a 1h token life
+    description: "Refresh Christina's PhoneBurner OAuth access token before it expires (no-op until she connects / until near expiry)",
+    handler: async () => {
+      const token = await ensureFreshPhoneBurnerToken("christina").catch((e) => {
+        throw e instanceof Error ? e : new Error(String(e));
+      });
+      return { refreshed: !!token, hasToken: !!token };
+    },
+  },
   // Daily call activity summary posted to Slack — totals, connect rate,
   // top dispositions, agent breakdown. Skipped on zero-call days.
   {
@@ -346,17 +364,6 @@ export const CRON_JOBS: CronJob[] = [
     // multi-minute Apify call inline (and never double-run a manual sync).
     handler: async () => enqueueSoundsSync(),
     guard: () => Boolean(process.env.APIFY_API_TOKEN),
-  },
-
-  // ── Sales: PhoneBurner per-rep OAuth token refresh ──
-  {
-    id: "phoneburner-token-refresh",
-    schedule: "*/20 * * * *",  // every 20 min — keeps each rep's access token fresh
-    description: "Refresh PhoneBurner OAuth access tokens for Christina/Sandra that are within 20 min of expiry (using their stored refresh tokens).",
-    handler: async () => {
-      const { refreshExpiringTokens } = await import("@/modules/sales/lib/phoneburner-oauth");
-      return refreshExpiringTokens();
-    },
   },
 
   // ── Sales: Pipedrive call activities → PhoneBurner rep folders ──

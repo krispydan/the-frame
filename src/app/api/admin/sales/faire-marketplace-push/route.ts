@@ -6,6 +6,7 @@ import { randomUUID } from "crypto";
 import { sqlite } from "@/lib/db";
 import { analyzeFaireExport, type FaireAnalysisRow } from "@/modules/sales/lib/faire-marketplace-import";
 import { ensureOutreachDeal } from "@/modules/sales/lib/pipedrive-sync";
+import { firstNameForMerge } from "@/modules/sales/lib/faire-marketplace-parse";
 import { createActivity, updateDeal, updateOrganization, updatePerson } from "@/modules/sales/lib/pipedrive-client";
 import { getPipelineOwner } from "@/modules/sales/lib/pipedrive-setup";
 import { addCompanyEmail } from "@/modules/sales/lib/company-emails";
@@ -110,6 +111,41 @@ function orgPersonIds(companyId: string): { orgId: number | null; personId: numb
   return { orgId: c?.pipedrive_org_id ?? null, personId: c?.pipedrive_person_id ?? null };
 }
 
+/**
+ * Render the call-task note for one lead: substitute {{firstName}}, {{store}},
+ * {{city}}, {{state}}, {{lastOrdered}}, {{spend}}, {{orders}}, {{tier}} in the
+ * operator's message (Pipedrive doesn't do merge fields itself), then ALWAYS
+ * append the AJM buying-history line — company, lifetime value, order count,
+ * last order — so the caller has the reactivation context on screen.
+ */
+function renderNote(template: string, row: FaireAnalysisRow): string {
+  const first = firstNameForMerge(row.contact, row.storeName);
+  const spend = row.spend ? `$${Math.round(row.spend).toLocaleString("en-US")}` : "";
+  const orders = row.orderCount != null ? String(row.orderCount) : "";
+  const vals: Record<string, string> = {
+    firstName: first || "there",
+    store: row.storeName || "",
+    company: row.storeName || "",
+    city: row.city || "",
+    state: row.state || "",
+    lastOrdered: row.lastOrdered || "",
+    spend,
+    orders,
+    tier: row.segment,
+  };
+  const body = template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, k: string) => vals[k] ?? "");
+  const ctx = [
+    row.storeName ? `Company: ${row.storeName}` : "",
+    spend ? `AJM lifetime: ${spend}` : "",
+    orders ? `${orders} orders` : "",
+    row.lastOrdered ? `Last ordered: ${row.lastOrdered}` : "",
+    `Tier: ${row.segment}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return ctx ? `${body}\n\n— AJM history — ${ctx}` : body;
+}
+
 export async function GET() {
   const raw = getSetting(RUN_KEY);
   return NextResponse.json(raw ? JSON.parse(raw) : { state: "idle" });
@@ -124,8 +160,14 @@ export async function POST(req: NextRequest) {
   const years = Math.max(1, parseInt(url.searchParams.get("years") || "4", 10));
   const highMin = Math.max(0, parseFloat(url.searchParams.get("highMin") || "1500"));
   const limit = url.searchParams.get("limit") ? Math.max(1, parseInt(url.searchParams.get("limit")!, 10)) : null;
-  const dueDays = Math.max(0, parseInt(url.searchParams.get("dueDays") || "3", 10));
-  const message = url.searchParams.get("message") || "";
+  // Default due TODAY so the daily-folder builder (which pulls activities due
+  // through today) stages them into the reps' PhoneBurner folders right away.
+  const dueDays = Math.max(0, parseInt(url.searchParams.get("dueDays") || "0", 10));
+  // resetTasks=true ignores the "already tasked" marker so a re-run recreates
+  // the call task with an updated note (delete the old ones in Pipedrive first
+  // to avoid duplicates).
+  const resetTasks = url.searchParams.get("resetTasks") === "true";
+  let message = url.searchParams.get("message") || "";
   const christinaId = url.searchParams.get("christinaId")
     ? parseInt(url.searchParams.get("christinaId")!, 10)
     : getPipelineOwner("ajm")?.id;
@@ -142,6 +184,10 @@ export async function POST(req: NextRequest) {
     const emails = form.get("emails");
     if (customers instanceof File) text = await customers.text();
     if (emails instanceof File) emailOverlay = await emails.text();
+    // Allow the call-task message as a form field so spaces/punctuation don't
+    // need URL-encoding (query param still works and wins if set).
+    const formMsg = form.get("message");
+    if (!message && typeof formMsg === "string") message = formMsg;
   } else {
     text = await req.text();
   }
@@ -223,18 +269,20 @@ export async function POST(req: NextRequest) {
           reowned++;
         }
 
-        // Call task for callable stores (idempotent via TASKED_TAG marker).
+        // Call task for callable stores (idempotent via TASKED_TAG marker;
+        // resetTasks ignores the marker so a re-run re-tasks with a new note).
         const tagsRow = sqlite.prepare("SELECT tags FROM companies WHERE id = ?").get(companyId) as { tags: string | null } | undefined;
-        const alreadyTasked = (tagsRow?.tags || "").includes(TASKED_TAG);
+        const alreadyTasked = !resetTasks && (tagsRow?.tags || "").includes(TASKED_TAG);
         if (row.hasPhone && message && r.dealId && !alreadyTasked) {
           await createActivity({
             subject: `Call for Faire Market — ${row.storeName || "store"}`,
             type: "call",
             deal_id: r.dealId,
             org_id: orgId ?? undefined,
-            owner_id: owner,
+            person_id: personId ?? undefined, // needed so the daily-folder builder resolves the company
+            user_id: owner, // Pipedrive activities assign via user_id (not owner_id)
             due_date: dueDate,
-            note: message,
+            note: renderNote(message, row),
             done: false,
           });
           mergeCompanyTags(companyId, [TASKED_TAG]);
