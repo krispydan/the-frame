@@ -163,6 +163,23 @@ try { sqlite.exec("ALTER TABLE marketing_tiktok_sounds ADD COLUMN prev_synced_at
 // footage file and flag it — the clips are all we keep.
 try { sqlite.exec("ALTER TABLE marketing_video_sources ADD COLUMN raw_deleted INTEGER NOT NULL DEFAULT 0"); } catch { /* exists */ }
 
+// AI SKU identification: model suggestions + human confirmation per media
+// item (video clip poster or catalog image). See media-match.ts schema.
+sqlite.exec(`CREATE TABLE IF NOT EXISTS marketing_media_matches (
+  id TEXT PRIMARY KEY,
+  media_type TEXT NOT NULL,
+  media_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  candidates_json TEXT,
+  confirmed_product_ids TEXT,
+  error TEXT,
+  model TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+)`);
+sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_match_media ON marketing_media_matches(media_type, media_id)`);
+sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_media_match_status ON marketing_media_matches(status)`);
+
 // Contact form URL — when scraping a prospect for classification, we ALSO
 // harvest contact info. If we found a contact-us page but no direct email,
 // stash the URL here for later outreach (manual form submission or scraper).

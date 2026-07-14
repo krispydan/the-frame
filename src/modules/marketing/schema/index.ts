@@ -134,3 +134,7 @@ export type { TiktokSound, TiktokSoundInsert } from "./tiktok-sounds";
 // Raw footage sources — the auto-clipper's input (split into clips).
 export { videoSources } from "./video-sources";
 export type { VideoSource, VideoSourceInsert } from "./video-sources";
+
+// AI SKU identification for media (clips + images).
+export { mediaMatches } from "./media-match";
+export type { MediaMatch, MediaMatchInsert } from "./media-match";

@@ -8,13 +8,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { RefreshCw, Scissors, Trash2, Volume2, VolumeX, Zap } from "lucide-react";
+import { RefreshCw, ScanSearch, Scissors, Trash2, Volume2, VolumeX, Zap } from "lucide-react";
 import { ClipUploader, type UploaderCategory, type UploaderProduct } from "./clip-uploader";
 import { SourceAutoClipper } from "./source-auto-clipper";
 
@@ -194,6 +195,9 @@ export function ClipLibrary() {
         <Button variant="outline" onClick={() => setShowAutoClipper((v) => !v)}>
           <Scissors className="h-4 w-4 mr-1" />
           {showAutoClipper ? "Hide clipping status" : "Clipping status"}
+        </Button>
+        <Button variant="outline" render={<Link href="/marketing/videos/identify" />}>
+          <ScanSearch className="h-4 w-4 mr-1" /> Identify SKUs (AI)
         </Button>
         <Button variant="outline" onClick={() => setShowCategories(true)}>
           Categories
