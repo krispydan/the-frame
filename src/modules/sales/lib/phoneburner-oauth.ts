@@ -27,8 +27,17 @@ export const PB_TOKEN_URL = "https://www.phoneburner.com/oauth/accesstoken";
 
 /** The redirect_uri must match EXACTLY across app registration, the authorize
  *  request, and the token exchange. Keep it stable. */
+/**
+ * Base URL for the OAuth redirect. This MUST equal the host registered as the
+ * app's Authorization callback URL in PhoneBurner, or the token exchange 400s on
+ * a redirect_uri mismatch. The registered callback is
+ * https://theframe.getjaxy.com/api/auth/phoneburner/callback, so we pin to that
+ * host by default and only honor an explicit PHONEBURNER_APP_URL override (not
+ * the generic Shopify/Pipedrive app-url vars, which may point at a railway.app
+ * domain that wouldn't match the registration).
+ */
 export function pbAppBaseUrl(): string {
-  return (process.env.THE_FRAME_URL || process.env.PIPEDRIVE_APP_URL || process.env.SHOPIFY_APP_URL || "https://theframe.getjaxy.com").replace(/\/$/, "");
+  return (process.env.PHONEBURNER_APP_URL || "https://theframe.getjaxy.com").replace(/\/$/, "");
 }
 export function pbRedirectUri(): string {
   return `${pbAppBaseUrl()}/api/auth/phoneburner/callback`;
