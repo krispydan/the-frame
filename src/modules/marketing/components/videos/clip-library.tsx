@@ -69,6 +69,9 @@ export function ClipLibrary() {
   const [showCategories, setShowCategories] = useState(false);
   const [showUploader, setShowUploader] = useState(false);
   const [showAutoClipper, setShowAutoClipper] = useState(false);
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  const PAGE_SIZE = 60;
 
   const load = useCallback(() => {
     const params = new URLSearchParams();
@@ -76,20 +79,31 @@ export function ClipLibrary() {
     if (filterStatus) params.set("status", filterStatus);
     if (filterTalent) params.set("talent", filterTalent);
     if (filterUntagged) params.set("untagged", "1");
+    params.set("limit", String(PAGE_SIZE));
+    params.set("offset", String(page * PAGE_SIZE));
     Promise.all([
       fetch(`/api/v1/marketing/videos/clips?${params}`).then((r) => r.json()),
       fetch("/api/v1/marketing/videos/categories").then((r) => r.json()),
     ]).then(([clipsRes, catsRes]) => {
-      setClips(clipsRes.clips ?? []);
+      const list = clipsRes.clips ?? [];
+      setClips(list);
+      setTotal(clipsRes.total ?? list.length);
       setTalents(clipsRes.talents ?? []);
       setCategories(catsRes.categories ?? []);
       setLoading(false);
+      // If a page emptied out (e.g. after deleting its last clips), step back.
+      if (list.length === 0 && page > 0) setPage((p) => Math.max(0, p - 1));
     });
-  }, [filterCategory, filterStatus, filterTalent, filterUntagged]);
+  }, [filterCategory, filterStatus, filterTalent, filterUntagged, page]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Any filter change resets to the first page.
+  useEffect(() => {
+    setPage(0);
+  }, [filterCategory, filterStatus, filterTalent, filterUntagged]);
 
   useEffect(() => {
     fetch("/api/v1/marketing/videos/skus")
@@ -115,6 +129,18 @@ export function ClipLibrary() {
       return next;
     });
   };
+
+  const pageIds = clips.map((c) => c.id);
+  const allPageSelected = clips.length > 0 && pageIds.every((id) => selected.has(id));
+  const toggleSelectAllOnPage = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allPageSelected) pageIds.forEach((id) => next.delete(id));
+      else pageIds.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const bulkPatch = async (patch: Record<string, unknown>) => {
     const res = await fetch("/api/v1/marketing/videos/clips/bulk", {
@@ -274,6 +300,9 @@ export function ClipLibrary() {
           <Button size="sm" variant="outline" onClick={() => bulkPatch({ boost: 0 })}>Unboost</Button>
           <BulkTalentInput talents={talents} onApply={(t) => bulkPatch({ talent: t })} />
           <div className="flex-1" />
+          <Button size="sm" variant="outline" onClick={toggleSelectAllOnPage}>
+            {allPageSelected ? "Deselect page" : `Select all ${clips.length} on page`}
+          </Button>
           <Button size="sm" variant="outline" onClick={bulkReclip}>
             <Scissors className="h-3.5 w-3.5 mr-1" /> Clip into 3–5s
           </Button>
@@ -281,6 +310,33 @@ export function ClipLibrary() {
             <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Clear</Button>
+        </div>
+      )}
+
+      {/* Select-all + pagination header */}
+      {clips.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input type="checkbox" checked={allPageSelected} onChange={toggleSelectAllOnPage} className="h-4 w-4" />
+            Select all on page
+          </label>
+          {selected.size > 0 && <span className="text-muted-foreground">{selected.size} selected</span>}
+          <span className="text-muted-foreground">
+            {total.toLocaleString()} clip{total === 1 ? "" : "s"} · showing {page * PAGE_SIZE + 1}–{page * PAGE_SIZE + clips.length}
+          </span>
+          <div className="flex-1" />
+          <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+            Prev
+          </Button>
+          <span className="whitespace-nowrap text-muted-foreground">Page {page + 1} / {totalPages}</span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={(page + 1) * PAGE_SIZE >= total}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Next
+          </Button>
         </div>
       )}
 
