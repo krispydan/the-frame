@@ -78,7 +78,8 @@ export async function POST(req: NextRequest) {
   try {
     existing = (await client.listFolders()).map((f) => ({ id: f.id, name: f.name || "" }));
   } catch (e) {
-    return NextResponse.json({ error: `listFolders failed: ${e instanceof Error ? e.message : String(e)}` }, { status: 502 });
+    // 200 (not 502) so the edge doesn't mask the real PhoneBurner error.
+    return NextResponse.json({ ok: false, step: "listFolders", account: client.label, error: e instanceof Error ? e.message : String(e) });
   }
 
   const result: Array<{ name: string; setting: string; folderId: string; action: "existing_setting" | "matched_name" | "created" }> = [];
@@ -99,9 +100,9 @@ export async function POST(req: NextRequest) {
       setSetting(w.setting, created.id);
       result.push({ name: w.name, setting: w.setting, folderId: created.id, action: "created" });
     } catch (e) {
-      return NextResponse.json({ error: `create "${w.name}" failed: ${e instanceof Error ? e.message : String(e)}`, partial: result }, { status: 502 });
+      return NextResponse.json({ ok: false, step: "createFolder", account: client.label, folder: w.name, error: e instanceof Error ? e.message : String(e), partial: result });
     }
   }
 
-  return NextResponse.json({ ok: true, rep, ownerId, folders: result });
+  return NextResponse.json({ ok: true, rep, account: client.label, ownerId, folders: result });
 }
