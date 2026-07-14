@@ -218,6 +218,7 @@ export async function POST(req: NextRequest) {
   void (async () => {
     let done = 0,
       added = 0,
+      filed = 0,
       errors = 0;
     const errSamples: string[] = [];
     for (const job of jobs) {
@@ -242,27 +243,41 @@ export async function POST(req: NextRequest) {
 
       for (const l of job.leads) {
         try {
-          const resp = await client.createContact(toPayload(l, ownerId, username, folderId));
-          added++;
-          if (l.frameCompanyId) tagCompany(l.frameCompanyId, PUSHED_TAG);
-          // Backfill owner_id from the first created contact if we didn't have it
-          // (fresh account) so folders work on later runs.
-          if (!ownerId) {
-            const oid = (resp as Record<string, unknown>).owner_id;
-            if (typeof oid === "string" && oid) {
-              ownerId = oid;
-              setSetting(cfg.ownerSetting, oid);
+          const resp = await client.createOrGetContact(toPayload(l, ownerId, username, folderId));
+          if (resp.duplicate) {
+            // Contact already exists in the workspace (e.g. from the AJM
+            // Reactivation import). File the EXISTING contact into this rep's
+            // campaign folder so it shows up for this week's calling. category_id
+            // sets the folder; owner_id re-assigns to the dialing rep (ignored by
+            // PB on update if the token can't own it, which is fine).
+            if (folderId) {
+              const patch: Partial<PbContactPayload> = { category_id: folderId };
+              if (ownerId) patch.owner_id = ownerId;
+              await client.updateContact(resp.id, patch);
+            }
+            filed++;
+          } else {
+            added++;
+            // Backfill owner_id from the first created contact if we didn't have
+            // it (fresh account) so folders work on later runs.
+            if (!ownerId) {
+              const oid = (resp as Record<string, unknown>).owner_id;
+              if (typeof oid === "string" && oid) {
+                ownerId = oid;
+                setSetting(cfg.ownerSetting, oid);
+              }
             }
           }
+          if (l.frameCompanyId) tagCompany(l.frameCompanyId, PUSHED_TAG);
         } catch (e) {
           errors++;
           if (errSamples.length < 15) errSamples.push(`${l.store} (${l.phone}) [${job.repKey}]: ${e instanceof Error ? e.message : String(e)}`);
         }
         done++;
-        if (done % 10 === 0) setSetting(RUN_KEY, JSON.stringify({ state: "running", total, done, added, errors, errSamples, updatedAt: new Date().toISOString() }));
+        if (done % 10 === 0) setSetting(RUN_KEY, JSON.stringify({ state: "running", total, done, added, filed, errors, errSamples, updatedAt: new Date().toISOString() }));
       }
     }
-    setSetting(RUN_KEY, JSON.stringify({ state: "done", total, done, added, errors, errSamples, finishedAt: new Date().toISOString() }));
+    setSetting(RUN_KEY, JSON.stringify({ state: "done", total, done, added, filed, errors, errSamples, finishedAt: new Date().toISOString() }));
   })();
 
   return NextResponse.json({

@@ -558,6 +558,29 @@ export class PhoneBurnerClient {
     return await this.request<PbContactResponse>("PUT", `/contacts/${id}`, patch);
   }
 
+  /**
+   * Create a contact, but if PhoneBurner reports it as a duplicate (409
+   * "Duplicate Match Found", which it returns even with on_duplicate:"skip"),
+   * return the EXISTING contact's id instead of throwing. Lets callers then file
+   * the pre-existing contact into a campaign folder rather than losing it to an
+   * error. `duplicate:true` distinguishes the two outcomes.
+   */
+  async createOrGetContact(payload: PbContactPayload): Promise<{ id: string; duplicate: boolean }> {
+    try {
+      const resp = await this.createContact(payload);
+      return { id: resp.id, duplicate: false };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // request() throws Error("PhoneBurner 409: <body>"); pull the first
+      // duplicate id out of the body.
+      if (msg.includes("409")) {
+        const m = msg.match(/"duplicates"\s*:\s*\[\s*"?(\d+)/);
+        if (m) return { id: m[1], duplicate: true };
+      }
+      throw e;
+    }
+  }
+
   /** Fetch a contact (raw). Used to read the phone-record ids PB assigns
    *  (needed for the click-to-call phoneId), which create/update don't
    *  return in a documented shape. */
