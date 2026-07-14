@@ -348,6 +348,17 @@ export const CRON_JOBS: CronJob[] = [
     guard: () => Boolean(process.env.APIFY_API_TOKEN),
   },
 
+  // ── Sales: PhoneBurner per-rep OAuth token refresh ──
+  {
+    id: "phoneburner-token-refresh",
+    schedule: "*/20 * * * *",  // every 20 min — keeps each rep's access token fresh
+    description: "Refresh PhoneBurner OAuth access tokens for Christina/Sandra that are within 20 min of expiry (using their stored refresh tokens).",
+    handler: async () => {
+      const { refreshExpiringTokens } = await import("@/modules/sales/lib/phoneburner-oauth");
+      return refreshExpiringTokens();
+    },
+  },
+
   // ── Sales: Pipedrive call activities → PhoneBurner rep folders ──
   {
     id: "build-call-folders",
