@@ -179,6 +179,21 @@ export async function POST(req: NextRequest) {
   const blockers: string[] = [];
   if (highTo.length && !christina.usable) blockers.push("Christina's account not usable (set up her apiKey/username via /phoneburner-setup)");
   if (lowTo.length && !sandra.usable) blockers.push("Sandra's account not usable");
+  // Fail fast on a bad/expired token rather than 401ing through every lead.
+  // One cheap auth probe per rep we're about to write to.
+  if (highTo.length && christina.usable) {
+    const probe = await christina.client.authProbe().catch((e) => ({ ok: false, raw: e instanceof Error ? e.message : String(e) }));
+    if (!probe.ok) {
+      blockers.push(
+        `Christina's PhoneBurner token is invalid/expired (${String((probe as { raw?: unknown }).raw).slice(0, 120)}). ` +
+          `Re-authorize at ${req.nextUrl.origin}/api/auth/phoneburner?rep=christina (logged in as Christina), then re-run.`,
+      );
+    }
+  }
+  if (lowTo.length && sandra.usable) {
+    const probe = await sandra.client.authProbe().catch((e) => ({ ok: false, raw: e instanceof Error ? e.message : String(e) }));
+    if (!probe.ok) blockers.push(`Sandra's PhoneBurner token is invalid/expired (${String((probe as { raw?: unknown }).raw).slice(0, 120)}).`);
+  }
   if (blockers.length) return NextResponse.json({ error: "cannot commit", blockers }, { status: 400 });
 
   const jobs = [
