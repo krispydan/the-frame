@@ -26,6 +26,7 @@ type Candidate = {
   colorName: string | null;
   confidence: number;
   via?: "filename" | "vision" | "both";
+  imageUrl?: string | null;
 };
 
 type Item = {
@@ -35,7 +36,7 @@ type Item = {
   mediaUrl: string | null;
   previewUrl: string | null;
   durationSec: number | null;
-  currentProducts: Array<{ id: string; name: string | null }>;
+  currentProducts: Array<{ id: string; name: string | null; imageUrl?: string | null }>;
   currentSku?: string | null;
   matchStatus: string | null;
   candidates: Candidate[];
@@ -43,7 +44,21 @@ type Item = {
   matchError: string | null;
 };
 
-type Product = { id: string; name: string | null; skuIds: string[] };
+type Product = { id: string; name: string | null; skuIds: string[]; imageUrl?: string | null };
+
+/** Small square product thumbnail used across the candidate / picker rows. */
+function ProductThumb({ url, className = "" }: { url?: string | null; className?: string }) {
+  return (
+    <span className={`flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded bg-muted ${className}`}>
+      {url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt="" className="h-full w-full object-contain" />
+      ) : (
+        <span className="text-[10px] text-muted-foreground">no img</span>
+      )}
+    </span>
+  );
+}
 
 const API = "/api/v1/marketing/media-match";
 
@@ -54,7 +69,9 @@ export function SkuIdentifier() {
   const [products, setProducts] = useState<Product[]>([]);
   const [aiConfigured, setAiConfigured] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [current, setCurrent] = useState(0);
+  // Track the selected item by ID, not index — the list re-sorts as items
+  // become "suggested", and an index would jump to a different clip.
+  const [currentId, setCurrentId] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [manualSearch, setManualSearch] = useState("");
   const [saving, setSaving] = useState(false);
@@ -81,7 +98,7 @@ export function SkuIdentifier() {
 
   useEffect(() => {
     setLoading(true);
-    setCurrent(0);
+    setCurrentId(null);
     autoSelectedFor.current = null;
     load();
   }, [load]);
@@ -94,7 +111,16 @@ export function SkuIdentifier() {
     return () => clearInterval(t);
   }, [hasPending, load]);
 
-  const item = items[current] ?? null;
+  // Keep a valid selection as the list changes/re-sorts.
+  useEffect(() => {
+    if (items.length === 0) return;
+    if (!currentId || !items.some((i) => i.mediaId === currentId)) {
+      setCurrentId(items[0].mediaId);
+    }
+  }, [items, currentId]);
+
+  const currentIndex = Math.max(0, items.findIndex((i) => i.mediaId === currentId));
+  const item = items.find((i) => i.mediaId === currentId) ?? items[currentIndex] ?? null;
 
   // Pre-select when arriving on an item: existing tags first (so a tagged
   // item shows its products checked and editable), else the model's
@@ -153,9 +179,13 @@ export function SkuIdentifier() {
     toast.success("Re-running AI on this item");
   };
 
+  // Drop the current item and move to the next one (by id, so the list can
+  // re-sort freely without losing our place).
   const advance = () => {
-    setItems((prev) => prev.filter((_, idx) => idx !== current));
-    setCurrent((c) => Math.max(0, Math.min(c, items.length - 2)));
+    const idx = items.findIndex((i) => i.mediaId === currentId);
+    const next = items[idx + 1] ?? items[idx - 1] ?? null;
+    setItems((prev) => prev.filter((i) => i.mediaId !== currentId));
+    setCurrentId(next ? next.mediaId : null);
     autoSelectedFor.current = null;
   };
 
@@ -249,11 +279,11 @@ export function SkuIdentifier() {
         <>
           {/* Thumbnail strip */}
           <div className="flex gap-1.5 overflow-x-auto pb-1">
-            {items.slice(0, 60).map((i, idx) => (
+            {items.slice(0, 60).map((i) => (
               <button
                 key={i.mediaId}
-                onClick={() => setCurrent(idx)}
-                className={`relative h-16 w-11 shrink-0 overflow-hidden rounded border ${idx === current ? "ring-2 ring-primary" : ""}`}
+                onClick={() => setCurrentId(i.mediaId)}
+                className={`relative h-16 w-11 shrink-0 overflow-hidden rounded border ${i.mediaId === currentId ? "ring-2 ring-primary" : ""}`}
                 title={i.fileName}
               >
                 {i.mediaUrl ? (
@@ -337,6 +367,7 @@ export function SkuIdentifier() {
                         <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${on ? "bg-primary border-primary text-primary-foreground" : ""}`}>
                           {on && <Check className="h-3.5 w-3.5" />}
                         </span>
+                        <ProductThumb url={c.imageUrl} />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-medium">{c.productName}</span>
                           <span className="block truncate text-xs text-muted-foreground">
@@ -381,9 +412,10 @@ export function SkuIdentifier() {
                           onClick={() => toggle(p.id)}
                           className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm ${on ? "bg-primary/10" : "hover:bg-muted"}`}
                         >
-                          <span className={`flex h-4 w-4 items-center justify-center rounded border ${on ? "bg-primary border-primary text-primary-foreground" : ""}`}>
+                          <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "bg-primary border-primary text-primary-foreground" : ""}`}>
                             {on && <Check className="h-3 w-3" />}
                           </span>
+                          <ProductThumb url={p.imageUrl} className="h-8 w-8" />
                           <span className="truncate">{p.name ?? "Unnamed product"}</span>
                         </button>
                       );
