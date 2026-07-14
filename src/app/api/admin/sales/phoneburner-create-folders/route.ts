@@ -54,7 +54,11 @@ export async function POST(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const rep = (new URL(req.url).searchParams.get("rep") || "christina") as PbRep;
+  const url = new URL(req.url);
+  const rep = (url.searchParams.get("rep") || "christina") as PbRep;
+  // force=true ignores the cached folder-id setting and recreates/matches in the
+  // account the rep's key now points at (used when a rep moved to their own key).
+  const force = url.searchParams.get("force") === "true";
   if (!PB_ACCOUNTS[rep]) return NextResponse.json({ error: `unknown rep "${rep}"` }, { status: 400 });
 
   const client = phoneBurnerClientFor(rep);
@@ -80,7 +84,7 @@ export async function POST(req: NextRequest) {
   const result: Array<{ name: string; setting: string; folderId: string; action: "existing_setting" | "matched_name" | "created" }> = [];
   for (const w of wanted) {
     const cached = getSetting(w.setting);
-    if (cached) {
+    if (cached && !force) {
       result.push({ name: w.name, setting: w.setting, folderId: cached, action: "existing_setting" });
       continue;
     }
