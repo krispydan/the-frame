@@ -41,6 +41,18 @@ registerJobHandler("marketing.video.split-source", async (input) => {
   return (await splitSource(sourceId)) as unknown as Record<string, unknown>;
 });
 
+registerJobHandler("marketing.media.identify", async (input) => {
+  const mediaType = input.mediaType;
+  const mediaId = input.mediaId;
+  if ((mediaType !== "clip" && mediaType !== "image") || typeof mediaId !== "string" || !mediaId) {
+    throw new Error("mediaType (clip|image) and mediaId are required for marketing.media.identify jobs");
+  }
+  const { identifyMedia } = await import("./sku-match");
+  // Idempotent: confirmed/suggested rows short-circuit inside identifyMedia.
+  const result = await identifyMedia(mediaType, mediaId, { force: input.force === true });
+  return result as unknown as Record<string, unknown>;
+});
+
 registerJobHandler("marketing.video.render-post", async (input) => {
   const postId = input.postId;
   if (!postId || typeof postId !== "string") {
