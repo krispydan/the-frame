@@ -4,6 +4,7 @@ export const maxDuration = 60;
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { phoneBurnerClientFor, pbOwnerFor, PB_ACCOUNTS, type PbRep } from "@/modules/sales/lib/phoneburner-client";
+import { setPbClientCreds, pbOAuthStatus, pbInitiateUrl } from "@/modules/sales/lib/phoneburner-oauth";
 
 /**
  * PhoneBurner second-caller setup.
@@ -44,6 +45,7 @@ function accountStatus() {
       keyConfigured: rep === "sandra" ? !!(process.env.PHONEBURNER_API_KEY || getSetting(cfg.keySetting)) : !!getSetting(cfg.keySetting),
       ownerId: getSetting(cfg.ownerSetting),
       username: getSetting(`phoneburner_username_${rep}`),
+      oauth: pbOAuthStatus(rep),
     };
   }
   return rows;
@@ -60,10 +62,36 @@ export async function POST(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const body = (await req.json().catch(() => ({}))) as { rep?: string; apiKey?: string; ownerId?: string; username?: string };
+  const body = (await req.json().catch(() => ({}))) as {
+    rep?: string;
+    apiKey?: string;
+    ownerId?: string;
+    username?: string;
+    clientId?: string;
+    clientSecret?: string;
+  };
   const rep = (body.rep || "christina") as PbRep;
   if (!PB_ACCOUNTS[rep]) return NextResponse.json({ error: `unknown rep "${rep}"` }, { status: 400 });
   const cfg = PB_ACCOUNTS[rep];
+
+  // OAuth app registration path: store the app's client_id/client_secret and
+  // hand back the authorize URL for the rep to visit. This is the correct way to
+  // connect a separate account — PhoneBurner tokens expire, so a pasted token
+  // never lasts; the authorize flow yields an access token + refresh token that
+  // we keep fresh automatically.
+  if (body.clientId && body.clientSecret) {
+    setPbClientCreds(rep, body.clientId, body.clientSecret);
+    if (body.username) setSetting(`phoneburner_username_${rep}`, body.username.trim());
+    return NextResponse.json({
+      ok: true,
+      rep,
+      mode: "oauth_client_registered",
+      authorizeUrl: pbInitiateUrl(rep),
+      next: `Open the authorizeUrl in a browser where ${rep} is logged into PhoneBurner as herself, approve access, and the callback will store her access + refresh tokens.`,
+      oauth: pbOAuthStatus(rep),
+      accounts: accountStatus(),
+    });
+  }
 
   // Two ways a second caller can exist:
   //   (a) same shared account, distinguished by owner_id (the common case) —

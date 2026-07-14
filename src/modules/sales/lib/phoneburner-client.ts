@@ -176,7 +176,7 @@ class RateLimiter {
 }
 
 // ── Client ──
-class PhoneBurnerClient {
+export class PhoneBurnerClient {
   private baseUrl = "https://www.phoneburner.com/rest/1";
   private envKey: string | null;
   private rateLimiter = new RateLimiter();
