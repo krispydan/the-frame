@@ -86,20 +86,23 @@ export async function POST(req: NextRequest) {
   if (ownerId) setSetting(cfg.ownerSetting, ownerId);
   if (body.username) setSetting(`phoneburner_username_${rep}`, body.username.trim());
 
-  // Verify with the client that will actually be used (shared key unless a
-  // separate key was set).
+  // Verify with the client that will actually be used (her own key if a separate
+  // key was set, else the shared key).
   const client = phoneBurnerClientFor(rep);
   const probe = await client.authProbe().catch((e) => ({ ok: false, raw: e instanceof Error ? e.message : String(e) }));
 
+  const usedKey = apiKey ? "separate (this rep's own key)" : "shared account key";
   return NextResponse.json({
     ok: probe.ok,
     rep,
     mode: apiKey ? "separate_account" : "shared_account_owner_routing",
     ownerId: pbOwnerFor(rep),
     authOk: probe.ok,
+    authError: probe.ok ? null : (probe as { raw?: unknown }).raw ?? null,
+    keyChecked: usedKey,
     accounts: accountStatus(),
     note: probe.ok
-      ? "Ready — contacts route to this rep by owner_id on the shared account."
-      : "Saved, but the shared account key failed auth — check the existing PHONEBURNER_API_KEY.",
+      ? `Ready — verified against ${usedKey}.`
+      : `Saved, but auth failed using the ${usedKey}. See authError for PhoneBurner's response.`,
   });
 }
