@@ -46,10 +46,12 @@ type Item = {
 
 type Product = { id: string; name: string | null; skuIds: string[]; imageUrl?: string | null };
 
-/** Small square product thumbnail used across the candidate / picker rows. */
-function ProductThumb({ url, className = "" }: { url?: string | null; className?: string }) {
+/** Product thumbnail used across the candidate / picker rows. Size comes
+ *  from `className` so callers can make it big (candidate cards) or small
+ *  (search list). */
+function ProductThumb({ url, className = "h-11 w-11" }: { url?: string | null; className?: string }) {
   return (
-    <span className={`flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded bg-muted ${className}`}>
+    <span className={`flex shrink-0 items-center justify-center overflow-hidden rounded bg-muted ${className}`}>
       {url ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={url} alt="" className="h-full w-full object-contain" />
@@ -132,8 +134,11 @@ export function SkuIdentifier() {
     if (current.length > 0) {
       setSelected(current);
     } else {
-      const confident = item.candidates.filter((c) => c.confidence >= 75).map((c) => c.productId);
-      setSelected(confident.length > 0 ? [confident[0]] : []);
+      // Only auto-tick reliable matches — a filename hit, or vision the
+      // filename also confirms. A plain vision guess (even 85%) is left
+      // unchecked so it's a shortlist to review, not an auto-answer.
+      const reliable = item.candidates.find((c) => c.via === "filename" || c.via === "both");
+      setSelected(reliable ? [reliable.productId] : []);
     }
     setManualSearch("");
   }, [item]);
@@ -367,7 +372,7 @@ export function SkuIdentifier() {
                         <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${on ? "bg-primary border-primary text-primary-foreground" : ""}`}>
                           {on && <Check className="h-3.5 w-3.5" />}
                         </span>
-                        <ProductThumb url={c.imageUrl} />
+                        <ProductThumb url={c.imageUrl} className="h-16 w-24 bg-white" />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-medium">{c.productName}</span>
                           <span className="block truncate text-xs text-muted-foreground">

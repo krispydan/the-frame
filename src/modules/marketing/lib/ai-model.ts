@@ -44,3 +44,23 @@ export function videoModel(): string {
   }
   return m;
 }
+
+let skuMatchLogged = false;
+
+/**
+ * Model for AI SKU identification (vision matching media vs the catalog).
+ * Runs at volume over a whole library and is human-reviewed, so it
+ * defaults to the CHEAP vision model (Haiku) rather than Opus. Override
+ * with MARKETING_SKU_MATCH_MODEL (e.g. bump to Sonnet if accuracy needs it).
+ */
+export function skuMatchModel(): string {
+  const m =
+    process.env.MARKETING_SKU_MATCH_MODEL ||
+    process.env.ANTHROPIC_VISION_MODEL ||
+    "claude-haiku-4-5-20251001";
+  if (!skuMatchLogged) {
+    skuMatchLogged = true;
+    console.info(`[sku-match] AI model: ${m}`);
+  }
+  return m;
+}
