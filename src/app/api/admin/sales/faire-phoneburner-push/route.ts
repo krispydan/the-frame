@@ -61,6 +61,34 @@ function companyHasTag(companyId: string, tag: string): boolean {
   return (row?.tags || "").toLowerCase().includes(tag.toLowerCase());
 }
 
+/** Persist the fuller Faire history from a CSV-sourced lead onto the company, so
+ *  the frame (not the CSV) is the source for future pushes. COALESCE-style: only
+ *  fills columns that are currently empty. */
+function persistFaireMeta(l: FairePhoneBurnerLead): void {
+  if (!l.frameCompanyId) return;
+  sqlite
+    .prepare(
+      `UPDATE companies SET
+         ajm_order_count = COALESCE(ajm_order_count, ?),
+         ajm_first_order = COALESCE(NULLIF(ajm_first_order, ''), ?),
+         ajm_store_type  = COALESCE(NULLIF(ajm_store_type, ''), ?),
+         ajm_faire_tags  = COALESCE(NULLIF(ajm_faire_tags, ''), ?),
+         ajm_last_order  = COALESCE(NULLIF(ajm_last_order, ''), ?),
+         ajm_total_spend = COALESCE(ajm_total_spend, ?),
+         updated_at = datetime('now')
+       WHERE id = ?`,
+    )
+    .run(
+      l.orderCount ? parseInt(l.orderCount, 10) || null : null,
+      l.firstOrdered || null,
+      l.storeType || null,
+      l.faireTags || null,
+      l.lastOrdered || null,
+      l.spend || null,
+      l.frameCompanyId,
+    );
+}
+
 /** Resolve the caller's account: client, owner_id (from settings or discovery),
  *  username fallback, and whether it's usable. */
 async function resolveAccount(rep: PbRep) {
@@ -79,17 +107,40 @@ async function resolveAccount(rep: PbRep) {
   return { rep, cfg, client, configured, ownerId, username, usable: configured && (!!ownerId || !!username) };
 }
 
+/** Pipedrive deep links for the note (web-app URLs, one per line). */
+function pipedriveLinkLines(pd: FairePhoneBurnerLead["pipedrive"]): string[] {
+  if (!pd.baseUrl) return [];
+  const lines: string[] = [];
+  if (pd.dealId) lines.push(`Deal: ${pd.baseUrl}/deal/${pd.dealId}`);
+  if (pd.orgId) lines.push(`Org: ${pd.baseUrl}/organization/${pd.orgId}`);
+  if (pd.personId) lines.push(`Person: ${pd.baseUrl}/person/${pd.personId}`);
+  return lines;
+}
+
 function toPayload(l: FairePhoneBurnerLead, ownerId: string | null, username: string | null, folderId: string | null): PbContactPayload {
-  const notes = [
-    l.store ? `Store: ${l.store}` : "",
-    l.spend ? `AJM lifetime: $${Math.round(l.spend)}` : "",
+  // Multiline note — PhoneBurner renders it on the dial screen. Grouped so the
+  // rep can scan the account, its AJM/Faire buying history, and jump into
+  // Pipedrive, all from the call card.
+  const dollars = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
+  const history = [
+    l.spend ? `Lifetime: ${dollars(l.spend)}` : "",
     l.orderCount ? `${l.orderCount} orders` : "",
-    l.lastOrdered ? `Last ordered: ${l.lastOrdered}` : "",
-    `Tier: ${l.tier}`,
-    "Campaign: AJM Faire Market",
+    l.firstOrdered ? `First: ${l.firstOrdered}` : "",
+    l.lastOrdered ? `Last: ${l.lastOrdered}` : "",
   ]
     .filter(Boolean)
     .join(" | ");
+  const profile = [l.storeType ? `Type: ${l.storeType}` : "", l.faireTags ? `Faire tags: ${l.faireTags}` : ""].filter(Boolean).join(" | ");
+  const pdLines = pipedriveLinkLines(l.pipedrive);
+  const noteLines = [
+    l.store ? `Company: ${l.store}` : "",
+    `Campaign: AJM Faire Market (${l.tier})`,
+    history ? `— AJM Faire history —\n${history}` : "",
+    profile,
+    pdLines.length ? `— Pipedrive —\n${pdLines.join("\n")}` : "",
+  ].filter(Boolean);
+  const notes = noteLines.join("\n");
+
   const p: PbContactPayload = {
     first_name: l.firstName || l.store || undefined,
     last_name: l.lastName || undefined,
@@ -103,9 +154,13 @@ function toPayload(l: FairePhoneBurnerLead, ownerId: string | null, username: st
     on_duplicate: "skip",
     custom_fields: [
       { name: "Company", value: l.store || "" },
-      { name: "AJM Lifetime Spend", value: l.spend ? `$${Math.round(l.spend)}` : "" },
+      { name: "AJM Lifetime Spend", value: l.spend ? dollars(l.spend) : "" },
+      { name: "AJM Orders", value: l.orderCount || "" },
+      { name: "First Ordered", value: l.firstOrdered || "" },
       { name: "Last Ordered", value: l.lastOrdered || "" },
+      { name: "Store Type", value: l.storeType || "" },
       { name: "Tier", value: l.tier },
+      { name: "Pipedrive Deal", value: l.pipedrive.baseUrl && l.pipedrive.dealId ? `${l.pipedrive.baseUrl}/deal/${l.pipedrive.dealId}` : "" },
     ],
   };
   if (ownerId) p.owner_id = ownerId;
@@ -248,20 +303,20 @@ export async function POST(req: NextRequest) {
 
       for (const l of job.leads) {
         try {
-          const resp = await client.createOrGetContact(toPayload(l, ownerId, username, folderId));
+          const payload = toPayload(l, ownerId, username, folderId);
+          const resp = await client.createOrGetContact(payload);
           if (resp.duplicate) {
             // Contact already exists in the workspace (e.g. from the AJM
             // Reactivation import). File the EXISTING contact into this rep's
-            // campaign folder so it shows up for this week's calling. category_id
-            // sets the folder; owner_id re-assigns to the dialing rep (ignored by
-            // PB on update if the token can't own it, which is fine).
-            // Enrich the existing contact with the company name too — many were
-            // imported without it (that's why "Company" shows blank in PB).
-            const patch: Partial<PbContactPayload> = {};
-            if (folderId) patch.category_id = folderId;
-            if (ownerId) patch.owner_id = ownerId;
-            if (l.store) patch.company = l.store;
-            if (Object.keys(patch).length) await client.updateContact(resp.id, patch);
+            // campaign folder AND enrich it with the full call brief (company,
+            // Faire history, Pipedrive links) — many were imported bare, which is
+            // why Company/notes showed blank. category_id sets the folder;
+            // owner_id re-assigns to the dialing rep (ignored by PB on update if
+            // the token can't own it, which is fine). on_duplicate isn't a
+            // contact field, so drop it from the update patch.
+            const { on_duplicate: _drop, ...patch } = payload;
+            void _drop;
+            await client.updateContact(resp.id, patch);
             filed++;
           } else {
             added++;
@@ -276,6 +331,9 @@ export async function POST(req: NextRequest) {
             }
           }
           if (l.frameCompanyId) tagCompany(l.frameCompanyId, PUSHED_TAG);
+          // If this cohort came from a CSV, persist its fuller Faire history to
+          // the frame so future DB-only pushes carry it.
+          if (fromCsv) persistFaireMeta(l);
         } catch (e) {
           errors++;
           if (errSamples.length < 15) errSamples.push(`${l.store} (${l.phone}) [${job.repKey}]: ${e instanceof Error ? e.message : String(e)}`);

@@ -109,6 +109,27 @@ export interface FairePhoneBurnerLead {
   spend: number;
   orderCount: string;
   lastOrdered: string;
+  firstOrdered: string;
+  storeType: string;
+  faireTags: string;
+  // Pipedrive deep-link ids (so the PhoneBurner note can link the rep straight
+  // to the deal/org/person). Null when the company isn't in Pipedrive.
+  pipedrive: { dealId: number | null; orgId: number | null; personId: number | null; baseUrl: string | null };
+}
+
+/** Pipedrive deep-link ids for a company (open AJM deal preferred), plus the
+ *  workspace base url from settings. Used to build clickable links in the
+ *  PhoneBurner call note. */
+export function pipedriveLinksFor(companyId: string | null): FairePhoneBurnerLead["pipedrive"] {
+  const baseUrl = (sqlite.prepare("SELECT value FROM settings WHERE key='pipedrive_api_domain'").get() as { value: string } | undefined)?.value?.replace(/\/$/, "") ?? null;
+  if (!companyId) return { dealId: null, orgId: null, personId: null, baseUrl };
+  const co = sqlite.prepare("SELECT pipedrive_org_id AS org, pipedrive_person_id AS person FROM companies WHERE id = ?").get(companyId) as
+    | { org: number | null; person: number | null }
+    | undefined;
+  const deal = sqlite
+    .prepare("SELECT pipedrive_deal_id AS id FROM pipedrive_deals WHERE company_id = ? AND is_open = 1 ORDER BY updated_at DESC LIMIT 1")
+    .get(companyId) as { id: number | null } | undefined;
+  return { dealId: deal?.id ?? null, orgId: co?.org ?? null, personId: co?.person ?? null, baseUrl };
 }
 
 /**
@@ -150,6 +171,10 @@ export function buildFairePhoneBurnerLeads(
       spend: r.spend,
       orderCount: r.orderCount != null ? String(r.orderCount) : "",
       lastOrdered: r.lastOrdered ?? "",
+      firstOrdered: r.firstOrdered ?? "",
+      storeType: r.storeType ?? "",
+      faireTags: r.customTags ?? "",
+      pipedrive: pipedriveLinksFor(r.frameCompanyId),
     };
     const cur = byPhone.get(key);
     if (!cur || r.spend > cur.spend) byPhone.set(key, lead);
@@ -173,7 +198,9 @@ export function buildFairePhoneBurnerLeadsFromDb(
   const campaignTag = opts.campaignTag || "faire_market_2026";
   const companies = sqlite
     .prepare(
-      `SELECT id, name, city, state, zip, ajm_total_spend AS spend, ajm_last_order AS lastOrdered, tags
+      `SELECT id, name, city, state, zip, ajm_total_spend AS spend, ajm_last_order AS lastOrdered,
+              ajm_order_count AS orderCount, ajm_first_order AS firstOrdered, ajm_store_type AS storeType,
+              ajm_faire_tags AS faireTags, tags
        FROM companies
        WHERE tags LIKE '%' || ? || '%'`,
     )
@@ -185,6 +212,10 @@ export function buildFairePhoneBurnerLeadsFromDb(
     zip: string | null;
     spend: number | null;
     lastOrdered: string | null;
+    orderCount: number | null;
+    firstOrdered: string | null;
+    storeType: string | null;
+    faireTags: string | null;
     tags: string | null;
   }>;
 
@@ -221,8 +252,12 @@ export function buildFairePhoneBurnerLeadsFromDb(
       state: c.state ?? "",
       zip: c.zip ?? "",
       spend: c.spend ?? 0,
-      orderCount: "",
+      orderCount: c.orderCount != null ? String(c.orderCount) : "",
       lastOrdered: c.lastOrdered ?? "",
+      firstOrdered: c.firstOrdered ?? "",
+      storeType: c.storeType ?? "",
+      faireTags: c.faireTags ?? "",
+      pipedrive: pipedriveLinksFor(c.id),
     };
     const cur = byPhone.get(key);
     if (!cur || lead.spend > cur.spend) byPhone.set(key, lead);

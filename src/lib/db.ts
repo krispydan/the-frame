@@ -448,6 +448,14 @@ try { sqlite.exec("CREATE INDEX idx_companies_top_brand ON companies (top_brand)
 // for brand-specific mail-merge in the Brand Carriers campaign.
 // Populated by /api/admin/sales/backfill-competitor-brand.
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN primary_competitor_brand TEXT"); } catch { /* exists */ }
+// Fuller AJM Faire history persisted from the customer export (beyond
+// ajm_total_spend / ajm_last_order) so the frame — not a local CSV — is the
+// source for enriching PhoneBurner call notes: order count, first-order date,
+// store type, and the store's Faire tags.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN ajm_order_count INTEGER"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN ajm_first_order TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN ajm_store_type TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN ajm_faire_tags TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_primary_competitor ON companies (primary_competitor_brand)"); } catch { /* exists */ }
 
 // AJM legacy import (2026-06-19): historical AJ Morgan customer data
