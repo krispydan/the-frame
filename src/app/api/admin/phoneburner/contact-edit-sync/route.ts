@@ -16,9 +16,11 @@ export async function POST(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const maxPages = Math.max(1, parseInt(new URL(req.url).searchParams.get("maxPages") || "5", 10));
+  const url = new URL(req.url);
+  const maxPages = Math.max(1, parseInt(url.searchParams.get("maxPages") || "5", 10));
+  const resetWatermark = url.searchParams.get("reset") === "true";
   try {
-    const result = await reconcileContactEdits({ maxPages });
+    const result = await reconcileContactEdits({ maxPages, resetWatermark });
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });

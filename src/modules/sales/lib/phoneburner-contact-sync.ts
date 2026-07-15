@@ -107,7 +107,7 @@ export async function applyEmailWriteback(opts: {
  * (stable) phone number. Watermark per account so each run only looks at what
  * changed since last time.
  */
-export async function reconcileContactEdits(opts: { maxPages?: number; pageSize?: number } = {}): Promise<{
+export async function reconcileContactEdits(opts: { maxPages?: number; pageSize?: number; resetWatermark?: boolean } = {}): Promise<{
   accounts: Array<{ rep: string; scanned: number; synced: number; pages: number; errors: number }>;
 }> {
   const maxPages = Math.max(1, opts.maxPages ?? 5);
@@ -116,6 +116,7 @@ export async function reconcileContactEdits(opts: { maxPages?: number; pageSize?
 
   for (const acct of phoneBurnerAccounts()) {
     const watermarkKey = `pb_contact_sync_watermark_${acct.rep}`;
+    if (opts.resetWatermark) sqlite.prepare("DELETE FROM settings WHERE key = ?").run(watermarkKey);
     const prevWatermark = getSetting(watermarkKey); // ISO-ish "YYYY-MM-DD HH:MM:SS"
     let newWatermark = prevWatermark;
     let scanned = 0,
