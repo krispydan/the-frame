@@ -141,11 +141,14 @@ function toPayload(l: FairePhoneBurnerLead, ownerId: string | null, username: st
   ].filter(Boolean);
   const notes = noteLines.join("\n");
 
+  // PhoneBurner 400s the whole contact on a malformed email, so only send it if
+  // it looks valid; otherwise drop it (the phone is what matters for calling).
+  const email = l.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(l.email.trim()) ? l.email.trim() : undefined;
   const p: PbContactPayload = {
     first_name: l.firstName || l.store || undefined,
     last_name: l.lastName || undefined,
     company: l.store || undefined,
-    email: l.email || undefined,
+    email,
     phone: l.phone,
     city: l.city || undefined,
     state: l.state || undefined,
