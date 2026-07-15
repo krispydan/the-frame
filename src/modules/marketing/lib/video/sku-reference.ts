@@ -14,13 +14,16 @@ import { sqlite } from "@/lib/db";
 import { readImage } from "@/lib/storage/local";
 import { readFromR2IfPresent, saveMedia, readMedia, mediaStat } from "@/lib/storage/media";
 
-// Grid geometry. 4 × 6 = 24 SKUs per sheet → ~5 sheets for a 115-SKU
-// catalog. Cells are small but plenty for frame-shape/color matching.
-const COLS = 4;
-const ROWS = 6;
-const CELL_W = 280;
-const IMG_H = 190;
-const CAPTION_H = 46;
+// Grid geometry. 3 × 4 = 12 SKUs per sheet → ~10 sheets for a 115-SKU
+// catalog. Bigger cells than before so the model can actually tell frame
+// colour (black vs tortoise vs clear) and shape apart. Bump LAYOUT_VERSION
+// whenever these change so the cached sheets rebuild.
+const LAYOUT_VERSION = 2;
+const COLS = 3;
+const ROWS = 4;
+const CELL_W = 384;
+const IMG_H = 300;
+const CAPTION_H = 52;
 const CELL_H = IMG_H + CAPTION_H;
 const SHEET_W = COLS * CELL_W;
 const SHEET_H = ROWS * CELL_H;
@@ -85,8 +88,8 @@ async function buildCell(ref: ReferenceSku): Promise<Buffer | null> {
   const caption = Buffer.from(
     `<svg width="${CELL_W}" height="${CAPTION_H}">
       <rect width="100%" height="100%" fill="#ffffff"/>
-      <text x="${CELL_W / 2}" y="17" text-anchor="middle" font-family="Arial" font-size="14" fill="#111">${esc(ref.productName)}</text>
-      <text x="${CELL_W / 2}" y="36" text-anchor="middle" font-family="Arial" font-size="14" font-weight="bold" fill="#c00">${esc(ref.sku)}</text>
+      <text x="${CELL_W / 2}" y="21" text-anchor="middle" font-family="Arial" font-size="18" fill="#111">${esc(ref.productName)}</text>
+      <text x="${CELL_W / 2}" y="43" text-anchor="middle" font-family="Arial" font-size="18" font-weight="bold" fill="#c00">${esc(ref.sku)}</text>
     </svg>`,
   );
 
@@ -108,10 +111,11 @@ interface SheetMeta {
   builtAt: string;
 }
 
-/** Fingerprint of the catalog's reference inputs — image path per SKU. */
+/** Fingerprint of the catalog's reference inputs — image path per SKU,
+ *  plus the layout version so a geometry change rebuilds the cache. */
 function catalogFingerprint(refs: ReferenceSku[]): string {
   return createHash("sha256")
-    .update(refs.map((r) => `${r.sku}|${r.imagePath}`).join("\n"))
+    .update(`layout-v${LAYOUT_VERSION}\n` + refs.map((r) => `${r.sku}|${r.imagePath}`).join("\n"))
     .digest("hex")
     .slice(0, 16);
 }
