@@ -152,15 +152,18 @@ function toPayload(l: FairePhoneBurnerLead, ownerId: string | null, username: st
     zip: l.zip || undefined,
     notes,
     on_duplicate: "skip",
+    // PhoneBurner auto-creates any custom field it hasn't seen, and rejects the
+    // whole call (43002 "type required") if `type` is missing — so every entry
+    // must carry type: "text".
     custom_fields: [
-      { name: "Company", value: l.store || "" },
-      { name: "AJM Lifetime Spend", value: l.spend ? dollars(l.spend) : "" },
-      { name: "AJM Orders", value: l.orderCount || "" },
-      { name: "First Ordered", value: l.firstOrdered || "" },
-      { name: "Last Ordered", value: l.lastOrdered || "" },
-      { name: "Store Type", value: l.storeType || "" },
-      { name: "Tier", value: l.tier },
-      { name: "Pipedrive Deal", value: l.pipedrive.baseUrl && l.pipedrive.dealId ? `${l.pipedrive.baseUrl}/deal/${l.pipedrive.dealId}` : "" },
+      { name: "Company", type: "text", value: l.store || "" },
+      { name: "AJM Lifetime Spend", type: "text", value: l.spend ? dollars(l.spend) : "" },
+      { name: "AJM Orders", type: "text", value: l.orderCount || "" },
+      { name: "First Ordered", type: "text", value: l.firstOrdered || "" },
+      { name: "Last Ordered", type: "text", value: l.lastOrdered || "" },
+      { name: "Store Type", type: "text", value: l.storeType || "" },
+      { name: "Tier", type: "text", value: l.tier },
+      { name: "Pipedrive Deal", type: "text", value: l.pipedrive.baseUrl && l.pipedrive.dealId ? `${l.pipedrive.baseUrl}/deal/${l.pipedrive.dealId}` : "" },
     ],
   };
   if (ownerId) p.owner_id = ownerId;
