@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft, ScanSearch } from "lucide-react";
 import { SkuIdentifier } from "@/modules/marketing/components/videos/sku-identifier";
 
-/** AI SKU Identifier — match media against the catalog + confirm tags. */
+/** SKU Identifier — filename matching + manual tagging vs the catalog. */
 export default function SkuIdentifierPage() {
   return (
     <div className="space-y-6">
@@ -13,8 +13,9 @@ export default function SkuIdentifierPage() {
             <ScanSearch className="h-7 w-7" /> SKU Identifier
           </h1>
           <p className="text-muted-foreground mt-1">
-            AI matches your clips and images against the catalog. Review its picks (with
-            confidence), click the right product, and the tags are saved to the media.
+            Files named after a product are matched automatically. For the rest, compare the
+            media against the catalog photos and click the right product — for video clips and
+            product/lifestyle shoots alike.
           </p>
         </div>
         <Button variant="outline" render={<Link href="/marketing/videos/clips" />}>

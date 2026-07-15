@@ -1,14 +1,13 @@
 "use client";
 
 /**
- * SKU Identifier — AI-assisted product tagging review queue.
+ * SKU Identifier — filename matching + manual review against the catalog.
  *
- * Pick a media type (video clips / catalog images), run AI identification
- * against the catalog reference sheets, then review: media on the left,
- * candidate products with confidence on the right. Click the right
- * product(s) and save — tags are written back to the media. Low-confidence
- * items show every option the model considered; a manual product search
- * covers the case where the model missed entirely.
+ * Media on the left; the FULL product catalog (with photos) on the right.
+ * When the filename names a product (shoot naming convention) it's
+ * matched automatically — "Match file names" bulk-applies those. Anything
+ * else gets tagged by hand: find the product in the catalog panel, click
+ * it, save. Works for video clips and product/lifestyle photos alike.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -17,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Check, RefreshCw, Sparkles, X } from "lucide-react";
+import { Check, FileText, Wand2, X } from "lucide-react";
 
 type Candidate = {
   productId: string;
@@ -25,7 +24,7 @@ type Candidate = {
   sku: string;
   colorName: string | null;
   confidence: number;
-  via?: "filename" | "vision" | "both";
+  via?: "filename";
   imageUrl?: string | null;
 };
 
@@ -46,12 +45,10 @@ type Item = {
 
 type Product = { id: string; name: string | null; skuIds: string[]; imageUrl?: string | null };
 
-/** Product thumbnail used across the candidate / picker rows. Size comes
- *  from `className` so callers can make it big (candidate cards) or small
- *  (search list). */
+/** Product photo tile used across the pickers. */
 function ProductThumb({ url, className = "h-11 w-11" }: { url?: string | null; className?: string }) {
   return (
-    <span className={`flex shrink-0 items-center justify-center overflow-hidden rounded bg-muted ${className}`}>
+    <span className={`flex shrink-0 items-center justify-center overflow-hidden rounded bg-white border ${className}`}>
       {url ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={url} alt="" className="h-full w-full object-contain" />
@@ -69,32 +66,21 @@ export function SkuIdentifier() {
   const [filter, setFilter] = useState<"queue" | "all">("queue");
   const [items, setItems] = useState<Item[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [aiConfigured, setAiConfigured] = useState(true);
   const [loading, setLoading] = useState(true);
-  // Track the selected item by ID, not index — the list re-sorts as items
-  // become "suggested", and an index would jump to a different clip.
+  // Track the selected item by ID, not index — the list can reorder.
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
-  const [manualSearch, setManualSearch] = useState("");
+  const [catalogSearch, setCatalogSearch] = useState("");
   const [saving, setSaving] = useState(false);
-  const [identifying, setIdentifying] = useState(false);
-  // Only auto-apply the model's top pick to the selection once per item.
+  const [matching, setMatching] = useState(false);
+  // Only auto-apply pre-selection once per item.
   const autoSelectedFor = useRef<string | null>(null);
-  // Media we've queued this session — shown as "processing" until a real
-  // status comes back (the server has no match row while a job is mid-run).
-  const inFlight = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     const res = await fetch(`${API}?type=${type}&filter=${filter}`);
     const d = await res.json();
-    const mapped: Item[] = (d.items ?? []).map((i: Item) => {
-      const real = i.matchStatus;
-      if (real && real !== "pending") inFlight.current.delete(i.mediaId);
-      return { ...i, matchStatus: real ?? (inFlight.current.has(i.mediaId) ? "pending" : null) };
-    });
-    setItems(mapped);
+    setItems(d.items ?? []);
     setProducts(d.products ?? []);
-    setAiConfigured(Boolean(d.aiConfigured));
     setLoading(false);
   }, [type, filter]);
 
@@ -105,15 +91,7 @@ export function SkuIdentifier() {
     load();
   }, [load]);
 
-  // Poll while identification jobs are outstanding so suggestions stream in.
-  const hasPending = items.some((i) => i.matchStatus === "pending" || (identifying && i.matchStatus === null));
-  useEffect(() => {
-    if (!hasPending) return;
-    const t = setInterval(load, 5000);
-    return () => clearInterval(t);
-  }, [hasPending, load]);
-
-  // Keep a valid selection as the list changes/re-sorts.
+  // Keep a valid selection as the list changes.
   useEffect(() => {
     if (items.length === 0) return;
     if (!currentId || !items.some((i) => i.mediaId === currentId)) {
@@ -121,12 +99,9 @@ export function SkuIdentifier() {
     }
   }, [items, currentId]);
 
-  const currentIndex = Math.max(0, items.findIndex((i) => i.mediaId === currentId));
-  const item = items.find((i) => i.mediaId === currentId) ?? items[currentIndex] ?? null;
+  const item = items.find((i) => i.mediaId === currentId) ?? null;
 
-  // Pre-select when arriving on an item: existing tags first (so a tagged
-  // item shows its products checked and editable), else the model's
-  // confident top pick.
+  // Pre-select on arrival: existing tags (editable), else the filename match.
   useEffect(() => {
     if (!item || autoSelectedFor.current === item.mediaId) return;
     autoSelectedFor.current = item.mediaId;
@@ -134,58 +109,34 @@ export function SkuIdentifier() {
     if (current.length > 0) {
       setSelected(current);
     } else {
-      // Only auto-tick reliable matches — a filename hit, or vision the
-      // filename also confirms. A plain vision guess (even 85%) is left
-      // unchecked so it's a shortlist to review, not an auto-answer.
-      const reliable = item.candidates.find((c) => c.via === "filename" || c.via === "both");
-      setSelected(reliable ? [reliable.productId] : []);
+      const fromFile = item.candidates.filter((c) => c.via === "filename").map((c) => c.productId);
+      setSelected(fromFile.slice(0, 1));
     }
-    setManualSearch("");
+    setCatalogSearch("");
   }, [item]);
 
-  const identifyAll = async (force = false) => {
-    setIdentifying(true);
+  /** Bulk: apply strong filename matches across every untagged item. */
+  const matchFilenames = async () => {
+    setMatching(true);
     const res = await fetch(API, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mediaType: type, all: true, force }),
+      body: JSON.stringify({ mediaType: type, all: true, apply: true }),
     });
     const d = await res.json();
+    setMatching(false);
     if (res.ok) {
-      // Optimistically mark the queued items as processing so the panel
-      // shows movement immediately (the poll flips them as jobs finish).
-      if (d.enqueued > 0) {
-        setItems((prev) =>
-          prev.map((i) => {
-            if (i.matchStatus === null || (force && i.matchStatus !== "confirmed")) {
-              inFlight.current.add(i.mediaId);
-              return { ...i, matchStatus: "pending" };
-            }
-            return i;
-          }),
-        );
-      }
-      toast.success(d.enqueued > 0 ? `AI identifying ${d.enqueued} item${d.enqueued === 1 ? "" : "s"} in the background` : "Nothing new to identify");
+      toast.success(
+        d.applied > 0
+          ? `Tagged ${d.applied} from file names${d.suggested ? `, ${d.suggested} suggested` : ""} (${d.scanned} scanned)`
+          : `No product names found in ${d.scanned} file name${d.scanned === 1 ? "" : "s"} — tag them manually below`,
+      );
+      load();
     } else {
-      toast.error(d.error ?? "Could not start identification");
+      toast.error(d.error ?? "Matching failed");
     }
   };
 
-  const identifyOne = async () => {
-    if (!item) return;
-    await fetch(API, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mediaType: type, mediaIds: [item.mediaId], force: true }),
-    });
-    inFlight.current.add(item.mediaId);
-    setItems((prev) => prev.map((i) => (i.mediaId === item.mediaId ? { ...i, matchStatus: "pending" } : i)));
-    setIdentifying(true);
-    toast.success("Re-running AI on this item");
-  };
-
-  // Drop the current item and move to the next one (by id, so the list can
-  // re-sort freely without losing our place).
   const advance = () => {
     const idx = items.findIndex((i) => i.mediaId === currentId);
     const next = items[idx + 1] ?? items[idx - 1] ?? null;
@@ -222,14 +173,18 @@ export function SkuIdentifier() {
   const toggle = (productId: string) =>
     setSelected((prev) => (prev.includes(productId) ? prev.filter((p) => p !== productId) : [...prev, productId]));
 
-  const manualMatches = useMemo(() => {
-    const q = manualSearch.trim().toLowerCase();
-    if (!q) return [];
-    return products.filter((p) => p.name?.toLowerCase().includes(q)).slice(0, 8);
-  }, [manualSearch, products]);
+  // Full catalog, filtered by search, selected products floated to the top.
+  const catalog = useMemo(() => {
+    const q = catalogSearch.trim().toLowerCase();
+    const list = q ? products.filter((p) => p.name?.toLowerCase().includes(q)) : products;
+    return [...list].sort((a, b) => {
+      const sa = selected.includes(a.id) ? 0 : 1;
+      const sb = selected.includes(b.id) ? 0 : 1;
+      return sa - sb || (a.name ?? "").localeCompare(b.name ?? "");
+    });
+  }, [products, catalogSearch, selected]);
 
-  const suggested = items.filter((i) => i.matchStatus === "suggested").length;
-  const unidentified = items.filter((i) => i.matchStatus === null || i.matchStatus === "failed").length;
+  const fileMatches = item?.candidates.filter((c) => c.via === "filename") ?? [];
 
   if (loading) return <div className="animate-pulse h-96 bg-muted rounded-lg" />;
 
@@ -259,20 +214,12 @@ export function SkuIdentifier() {
             </button>
           ))}
         </div>
-        <span className="text-sm text-muted-foreground">
-          {items.length} shown · {suggested} AI-suggested · {unidentified} not yet identified
-        </span>
+        <span className="text-sm text-muted-foreground">{items.length} shown</span>
         <div className="flex-1" />
-        <Button onClick={() => identifyAll(false)} disabled={!aiConfigured}>
-          <Sparkles className="h-4 w-4 mr-1" /> Identify all with AI
+        <Button onClick={matchFilenames} disabled={matching}>
+          <Wand2 className="h-4 w-4 mr-1" /> {matching ? "Matching…" : "Match file names"}
         </Button>
       </div>
-
-      {!aiConfigured && (
-        <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm">
-          ANTHROPIC_API_KEY isn&apos;t set in this environment — AI runs on the server where it is configured.
-        </div>
-      )}
 
       {items.length === 0 ? (
         <Card>
@@ -297,11 +244,9 @@ export function SkuIdentifier() {
                 ) : (
                   <span className="flex h-full w-full items-center justify-center bg-muted text-[10px]">?</span>
                 )}
-                <span
-                  className={`absolute bottom-0.5 right-0.5 h-2 w-2 rounded-full ${
-                    i.matchStatus === "suggested" ? "bg-blue-500" : i.matchStatus === "pending" ? "bg-amber-400 animate-pulse" : i.matchStatus === "failed" ? "bg-red-500" : "bg-gray-300"
-                  }`}
-                />
+                {i.matchStatus === "suggested" && (
+                  <span className="absolute bottom-0.5 right-0.5 h-2 w-2 rounded-full bg-blue-500" />
+                )}
               </button>
             ))}
           </div>
@@ -334,62 +279,27 @@ export function SkuIdentifier() {
               )}
             </div>
 
-            {/* Candidates */}
+            {/* Catalog picker */}
             <div className="space-y-2 min-w-0">
-              {item.matchStatus === "pending" && (
-                <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-sm">
-                  <RefreshCw className="h-4 w-4 animate-spin text-primary" />
-                  <span>
-                    <span className="font-medium">Analyzing…</span>
-                    <span className="block text-xs text-muted-foreground">
-                      Checking the file name, then sampling video frames against the catalog.
-                    </span>
-                  </span>
-                </div>
-              )}
-              {item.matchStatus === "failed" && item.matchError && (
-                <div className="rounded border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                  AI failed: {item.matchError}
-                </div>
-              )}
-              {item.matchStatus === null && (
-                <div className="text-sm text-muted-foreground">
-                  Not identified yet — hit <b>Identify all with AI</b> above, or tag manually below.
-                </div>
-              )}
-
-              {item.candidates.length > 0 && (
+              {/* Filename match (pre-ticked) */}
+              {fileMatches.length > 0 && (
                 <div className="space-y-1.5">
-                  <p className="text-sm font-medium">AI matches</p>
-                  {item.candidates.map((c) => {
+                  {fileMatches.map((c) => {
                     const on = selected.includes(c.productId);
                     return (
                       <button
                         key={c.productId}
                         onClick={() => toggle(c.productId)}
-                        className={`flex w-full items-center gap-3 rounded-lg border p-2.5 text-left text-sm transition-colors ${on ? "border-primary bg-primary/5" : "hover:bg-muted"}`}
+                        className={`flex w-full items-center gap-3 rounded-lg border p-2.5 text-left text-sm ${on ? "border-primary bg-primary/5" : "hover:bg-muted"}`}
                       >
                         <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${on ? "bg-primary border-primary text-primary-foreground" : ""}`}>
                           {on && <Check className="h-3.5 w-3.5" />}
                         </span>
-                        <ProductThumb url={c.imageUrl} className="h-16 w-24 bg-white" />
+                        <ProductThumb url={c.imageUrl} className="h-16 w-24" />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-medium">{c.productName}</span>
-                          <span className="block truncate text-xs text-muted-foreground">
-                            {c.via === "filename"
-                              ? "📄 matched from the file name"
-                              : c.via === "both"
-                                ? `looks like ${c.sku} · confirmed by file name`
-                                : `looks like ${c.sku}${c.colorName ? ` (${c.colorName})` : ""}`}
-                          </span>
-                        </span>
-                        <span className="w-24 shrink-0">
-                          <span className="block text-right text-xs font-semibold">{c.confidence}%</span>
-                          <span className="mt-0.5 block h-1.5 w-full rounded bg-muted">
-                            <span
-                              className={`block h-full rounded ${c.confidence >= 75 ? "bg-emerald-500" : c.confidence >= 45 ? "bg-amber-500" : "bg-red-400"}`}
-                              style={{ width: `${c.confidence}%` }}
-                            />
+                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <FileText className="h-3 w-3" /> matched from the file name
                           </span>
                         </span>
                       </button>
@@ -398,40 +308,46 @@ export function SkuIdentifier() {
                 </div>
               )}
 
-              {/* Manual fallback */}
-              <div className="pt-1">
-                <p className="text-sm font-medium">Not in the list? Search the catalog</p>
-                <Input
-                  placeholder="Search products…"
-                  value={manualSearch}
-                  onChange={(e) => setManualSearch(e.target.value)}
-                  className="mt-1 h-8"
-                />
-                {manualMatches.length > 0 && (
-                  <div className="mt-1 space-y-0.5 rounded border p-1.5">
-                    {manualMatches.map((p) => {
-                      const on = selected.includes(p.id);
-                      return (
-                        <button
-                          key={p.id}
-                          onClick={() => toggle(p.id)}
-                          className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm ${on ? "bg-primary/10" : "hover:bg-muted"}`}
-                        >
-                          <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "bg-primary border-primary text-primary-foreground" : ""}`}>
-                            {on && <Check className="h-3 w-3" />}
+              {/* Full catalog */}
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium">Catalog</p>
+                  <Input
+                    placeholder="Filter products…"
+                    value={catalogSearch}
+                    onChange={(e) => setCatalogSearch(e.target.value)}
+                    className="h-8 flex-1"
+                  />
+                </div>
+                <div className="mt-1.5 grid max-h-[420px] grid-cols-2 gap-1.5 overflow-y-auto rounded-lg border p-1.5 sm:grid-cols-3">
+                  {catalog.map((p) => {
+                    const on = selected.includes(p.id);
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => toggle(p.id)}
+                        className={`relative flex flex-col items-center gap-1 rounded-lg border p-2 text-center ${on ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted"}`}
+                        title={p.name ?? undefined}
+                      >
+                        {on && (
+                          <span className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                            <Check className="h-3 w-3" />
                           </span>
-                          <ProductThumb url={p.imageUrl} className="h-8 w-8" />
-                          <span className="truncate">{p.name ?? "Unnamed product"}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+                        )}
+                        <ProductThumb url={p.imageUrl} className="h-14 w-full border-0" />
+                        <span className="w-full truncate text-xs">{p.name ?? "Unnamed"}</span>
+                      </button>
+                    );
+                  })}
+                  {catalog.length === 0 && (
+                    <span className="col-span-full p-3 text-center text-sm text-muted-foreground">No products match “{catalogSearch}”</span>
+                  )}
+                </div>
               </div>
 
-              {/* Selection summary + actions */}
+              {/* Selection + actions */}
               {selected.length > 0 && (
-                <div className="flex flex-wrap gap-1 pt-1">
+                <div className="flex flex-wrap gap-1">
                   {selected.map((id) => {
                     const p = products.find((x) => x.id === id);
                     return (
@@ -443,7 +359,7 @@ export function SkuIdentifier() {
                   })}
                 </div>
               )}
-              <div className="flex flex-wrap gap-2 pt-2">
+              <div className="flex flex-wrap gap-2 pt-1">
                 <Button onClick={() => save(false)} disabled={saving || selected.length === 0}>
                   <Check className="h-4 w-4 mr-1" /> Save {selected.length > 1 ? `${selected.length} products` : "product"}
                 </Button>
@@ -451,10 +367,6 @@ export function SkuIdentifier() {
                   No product visible
                 </Button>
                 <Button variant="ghost" onClick={advance}>Skip</Button>
-                <div className="flex-1" />
-                <Button variant="outline" size="sm" onClick={identifyOne} disabled={!aiConfigured}>
-                  <RefreshCw className="h-3.5 w-3.5 mr-1" /> Re-run AI
-                </Button>
               </div>
             </div>
           </div>

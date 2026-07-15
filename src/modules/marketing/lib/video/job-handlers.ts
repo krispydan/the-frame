@@ -42,15 +42,16 @@ registerJobHandler("marketing.video.split-source", async (input) => {
 });
 
 registerJobHandler("marketing.media.identify", async (input) => {
+  // Legacy handler (identification is synchronous filename matching now,
+  // run directly by the media-match route) — kept so any jobs queued
+  // before the cutover still drain cleanly instead of erroring.
   const mediaType = input.mediaType;
   const mediaId = input.mediaId;
   if ((mediaType !== "clip" && mediaType !== "image") || typeof mediaId !== "string" || !mediaId) {
     throw new Error("mediaType (clip|image) and mediaId are required for marketing.media.identify jobs");
   }
   const { identifyMedia } = await import("./sku-match");
-  // Idempotent: confirmed/suggested rows short-circuit inside identifyMedia.
-  const result = await identifyMedia(mediaType, mediaId, { force: input.force === true });
-  return result as unknown as Record<string, unknown>;
+  return identifyMedia(mediaType, mediaId, { apply: false }) as unknown as Record<string, unknown>;
 });
 
 registerJobHandler("marketing.video.render-post", async (input) => {
