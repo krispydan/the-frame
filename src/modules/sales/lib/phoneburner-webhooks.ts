@@ -48,6 +48,7 @@ import {
 } from "./lead-resolution";
 import { progressCompanyStatus, type CompanyStatus } from "./status-progression";
 import { enqueueCallTranscription, enqueueFollowupSummary } from "./status-sync";
+import { updatePerson } from "./pipedrive-client";
 
 /**
  * Map a PhoneBurner disposition label to a companies.status value, or
@@ -241,6 +242,78 @@ function resolveEvent(body: PbWebhookPayload): ResolveResult | null {
   const r3 = resolveByPbContactId(pbContactUserId(body));
   if (r3) return r3;
   return resolveByPhone(pbContactPhone(body));
+}
+
+/** True for PhoneBurner events that represent an edit to the contact record
+ *  (so we sync fields back), not a passive event like "contact displayed". PB's
+ *  exact event string varies by account config, so match on intent. */
+function isContactUpdateEvent(eventType: string): boolean {
+  return /contact/i.test(eventType) && /(updat|edit|activit|chang)/i.test(eventType);
+}
+
+function validEmail(e: string | null | undefined): string | null {
+  const s = (e ?? "").trim().toLowerCase();
+  return s && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s) ? s : null;
+}
+
+/** Email the agent set on the PB contact (nested or flat shape). */
+function pbContactEmail(body: PbWebhookPayload): string | null {
+  return body.contact?.primary_email ?? body.email ?? null;
+}
+
+/**
+ * Writeback: when an agent edits a contact's email in PhoneBurner, propagate it
+ * to the frame (contacts + campaign_leads) and to the Pipedrive person — so the
+ * frame stays the source of truth and a later push doesn't clobber the fix.
+ * Targets the company's primary contact (our AJM cohort is one-contact-per-
+ * company). No-ops when the email is missing/invalid/unchanged.
+ */
+async function syncContactWriteback(match: ResolveResult, body: PbWebhookPayload): Promise<string> {
+  const newEmail = validEmail(pbContactEmail(body));
+  if (!newEmail) return "no valid email in payload — nothing to sync";
+  const changes: string[] = [];
+
+  // 1. Frame primary contact.
+  const contact = sqlite
+    .prepare("SELECT id, email FROM contacts WHERE company_id = ? ORDER BY is_primary DESC, created_at ASC LIMIT 1")
+    .get(match.companyId) as { id: string; email: string | null } | undefined;
+  if (contact) {
+    if ((contact.email ?? "").trim().toLowerCase() !== newEmail) {
+      sqlite.prepare("UPDATE contacts SET email = ?, updated_at = datetime('now') WHERE id = ?").run(newEmail, contact.id);
+      changes.push("frame contact");
+    }
+  } else {
+    // No contact row yet — create one so the email has a home.
+    sqlite
+      .prepare(
+        `INSERT INTO contacts (id, company_id, email, is_primary, source, created_at, updated_at)
+         VALUES (?, ?, ?, 1, 'phoneburner_writeback', datetime('now'), datetime('now'))`,
+      )
+      .run(crypto.randomUUID(), match.companyId, newEmail);
+    changes.push("frame contact (created)");
+  }
+
+  // 2. campaign_leads row, if this event resolved to one.
+  if (match.campaignLeadId) {
+    const cl = sqlite.prepare("SELECT email FROM campaign_leads WHERE id = ?").get(match.campaignLeadId) as { email: string | null } | undefined;
+    if (cl && (cl.email ?? "").trim().toLowerCase() !== newEmail) {
+      sqlite.prepare("UPDATE campaign_leads SET email = ?, updated_at = datetime('now') WHERE id = ?").run(newEmail, match.campaignLeadId);
+      changes.push("campaign_lead");
+    }
+  }
+
+  // 3. Pipedrive person (email is an array of values on the person).
+  const personId = (sqlite.prepare("SELECT pipedrive_person_id AS id FROM companies WHERE id = ?").get(match.companyId) as { id: number | null } | undefined)?.id ?? null;
+  if (personId) {
+    try {
+      await updatePerson(personId, { email: [newEmail] });
+      changes.push("pipedrive person");
+    } catch (e) {
+      changes.push(`pipedrive failed(${e instanceof Error ? e.message.slice(0, 60) : "err"})`);
+    }
+  }
+
+  return changes.length ? `email → ${newEmail}: ${changes.join(", ")}` : "email unchanged";
 }
 
 function logToActivityFeed(opts: {
@@ -449,16 +522,24 @@ async function handlePhoneBurnerWebhook(
         }
       }
     } else {
-      // Non-call events: just write to activity_feed if we can resolve
-      // a company. Unmatched events get logged in the audit table only.
+      // Non-call events: write to activity_feed if we can resolve a company.
+      // Unmatched events get logged in the audit table only.
       const match = resolveEvent(body);
       if (match) {
+        // Contact edits (email change etc.) → sync the field back to the frame
+        // + Pipedrive so the frame stays source of truth. Passive events
+        // (e.g. contact displayed) are logged only, never written back.
+        if (isContactUpdateEvent(eventType)) {
+          const synced = await syncContactWriteback(match, body);
+          message = `${eventType} → company ${match.companyId}; writeback: ${synced}`;
+        } else {
+          message = `${eventType} → company ${match.companyId}`;
+        }
         logToActivityFeed({
           companyId: match.companyId,
           eventType,
           body,
         });
-        message = `${eventType} → company ${match.companyId}`;
       } else {
         message = `${eventType} unmatched (no company)`;
       }
