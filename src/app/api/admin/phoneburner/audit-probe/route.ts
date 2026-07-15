@@ -21,10 +21,10 @@ export async function GET(req: NextRequest) {
   const client = phoneBurnerClientFor(rep);
 
   const candidates: Array<{ label: string; path: string; query?: Record<string, string | number> }> = [
-    { label: "no_page", path: `/contacts`, query: { sort: "date_updated", order: "desc", page_size: 3 } },
-    { label: "page_0", path: `/contacts`, query: { sort: "date_updated", order: "desc", page_size: 3, page: 0 } },
-    { label: "page_1", path: `/contacts`, query: { sort: "date_updated", order: "desc", page_size: 3, page: 1 } },
-    { label: "page_2", path: `/contacts`, query: { sort: "date_updated", order: "desc", page_size: 3, page: 2 } },
+    { label: "size_25", path: `/contacts`, query: { sort: "date_updated", order: "desc", page_size: 25, page: 1 } },
+    { label: "size_50", path: `/contacts`, query: { sort: "date_updated", order: "desc", page_size: 50, page: 1 } },
+    { label: "size_100", path: `/contacts`, query: { sort: "date_updated", order: "desc", page_size: 100, page: 1 } },
+    { label: "size_200", path: `/contacts`, query: { sort: "date_updated", order: "desc", page_size: 200, page: 1 } },
   ];
 
   const results: Array<{ label: string; path: string; ok: boolean; keys?: string[]; count?: number; firstIds?: string[]; sample?: string; error?: string }> = [];

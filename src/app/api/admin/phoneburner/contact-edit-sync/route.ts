@@ -18,9 +18,10 @@ export async function POST(req: NextRequest) {
   }
   const url = new URL(req.url);
   const maxPages = Math.max(1, parseInt(url.searchParams.get("maxPages") || "5", 10));
+  const pageSize = url.searchParams.get("pageSize") ? Math.max(10, parseInt(url.searchParams.get("pageSize")!, 10)) : undefined;
   const resetWatermark = url.searchParams.get("reset") === "true";
   try {
-    const result = await reconcileContactEdits({ maxPages, resetWatermark });
+    const result = await reconcileContactEdits({ maxPages, pageSize, resetWatermark });
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
