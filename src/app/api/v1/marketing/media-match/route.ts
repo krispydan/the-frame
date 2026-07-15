@@ -1,15 +1,18 @@
 /**
- * /api/v1/marketing/media-match — AI SKU identification review queue.
+ * /api/v1/marketing/media-match — SKU identification review queue.
+ *
+ * Identification is FILENAME matching + manual review (the AI vision
+ * matcher was removed — it couldn't reliably tell the catalog apart).
  *
  * GET  ?type=clip|image&filter=queue|all&limit=
  *   List media of that type with their match state. `queue` (default)
- *   returns items still needing attention (no confirmed match), newest
- *   first; `all` includes confirmed/no_product.
+ *   returns items still needing attention (untagged), newest first;
+ *   `all` includes tagged media for re-review.
  *
- * POST — queue identification jobs.
- *   Body: { mediaType: "clip"|"image", mediaIds?: string[], all?: true, force?: boolean }
- *   `all` targets every eligible item that doesn't already have a
- *   suggestion/confirmation (force re-runs suggested/failed too).
+ * POST — run filename matching NOW (synchronous, no AI, no jobs).
+ *   Body: { mediaType: "clip"|"image", mediaIds?: string[], all?: true, apply?: boolean }
+ *   apply (default true): strong filename matches are written straight
+ *   onto the media; apply:false stores them as suggestions only.
  *
  * PATCH — confirm a review decision + write the tags.
  *   Body: { mediaType, mediaId, productIds: string[] }  → tag products
@@ -25,7 +28,7 @@ export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { videoUrl } from "@/lib/storage/videos";
-import { jobQueue } from "@/modules/core/lib/job-queue";
+import { identifyMedia, confirmMediaProducts } from "@/modules/marketing/lib/video/sku-match";
 
 type MediaType = "clip" | "image";
 
@@ -164,50 +167,58 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  let body: { mediaType?: string; mediaIds?: string[]; all?: boolean; force?: boolean };
+  let body: { mediaType?: string; mediaIds?: string[]; all?: boolean; apply?: boolean };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
   const mediaType = parseType(body.mediaType ?? null);
-  const force = body.force === true;
+  // apply=true: strong filename matches are written straight onto the
+  // media (the shoot naming convention is trusted); otherwise they're
+  // stored as pre-ticked suggestions for review.
+  const apply = body.apply !== false;
 
   let ids: string[];
   if (body.all) {
-    // Everything eligible that still needs a suggestion. force also
-    // re-runs items that already have one (or failed).
-    const skipStatuses = force ? `('confirmed')` : `('confirmed','suggested','no_product')`;
     if (mediaType === "clip") {
-      // Only spend AI on clips that still have NO product tags.
       ids = (sqlite.prepare(`
         SELECT c.id FROM marketing_video_clips c
         LEFT JOIN marketing_media_matches m ON m.media_type = 'clip' AND m.media_id = c.id
-        WHERE c.status = 'ready' AND c.poster_path IS NOT NULL
+        WHERE c.status = 'ready'
           AND NOT EXISTS (SELECT 1 FROM marketing_video_clip_products cp WHERE cp.clip_id = c.id)
-          AND (m.status IS NULL OR m.status NOT IN ${skipStatuses})
-        LIMIT 500
+          AND (m.status IS NULL OR m.status NOT IN ('confirmed','no_product'))
+        LIMIT 1000
       `).all() as Array<{ id: string }>).map((r) => r.id);
     } else {
       ids = (sqlite.prepare(`
         SELECT i.id FROM catalog_images i
         LEFT JOIN marketing_media_matches m ON m.media_type = 'image' AND m.media_id = i.id
         WHERE i.file_path IS NOT NULL AND i.sku_id IS NULL
-          AND (m.status IS NULL OR m.status NOT IN ${skipStatuses})
-        LIMIT 500
+          AND (m.status IS NULL OR m.status NOT IN ('confirmed','no_product'))
+        LIMIT 1000
       `).all() as Array<{ id: string }>).map((r) => r.id);
     }
   } else {
     ids = (body.mediaIds ?? []).map(String).filter(Boolean);
   }
   if (ids.length === 0) {
-    return NextResponse.json({ enqueued: 0, message: "Nothing to identify" });
+    return NextResponse.json({ scanned: 0, applied: 0, suggested: 0, message: "Nothing to match" });
   }
 
+  // Filename matching is pure string work — run it synchronously, no jobs.
+  let applied = 0;
+  let suggested = 0;
   for (const mediaId of ids) {
-    jobQueue.enqueue("marketing.media.identify", "marketing", { mediaType, mediaId, force }, { priority: 4 });
+    try {
+      const r = identifyMedia(mediaType, mediaId, { apply });
+      if (r.applied) applied++;
+      else if (r.status === "suggested") suggested++;
+    } catch {
+      /* one bad row must not sink the batch */
+    }
   }
-  return NextResponse.json({ enqueued: ids.length });
+  return NextResponse.json({ scanned: ids.length, applied, suggested });
 }
 
 export async function PATCH(request: NextRequest) {
@@ -251,39 +262,20 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "productIds (or noProduct) is required" }, { status: 400 });
   }
 
-  if (mediaType === "clip") {
-    const clip = sqlite.prepare(`SELECT id FROM marketing_video_clips WHERE id = ?`).get(mediaId);
-    if (!clip) return NextResponse.json({ error: "Clip not found" }, { status: 404 });
-    // Product-level tagging: replace the clip's tags with every SKU of the
-    // confirmed products (same expansion the pickers do).
-    const skuIds = (sqlite
-      .prepare(`SELECT id FROM catalog_skus WHERE product_id IN (${productIds.map(() => "?").join(",")})`)
-      .all(...productIds) as Array<{ id: string }>).map((r) => r.id);
-    sqlite.prepare(`DELETE FROM marketing_video_clip_products WHERE clip_id = ?`).run(mediaId);
-    const insert = sqlite.prepare(
-      `INSERT OR IGNORE INTO marketing_video_clip_products (id, clip_id, sku_id) VALUES (?, ?, ?)`,
-    );
-    for (const skuId of skuIds) insert.run(crypto.randomUUID(), mediaId, skuId);
-  } else {
-    const image = sqlite.prepare(`SELECT id FROM catalog_images WHERE id = ?`).get(mediaId);
-    if (!image) return NextResponse.json({ error: "Image not found" }, { status: 404 });
-    // A catalog image belongs to exactly one SKU. Prefer the matched
-    // colorway from the AI candidates; fall back to the product's first SKU.
-    const productId = productIds[0];
-    const candidates = (match?.candidatesJson ? JSON.parse(match.candidatesJson) : []) as Array<{
-      productId: string;
-      skuId: string;
-    }>;
-    const fromCandidate = candidates.find((c) => c.productId === productId)?.skuId;
-    const skuId =
-      fromCandidate ??
-      (sqlite.prepare(`SELECT id FROM catalog_skus WHERE product_id = ? ORDER BY sku ASC LIMIT 1`).get(productId) as
-        | { id: string }
-        | undefined)?.id;
-    if (!skuId) return NextResponse.json({ error: "Product has no SKUs" }, { status: 400 });
-    sqlite.prepare(`UPDATE catalog_images SET sku_id = ? WHERE id = ?`).run(skuId, mediaId);
-  }
+  const exists =
+    mediaType === "clip"
+      ? sqlite.prepare(`SELECT id FROM marketing_video_clips WHERE id = ?`).get(mediaId)
+      : sqlite.prepare(`SELECT id FROM catalog_images WHERE id = ?`).get(mediaId);
+  if (!exists) return NextResponse.json({ error: "Media not found" }, { status: 404 });
 
-  upsert("confirmed", productIds);
+  const candidates = (match?.candidatesJson ? JSON.parse(match.candidatesJson) : []) as Array<{
+    productId: string;
+    skuId: string;
+  }>;
+  try {
+    confirmMediaProducts(mediaType, mediaId, productIds, candidates);
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 400 });
+  }
   return NextResponse.json({ saved: true, status: "confirmed" });
 }
