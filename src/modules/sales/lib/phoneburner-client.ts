@@ -38,6 +38,9 @@ export interface PbContactPayload {
   owner_username?: string;
   first_name?: string;
   last_name?: string;
+  /** PB native company/organization field (shows in the contact's Company
+   *  column). Distinct from any custom "Company" field. */
+  company?: string;
   email?: string;
   phone?: string;
   phone_type?: number;

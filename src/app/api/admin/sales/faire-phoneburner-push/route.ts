@@ -93,6 +93,7 @@ function toPayload(l: FairePhoneBurnerLead, ownerId: string | null, username: st
   const p: PbContactPayload = {
     first_name: l.firstName || l.store || undefined,
     last_name: l.lastName || undefined,
+    company: l.store || undefined,
     email: l.email || undefined,
     phone: l.phone,
     city: l.city || undefined,
@@ -155,10 +156,14 @@ export async function POST(req: NextRequest) {
   // Optional rep filter — push only one caller's leads (e.g. just Christina's
   // to her own account) without touching the other's.
   const onlyRep = url.searchParams.get("rep");
+  // refile=true re-processes contacts already tagged faire_phoneburner_pushed —
+  // used to backfill fields (e.g. company) onto contacts pushed by an earlier
+  // run. Normal runs skip already-pushed companies (idempotent).
+  const refile = url.searchParams.get("refile") === "true";
   const { high, low } = fromCsv
     ? buildFairePhoneBurnerLeads(text, { recencyYears: years, highMinSpend: highMin, emailOverlay })
     : buildFairePhoneBurnerLeadsFromDb();
-  const notPushed = (l: FairePhoneBurnerLead) => !(l.frameCompanyId && companyHasTag(l.frameCompanyId, PUSHED_TAG));
+  const notPushed = (l: FairePhoneBurnerLead) => refile || !(l.frameCompanyId && companyHasTag(l.frameCompanyId, PUSHED_TAG));
   const highAfter = (onlyRep === "sandra" ? [] : high).filter(notPushed);
   const lowAfter = (onlyRep === "christina" ? [] : low).filter(notPushed);
   const highTo = limit ? highAfter.slice(0, limit) : highAfter;
@@ -250,11 +255,13 @@ export async function POST(req: NextRequest) {
             // campaign folder so it shows up for this week's calling. category_id
             // sets the folder; owner_id re-assigns to the dialing rep (ignored by
             // PB on update if the token can't own it, which is fine).
-            if (folderId) {
-              const patch: Partial<PbContactPayload> = { category_id: folderId };
-              if (ownerId) patch.owner_id = ownerId;
-              await client.updateContact(resp.id, patch);
-            }
+            // Enrich the existing contact with the company name too — many were
+            // imported without it (that's why "Company" shows blank in PB).
+            const patch: Partial<PbContactPayload> = {};
+            if (folderId) patch.category_id = folderId;
+            if (ownerId) patch.owner_id = ownerId;
+            if (l.store) patch.company = l.store;
+            if (Object.keys(patch).length) await client.updateContact(resp.id, patch);
             filed++;
           } else {
             added++;
