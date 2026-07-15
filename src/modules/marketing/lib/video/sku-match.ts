@@ -21,7 +21,7 @@ import { and, eq } from "drizzle-orm";
 import { readVideo, materializeVideo, videoScratchPath } from "@/lib/storage/videos";
 import { readImage } from "@/lib/storage/local";
 import { readFromR2IfPresent } from "@/lib/storage/media";
-import { videoModel } from "@/modules/marketing/lib/ai-model";
+import { skuMatchModel } from "@/modules/marketing/lib/ai-model";
 import { runFfmpeg } from "./ffmpeg";
 import { getReferenceSheets, loadReferenceSkus, type ReferenceSku } from "./sku-reference";
 
@@ -171,12 +171,14 @@ const MATCH_TOOL = {
       candidates: {
         type: "array",
         description:
-          "Catalog SKU codes that plausibly match, best first. Include several options when unsure. Empty if no catalog product is identifiable.",
+          "The 3-5 MOST LIKELY catalog SKU codes, ranked best-first, each with a confidence. " +
+          "ALWAYS return several options for the human to review — never just one — unless nothing is " +
+          "identifiable at all (then empty). This is a shortlist for a person to pick from, not a final answer.",
         items: {
           type: "object",
           properties: {
             sku: { type: "string", description: "Exact SKU code from a reference sheet, e.g. JX1005-OLV" },
-            confidence: { type: "number", description: "0-100 — how confident this product is in the frame" },
+            confidence: { type: "number", description: "0-100 — how confident this specific product is the one in the frame" },
           },
           required: ["sku", "confidence"],
         },
@@ -206,14 +208,17 @@ async function callVision(content: unknown[]): Promise<{ candidates: RawCandidat
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: videoModel(),
+      model: skuMatchModel(),
       max_tokens: 1024,
       system:
         "You identify Jaxy eyewear products in marketing media. You are given labeled catalog reference sheets " +
-        "(each cell shows one colorway with its SKU code) followed by ONE media frame to identify. Match by frame " +
-        "shape, color/pattern, temple details and lens tint. Sunglasses are often worn on a model at an angle — " +
-        "judge carefully. Only report SKU codes that appear on the sheets. Be honest: high confidence (80+) only " +
-        "for clear matches; when torn between look-alikes, list each with moderate confidence.",
+        "(each cell shows one colorway with its SKU code) followed by ONE media frame to identify. " +
+        "Your job is to return a RANKED SHORTLIST (3-5) of the most likely products for a human to review — " +
+        "not a single guess. Match on, in priority order: (1) FRAME COLOR/PATTERN — solid black vs tortoise/havana " +
+        "vs clear/crystal vs colored are very different; do not confuse them; (2) frame SHAPE (round, rectangle, " +
+        "cat-eye, aviator, oversized); (3) temple + lens details. Sunglasses are usually worn on a model at an " +
+        "angle — judge carefully. Only report SKU codes that appear on the sheets. Calibrate confidence honestly: " +
+        "reserve 80+ for a clear, unambiguous match; use 40-70 when it's plausibly one of several look-alikes.",
       tools: [MATCH_TOOL],
       tool_choice: { type: "tool", name: MATCH_TOOL.name },
       messages: [{ role: "user", content }],
@@ -443,7 +448,7 @@ export async function identifyMedia(
       status,
       candidatesJson: JSON.stringify(candidates),
       error: null,
-      model: videoModel(),
+      model: skuMatchModel(),
     });
     return { status, candidates };
   } catch (e) {
