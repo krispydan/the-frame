@@ -291,6 +291,12 @@ export class PhoneBurnerClient {
     throw lastError ?? new Error("PhoneBurner request failed");
   }
 
+  /** Diagnostic: raw authenticated GET against an arbitrary REST path. Used to
+   *  probe undocumented endpoints (e.g. the contact audit log). */
+  async rawGet(path: string, query?: Record<string, string | number | undefined>): Promise<unknown> {
+    return await this.request<unknown>("GET", path, undefined, query);
+  }
+
   // ── Auth probe ──
   // PhoneBurner has no /me endpoint. A 1-item folder list is the
   // cheapest auth-required call.
