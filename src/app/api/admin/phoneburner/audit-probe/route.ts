@@ -21,14 +21,13 @@ export async function GET(req: NextRequest) {
   const client = phoneBurnerClientFor(rep);
 
   const candidates: Array<{ label: string; path: string; query?: Record<string, string | number> }> = [
-    { label: "list_sort_updated", path: `/contacts`, query: { sort: "date_updated", order: "desc", page_size: 2 } },
-    { label: "list_sort_dateupdated", path: `/contacts`, query: { sort_by: "date_updated", sort_order: "desc", page_size: 2 } },
-    { label: "activities_type", path: `/contacts/${contactId}/activities`, query: { type: "update" } },
-    { label: "activities_pagesize", path: `/contacts/${contactId}/activities`, query: { page_size: 5 } },
-    { label: "auditlog", path: `/contacts/${contactId}/auditlog` },
+    { label: "no_page", path: `/contacts`, query: { sort: "date_updated", order: "desc", page_size: 3 } },
+    { label: "page_0", path: `/contacts`, query: { sort: "date_updated", order: "desc", page_size: 3, page: 0 } },
+    { label: "page_1", path: `/contacts`, query: { sort: "date_updated", order: "desc", page_size: 3, page: 1 } },
+    { label: "page_2", path: `/contacts`, query: { sort: "date_updated", order: "desc", page_size: 3, page: 2 } },
   ];
 
-  const results: Array<{ label: string; path: string; ok: boolean; keys?: string[]; sample?: string; error?: string }> = [];
+  const results: Array<{ label: string; path: string; ok: boolean; keys?: string[]; count?: number; firstIds?: string[]; sample?: string; error?: string }> = [];
   for (const c of candidates) {
     const qs = c.query ? `?${new URLSearchParams(Object.entries(c.query).map(([k, v]) => [k, String(v)])).toString()}` : "";
     try {
@@ -37,13 +36,19 @@ export async function GET(req: NextRequest) {
       // Surface the first contact record's field names so we can see if
       // date_updated / primary_email / primary_phone are present.
       let keys: string[] | undefined;
+      let count: number | undefined;
+      let firstIds: string[] | undefined;
       try {
         const r = raw as Record<string, unknown>;
         const arr = (r?.contacts as { contacts?: unknown[] })?.contacts;
-        const first = Array.isArray(arr) ? arr[0] : undefined;
-        if (first && typeof first === "object") keys = Object.keys(first as Record<string, unknown>);
+        if (Array.isArray(arr)) {
+          count = arr.length;
+          firstIds = arr.slice(0, 3).map((x) => String((x as Record<string, unknown>)?.user_id ?? "?"));
+          const first = arr[0];
+          if (first && typeof first === "object") keys = Object.keys(first as Record<string, unknown>);
+        }
       } catch { /* ignore */ }
-      results.push({ label: c.label, path: c.path + qs, ok: true, keys, sample: str.slice(0, 1200) });
+      results.push({ label: c.label, path: c.path + qs, ok: true, keys, count, firstIds, sample: str.slice(0, 200) });
     } catch (e) {
       results.push({ label: c.label, path: c.path + qs, ok: false, error: e instanceof Error ? e.message.slice(0, 200) : String(e) });
     }
