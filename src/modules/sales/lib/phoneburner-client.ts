@@ -297,6 +297,50 @@ export class PhoneBurnerClient {
     return await this.request<unknown>("GET", path, undefined, query);
   }
 
+  /**
+   * Page contacts ordered by most-recently-updated. Used by the contact-edit
+   * reconciliation poller to catch agent-side field edits (PB has no
+   * contact-edit webhook). Returns a compact shape + pagination.
+   */
+  async listContactsByUpdated(opts: { page?: number; pageSize?: number } = {}): Promise<{
+    contacts: Array<{ userId: string; email: string | null; phone: string | null; dateUpdated: string | null }>;
+    page: number;
+    totalPages: number | null;
+  }> {
+    const pageSize = opts.pageSize ?? 100;
+    const page = opts.page ?? 1;
+    const raw = (await this.request<Record<string, unknown>>("GET", "/contacts", undefined, {
+      sort: "date_updated",
+      order: "desc",
+      page_size: pageSize,
+      page,
+    })) as Record<string, unknown>;
+    const env = (raw?.contacts ?? raw) as Record<string, unknown>;
+    const arr = (env?.contacts as unknown[]) ?? [];
+    const readStr = (v: unknown): string | null => (v == null ? null : String(v).trim() || null);
+    const pickPhone = (c: Record<string, unknown>): string | null => {
+      const pp = c.primary_phone as { phone?: unknown; raw_phone?: unknown } | undefined;
+      return readStr(pp?.phone ?? pp?.raw_phone ?? c.raw_phone);
+    };
+    const pickEmail = (c: Record<string, unknown>): string | null => {
+      const pe = c.primary_email as { email_address?: unknown } | string | undefined;
+      if (typeof pe === "string") return readStr(pe);
+      return readStr(pe?.email_address);
+    };
+    const contacts = (Array.isArray(arr) ? arr : [])
+      .filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
+      .map((c) => ({
+        userId: readStr(c.user_id) ?? "",
+        email: pickEmail(c),
+        phone: pickPhone(c),
+        dateUpdated: readStr(c.date_updated ?? c.date_modified),
+      }))
+      .filter((c) => c.userId);
+    const totalPagesRaw = env?.total_pages ?? env?.totalPages;
+    const totalPages = totalPagesRaw != null ? Number(totalPagesRaw) : null;
+    return { contacts, page, totalPages: Number.isFinite(totalPages as number) ? (totalPages as number) : null };
+  }
+
   // ── Auth probe ──
   // PhoneBurner has no /me endpoint. A 1-item folder list is the
   // cheapest auth-required call.

@@ -26,6 +26,7 @@ import { syncShipHeroInventory, isDuringBusinessHours } from "@/modules/operatio
 import { refreshIfExpiringSoon as refreshShipHeroToken } from "@/modules/operations/lib/shiphero/auth";
 import { pullPhoneBurnerCallResults } from "@/modules/sales/lib/phoneburner-sync";
 import { ensureFreshPhoneBurnerToken } from "@/modules/sales/lib/phoneburner-oauth";
+import { reconcileContactEdits } from "@/modules/sales/lib/phoneburner-contact-sync";
 import { postPhoneBurnerCallDigest } from "@/modules/integrations/lib/slack/phoneburner-digest";
 import { runShopifyMetafieldSync } from "@/modules/catalog/lib/shopify-metafields/bulk-sync-job";
 import { syncSettlementsAllShops } from "@/modules/finance/lib/shopify-settlements";
@@ -275,6 +276,18 @@ export const CRON_JOBS: CronJob[] = [
       });
       return { refreshed: !!token, hasToken: !!token };
     },
+  },
+  // Reconcile agent-side contact edits from PhoneBurner. PB has no
+  // contact-edit webhook, so we poll the /contacts list (ordered by
+  // date_updated) and sync any email that now differs from the frame back into
+  // the frame + Pipedrive. Watermark per account keeps each run cheap. Runs
+  // during business hours (when agents are dialing/editing).
+  {
+    id: "phoneburner-contact-edit-sync",
+    schedule: "*/15 * * * *",  // every 15 min
+    description: "Poll PhoneBurner for agent-edited contact emails and sync them back to the frame + Pipedrive (no PB contact-edit webhook exists)",
+    handler: () => reconcileContactEdits({ maxPages: 5 }),
+    guard: () => isDuringBusinessHours(),
   },
   // Daily call activity summary posted to Slack — totals, connect rate,
   // top dispositions, agent breakdown. Skipped on zero-call days.
