@@ -36,7 +36,7 @@ import {
 import { settlements, settlementLineItems } from "@/modules/finance/schema";
 import { orders } from "@/modules/orders/schema";
 import { eq, and, inArray } from "drizzle-orm";
-import { postManualJournal, postBankTransactionReceive, postSettlementInvoice } from "@/modules/finance/lib/xero-client";
+import { postManualJournal, postBankTransactionReceive, postSettlementInvoice, postClawbackBill } from "@/modules/finance/lib/xero-client";
 import {
   listFaireOrdersPage,
   summarizeFairePayout,
@@ -163,16 +163,39 @@ export async function syncFairePayouts(opts: { maxPages?: number } = {}): Promis
             .prepare("SELECT 1 FROM xero_journal_log WHERE source_id = ? AND xero_object_type = 'issue_credit' LIMIT 1")
             .get(summary.payoutKey);
           if (!alreadyAlerted) {
+            // For a clawback (Faire pays LESS; money is pulled from the bank as
+            // a separate debit), auto-create an ACCPAY Bill coded to 5900 so
+            // the bank debit reconciles by one-click Match — mirroring how the
+            // payout deposit matches the ACCREC invoice.
+            let billId: string | null = null;
+            let billError: string | null = null;
+            if (drift < 0) {
+              const bill = await postClawbackBill({
+                contactName: "Faire",
+                billNumber: `FAIRE-IC-${summary.displayId}`,
+                reference: `Faire issue credit — order ${summary.displayId}`,
+                date: new Date().toISOString().slice(0, 10),
+                amount: Math.abs(drift),
+                accountCode: cfg.inventoryAdjustmentsAccount ?? "5900",
+                description: `Faire issue-report deduction (under-shipment/damaged/missing) — order ${summary.displayId}${summary.retailerCompany ? ` (${summary.retailerCompany})` : ""}. Payout revised ${existing.amount.toFixed(2)} → ${summary.totalPayout.toFixed(2)}. Match the FAIRE WHOLESALE bank debit to this bill.`,
+                tracking: cfg.trackingCategoryId
+                  ? [{ TrackingCategoryID: cfg.trackingCategoryId, Name: cfg.trackingCategoryName ?? undefined, Option: cfg.trackingOptionName ?? "" }]
+                  : undefined,
+              });
+              if (bill.success) billId = bill.billId ?? null;
+              else billError = bill.error ?? "bill creation failed";
+            }
             await db.insert(xeroJournalLog).values({
               syncRunId: runId,
               sourcePlatform: PLATFORM,
               sourceId: summary.payoutKey,
               xeroObjectType: "issue_credit",
-              xeroObjectId: null,
-              status: "detected",
+              xeroObjectId: billId,
+              status: billError ? "failed" : "detected",
               amount: drift,
               currency: summary.currency,
-              payload: JSON.stringify({ kind: "faire_issue_credit", displayId: summary.displayId, originalPayout: existing.amount, currentPayout: summary.totalPayout, drift }),
+              payload: JSON.stringify({ kind: "faire_issue_credit", displayId: summary.displayId, originalPayout: existing.amount, currentPayout: summary.totalPayout, drift, billId, billError }),
+              errorMessage: billError,
             });
             try {
               const { notifyFaireIssueCredit } = await import("@/modules/integrations/lib/slack/notifications");
@@ -183,6 +206,8 @@ export async function syncFairePayouts(opts: { maxPages?: number } = {}): Promis
                 currentPayout: summary.totalPayout,
                 delta: drift,
                 currency: summary.currency,
+                billNumber: billId ? `FAIRE-IC-${summary.displayId}` : null,
+                billError,
               });
             } catch (e) {
               console.error("[faire-payout-sync] issue-credit Slack alert failed:", e);

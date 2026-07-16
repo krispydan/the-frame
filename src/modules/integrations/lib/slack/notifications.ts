@@ -649,8 +649,15 @@ export async function notifyFaireIssueCredit(opts: {
   currentPayout: number;
   delta: number; // negative = Faire reduced the payout
   currency: string;
+  billNumber?: string | null; // ACCPAY bill auto-created for the clawback
+  billError?: string | null;
 }) {
   const dir = opts.delta < 0 ? "reduced" : "increased";
+  const action = opts.billNumber
+    ? `✅ Bill *${opts.billNumber}* (${Math.abs(opts.delta).toFixed(2)} → 5900) has been created in Xero — when the FAIRE WHOLESALE debit lands on Mercury, just *Match* it to the bill.`
+    : opts.billError
+      ? `⚠️ Auto-creating the bill failed (_${opts.billError}_) — create it manually or code the bank debit as Spend Money → 5900 (contact: Faire, reference order #${opts.displayId}). See SOP §5.5.`
+      : `Code the bank line per SOP §5.5.`;
   await postSlack({
     topic: "finance.faire_issue_credit",
     text: `🟠 Faire issue credit — order ${opts.displayId}: payout ${dir} by ${Math.abs(opts.delta).toFixed(2)}`,
@@ -662,7 +669,7 @@ export async function notifyFaireIssueCredit(opts: {
           text:
             `🟠 *Faire issue credit detected — order ${opts.displayId}*${opts.retailer ? ` (${opts.retailer})` : ""}\n` +
             `Faire retroactively ${dir} this already-synced payout: ${opts.currency} ${opts.originalPayout.toFixed(2)} → ${opts.currentPayout.toFixed(2)} (Δ ${opts.delta.toFixed(2)}).\n` +
-            `Usually an under-shipment / damaged / missing issue report. *Expect a matching bank ${opts.delta < 0 ? "debit" : "credit"} of ${Math.abs(opts.delta).toFixed(2)} on Mercury* — since our synced entry kept the original amount, code it as *Spend Money → 5900 Inventory Adjustments & Shrinkage* (contact: Faire, reference the order #). See SOP §4b.`,
+            `Usually an under-shipment / damaged / missing issue report. *Expect a bank ${opts.delta < 0 ? "debit" : "credit"} of ${Math.abs(opts.delta).toFixed(2)} on Mercury.*\n${action}`,
         },
       },
     ],

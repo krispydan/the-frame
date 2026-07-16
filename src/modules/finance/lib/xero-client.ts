@@ -420,6 +420,74 @@ export async function postSettlementInvoice(
 }
 
 /**
+ * Post an ACCPAY Bill for a marketplace clawback (e.g. a Faire issue-report
+ * deduction taken directly from the bank). The bank debit then reconciles by
+ * one-click Match against the bill. Idempotent by InvoiceNumber (bills live on
+ * the /Invoices endpoint with Type ACCPAY, same scope as sales invoices).
+ */
+export async function postClawbackBill(opts: {
+  contactName: string;
+  billNumber: string;   // idempotency key, e.g. "FAIRE-IC-9HZEUWQS8D"
+  reference: string;
+  date: string;         // YYYY-MM-DD (detection date; the bank debit lands near it)
+  amount: number;       // positive = what the marketplace deducted
+  accountCode: string;  // e.g. 5900 Inventory Adjustments & Shrinkage
+  description: string;
+  tracking?: Array<{ TrackingCategoryID: string; Name?: string; Option: string }>;
+}): Promise<{ success: boolean; billId?: string; existed?: boolean; error?: string }> {
+  const auth = await getAccessToken();
+  if (!auth) return { success: false, error: "Not authenticated with Xero" };
+  const headers = {
+    Authorization: `Bearer ${auth.token}`,
+    "xero-tenant-id": auth.tenantId,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  try {
+    const lookup = await fetch(
+      `https://api.xero.com/api.xro/2.0/Invoices?InvoiceNumbers=${encodeURIComponent(opts.billNumber)}`,
+      { headers },
+    );
+    if (lookup.ok) {
+      const j = await lookup.json();
+      const existingId = j?.Invoices?.[0]?.InvoiceID;
+      if (existingId) return { success: true, billId: existingId, existed: true };
+    }
+  } catch { /* fall through to create */ }
+
+  const res = await fetch("https://api.xero.com/api.xro/2.0/Invoices", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      Invoices: [{
+        Type: "ACCPAY",
+        Contact: { Name: opts.contactName },
+        Date: opts.date,
+        DueDate: opts.date,
+        InvoiceNumber: opts.billNumber,
+        Reference: opts.reference,
+        Status: "AUTHORISED",
+        LineAmountTypes: "NoTax",
+        LineItems: [{
+          Description: opts.description,
+          Quantity: 1,
+          UnitAmount: opts.amount,
+          AccountCode: opts.accountCode,
+          ...(opts.tracking ? { Tracking: opts.tracking } : {}),
+        }],
+      }],
+    }),
+  });
+  if (!res.ok) {
+    return { success: false, error: `Xero Bills ${res.status}: ${(await res.text()).slice(0, 300)}` };
+  }
+  const result = await res.json();
+  const billId = result?.Invoices?.[0]?.InvoiceID;
+  if (!billId) return { success: false, error: "Xero returned no InvoiceID for bill" };
+  return { success: true, billId };
+}
+
+/**
  * Post a settlement ACCRECCREDIT credit note (for net-negative payouts where
  * refunds exceeded sales). Idempotent by CreditNoteNumber.
  */
