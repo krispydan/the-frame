@@ -134,7 +134,7 @@ class ApifyClient {
    */
   async runGoogleMapsScraper(
     searchStrings: string[],
-    opts: { maxPerSearch?: number; timeoutSecs?: number } = {},
+    opts: { maxPerSearch?: number; timeoutSecs?: number; fast?: boolean } = {},
   ): Promise<GoogleMapsPlace[]> {
     const token = this.resolveApiKey();
     if (!token) {
@@ -159,11 +159,14 @@ class ApifyClient {
       // Skip noise fields we don't use to keep response smaller
       includeReviews: false,
       includeImages: false,
-      includeOpeningHours: true,
+      // fast mode: skip the per-place detail-page crawl + hours — the street
+      // address, city/state, and postal code are in the search result, so we
+      // don't need the (slow) detail page just to get a mailing address.
+      includeOpeningHours: !opts.fast,
       includePeopleAlsoSearch: false,
       includePopularTimes: false,
       includeWebResults: false,
-      scrapePlaceDetailPage: true,
+      scrapePlaceDetailPage: !opts.fast,
     };
 
     // Retry policy: 429 (rate-limit) gets backed off and retried up
