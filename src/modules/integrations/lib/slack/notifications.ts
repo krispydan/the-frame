@@ -642,6 +642,33 @@ export async function notifyCogsDailySummary(opts: {
   });
 }
 
+export async function notifyFaireIssueCredit(opts: {
+  displayId: string;
+  retailer: string | null;
+  originalPayout: number;
+  currentPayout: number;
+  delta: number; // negative = Faire reduced the payout
+  currency: string;
+}) {
+  const dir = opts.delta < 0 ? "reduced" : "increased";
+  await postSlack({
+    topic: "finance.faire_issue_credit",
+    text: `🟠 Faire issue credit — order ${opts.displayId}: payout ${dir} by ${Math.abs(opts.delta).toFixed(2)}`,
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text:
+            `🟠 *Faire issue credit detected — order ${opts.displayId}*${opts.retailer ? ` (${opts.retailer})` : ""}\n` +
+            `Faire retroactively ${dir} this already-synced payout: ${opts.currency} ${opts.originalPayout.toFixed(2)} → ${opts.currentPayout.toFixed(2)} (Δ ${opts.delta.toFixed(2)}).\n` +
+            `Usually an under-shipment / damaged / missing issue report. *Expect a matching bank ${opts.delta < 0 ? "debit" : "credit"} of ${Math.abs(opts.delta).toFixed(2)} on Mercury* — since our synced entry kept the original amount, code it as *Spend Money → 5900 Inventory Adjustments & Shrinkage* (contact: Faire, reference the order #). See SOP §4b.`,
+        },
+      },
+    ],
+  });
+}
+
 export async function notifyCogsRunFailed(opts: { date: string; errorMessage: string }) {
   await postSlack({
     topic: "finance.cogs_run_failed",

@@ -147,9 +147,50 @@ export async function syncFairePayouts(opts: { maxPages?: number } = {}): Promis
 
       // Idempotency: skip if we already posted this payout
       const existing = sqlite
-        .prepare("SELECT id FROM xero_payout_syncs WHERE source_platform = ? AND source_payout_id = ? LIMIT 1")
-        .get(PLATFORM, summary.payoutKey);
-      if (existing) { result.skipped++; continue; }
+        .prepare("SELECT id, amount FROM xero_payout_syncs WHERE source_platform = ? AND source_payout_id = ? LIMIT 1")
+        .get(PLATFORM, summary.payoutKey) as { id: string; amount: number } | undefined;
+      if (existing) {
+        // ── Issue-credit detection ──
+        // Faire retroactively rewrites payout_costs.total_payout when a
+        // retailer issue report (under-shipment / damaged / missing) is
+        // resolved, and claws the difference back as a SEPARATE bank debit.
+        // Our posted entry keeps the original amount, so a drift between the
+        // stored amount and the API's current amount means a bank line is
+        // coming that needs manual coding (SOP §4b). Alert once per payout.
+        const drift = Math.round((summary.totalPayout - existing.amount) * 100) / 100;
+        if (Math.abs(drift) >= 0.01) {
+          const alreadyAlerted = sqlite
+            .prepare("SELECT 1 FROM xero_journal_log WHERE source_id = ? AND xero_object_type = 'issue_credit' LIMIT 1")
+            .get(summary.payoutKey);
+          if (!alreadyAlerted) {
+            await db.insert(xeroJournalLog).values({
+              syncRunId: runId,
+              sourcePlatform: PLATFORM,
+              sourceId: summary.payoutKey,
+              xeroObjectType: "issue_credit",
+              xeroObjectId: null,
+              status: "detected",
+              amount: drift,
+              currency: summary.currency,
+              payload: JSON.stringify({ kind: "faire_issue_credit", displayId: summary.displayId, originalPayout: existing.amount, currentPayout: summary.totalPayout, drift }),
+            });
+            try {
+              const { notifyFaireIssueCredit } = await import("@/modules/integrations/lib/slack/notifications");
+              await notifyFaireIssueCredit({
+                displayId: summary.displayId,
+                retailer: summary.retailerCompany ?? null,
+                originalPayout: existing.amount,
+                currentPayout: summary.totalPayout,
+                delta: drift,
+                currency: summary.currency,
+              });
+            } catch (e) {
+              console.error("[faire-payout-sync] issue-credit Slack alert failed:", e);
+            }
+          }
+        }
+        result.skipped++; continue;
+      }
 
       try {
         if (getPayoutRevenueModel() === "invoice") {
