@@ -129,25 +129,28 @@ export async function enrichCatalogChunk(limit = 12): Promise<{ processed: numbe
     filled = 0,
     noResult = 0;
 
+  // Run all batches CONCURRENTLY (one Apify wave) so a chunk finishes in ~200s
+  // rather than ~800s serial — short enough that a fire-and-forget cron run
+  // completes before any container recycle. Each batch's Apify call is
+  // independent; a failed batch resolves to [] and its targets fall through to
+  // no-result (retried on a later run only if untagged, which they won't be).
   const BATCH = 3;
-  for (let i = 0; i < targets.length; i += BATCH) {
-    const batch = targets.slice(i, i + BATCH);
-    const queries = batch.map(queryFor);
-    let places: Awaited<ReturnType<typeof apifyClient.runGoogleMapsScraper>> = [];
-    try {
-      places = await apifyClient.runGoogleMapsScraper(queries, { maxPerSearch: 1, timeoutSecs: 200 });
-    } catch {
-      // Batch failed (usually a timeout) — retry each query alone; single-place
-      // runs are fast. Anything still failing falls through to no-result.
-      for (const q of queries) {
-        try {
-          places.push(...(await apifyClient.runGoogleMapsScraper([q], { maxPerSearch: 1, timeoutSecs: 120 })));
-        } catch {
-          /* leave unmatched */
-        }
-      }
-    }
+  const batches: CohortRow[][] = [];
+  for (let i = 0; i < targets.length; i += BATCH) batches.push(targets.slice(i, i + BATCH));
 
+  const batchResults = await Promise.all(
+    batches.map(async (batch) => {
+      const queries = batch.map(queryFor);
+      try {
+        const places = await apifyClient.runGoogleMapsScraper(queries, { maxPerSearch: 1, timeoutSecs: 200 });
+        return { batch, queries, places };
+      } catch {
+        return { batch, queries, places: [] as Awaited<ReturnType<typeof apifyClient.runGoogleMapsScraper>> };
+      }
+    }),
+  );
+
+  for (const { batch, queries, places } of batchResults) {
     for (let j = 0; j < batch.length; j++) {
       const t = batch[j];
       processed++;
