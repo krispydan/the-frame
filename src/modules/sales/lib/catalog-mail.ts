@@ -122,6 +122,44 @@ export function resetNoResultTags(): number {
   return cleared;
 }
 
+const compressName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/** Diagnostic: run Apify for a few missing-address targets and report what came
+ *  back + the match decision, WITHOUT writing or tagging. */
+export async function debugCatalogEnrich(limit = 3): Promise<unknown[]> {
+  const targets = loadCatalogCohort().filter((r) => !r.addressComplete && !r.noAddressResult).slice(0, limit);
+  const queries = targets.map(queryFor);
+  let places: Awaited<ReturnType<typeof apifyClient.runGoogleMapsScraper>> = [];
+  let apifyError: string | null = null;
+  try {
+    places = await apifyClient.runGoogleMapsScraper(queries, { maxPerSearch: 1, timeoutSecs: 120 });
+  } catch (e) {
+    apifyError = e instanceof Error ? e.message.slice(0, 200) : String(e);
+  }
+  return targets.map((t, j) => {
+    const place = places.find((p) => (p.searchString || "") === queries[j]) ?? places[j];
+    const street = place ? String(place.street || "").trim() || String(place.address || "").split(",")[0]?.trim() || "" : "";
+    const sameName = !!compressName(String(place?.title || "")) && (compressName(String(place?.title || "")).includes(compressName(t.store)) || compressName(t.store).includes(compressName(String(place?.title || ""))));
+    const sameDomain = !!domainOf(place?.website) && domainOf(place?.website) === domainOf(t.website);
+    return {
+      store: t.store,
+      query: queries[j],
+      apifyError,
+      returned: !!place,
+      apifyTitle: place?.title ?? null,
+      apifyStreet: place?.street ?? null,
+      apifyAddress: place?.address ?? null,
+      apifyPostal: place?.postalCode ?? null,
+      apifyWebsite: place?.website ?? null,
+      extractedStreet: street,
+      hasStreetNumber: /\d/.test(street),
+      sameName,
+      sameDomain,
+      wouldFill: !!place && /\d/.test(street) && (sameName || sameDomain),
+    };
+  });
+}
+
 const compress = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 function domainOf(url: string | null | undefined): string | null {
   if (!url) return null;
