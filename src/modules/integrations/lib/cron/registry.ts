@@ -27,6 +27,7 @@ import { refreshIfExpiringSoon as refreshShipHeroToken } from "@/modules/operati
 import { pullPhoneBurnerCallResults } from "@/modules/sales/lib/phoneburner-sync";
 import { ensureFreshPhoneBurnerToken } from "@/modules/sales/lib/phoneburner-oauth";
 import { reconcileContactEdits } from "@/modules/sales/lib/phoneburner-contact-sync";
+import { enrichCatalogChunk } from "@/modules/sales/lib/catalog-mail";
 import { postPhoneBurnerCallDigest } from "@/modules/integrations/lib/slack/phoneburner-digest";
 import { runShopifyMetafieldSync } from "@/modules/catalog/lib/shopify-metafields/bulk-sync-job";
 import { syncSettlementsAllShops } from "@/modules/finance/lib/shopify-settlements";
@@ -276,6 +277,18 @@ export const CRON_JOBS: CronJob[] = [
       });
       return { refreshed: !!token, hasToken: !!token };
     },
+  },
+  // Drain the catalog direct-mail cohort's missing street addresses via Apify
+  // Google Maps, in small restart-safe chunks. Self-stops once every
+  // Catalog-Interested lead is either addressed or tagged no-result. fire-and-
+  // forget so a slow Apify batch doesn't 524 the tick. Disable in the cron UI
+  // once the cohort is drained.
+  {
+    id: "catalog-mail-address-enrich",
+    schedule: "*/5 * * * *",  // every 5 min
+    description: "Fill missing mailing addresses for the Catalog-Interested direct-mail cohort via Apify Google Maps (chunked, self-stopping)",
+    handler: () => enrichCatalogChunk(12),
+    fireAndForget: true,
   },
   // Reconcile agent-side contact edits from PhoneBurner. PB has no
   // contact-edit webhook, so we poll the /contacts list (ordered by
