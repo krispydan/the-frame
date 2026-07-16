@@ -9,6 +9,7 @@ import {
   loadCatalogCohort,
   enrichCatalogChunk,
   resetNoResultTags,
+  debugCatalogEnrich,
   tagCompany,
   MAILED_TAG,
   type CohortRow,
@@ -132,6 +133,11 @@ export async function POST(req: NextRequest) {
 
   if (action === "reset-noresult") {
     return NextResponse.json({ ok: true, cleared: resetNoResultTags() });
+  }
+
+  if (action === "debug") {
+    const limit = Math.max(1, parseInt(url.searchParams.get("limit") || "3", 10));
+    return NextResponse.json({ ok: true, results: await debugCatalogEnrich(limit) });
   }
 
   const cohort = loadCatalogCohort();
