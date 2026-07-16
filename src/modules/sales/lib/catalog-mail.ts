@@ -104,7 +104,10 @@ export function tagCompany(companyId: string, tag: string): void {
 /** Clear the no-result tag from cohort companies so they're retried (used after
  *  a logic fix that may have wrongly tagged transient Apify failures). */
 export function resetNoResultTags(): number {
-  const rows = sqlite.prepare("SELECT id, tags FROM companies WHERE tags LIKE ?").all(`%${NO_ADDRESS_TAG}%`) as Array<{ id: string; tags: string | null }>;
+  const strip = new Set([NO_ADDRESS_TAG, "catalog_addr_try1"]);
+  const rows = sqlite
+    .prepare(`SELECT id, tags FROM companies WHERE tags LIKE ? OR tags LIKE ?`)
+    .all(`%${NO_ADDRESS_TAG}%`, `%catalog_addr_try1%`) as Array<{ id: string; tags: string | null }>;
   let cleared = 0;
   for (const r of rows) {
     let tags: string[] = [];
@@ -113,7 +116,7 @@ export function resetNoResultTags(): number {
     } catch {
       tags = r.tags ? r.tags.split(",").map((s) => s.trim()).filter(Boolean) : [];
     }
-    const next = tags.filter((t) => t !== NO_ADDRESS_TAG);
+    const next = tags.filter((t) => !strip.has(t));
     if (next.length !== tags.length) {
       sqlite.prepare("UPDATE companies SET tags = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(next), r.id);
       cleared++;
@@ -129,15 +132,21 @@ const compressName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 export async function debugCatalogEnrich(limit = 3): Promise<unknown[]> {
   const targets = loadCatalogCohort().filter((r) => !r.addressComplete && !r.noAddressResult).slice(0, limit);
   const queries = targets.map(queryFor);
-  let places: Awaited<ReturnType<typeof apifyClient.runGoogleMapsScraper>> = [];
-  let apifyError: string | null = null;
-  try {
-    places = await apifyClient.runGoogleMapsScraper(queries, { maxPerSearch: 1, timeoutSecs: 120 });
-  } catch (e) {
-    apifyError = e instanceof Error ? e.message.slice(0, 200) : String(e);
-  }
+  // Per-target single fast lookups (mirrors enrichOne) so one slow store doesn't
+  // hide the others.
+  const perTarget = await Promise.all(
+    queries.map(async (q) => {
+      try {
+        const r = await apifyClient.runGoogleMapsScraper([q], { maxPerSearch: 1, timeoutSecs: 90, fast: true });
+        return { place: r[0] ?? null, apifyError: null as string | null };
+      } catch (e) {
+        return { place: null, apifyError: e instanceof Error ? e.message.slice(0, 200) : String(e) };
+      }
+    }),
+  );
   return targets.map((t, j) => {
-    const place = places.find((p) => (p.searchString || "") === queries[j]) ?? places[j];
+    const place = perTarget[j].place;
+    const apifyError = perTarget[j].apifyError;
     const street = place ? String(place.street || "").trim() || String(place.address || "").split(",")[0]?.trim() || "" : "";
     const sameName = !!compressName(String(place?.title || "")) && (compressName(String(place?.title || "")).includes(compressName(t.store)) || compressName(t.store).includes(compressName(String(place?.title || ""))));
     const sameDomain = !!domainOf(place?.website) && domainOf(place?.website) === domainOf(t.website);
@@ -181,70 +190,81 @@ function queryFor(t: CohortRow): string {
  * cron converges. Small batches + short Apify timeout so a single invocation
  * stays bounded. Returns per-run counts + how many still need an address.
  */
+const TRY_TAG = "catalog_addr_try1";
+
+/** Enrich one catalog target: single fast Apify lookup, match-gated write.
+ *  Returns "filled" | "nomatch" (Apify returned but no usable/ matching address)
+ *  | "timeout" (Apify failed — transient). */
+async function enrichOne(t: CohortRow): Promise<"filled" | "nomatch" | "timeout"> {
+  const q = queryFor(t);
+  let places: Awaited<ReturnType<typeof apifyClient.runGoogleMapsScraper>>;
+  try {
+    places = await apifyClient.runGoogleMapsScraper([q], { maxPerSearch: 1, timeoutSecs: 90, fast: true });
+  } catch {
+    return "timeout";
+  }
+  const place = places[0];
+  const street = place ? String(place.street || "").trim() || String(place.address || "").split(",")[0]?.trim() || "" : "";
+  const a = compress(String(place?.title || ""));
+  const b = compress(t.store);
+  const sameName = !!a && !!b && (a.includes(b) || b.includes(a));
+  const sameDomain = !!domainOf(place?.website) && domainOf(place?.website) === domainOf(t.website);
+  if (!place || !/\d/.test(street) || !(sameName || sameDomain)) return "nomatch";
+  sqlite
+    .prepare(
+      `UPDATE companies SET
+         address = CASE WHEN COALESCE(TRIM(address),'') = '' OR address NOT GLOB '*[0-9]*' THEN ? ELSE address END,
+         city    = COALESCE(NULLIF(city, ''), ?),
+         state   = COALESCE(NULLIF(state, ''), ?),
+         zip     = COALESCE(NULLIF(zip, ''), ?),
+         google_place_id = COALESCE(google_place_id, ?),
+         updated_at = datetime('now')
+       WHERE id = ?`,
+    )
+    .run(street, place.city || null, place.state || null, place.postalCode || null, place.placeId || null, t.companyId);
+  return "filled";
+}
+
+/**
+ * Enrich a bounded chunk of missing addresses. Each target is looked up with
+ * its OWN fast Apify run (concurrency-limited) so a slow online-only store times
+ * out alone instead of poisoning a batch. Genuine no-matches are tagged
+ * no-result immediately; a transient timeout tags TRY_TAG on the first miss and
+ * no-result on the second, so the drain converges even for stores Apify can't
+ * resolve.
+ */
 export async function enrichCatalogChunk(limit = 12): Promise<{ processed: number; filled: number; noResult: number; deferred: number; remaining: number }> {
   const cohort = loadCatalogCohort();
   const targets = cohort.filter((r) => !r.addressComplete && !r.noAddressResult).slice(0, limit);
   let processed = 0,
     filled = 0,
-    noResult = 0;
+    noResult = 0,
+    deferred = 0;
 
-  // Run all batches CONCURRENTLY (one Apify wave) so a chunk finishes in ~200s
-  // rather than ~800s serial — short enough that a fire-and-forget cron run
-  // completes before any container recycle. Each batch's Apify call is
-  // independent; a failed batch resolves to [] and its targets fall through to
-  // no-result (retried on a later run only if untagged, which they won't be).
-  const BATCH = 3;
-  const batches: CohortRow[][] = [];
-  for (let i = 0; i < targets.length; i += BATCH) batches.push(targets.slice(i, i + BATCH));
-
-  let deferred = 0;
-  const batchResults = await Promise.all(
-    batches.map(async (batch) => {
-      const queries = batch.map(queryFor);
-      try {
-        const places = await apifyClient.runGoogleMapsScraper(queries, { maxPerSearch: 1, timeoutSecs: 200 });
-        return { batch, queries, places, ok: true };
-      } catch {
-        // Transient Apify failure (usually a timeout) — do NOT tag these as
-        // no-result; leave them untagged so a later run retries them.
-        return { batch, queries, places: [] as Awaited<ReturnType<typeof apifyClient.runGoogleMapsScraper>>, ok: false };
-      }
-    }),
-  );
-
-  for (const { batch, queries, places, ok } of batchResults) {
-    if (!ok) {
-      deferred += batch.length;
-      continue;
-    }
-    for (let j = 0; j < batch.length; j++) {
-      const t = batch[j];
+  const CONCURRENCY = 6;
+  for (let i = 0; i < targets.length; i += CONCURRENCY) {
+    const wave = targets.slice(i, i + CONCURRENCY);
+    const outcomes = await Promise.all(wave.map((t) => enrichOne(t).catch(() => "timeout" as const)));
+    for (let k = 0; k < wave.length; k++) {
+      const t = wave[k];
+      const outcome = outcomes[k];
       processed++;
-      const place = places.find((p) => (p.searchString || "") === queries[j]) ?? places[j];
-      const street = place ? String(place.street || "").trim() || String(place.address || "").split(",")[0]?.trim() || "" : "";
-      const a = compress(String(place?.title || ""));
-      const b = compress(t.store);
-      const sameName = !!a && !!b && (a.includes(b) || b.includes(a));
-      const sameDomain = !!domainOf(place?.website) && domainOf(place?.website) === domainOf(t.website);
-      const usable = place && /\d/.test(street) && (sameName || sameDomain);
-      if (!usable) {
+      if (outcome === "filled") {
+        filled++;
+      } else if (outcome === "nomatch") {
         tagCompany(t.companyId, NO_ADDRESS_TAG);
         noResult++;
-        continue;
+      } else {
+        // timeout — give it one retry across runs, then give up.
+        const tried = sqlite.prepare("SELECT tags FROM companies WHERE id = ?").get(t.companyId) as { tags: string | null } | undefined;
+        if ((tried?.tags || "").includes(TRY_TAG)) {
+          tagCompany(t.companyId, NO_ADDRESS_TAG);
+          noResult++;
+        } else {
+          tagCompany(t.companyId, TRY_TAG);
+          deferred++;
+        }
       }
-      sqlite
-        .prepare(
-          `UPDATE companies SET
-             address = CASE WHEN COALESCE(TRIM(address),'') = '' OR address NOT GLOB '*[0-9]*' THEN ? ELSE address END,
-             city    = COALESCE(NULLIF(city, ''), ?),
-             state   = COALESCE(NULLIF(state, ''), ?),
-             zip     = COALESCE(NULLIF(zip, ''), ?),
-             google_place_id = COALESCE(google_place_id, ?),
-             updated_at = datetime('now')
-           WHERE id = ?`,
-        )
-        .run(street, place!.city || null, place!.state || null, place!.postalCode || null, place!.placeId || null, t.companyId);
-      filled++;
     }
   }
 
