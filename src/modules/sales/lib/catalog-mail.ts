@@ -101,6 +101,27 @@ export function tagCompany(companyId: string, tag: string): void {
   sqlite.prepare("UPDATE companies SET tags = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(dedupeTagsArray([...existing, tag])), companyId);
 }
 
+/** Clear the no-result tag from cohort companies so they're retried (used after
+ *  a logic fix that may have wrongly tagged transient Apify failures). */
+export function resetNoResultTags(): number {
+  const rows = sqlite.prepare("SELECT id, tags FROM companies WHERE tags LIKE ?").all(`%${NO_ADDRESS_TAG}%`) as Array<{ id: string; tags: string | null }>;
+  let cleared = 0;
+  for (const r of rows) {
+    let tags: string[] = [];
+    try {
+      tags = r.tags ? (JSON.parse(r.tags) as string[]) : [];
+    } catch {
+      tags = r.tags ? r.tags.split(",").map((s) => s.trim()).filter(Boolean) : [];
+    }
+    const next = tags.filter((t) => t !== NO_ADDRESS_TAG);
+    if (next.length !== tags.length) {
+      sqlite.prepare("UPDATE companies SET tags = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(next), r.id);
+      cleared++;
+    }
+  }
+  return cleared;
+}
+
 const compress = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 function domainOf(url: string | null | undefined): string | null {
   if (!url) return null;
@@ -122,7 +143,7 @@ function queryFor(t: CohortRow): string {
  * cron converges. Small batches + short Apify timeout so a single invocation
  * stays bounded. Returns per-run counts + how many still need an address.
  */
-export async function enrichCatalogChunk(limit = 12): Promise<{ processed: number; filled: number; noResult: number; remaining: number }> {
+export async function enrichCatalogChunk(limit = 12): Promise<{ processed: number; filled: number; noResult: number; deferred: number; remaining: number }> {
   const cohort = loadCatalogCohort();
   const targets = cohort.filter((r) => !r.addressComplete && !r.noAddressResult).slice(0, limit);
   let processed = 0,
@@ -138,19 +159,26 @@ export async function enrichCatalogChunk(limit = 12): Promise<{ processed: numbe
   const batches: CohortRow[][] = [];
   for (let i = 0; i < targets.length; i += BATCH) batches.push(targets.slice(i, i + BATCH));
 
+  let deferred = 0;
   const batchResults = await Promise.all(
     batches.map(async (batch) => {
       const queries = batch.map(queryFor);
       try {
         const places = await apifyClient.runGoogleMapsScraper(queries, { maxPerSearch: 1, timeoutSecs: 200 });
-        return { batch, queries, places };
+        return { batch, queries, places, ok: true };
       } catch {
-        return { batch, queries, places: [] as Awaited<ReturnType<typeof apifyClient.runGoogleMapsScraper>> };
+        // Transient Apify failure (usually a timeout) — do NOT tag these as
+        // no-result; leave them untagged so a later run retries them.
+        return { batch, queries, places: [] as Awaited<ReturnType<typeof apifyClient.runGoogleMapsScraper>>, ok: false };
       }
     }),
   );
 
-  for (const { batch, queries, places } of batchResults) {
+  for (const { batch, queries, places, ok } of batchResults) {
+    if (!ok) {
+      deferred += batch.length;
+      continue;
+    }
     for (let j = 0; j < batch.length; j++) {
       const t = batch[j];
       processed++;
@@ -183,5 +211,5 @@ export async function enrichCatalogChunk(limit = 12): Promise<{ processed: numbe
   }
 
   const remaining = loadCatalogCohort().filter((r) => !r.addressComplete && !r.noAddressResult).length;
-  return { processed, filled, noResult, remaining };
+  return { processed, filled, noResult, deferred, remaining };
 }

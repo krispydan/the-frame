@@ -8,6 +8,7 @@ import { getPipelineOwner } from "@/modules/sales/lib/pipedrive-setup";
 import {
   loadCatalogCohort,
   enrichCatalogChunk,
+  resetNoResultTags,
   tagCompany,
   MAILED_TAG,
   type CohortRow,
@@ -127,6 +128,10 @@ export async function POST(req: NextRequest) {
     const limit = Math.max(1, parseInt(url.searchParams.get("limit") || "12", 10));
     const result = await enrichCatalogChunk(limit);
     return NextResponse.json({ ok: true, ...result });
+  }
+
+  if (action === "reset-noresult") {
+    return NextResponse.json({ ok: true, cleared: resetNoResultTags() });
   }
 
   const cohort = loadCatalogCohort();
