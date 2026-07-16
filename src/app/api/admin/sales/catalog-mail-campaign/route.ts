@@ -176,8 +176,16 @@ function domainOf(url: string | null | undefined): string | null {
   }
 }
 
+function queryFor(t: CohortRow): string {
+  const geo = [t.city, t.state].filter(Boolean).join(", ");
+  return geo ? `${t.store}, ${geo}` : `${t.store} store USA`;
+}
+
 async function enrichAddresses(targets: CohortRow[]): Promise<void> {
-  const BATCH = 5;
+  // Apify's run-sync endpoint hard-caps at ~300s, so keep batches small; on a
+  // batch failure (usually a timeout) retry each query alone — single-place
+  // runs finish fast and rarely time out.
+  const BATCH = 3;
   let done = 0,
     filled = 0,
     noMatch = 0,
@@ -189,19 +197,20 @@ async function enrichAddresses(targets: CohortRow[]): Promise<void> {
 
   for (let i = 0; i < targets.length; i += BATCH) {
     const batch = targets.slice(i, i + BATCH);
-    const queries = batch.map((t) => {
-      const geo = [t.city, t.state].filter(Boolean).join(", ");
-      return geo ? `${t.store}, ${geo}` : `${t.store} store USA`;
-    });
-    let places;
+    const queries = batch.map(queryFor);
+    let places: Awaited<ReturnType<typeof apifyClient.runGoogleMapsScraper>> = [];
     try {
-      places = await apifyClient.runGoogleMapsScraper(queries, { maxPerSearch: 1 });
-    } catch (e) {
-      errors += batch.length;
-      done += batch.length;
-      if (errSamples.length < 10) errSamples.push(`apify batch: ${e instanceof Error ? e.message.slice(0, 150) : String(e)}`);
-      write("running");
-      continue;
+      places = await apifyClient.runGoogleMapsScraper(queries, { maxPerSearch: 1, timeoutSecs: 290 });
+    } catch {
+      // Batch failed — retry each query individually before giving up.
+      for (const q of queries) {
+        try {
+          const one = await apifyClient.runGoogleMapsScraper([q], { maxPerSearch: 1, timeoutSecs: 290 });
+          places.push(...one);
+        } catch (e2) {
+          if (errSamples.length < 10) errSamples.push(`${q}: ${e2 instanceof Error ? e2.message.slice(0, 120) : String(e2)}`);
+        }
+      }
     }
 
     for (let j = 0; j < batch.length; j++) {
