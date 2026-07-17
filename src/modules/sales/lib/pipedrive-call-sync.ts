@@ -17,6 +17,7 @@ import { sqlite } from "@/lib/db";
 import {
   listActivities,
   updateActivity,
+  listOpenActivitiesForPerson,
   type PdActivity,
 } from "./pipedrive-client";
 import { phoneBurnerClient, pbOwnerFor, type PbRep } from "./phoneburner-client";
@@ -368,6 +369,58 @@ export async function handleCallActivityFeedback(
   } catch (e) {
     console.error("[pipedrive-call-sync] activity feedback failed:", e instanceof Error ? e.message : e);
     return { handled: false };
+  }
+}
+
+/** Dispositions that mean the rep did NOT reach a person (so the call task
+ *  stays open for another attempt). Everything else on a connected call is
+ *  treated as "spoke to them" and closes the task. */
+const NOT_REACHED_DISPOSITIONS = new Set([
+  "no answer", "busy", "busy phone", "left message", "voicemail", "left voicemail",
+  "not in service", "disconnected", "wrong number", "hang up", "abandoned",
+]);
+
+/**
+ * Fallback close: when a rep dials a lead through PhoneBurner and the call
+ * CONNECTS (they answered), mark that person's open Pipedrive "Call" activity
+ * done — even if the contact was never staged via Model A (e.g. a sequence-
+ * created call task). Closes the earliest-due open call activity for the person.
+ *
+ * Gated on "answered": connected, or a disposition that implies a live
+ * conversation. No-op when not reached, no person in Pipedrive, or no open call
+ * activity. Idempotent (an already-done activity just won't be in the open list).
+ */
+export async function completeOpenCallActivityForCompany(
+  companyId: string | null,
+  opts: { connected: boolean; disposition: string | null; durationSeconds: number | null },
+): Promise<{ closed: boolean; activityId?: number }> {
+  if (!companyId) return { closed: false };
+  const disp = (opts.disposition || "").trim().toLowerCase();
+  const answered = opts.connected || (!!disp && !NOT_REACHED_DISPOSITIONS.has(disp));
+  if (!answered) return { closed: false };
+
+  const personId = (sqlite.prepare("SELECT pipedrive_person_id AS id FROM companies WHERE id = ?").get(companyId) as { id: number | null } | undefined)?.id ?? null;
+  if (!personId) return { closed: false };
+
+  let open: PdActivity[];
+  try {
+    open = await listOpenActivitiesForPerson(personId);
+  } catch (e) {
+    console.warn("[pipedrive-call-sync] list person activities failed:", e instanceof Error ? e.message : e);
+    return { closed: false };
+  }
+  // The sequence's task type is "call"; be lenient (some accounts localize the
+  // type key) and also accept subjects that look like a call.
+  const call = open.find((a) => (a.type || "").toLowerCase() === "call") ?? open.find((a) => /call/i.test(a.subject || ""));
+  if (!call) return { closed: false };
+
+  const durTxt = opts.durationSeconds ? ` · ${Math.floor(opts.durationSeconds / 60)}m${String(opts.durationSeconds % 60).padStart(2, "0")}s` : "";
+  try {
+    await updateActivity(call.id, { done: true, note: `Completed via PhoneBurner call — ${opts.disposition || "connected"}${durTxt}` });
+    return { closed: true, activityId: call.id };
+  } catch (e) {
+    console.warn("[pipedrive-call-sync] fallback activity close failed:", e instanceof Error ? e.message : e);
+    return { closed: false };
   }
 }
 

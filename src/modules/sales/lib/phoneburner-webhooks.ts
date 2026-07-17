@@ -425,9 +425,20 @@ async function handlePhoneBurnerWebhook(
       // list, close or reschedule the stamped Pipedrive activity + tidy
       // the folder. Best-effort, independent of pipeline progression.
       try {
-        const { handleCallActivityFeedback } = await import("./pipedrive-call-sync");
+        const { handleCallActivityFeedback, completeOpenCallActivityForCompany } = await import("./pipedrive-call-sync");
         const dur = typeof body.duration === "number" ? Math.round(body.duration) : null;
-        await handleCallActivityFeedback(pbContactUserId(body), disposition, dur);
+        const fb = await handleCallActivityFeedback(pbContactUserId(body), disposition, dur);
+        // Fallback: if this contact wasn't staged via Model A (e.g. a sequence-
+        // created "Call" task), still close the person's open Pipedrive call
+        // activity when the call connected (they answered).
+        if (!fb.handled && match?.companyId) {
+          const done = await completeOpenCallActivityForCompany(match.companyId, {
+            connected: pbConnected(body),
+            disposition,
+            durationSeconds: dur,
+          });
+          if (done.closed) message += ` pd-activity-closed=${done.activityId}`;
+        }
       } catch (e) {
         console.error("[phoneburner-webhook] activity feedback failed:", e);
       }

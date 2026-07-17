@@ -439,6 +439,16 @@ export async function listActivities(params: {
   return (await pdRequest<PdActivity[]>("GET", `/activities${qs ? `?${qs}` : ""}`)) || [];
 }
 
+/**
+ * Open activities for a person, via the person sub-resource (reliable filtering,
+ * unlike /activities?person_id=). Used to close the sequence's "Call" activity
+ * when the rep dials the person through PhoneBurner. Sorted by due date ascending.
+ */
+export async function listOpenActivitiesForPerson(personId: number, limit = 50): Promise<PdActivity[]> {
+  const rows = (await pdRequest<PdActivity[]>("GET", `/persons/${personId}/activities?done=0&limit=${limit}`)) || [];
+  return rows.slice().sort((a, b) => (a.due_date || "9999").localeCompare(b.due_date || "9999"));
+}
+
 /** Attach a free-text note to a deal / org / person. */
 export async function createNote(input: {
   content: string; // supports basic HTML
