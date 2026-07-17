@@ -811,8 +811,25 @@ export async function pullPhoneBurnerCallResults(opts?: {
       for (const call of batch) {
         try {
           const outcome = ingestOneCall(call);
-          if (outcome === "ingested") summary.ingested++;
-          else if (outcome === "skipped_existing") summary.skipped_existing++;
+          if (outcome === "ingested") {
+            summary.ingested++;
+            // Close the Pipedrive call activity for calls the webhook missed
+            // (webhook is primary; skipped_existing calls were already handled
+            // there, so we only act on newly-ingested ones).
+            try {
+              const pbId = call.contact_id ? String(call.contact_id) : null;
+              const disp = call.disposition_label ?? call.disposition ?? null;
+              const dur = typeof call.duration === "number" ? Math.round(call.duration) : null;
+              const { handleCallActivityFeedback, completeOpenCallActivityForCompany } = await import("./pipedrive-call-sync");
+              const fb = await handleCallActivityFeedback(pbId, disp, dur);
+              if (!fb.handled) {
+                const m = pbId ? resolveByPbContactId(pbId) : null;
+                if (m?.companyId) await completeOpenCallActivityForCompany(m.companyId, { connected: !!call.connected, disposition: disp, durationSeconds: dur });
+              }
+            } catch (e) {
+              console.warn("[phoneburner-sync] poll activity close failed:", e instanceof Error ? e.message : e);
+            }
+          } else if (outcome === "skipped_existing") summary.skipped_existing++;
           else summary.unmatched++;
         } catch (e) {
           summary.errors.push({
