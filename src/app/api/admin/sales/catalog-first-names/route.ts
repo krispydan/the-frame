@@ -65,13 +65,18 @@ const NON_NAMES = new Set([
   "there", "team", "all", "everyone", "folks", "friend", "friends", "owner", "owners", "y'all", "yall", "guys",
   "boutique", "store", "shop", "hello", "hi", "hey", "sir", "madam", "maam", "ladies", "gentlemen", "customer",
   "buyer", "manager", "sales", "info", "the",
+  // sentence-starters that can follow "Hi," when there's no name
+  "thanks", "thank", "since", "just", "hoping", "wanted", "following", "welcome", "happy", "again", "so", "quick",
+  "hope", "good", "great", "sorry", "checking", "reaching", "we", "i",
 ]);
 
 /** Parse "Hi <Name>," from an outbound email snippet. Returns a clean first name
  *  or null (rejects merge-field failures, business words, the store name echo). */
 function nameFromSnippet(snippet: string | undefined, store: string): string | null {
   if (!snippet) return null;
-  const m = snippet.match(/^\s*(?:hi|hello|hey|dear|good\s+(?:morning|afternoon|evening))[\s,]+([A-Za-z][A-Za-z'’.-]{1,24})/i);
+  // Require WHITESPACE between the greeting and the name (not a comma) — "Hi
+  // Anna," is an address; "Hi, Thanks for..." is not.
+  const m = snippet.match(/^\s*(?:hi|hello|hey|dear|good\s+(?:morning|afternoon|evening))\s+([A-Za-z][A-Za-z'’.-]{1,24})/i);
   if (!m) return null;
   const rawName = m[1].replace(/[.'’-]+$/, "").trim();
   if (!rawName || rawName.length < 2) return null;
@@ -150,7 +155,10 @@ export async function POST(req: NextRequest) {
   const url = new URL(req.url);
   const commit = url.searchParams.get("commit") === "true";
   const overwrite = url.searchParams.get("overwrite") === "true";
-  const leads = loadNamelessLeads().filter((l) => l.dealId && (overwrite || !l.firstName));
+  // Process leads that are missing a name, have a bad-word name (a prior false
+  // positive to fix), or all when overwrite=true.
+  const needsName = (l: Lead) => !l.firstName || NON_NAMES.has(l.firstName.toLowerCase());
+  const leads = loadNamelessLeads().filter((l) => l.dealId && (overwrite || needsName(l)));
 
   if (!commit) {
     return NextResponse.json({ ok: true, commit: false, wouldScan: leads.length, note: "Re-run with commit=true to scan Pipedrive mail + write first names." });
@@ -179,12 +187,15 @@ export async function POST(req: NextRequest) {
         if (best) {
           found++;
           if (samples.length < 25) samples.push({ store: l.store, name: best });
-          // Write to the primary contact (create one if missing).
           if (l.contactId) {
             sqlite.prepare("UPDATE contacts SET first_name = ?, updated_at = datetime('now') WHERE id = ?").run(best, l.contactId);
           } else {
             sqlite.prepare("INSERT INTO contacts (id, company_id, first_name, is_primary, source, created_at, updated_at) VALUES (?, ?, ?, 1, 'pipedrive_greeting', datetime('now'), datetime('now'))").run(crypto.randomUUID(), l.companyId, best);
           }
+          written++;
+        } else if (l.contactId && l.firstName && NON_NAMES.has(l.firstName.toLowerCase())) {
+          // No valid name and the current one is a bad-word false positive → clear it.
+          sqlite.prepare("UPDATE contacts SET first_name = '', updated_at = datetime('now') WHERE id = ?").run(l.contactId);
           written++;
         }
       } catch (e) {
