@@ -87,6 +87,8 @@ interface CatalogSettings {
   showOrderForm: boolean;
   showTerms: boolean;
   showInventory: boolean;
+  /** When false, render a compact table instead of the image-heavy product cards. */
+  includeImages: boolean;
   /** Per-SKU minimum; SKUs below this are dropped, products with 0 remaining SKUs are dropped. 0 = no filter. */
   minInventory: number;
   season: string;
@@ -341,6 +343,86 @@ function drawProductPages(
   drawPageNumber(state);
 }
 
+// ── Compact Table (no-images mode) ──
+
+/**
+ * Alternate product-page renderer used when includeImages=false.
+ * Produces a dense inventory table: one row per variant, grouped by style.
+ * Way more products per page than the image-card layout.
+ */
+function drawProductTablePages(
+  state: PdfState,
+  products: CatalogProduct[],
+  settings: CatalogSettings,
+) {
+  function startPage() {
+    newPage(state);
+    state.doc.rect(0, 0, PAGE_W, PAGE_H).fill("white");
+    state.doc.font("Helvetica").fontSize(8).fillColor(LIGHT_GRAY);
+    state.doc.text(`JAXY  ·  ${settings.season.toUpperCase()}  ·  Inventory`, MARGIN, MARGIN, { width: CW, lineBreak: false });
+    state.y = MARGIN + 20;
+
+    // Table header
+    const cols = settings.showInventory
+      ? [MARGIN, MARGIN + 165, MARGIN + 265, MARGIN + 340, MARGIN + 400, MARGIN + 470]
+      : [MARGIN, MARGIN + 200, MARGIN + 320, MARGIN + 400, MARGIN + 470];
+    const labels = settings.showInventory
+      ? ["Style", "Color", "SKU", "Lens", "Wholesale", "In Stock"]
+      : ["Style", "Color", "SKU", "Lens", "Wholesale"];
+    state.doc.rect(MARGIN, state.y - 2, CW, 14).fill(DARK);
+    state.doc.font("Helvetica-Bold").fontSize(8).fillColor("white");
+    for (let j = 0; j < labels.length; j++) {
+      state.doc.text(labels[j], cols[j] + 3, state.y, { lineBreak: false });
+    }
+    state.y += 16;
+    return cols;
+  }
+
+  let cols = startPage();
+  let rowIndex = 0;
+
+  for (const prod of products) {
+    for (let vi = 0; vi < prod.variants.length; vi++) {
+      const v = prod.variants[vi];
+
+      // New page if we're running out of room
+      if (state.y > PAGE_H - MARGIN - 30) {
+        drawPageNumber(state);
+        cols = startPage();
+        rowIndex = 0;
+      }
+
+      // Zebra stripe
+      if (rowIndex % 2 === 0) state.doc.rect(MARGIN, state.y - 2, CW, 13).fill(BG_GRAY);
+
+      state.doc.font("Helvetica").fontSize(8).fillColor(DARK);
+      // Only show style name on the first variant of each product (grouping)
+      if (vi === 0) {
+        state.doc.font("Helvetica-Bold");
+        state.doc.text(prod.title, cols[0] + 3, state.y, { width: cols[1] - cols[0] - 6, lineBreak: false, ellipsis: true });
+        state.doc.font("Helvetica");
+      }
+      state.doc.text(v.color, cols[1] + 3, state.y, { width: cols[2] - cols[1] - 6, lineBreak: false, ellipsis: true });
+      state.doc.fillColor(MED_GRAY);
+      state.doc.text(v.sku, cols[2] + 3, state.y, { width: cols[3] - cols[2] - 6, lineBreak: false });
+      state.doc.text(prod.lens, cols[3] + 3, state.y, { width: cols[4] - cols[3] - 6, lineBreak: false });
+      state.doc.fillColor(DARK);
+      state.doc.text(`$${prod.wholesale.toFixed(2)}`, cols[4] + 3, state.y, { lineBreak: false });
+
+      if (settings.showInventory) {
+        const tier = inventoryTier(v.inventoryQuantity);
+        state.doc.font("Helvetica-Bold").fillColor(tier.color);
+        state.doc.text(tier.label, cols[5] + 3, state.y, { lineBreak: false });
+        state.doc.font("Helvetica").fillColor(DARK);
+      }
+
+      state.y += 13;
+      rowIndex++;
+    }
+  }
+  drawPageNumber(state);
+}
+
 // ── Pre-Order Page ──
 
 function drawPreorderPage(state: PdfState, avgWholesale: number, preorderPrice: number) {
@@ -558,7 +640,11 @@ function generateCatalogPDF(
     const state: PdfState = { doc, y: 0, pageNum: 0, expectedPages: 0 };
 
     drawCover(state, settings);
-    drawProductPages(state, products, settings, imageBufferBySku);
+    if (settings.includeImages) {
+      drawProductPages(state, products, settings, imageBufferBySku);
+    } else {
+      drawProductTablePages(state, products, settings);
+    }
     if (settings.showPreorder) drawPreorderPage(state, avgWholesale, preorderPrice);
     if (settings.showOrderForm) drawOrderFormPages(state, products, preorderPrice, avgWholesale, settings.showInventory);
     if (settings.showTerms) drawTermsPage(state, avgWholesale, preorderPrice);
@@ -577,6 +663,7 @@ export async function GET(request: NextRequest) {
       showOrderForm: searchParams.get("orderForm") !== "false",
       showTerms: searchParams.get("terms") !== "false",
       showInventory: searchParams.get("showInventory") === "true",
+      includeImages: searchParams.get("includeImages") !== "false", // default true
       minInventory: parseInt(searchParams.get("minInventory") || "10", 10),
       season: searchParams.get("season") || "Spring 2026",
       preorderDiscount: parseFloat(searchParams.get("preorderDiscount") || "0.2"),
@@ -598,14 +685,17 @@ export async function GET(request: NextRequest) {
     }
     // Try wholesale first (most SKUs live there), then fall back to DTC/retail
     // for anything the wholesale store doesn't have yet.
+    // Skipped entirely when images are excluded (compact table mode).
     let shopifyImagesBySku = new Map<string, string>();
     let imageLookupStats: Record<string, MultiStoreLookupStats> = {};
-    try {
-      const res = await getShopifyImagesForSkusMultiStore(["wholesale", "dtc"], filteredSkus);
-      shopifyImagesBySku = res.images;
-      imageLookupStats = res.stats;
-    } catch (e) {
-      console.warn("[pdf] Shopify image lookup failed, using local images only:", e);
+    if (settings.includeImages) {
+      try {
+        const res = await getShopifyImagesForSkusMultiStore(["wholesale", "dtc"], filteredSkus);
+        shopifyImagesBySku = res.images;
+        imageLookupStats = res.stats;
+      } catch (e) {
+        console.warn("[pdf] Shopify image lookup failed, using local images only:", e);
+      }
     }
 
     // Debug mode: return JSON stats instead of a PDF so we can diagnose
@@ -626,8 +716,9 @@ export async function GET(request: NextRequest) {
     const catalogProducts = toCatalogProducts(exportProducts, shopifyImagesBySku, settings.minInventory);
 
     // Concurrently pre-fetch the actual image bytes (max 6 in flight)
+    // Skipped when includeImages is off (empty map → no-op loop below)
     const imageBufferBySku = new Map<string, Buffer>();
-    const entries = Array.from(shopifyImagesBySku.entries());
+    const entries = settings.includeImages ? Array.from(shopifyImagesBySku.entries()) : [];
     const CONCURRENCY = 6;
     let cursor = 0;
     await Promise.all(

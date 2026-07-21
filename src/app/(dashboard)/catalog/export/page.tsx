@@ -51,6 +51,7 @@ export default function ExportPage() {
   const [showOrderForm, setShowOrderForm] = useState(true);
   const [showTerms, setShowTerms] = useState(true);
   const [showInventory, setShowInventory] = useState(false);
+  const [includeImages, setIncludeImages] = useState(true);
   const [inStockOnly, setInStockOnly] = useState(true);
   const [minInventory, setMinInventory] = useState(10);
 
@@ -85,6 +86,7 @@ export default function ExportPage() {
     params.set("orderForm", String(showOrderForm));
     params.set("terms", String(showTerms));
     params.set("showInventory", String(showInventory));
+    params.set("includeImages", String(includeImages));
     // minInventory=0 means include everything; toggle sets to 10 (or user's number) when on
     params.set("minInventory", String(inStockOnly ? minInventory : 0));
     window.open(`/api/v1/catalog/export/pdf?${params}`, "_blank");
@@ -200,6 +202,15 @@ export default function ExportPage() {
                 <Checkbox checked={showInventory} onCheckedChange={(v) => setShowInventory(!!v)} />
                 Show inventory quantities
               </label>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={includeImages} onCheckedChange={(v) => setIncludeImages(!!v)} />
+                Include product images
+              </label>
+              {!includeImages && (
+                <span className="text-xs text-muted-foreground italic">
+                  Compact inventory table (no images)
+                </span>
+              )}
             </div>
           </div>
         </CardContent>
