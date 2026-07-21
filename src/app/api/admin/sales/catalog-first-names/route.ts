@@ -3,7 +3,7 @@ export const maxDuration = 300;
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
-import { listDealMailMessages } from "@/modules/sales/lib/pipedrive-client";
+import { listDealMailMessages, getPerson, updatePerson } from "@/modules/sales/lib/pipedrive-client";
 import { firstNameForMerge } from "@/modules/sales/lib/faire-marketplace-parse";
 
 /**
@@ -23,7 +23,7 @@ import { firstNameForMerge } from "@/modules/sales/lib/faire-marketplace-parse";
 
 const RUN_KEY = "catalog_first_names_run";
 const OUR_DOMAIN = "getjaxy.com";
-const VERSION = "v3-storeecho-greetingonly"; // bump on logic change to confirm live build
+const VERSION = "v4-update-names"; // bump on logic change to confirm live build
 
 function getSetting(key: string): string | null {
   return (sqlite.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined)?.value?.trim() || null;
@@ -157,6 +157,61 @@ export async function POST(req: NextRequest) {
   const url = new URL(req.url);
   const commit = url.searchParams.get("commit") === "true";
   const overwrite = url.searchParams.get("overwrite") === "true";
+
+  // ── action=update-names: push frame first names to Pipedrive person records
+  //    that don't already have a real personal name (store-echo / email / blank).
+  if (url.searchParams.get("action") === "update-names") {
+    const rows = sqlite
+      .prepare(
+        `SELECT c.id, c.name AS store, c.pipedrive_person_id AS personId,
+                (SELECT TRIM(COALESCE(ct.first_name,'')) FROM contacts ct WHERE ct.company_id = c.id ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS firstName,
+                (SELECT TRIM(COALESCE(ct.last_name,'')) FROM contacts ct WHERE ct.company_id = c.id ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS lastName
+         FROM companies c
+         JOIN pipedrive_deals d ON d.company_id = c.id AND d.pipeline = 'catalog' AND d.is_open = 1
+         WHERE c.status != 'customer' AND c.pipedrive_person_id IS NOT NULL
+         GROUP BY c.id`,
+      )
+      .all() as Array<{ id: string; store: string; personId: number; firstName: string | null; lastName: string | null }>;
+    const targets = rows.filter((r) => (r.firstName || "").trim() && !isBadName(r.firstName, r.store));
+
+    if (!commit) {
+      return NextResponse.json({ ok: true, commit: false, candidates: targets.length, note: "commit=true to fetch each person and update those without a real name." });
+    }
+    setSetting(RUN_KEY, JSON.stringify({ state: "running", mode: "update-names", total: targets.length, done: 0, updated: 0, alreadyNamed: 0, errors: 0, startedAt: new Date().toISOString() }));
+    void (async () => {
+      let done = 0,
+        updated = 0,
+        alreadyNamed = 0,
+        errors = 0;
+      const samples: Array<{ store: string; from: string; to: string }> = [];
+      const errSamples: string[] = [];
+      for (const r of targets) {
+        try {
+          const person = await getPerson(r.personId);
+          const current = (person?.name || "").trim();
+          // "Already has a real name" = non-blank, not an email, not a store echo.
+          const hasRealName = !!current && !current.includes("@") && !isStoreEcho(current.split(/\s+/)[0], r.store) && !isBadName(current.split(/\s+/)[0], r.store);
+          if (hasRealName) {
+            alreadyNamed++;
+          } else {
+            const last = (r.lastName || "").trim();
+            const newName = last && !isStoreEcho(last, r.store) ? `${r.firstName} ${last}` : `${r.firstName}`;
+            await updatePerson(r.personId, { name: newName });
+            updated++;
+            if (samples.length < 25) samples.push({ store: r.store, from: current || "(blank)", to: newName });
+          }
+        } catch (e) {
+          errors++;
+          if (errSamples.length < 10) errSamples.push(`${r.store}: ${e instanceof Error ? e.message.slice(0, 100) : String(e)}`);
+        }
+        done++;
+        if (done % 15 === 0) setSetting(RUN_KEY, JSON.stringify({ state: "running", mode: "update-names", total: targets.length, done, updated, alreadyNamed, errors, samples, errSamples, updatedAt: new Date().toISOString() }));
+      }
+      setSetting(RUN_KEY, JSON.stringify({ state: "done", mode: "update-names", total: targets.length, done, updated, alreadyNamed, errors, samples, errSamples, finishedAt: new Date().toISOString() }));
+    })();
+    return NextResponse.json({ ok: true, started: true, candidates: targets.length, note: "Poll GET ?run=extract for progress." });
+  }
+
   // Process leads that are missing a name, or have a bad name (blocklist word or
   // store-name echo — prior false positives to fix), or all when overwrite=true.
   const leads = loadNamelessLeads().filter((l) => l.dealId && (overwrite || isBadName(l.firstName, l.store)));
