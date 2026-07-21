@@ -33,6 +33,26 @@ export async function GET(req: NextRequest) {
     const raw = await pdRequest<unknown>("GET", `/mailbox/mailThreads/${threadId}/mailMessages`);
     return NextResponse.json({ ok: true, raw });
   }
+  if (debug === "dealmail") {
+    const dealId = url.searchParams.get("dealId");
+    // include_body=1 asks Pipedrive for the full message body, not just a snippet.
+    const raw = await pdRequest<Array<Record<string, unknown>>>("GET", `/deals/${dealId}/mailMessages?limit=20`);
+    // Trim each message to the fields we care about so the response is readable.
+    const trimmed = (Array.isArray(raw) ? raw : []).map((m) => {
+      const d = (m.data ?? m) as Record<string, unknown>;
+      return {
+        id: d.id,
+        from: d.from,
+        to: d.to,
+        subject: d.subject,
+        snippet: d.snippet,
+        bodyPreview: typeof d.body === "string" ? (d.body as string).slice(0, 300) : d.body,
+        message_time: d.message_time,
+        mail_thread_id: d.mail_thread_id,
+      };
+    });
+    return NextResponse.json({ ok: true, count: trimmed.length, messages: trimmed });
+  }
 
   // Coverage audit over the catalog cohort.
   const rows = sqlite
