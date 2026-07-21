@@ -91,6 +91,30 @@ function isOutbound(msg: { from?: Array<{ email_address?: string }> }): boolean 
   return from.endsWith(`@${OUR_DOMAIN}`);
 }
 
+interface DealMsg {
+  from?: Array<{ email_address?: string }>;
+  to?: Array<{ email_address?: string; linked_person_name?: string | null }>;
+  snippet?: string;
+}
+
+/** Best first name from one OUTBOUND message: the greeting we wrote ("Hi X,"),
+ *  else the recipient's Pipedrive-linked person name. Both validated. */
+function nameFromMessage(m: DealMsg, store: string): string | null {
+  const fromGreeting = nameFromSnippet(m.snippet, store);
+  if (fromGreeting) return fromGreeting;
+  // Fallback: the "to" party Pipedrive linked to a person (skip our own team).
+  const recipient = (m.to || []).find((t) => !(t.email_address || "").toLowerCase().endsWith(`@${OUR_DOMAIN}`));
+  const linked = (recipient?.linked_person_name || "").trim();
+  if (linked) {
+    const first = linked.split(/\s+/)[0];
+    if (first && !NON_NAMES.has(first.toLowerCase())) {
+      const clean = firstNameForMerge(first, store);
+      if (clean) return clean;
+    }
+  }
+  return null;
+}
+
 export async function GET(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -104,7 +128,8 @@ export async function GET(req: NextRequest) {
   if (debug === "dealmail") {
     const dealId = Number(url.searchParams.get("dealId"));
     const msgs = await listDealMailMessages(dealId);
-    return NextResponse.json({ ok: true, count: msgs.length, messages: msgs.map((m) => ({ from: m.from?.[0]?.email_address, subject: m.subject, snippet: m.snippet, outbound: isOutbound(m), parsedName: nameFromSnippet(m.snippet, "") })) });
+    const store = url.searchParams.get("store") || "";
+    return NextResponse.json({ ok: true, count: msgs.length, messages: msgs.map((m) => ({ from: m.from?.[0]?.email_address, linkedTo: m.to?.map((t) => t.linked_person_name).filter(Boolean), subject: m.subject, snippet: (m.snippet || "").slice(0, 40), outbound: isOutbound(m), parsedName: nameFromMessage(m, store) })) });
   }
 
   const leads = loadNamelessLeads();
@@ -147,7 +172,7 @@ export async function POST(req: NextRequest) {
         const tally = new Map<string, number>();
         for (const m of msgs) {
           if (!isOutbound(m)) continue;
-          const name = nameFromSnippet(m.snippet, l.store);
+          const name = nameFromMessage(m, l.store);
           if (name) tally.set(name, (tally.get(name) || 0) + 1);
         }
         const best = [...tally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
