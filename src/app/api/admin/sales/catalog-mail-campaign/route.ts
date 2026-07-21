@@ -54,14 +54,14 @@ function csvEscape(v: string): string {
 function buildCsv(rows: CohortRow[]): string {
   const base = getSetting("pipedrive_api_domain")?.replace(/\/$/, "") ?? "";
   const header = [
-    "store", "contact_name", "address", "city", "state", "zip",
+    "store", "first_name", "contact_name", "address", "city", "state", "zip",
     "email", "phone", "address_complete", "deal_stage", "already_mailed", "pipedrive_deal_url",
   ];
   const lines = [header.join(",")];
   for (const r of rows) {
     lines.push(
       [
-        r.store, r.contactName, r.address, r.city, r.state, r.zip,
+        r.store, r.firstName, r.contactName, r.address, r.city, r.state, r.zip,
         r.email, r.phone, r.addressComplete ? "yes" : "NO - needs address",
         r.dealStage ?? "", r.alreadyMailed ? "yes" : "",
         base && r.pipedriveDealId ? `${base}/deal/${r.pipedriveDealId}` : "",

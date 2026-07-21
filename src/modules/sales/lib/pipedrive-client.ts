@@ -439,6 +439,23 @@ export async function listActivities(params: {
   return (await pdRequest<PdActivity[]>("GET", `/activities${qs ? `?${qs}` : ""}`)) || [];
 }
 
+export interface PdMailMessage {
+  id?: number;
+  from?: Array<{ email_address?: string; name?: string }>;
+  to?: Array<{ email_address?: string; name?: string }>;
+  subject?: string;
+  snippet?: string;
+  message_time?: string | number;
+  [k: string]: unknown;
+}
+
+/** Mail messages associated with a deal (Pipedrive Mailbox). The snippet holds
+ *  the opening line — enough to read the "Hi <Name>," greeting we sent. */
+export async function listDealMailMessages(dealId: number, limit = 20): Promise<PdMailMessage[]> {
+  const raw = (await pdRequest<Array<Record<string, unknown>>>("GET", `/deals/${dealId}/mailMessages?limit=${limit}`)) || [];
+  return (Array.isArray(raw) ? raw : []).map((m) => (m.data ?? m) as PdMailMessage);
+}
+
 /**
  * Open activities for a person, via the person sub-resource (reliable filtering,
  * unlike /activities?person_id=). Used to close the sequence's "Call" activity

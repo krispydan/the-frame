@@ -21,6 +21,7 @@ export interface CohortRow {
   companyId: string;
   store: string;
   contactName: string;
+  firstName: string;
   email: string;
   phone: string;
   address: string;
@@ -50,6 +51,8 @@ export function loadCatalogCohort(): CohortRow[] {
               d.pipedrive_deal_id AS dealId, d.stage AS stage,
               (SELECT TRIM(ct.first_name || ' ' || COALESCE(ct.last_name,'')) FROM contacts ct
                 WHERE ct.company_id = c.id ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS contactName,
+              (SELECT TRIM(COALESCE(ct.first_name,'')) FROM contacts ct
+                WHERE ct.company_id = c.id ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS firstName,
               (SELECT ct.email FROM contacts ct
                 WHERE ct.company_id = c.id AND TRIM(COALESCE(ct.email,'')) <> ''
                 ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
@@ -65,7 +68,7 @@ export function loadCatalogCohort(): CohortRow[] {
     .all() as Array<{
     id: string; name: string; address: string | null; city: string | null; state: string | null; zip: string | null;
     tags: string | null; website: string | null; orgId: number | null; personId: number | null; dealId: number | null;
-    stage: string | null; contactName: string | null; email: string | null; phone: string | null;
+    stage: string | null; contactName: string | null; firstName: string | null; email: string | null; phone: string | null;
   }>;
 
   return rows.map((r) => {
@@ -75,6 +78,7 @@ export function loadCatalogCohort(): CohortRow[] {
       companyId: r.id,
       store: r.name,
       contactName: r.contactName ?? "",
+      firstName: r.firstName ?? "",
       email: r.email ?? "",
       phone: r.phone ?? "",
       ...base,
