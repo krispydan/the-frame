@@ -441,8 +441,8 @@ export async function listActivities(params: {
 
 export interface PdMailMessage {
   id?: number;
-  from?: Array<{ email_address?: string; name?: string }>;
-  to?: Array<{ email_address?: string; name?: string }>;
+  from?: Array<{ email_address?: string; name?: string; linked_person_name?: string | null }>;
+  to?: Array<{ email_address?: string; name?: string; linked_person_name?: string | null; linked_person_id?: number | null }>;
   subject?: string;
   snippet?: string;
   message_time?: string | number;
