@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { loadExportProducts } from "@/modules/catalog/lib/export/load-products";
 import type { ExportProduct } from "@/modules/catalog/lib/export/types";
-import { getShopifyImagesForSkusMultiStore } from "@/modules/orders/lib/shopify-images";
+import { getShopifyImagesForSkusMultiStore, type MultiStoreLookupStats } from "@/modules/orders/lib/shopify-images";
 
 /**
  * Bucket exact inventory count into a tier label for wholesale catalogs.
@@ -599,7 +599,7 @@ export async function GET(request: NextRequest) {
     // Try wholesale first (most SKUs live there), then fall back to DTC/retail
     // for anything the wholesale store doesn't have yet.
     let shopifyImagesBySku = new Map<string, string>();
-    let imageLookupStats: Record<string, { total: number; matched: number; matchedByPrefix: number }> = {};
+    let imageLookupStats: Record<string, MultiStoreLookupStats> = {};
     try {
       const res = await getShopifyImagesForSkusMultiStore(["wholesale", "dtc"], filteredSkus);
       shopifyImagesBySku = res.images;

@@ -164,29 +164,63 @@ export async function getShopifyImageForSku(
   }
 }
 
+export interface MultiStoreLookupStats {
+  configured: boolean;
+  domain: string | null;
+  totalVariantsInShopify: number;
+  totalProductsInShopify: number;
+  matched: number;
+  matchedByPrefix: number;
+  error: string | null;
+  sampleShopifySkus: string[]; // first 10 SKUs on the store — useful for format-mismatch diagnosis
+}
+
 /**
  * Batch-resolve images for many SKUs across multiple stores. Tries each store
  * in order — the first store that has an image for a given SKU wins. Useful
  * when products live on the retail store but not (yet) on wholesale.
+ *
+ * Returns per-store stats including whether credentials are configured, any
+ * error encountered, and a sample of the actual SKUs on that store (so a
+ * caller can see if there's a SKU format mismatch).
  */
 export async function getShopifyImagesForSkusMultiStore(
   stores: ShopifyStore[],
   skus: Array<string | null | undefined>,
-): Promise<{ images: Map<string, string>; stats: Record<string, { total: number; matched: number; matchedByPrefix: number }> }> {
+): Promise<{ images: Map<string, string>; stats: Record<string, MultiStoreLookupStats> }> {
   const images = new Map<string, string>();
-  const stats: Record<string, { total: number; matched: number; matchedByPrefix: number }> = {};
+  const stats: Record<string, MultiStoreLookupStats> = {};
   const remaining = new Set(skus.filter((s): s is string => Boolean(s)));
 
   for (const store of stores) {
-    stats[store] = { total: 0, matched: 0, matchedByPrefix: 0 };
+    const cfg = getStoreConfig(store);
+    stats[store] = {
+      configured: !!cfg,
+      domain: cfg?.domain || null,
+      totalVariantsInShopify: 0,
+      totalProductsInShopify: 0,
+      matched: 0,
+      matchedByPrefix: 0,
+      error: null,
+      sampleShopifySkus: [],
+    };
+
+    if (!cfg) {
+      stats[store].error = `Missing SHOPIFY_${store.toUpperCase()}_STORE_DOMAIN or SHOPIFY_${store.toUpperCase()}_ACCESS_TOKEN env var`;
+      continue;
+    }
+
     let map: CacheEntry;
     try {
       map = await loadShopifyImageMap(store);
     } catch (e) {
+      stats[store].error = String(e);
       console.warn(`[shopify-images] load failed for ${store}:`, e);
       continue;
     }
-    stats[store].total = map.bySku.size;
+    stats[store].totalVariantsInShopify = map.bySku.size;
+    stats[store].totalProductsInShopify = map.bySkuPrefix.size;
+    stats[store].sampleShopifySkus = Array.from(map.bySku.keys()).slice(0, 10);
 
     for (const sku of Array.from(remaining)) {
       const direct = map.bySku.get(sku);
