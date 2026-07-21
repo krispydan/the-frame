@@ -5,7 +5,21 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { loadExportProducts } from "@/modules/catalog/lib/export/load-products";
 import type { ExportProduct } from "@/modules/catalog/lib/export/types";
-import { getShopifyImagesForSkus } from "@/modules/orders/lib/shopify-images";
+import { getShopifyImagesForSkusMultiStore } from "@/modules/orders/lib/shopify-images";
+
+/**
+ * Bucket exact inventory count into a tier label for wholesale catalogs.
+ * We don't want to reveal exact stock levels to buyers — an approximation
+ * is more helpful anyway (buyers care "can I still order 24 units?" not
+ * whether we have 137 or 189).
+ */
+function inventoryTier(qty: number): { label: string; color: string } {
+  if (qty >= 100) return { label: "100+", color: "#0F8B4A" };
+  if (qty >= 50) return { label: "50-100", color: "#0F8B4A" };
+  if (qty >= 20) return { label: "20-50", color: "#B37800" };
+  if (qty >= 1) return { label: "Low stock", color: "#B32C2C" };
+  return { label: "Out of stock", color: "#B32C2C" };
+}
 
 function loadImageBuffer(imgUrl: string): Buffer | null {
   const candidates = [
@@ -314,10 +328,9 @@ function drawProductPages(
       state.doc.text(v.sku, imgX, labelY + 9, { width: imgW, align: "center", lineBreak: false });
 
       if (settings.showInventory) {
-        const qty = v.inventoryQuantity;
-        const qtyColor = qty >= 50 ? "#0F8B4A" : qty >= 10 ? "#B37800" : "#B32C2C";
-        state.doc.font("Helvetica-Bold").fontSize(6.5).fillColor(qtyColor);
-        state.doc.text(`${qty.toLocaleString()} in stock`, imgX, labelY + 18, { width: imgW, align: "center", lineBreak: false });
+        const tier = inventoryTier(v.inventoryQuantity);
+        state.doc.font("Helvetica-Bold").fontSize(6.5).fillColor(tier.color);
+        state.doc.text(`${tier.label} in stock`, imgX, labelY + 18, { width: imgW, align: "center", lineBreak: false });
       }
     }
 
@@ -428,9 +441,9 @@ function drawOrderFormPages(state: PdfState, products: CatalogProduct[], preorde
       state.doc.text(`${s.style} / ${s.color}`, cols[1] + 3, state.y, { lineBreak: false });
       state.doc.text(`$${s.wholesale.toFixed(2)}`, cols[2] + 3, state.y, { lineBreak: false });
       if (showInventory) {
-        const qtyColor = s.inventory >= 50 ? "#0F8B4A" : s.inventory >= 10 ? "#B37800" : "#B32C2C";
-        state.doc.fillColor(qtyColor);
-        state.doc.text(s.inventory.toLocaleString(), cols[3] + 3, state.y, { lineBreak: false });
+        const tier = inventoryTier(s.inventory);
+        state.doc.fillColor(tier.color);
+        state.doc.text(tier.label, cols[3] + 3, state.y, { lineBreak: false });
         state.doc.fillColor(DARK);
       }
       // Blank lines for qty and total
@@ -583,11 +596,31 @@ export async function GET(request: NextRequest) {
         }
       }
     }
+    // Try wholesale first (most SKUs live there), then fall back to DTC/retail
+    // for anything the wholesale store doesn't have yet.
     let shopifyImagesBySku = new Map<string, string>();
+    let imageLookupStats: Record<string, { total: number; matched: number; matchedByPrefix: number }> = {};
     try {
-      shopifyImagesBySku = await getShopifyImagesForSkus("wholesale", filteredSkus);
+      const res = await getShopifyImagesForSkusMultiStore(["wholesale", "dtc"], filteredSkus);
+      shopifyImagesBySku = res.images;
+      imageLookupStats = res.stats;
     } catch (e) {
       console.warn("[pdf] Shopify image lookup failed, using local images only:", e);
+    }
+
+    // Debug mode: return JSON stats instead of a PDF so we can diagnose
+    // missing images without generating a large file
+    if (searchParams.get("debug") === "true") {
+      const missing = filteredSkus.filter((s) => !shopifyImagesBySku.has(s));
+      return NextResponse.json({
+        productCount: exportProducts.length,
+        filteredSkuCount: filteredSkus.length,
+        imagesResolved: shopifyImagesBySku.size,
+        imagesMissing: missing.length,
+        storesUsed: imageLookupStats,
+        firstFewMatched: Array.from(shopifyImagesBySku.entries()).slice(0, 5).map(([sku, url]) => ({ sku, url })),
+        firstFewMissing: missing.slice(0, 20),
+      });
     }
 
     const catalogProducts = toCatalogProducts(exportProducts, shopifyImagesBySku, settings.minInventory);

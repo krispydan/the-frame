@@ -165,8 +165,57 @@ export async function getShopifyImageForSku(
 }
 
 /**
- * Batch-resolve images for many SKUs at once. More efficient than calling
- * getShopifyImageForSku in a loop because the cache load is amortized.
+ * Batch-resolve images for many SKUs across multiple stores. Tries each store
+ * in order — the first store that has an image for a given SKU wins. Useful
+ * when products live on the retail store but not (yet) on wholesale.
+ */
+export async function getShopifyImagesForSkusMultiStore(
+  stores: ShopifyStore[],
+  skus: Array<string | null | undefined>,
+): Promise<{ images: Map<string, string>; stats: Record<string, { total: number; matched: number; matchedByPrefix: number }> }> {
+  const images = new Map<string, string>();
+  const stats: Record<string, { total: number; matched: number; matchedByPrefix: number }> = {};
+  const remaining = new Set(skus.filter((s): s is string => Boolean(s)));
+
+  for (const store of stores) {
+    stats[store] = { total: 0, matched: 0, matchedByPrefix: 0 };
+    let map: CacheEntry;
+    try {
+      map = await loadShopifyImageMap(store);
+    } catch (e) {
+      console.warn(`[shopify-images] load failed for ${store}:`, e);
+      continue;
+    }
+    stats[store].total = map.bySku.size;
+
+    for (const sku of Array.from(remaining)) {
+      const direct = map.bySku.get(sku);
+      if (direct) {
+        images.set(sku, direct);
+        stats[store].matched++;
+        remaining.delete(sku);
+        continue;
+      }
+      const dash = sku.lastIndexOf("-");
+      if (dash > 0) {
+        const prefix = sku.slice(0, dash);
+        const productImages = map.bySkuPrefix.get(prefix);
+        if (productImages && productImages.length > 0) {
+          images.set(sku, productImages[0]);
+          stats[store].matched++;
+          stats[store].matchedByPrefix++;
+          remaining.delete(sku);
+        }
+      }
+    }
+  }
+
+  return { images, stats };
+}
+
+/**
+ * Batch-resolve images for many SKUs at once (single store). More efficient
+ * than calling getShopifyImageForSku in a loop because the cache load is amortized.
  */
 export async function getShopifyImagesForSkus(
   store: ShopifyStore,
