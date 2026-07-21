@@ -12,7 +12,7 @@ import {
 import { toast } from "sonner";
 import {
   ArrowLeft, Calculator, Upload, Layers, DollarSign, TrendingUp,
-  Loader2, CheckCircle, Clock, AlertTriangle, RefreshCw,
+  Loader2, CheckCircle, Clock, AlertTriangle, RefreshCw, Package,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -166,22 +166,69 @@ export default function CogsPage() {
   const [backfillFrom, setBackfillFrom] = useState("");
   const [backfillTo, setBackfillTo] = useState("");
 
+  // SKU aliases (non-catalog order SKUs → canonical catalog SKUs)
+  const [aliases, setAliases] = useState<Array<{ alias: string; canonicalSku: string; note: string | null; createdAt: string }>>([]);
+  const [aliasForm, setAliasForm] = useState({ alias: "", canonicalSku: "", note: "" });
+  const [aliasBusy, setAliasBusy] = useState(false);
+
   const load = useCallback(async () => {
     try {
-      const [layerRes, journalRes, healthRes] = await Promise.all([
+      const [layerRes, journalRes, healthRes, aliasRes] = await Promise.all([
         fetch("/api/v1/finance/cost-layers?summary=true"),
         fetch("/api/v1/finance/cogs?journals=true"),
         fetch("/api/v1/finance/cogs?health=true"),
+        fetch("/api/v1/finance/sku-aliases"),
       ]);
       if (layerRes.ok) setLayers(await layerRes.json());
       if (journalRes.ok) setJournals(await journalRes.json());
       if (healthRes.ok) setHealth(await healthRes.json());
+      if (aliasRes.ok) setAliases((await aliasRes.json()).aliases ?? []);
     } catch {
       toast.error("Failed to load COGS data");
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const handleAddAlias = async () => {
+    if (!aliasForm.alias.trim() || !aliasForm.canonicalSku.trim()) {
+      toast.error("Both the order SKU and the canonical catalog SKU are required");
+      return;
+    }
+    setAliasBusy(true);
+    try {
+      const res = await fetch("/api/v1/finance/sku-aliases", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ alias: aliasForm.alias.trim(), canonicalSku: aliasForm.canonicalSku.trim(), note: aliasForm.note.trim() || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to add alias");
+      toast.success(`${data.alias} → ${data.canonicalSku} mapped. Now re-cost the affected day(s) below (Backfill range or Run yesterday) so the excluded lines get costed.`);
+      setAliasForm({ alias: "", canonicalSku: "", note: "" });
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to add alias");
+    } finally {
+      setAliasBusy(false);
+    }
+  };
+
+  const handleDeleteAlias = async (alias: string) => {
+    setAliasBusy(true);
+    try {
+      const res = await fetch("/api/v1/finance/sku-aliases", {
+        method: "DELETE", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ alias }),
+      });
+      if (!res.ok) throw new Error("Failed to delete alias");
+      toast.success(`Alias ${alias} removed`);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete alias");
+    } finally {
+      setAliasBusy(false);
+    }
+  };
 
   useEffect(() => { load(); }, [load]);
 
@@ -449,6 +496,69 @@ export default function CogsPage() {
             <Button onClick={() => handleBackfill(true)} variant="outline" size="sm" disabled={running}>Dry-run range</Button>
             <Button onClick={() => handleBackfill(false)} size="sm" disabled={running}>Backfill range</Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* SKU Aliases — map non-catalog order SKUs (Faire duplicate listings,
+          size variants) to canonical SKUs so they cost against the right FIFO
+          layers instead of raising unmapped_sku exceptions */}
+      <Card id="sku-aliases">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Package className="h-5 w-5" /> SKU Aliases
+          </CardTitle>
+          <CardDescription>
+            When an order SKU isn&apos;t in the catalog (a Faire duplicate listing like <code>JX3003-F1-BLK</code>, a size variant like <code>JX4004-S-BLK</code>), map it to the canonical SKU here — it will cost against that SKU&apos;s inventory layers. After adding, re-cost the affected day(s) with the Backfill controls above.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <Label className="text-xs">Order SKU (as it appears on orders)</Label>
+              <Input placeholder="JX3003-F1-BLK" value={aliasForm.alias} onChange={(e) => setAliasForm((f) => ({ ...f, alias: e.target.value }))} className="h-9 w-48 font-mono" />
+            </div>
+            <div>
+              <Label className="text-xs">Canonical catalog SKU</Label>
+              <Input placeholder="JX3003-BLK" value={aliasForm.canonicalSku} onChange={(e) => setAliasForm((f) => ({ ...f, canonicalSku: e.target.value }))} className="h-9 w-48 font-mono" />
+            </div>
+            <div className="flex-1 min-w-40">
+              <Label className="text-xs">Note (optional)</Label>
+              <Input placeholder="Faire duplicate listing" value={aliasForm.note} onChange={(e) => setAliasForm((f) => ({ ...f, note: e.target.value }))} className="h-9" />
+            </div>
+            <Button onClick={handleAddAlias} size="sm" disabled={aliasBusy}>
+              {aliasBusy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Add alias
+            </Button>
+          </div>
+          {aliases.length > 0 && (
+            <div className="rounded-md border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50">
+                  <tr className="border-b text-left text-xs">
+                    <th className="p-2 font-medium">Order SKU</th>
+                    <th className="p-2 font-medium">Costs against</th>
+                    <th className="p-2 font-medium">Note</th>
+                    <th className="p-2 font-medium">Added</th>
+                    <th className="p-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {aliases.map((a) => (
+                    <tr key={a.alias} className="border-b last:border-0">
+                      <td className="p-2 font-mono text-xs">{a.alias}</td>
+                      <td className="p-2 font-mono text-xs">→ {a.canonicalSku}</td>
+                      <td className="p-2 text-xs text-muted-foreground">{a.note || "—"}</td>
+                      <td className="p-2 text-xs text-muted-foreground">{formatDate(a.createdAt)}</td>
+                      <td className="p-2 text-right">
+                        <Button variant="ghost" size="sm" onClick={() => handleDeleteAlias(a.alias)} disabled={aliasBusy} className="h-7 text-xs text-muted-foreground hover:text-red-600">
+                          Remove
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </CardContent>
       </Card>
 

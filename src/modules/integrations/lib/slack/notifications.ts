@@ -703,6 +703,16 @@ export async function notifyCogsException(opts: {
     unmapped_sku: "Unmapped SKU",
   };
   const emoji = opts.type === "zero_cost" || opts.type === "implausible_cost" ? "🔴" : "🟠";
+  const FIX_HINT: Record<string, string> = {
+    unmapped_sku:
+      "*How to fix:* if these are variants of an existing catalog SKU (a Faire duplicate listing like `JX3003-F1-BLK`, a size variant like `JX4004-S-BLK`), add an alias mapping them to the canonical SKU under <https://theframe.getjaxy.com/finance/cogs#sku-aliases|Finance → COGS → SKU Aliases>, then re-cost the day with the Backfill controls on the same page. If it's a genuinely new product, add it to the catalog + seed cost layers instead.",
+    shortfall:
+      "*How to fix:* the SKU has no inventory cost layers with stock — receive the PO (or seed opening layers) so landed cost exists, then re-cost the day from <https://theframe.getjaxy.com/finance/cogs|Finance → COGS>.",
+    zero_cost:
+      "*How to fix:* the next FIFO layer for this SKU has a $0/implausible unit cost — correct the layer's cost, then re-cost the day.",
+    implausible_cost:
+      "*How to fix:* the next FIFO layer's unit cost failed the sanity check — verify the PO/layer cost, fix it, then re-cost the day.",
+  };
   await postSlack({
     topic: "finance.cogs_exception",
     text: `${emoji} COGS ${label[opts.type]}: ${opts.count} on ${opts.date}`,
@@ -711,7 +721,7 @@ export async function notifyCogsException(opts: {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `${emoji} *COGS exception — ${label[opts.type]}*\n${pluralize(opts.count, "order line", "order lines")} on ${opts.date} couldn't be costed and were excluded from the journal until fixed.\n${opts.examples.slice(0, 8).map((e) => `• ${e}`).join("\n")}`,
+          text: `${emoji} *COGS exception — ${label[opts.type]}*\n${pluralize(opts.count, "order line", "order lines")} on ${opts.date} couldn't be costed and were excluded from the journal until fixed.\n${opts.examples.slice(0, 8).map((e) => `• ${e}`).join("\n")}\n\n${FIX_HINT[opts.type] ?? ""}`,
         },
       },
       ...(opts.orderUrl
