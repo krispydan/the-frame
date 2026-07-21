@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { loadExportProducts } from "@/modules/catalog/lib/export/load-products";
 import type { ExportProduct } from "@/modules/catalog/lib/export/types";
+import { getShopifyImagesForSkus } from "@/modules/orders/lib/shopify-images";
 
 function loadImageBuffer(imgUrl: string): Buffer | null {
   const candidates = [
@@ -19,6 +20,34 @@ function loadImageBuffer(imgUrl: string): Buffer | null {
     }
   }
   return null;
+}
+
+/**
+ * Fetch a remote image (Shopify CDN etc) into a Buffer for pdfkit.
+ * Shopify CDN URLs accept width params — request 600px to keep the PDF small.
+ * pdfkit only supports JPEG/PNG, so we fall back to a format=jpg parameter if
+ * Shopify serves us a webp.
+ */
+async function fetchImageBuffer(url: string): Promise<Buffer | null> {
+  try {
+    const sized = url.includes("cdn.shopify.com") && !url.includes("width=")
+      ? `${url}${url.includes("?") ? "&" : "?"}width=600`
+      : url;
+    const res = await fetch(sized);
+    if (!res.ok) return null;
+    const contentType = res.headers.get("content-type") || "";
+    if (!/image\/(jpeg|png|jpg)/i.test(contentType)) {
+      const jpgUrl = `${sized}${sized.includes("?") ? "&" : "?"}format=jpg`;
+      const res2 = await fetch(jpgUrl);
+      if (!res2.ok) return null;
+      const ct2 = res2.headers.get("content-type") || "";
+      if (!/image\/(jpeg|png|jpg)/i.test(ct2)) return null;
+      return Buffer.from(await res2.arrayBuffer());
+    }
+    return Buffer.from(await res.arrayBuffer());
+  } catch {
+    return null;
+  }
 }
 
 // ── Design System ──
@@ -43,6 +72,9 @@ interface CatalogSettings {
   showPreorder: boolean;
   showOrderForm: boolean;
   showTerms: boolean;
+  showInventory: boolean;
+  /** Per-SKU minimum; SKUs below this are dropped, products with 0 remaining SKUs are dropped. 0 = no filter. */
+  minInventory: number;
   season: string;
   preorderDiscount: number;
 }
@@ -60,8 +92,8 @@ interface CatalogProduct {
   lens: string;
   wholesale: number;
   retail: number;
-  variants: { sku: string; color: string }[];
-  imageUrls: string[]; // one URL per variant
+  variants: { sku: string; color: string; inventoryQuantity: number }[];
+  imageUrls: string[]; // one URL per variant (Shopify CDN URL when available)
 }
 
 // ── Helpers ──
@@ -102,17 +134,28 @@ function newPage(state: PdfState) {
 
 // ── Transform export products to catalog format ──
 
-function toCatalogProducts(exportProducts: ExportProduct[]): CatalogProduct[] {
+function toCatalogProducts(
+  exportProducts: ExportProduct[],
+  shopifyImagesBySku: Map<string, string>,
+  minInventory: number,
+): CatalogProduct[] {
   return exportProducts
-    .filter(ep => ep.skus.length > 0)
     .map(ep => {
-      // Pick one image URL per variant (prefer approved, isBest)
-      const skuImageMap = new Map<string, string>();
+      // Filter SKUs to those with sufficient inventory (0 = include all)
+      const inStockSkus = minInventory > 0
+        ? ep.skus.filter(s => (s.inventoryQuantity ?? 0) >= minInventory)
+        : ep.skus;
+      if (inStockSkus.length === 0) return null;
+
+      // Pick one local image URL per variant (prefer approved, isBest)
+      const localImageBySkuId = new Map<string, string>();
       for (const img of ep.images) {
-        if (!img.filePath) continue;
-        const existing = skuImageMap.get(img.skuId);
+        // Prefer R2 URL (public CDN) when present, fall back to filePath
+        const path = img.url || img.filePath;
+        if (!path) continue;
+        const existing = localImageBySkuId.get(img.skuId);
         if (!existing || img.isBest || img.status === "approved") {
-          skuImageMap.set(img.skuId, img.filePath);
+          localImageBySkuId.set(img.skuId, path);
         }
       }
 
@@ -122,13 +165,21 @@ function toCatalogProducts(exportProducts: ExportProduct[]): CatalogProduct[] {
         lens: (ep.product.lensType ?? "").toLowerCase() === "polarized" || ep.product.name?.toLowerCase().includes("polarized") ? "Polarized" : "UV400",
         wholesale: ep.wholesalePrice || 7,
         retail: ep.retailPrice || 24,
-        variants: ep.skus.map(s => ({
+        variants: inStockSkus.map(s => ({
           sku: s.sku || "",
           color: titleCase(s.colorName || "Default"),
+          inventoryQuantity: s.inventoryQuantity ?? 0,
         })),
-        imageUrls: ep.skus.map(s => skuImageMap.get(s.id) || ""),
+        // Prefer Shopify CDN image (public URL, always resolves) then fall back
+        // to any local path we have on record.
+        imageUrls: inStockSkus.map(s => {
+          const shopify = s.sku ? shopifyImagesBySku.get(s.sku) : undefined;
+          if (shopify) return shopify;
+          return localImageBySkuId.get(s.id) || "";
+        }),
       };
     })
+    .filter((p): p is CatalogProduct => p !== null)
     .sort((a, b) => (a.variants[0]?.sku || "").localeCompare(b.variants[0]?.sku || ""));
 }
 
@@ -162,12 +213,17 @@ function drawCover(state: PdfState, settings: CatalogSettings) {
 
 // ── Product Pages ──
 
-function drawProductPages(state: PdfState, products: CatalogProduct[], settings: CatalogSettings) {
+function drawProductPages(
+  state: PdfState,
+  products: CatalogProduct[],
+  settings: CatalogSettings,
+  imageBufferBySku: Map<string, Buffer>,
+) {
   function productHeight(p: CatalogProduct): number {
     const n = p.variants.length;
     const imgW = Math.min(120, (CW - IMG_GAP * (n - 1)) / n);
     const imgH = imgW * IMG_RATIO;
-    return 18 + imgH + 12 + 10 + 10;
+    return 18 + imgH + 12 + 10 + 10 + (settings.showInventory ? 10 : 0);
   }
 
   function startProductPage() {
@@ -224,19 +280,26 @@ function drawProductPages(state: PdfState, products: CatalogProduct[], settings:
       // Grey background card for image placeholder
       state.doc.roundedRect(imgX, state.y, imgW, imgH, 3).fill(BG_GRAY);
 
-      // Try to load image if it's a local file
+      const v = prod.variants[i];
       const imgUrl = prod.imageUrls[i];
-      if (imgUrl) {
+
+      // Try pre-fetched Shopify image buffer first (keyed by SKU),
+      // then fall back to a local file lookup for non-HTTP paths.
+      let imgBuf: Buffer | null = null;
+      if (v.sku && imageBufferBySku.has(v.sku)) {
+        imgBuf = imageBufferBySku.get(v.sku) || null;
+      } else if (imgUrl && !imgUrl.startsWith("http")) {
+        imgBuf = loadImageBuffer(imgUrl);
+      }
+
+      if (imgBuf) {
         try {
-          const imgBuf = loadImageBuffer(imgUrl);
-          if (imgBuf) {
-            state.doc.image(imgBuf, imgX + 3, state.y + 3, {
-              fit: [imgW - 6, imgH - 6],
-              align: "center",
-              valign: "center",
-            });
-          }
-        } catch { /* image not available, show placeholder */ }
+          state.doc.image(imgBuf, imgX + 3, state.y + 3, {
+            fit: [imgW - 6, imgH - 6],
+            align: "center",
+            valign: "center",
+          });
+        } catch { /* pdfkit rejected the image (bad format) — placeholder stays */ }
       }
     }
 
@@ -249,9 +312,16 @@ function drawProductPages(state: PdfState, products: CatalogProduct[], settings:
       state.doc.text(v.color, imgX, labelY, { width: imgW, align: "center", lineBreak: false });
       state.doc.font("Helvetica").fontSize(6).fillColor(LIGHT_GRAY);
       state.doc.text(v.sku, imgX, labelY + 9, { width: imgW, align: "center", lineBreak: false });
+
+      if (settings.showInventory) {
+        const qty = v.inventoryQuantity;
+        const qtyColor = qty >= 50 ? "#0F8B4A" : qty >= 10 ? "#B37800" : "#B32C2C";
+        state.doc.font("Helvetica-Bold").fontSize(6.5).fillColor(qtyColor);
+        state.doc.text(`${qty.toLocaleString()} in stock`, imgX, labelY + 18, { width: imgW, align: "center", lineBreak: false });
+      }
     }
 
-    state.y = labelY + 22;
+    state.y = labelY + 22 + (settings.showInventory ? 10 : 0);
     drawLine(state.doc, state.y);
     state.y += 8;
   }
@@ -305,11 +375,11 @@ function drawPreorderPage(state: PdfState, avgWholesale: number, preorderPrice: 
 
 // ── Order Form Pages ──
 
-function drawOrderFormPages(state: PdfState, products: CatalogProduct[], preorderPrice: number, avgWholesale: number) {
-  const allSkus: { sku: string; style: string; color: string; wholesale: number }[] = [];
+function drawOrderFormPages(state: PdfState, products: CatalogProduct[], preorderPrice: number, avgWholesale: number, showInventory: boolean) {
+  const allSkus: { sku: string; style: string; color: string; wholesale: number; inventory: number }[] = [];
   for (const prod of products) {
     for (const v of prod.variants) {
-      allSkus.push({ sku: v.sku, style: prod.title, color: v.color, wholesale: prod.wholesale });
+      allSkus.push({ sku: v.sku, style: prod.title, color: v.color, wholesale: prod.wholesale, inventory: v.inventoryQuantity });
     }
   }
 
@@ -334,9 +404,13 @@ function drawOrderFormPages(state: PdfState, products: CatalogProduct[], preorde
       state.y += 10;
     }
 
-    // Table header
-    const cols = [MARGIN, MARGIN + 85, MARGIN + 220, MARGIN + 300, MARGIN + 380, MARGIN + 460];
-    const colLabels = ["SKU", "Style / Color", "Wholesale", "Qty (min 3)", "Line Total"];
+    // Table header — layout depends on whether we're showing inventory
+    const cols = showInventory
+      ? [MARGIN, MARGIN + 80, MARGIN + 210, MARGIN + 275, MARGIN + 335, MARGIN + 405]
+      : [MARGIN, MARGIN + 85, MARGIN + 220, MARGIN + 300, MARGIN + 380, MARGIN + 460];
+    const colLabels = showInventory
+      ? ["SKU", "Style / Color", "Wholesale", "In Stock", "Qty (min 3)", "Line Total"]
+      : ["SKU", "Style / Color", "Wholesale", "Qty (min 3)", "Line Total"];
     state.doc.rect(MARGIN, state.y - 2, CW, 14).fill(DARK);
     state.doc.font("Helvetica-Bold").fontSize(7).fillColor("white");
     for (let j = 0; j < colLabels.length; j++) {
@@ -353,10 +427,17 @@ function drawOrderFormPages(state: PdfState, products: CatalogProduct[], preorde
       state.doc.text(s.sku, cols[0] + 3, state.y, { lineBreak: false });
       state.doc.text(`${s.style} / ${s.color}`, cols[1] + 3, state.y, { lineBreak: false });
       state.doc.text(`$${s.wholesale.toFixed(2)}`, cols[2] + 3, state.y, { lineBreak: false });
+      if (showInventory) {
+        const qtyColor = s.inventory >= 50 ? "#0F8B4A" : s.inventory >= 10 ? "#B37800" : "#B32C2C";
+        state.doc.fillColor(qtyColor);
+        state.doc.text(s.inventory.toLocaleString(), cols[3] + 3, state.y, { lineBreak: false });
+        state.doc.fillColor(DARK);
+      }
       // Blank lines for qty and total
+      const blankCols = showInventory ? [cols[4], cols[5]] : [cols[3], cols[4]];
       state.doc.strokeColor(LINE_GRAY).lineWidth(0.3);
-      for (const cx of [cols[3], cols[4]]) {
-        state.doc.moveTo(cx + 3, state.y + 10).lineTo(cx + 65, state.y + 10).stroke();
+      for (const cx of blankCols) {
+        state.doc.moveTo(cx + 3, state.y + 10).lineTo(cx + 55, state.y + 10).stroke();
       }
       state.y += 13;
     }
@@ -437,6 +518,7 @@ function drawTermsPage(state: PdfState, avgWholesale: number, preorderPrice: num
 function generateCatalogPDF(
   products: CatalogProduct[],
   settings: CatalogSettings,
+  imageBufferBySku: Map<string, Buffer>,
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const avgWholesale = products.length > 0
@@ -463,9 +545,9 @@ function generateCatalogPDF(
     const state: PdfState = { doc, y: 0, pageNum: 0, expectedPages: 0 };
 
     drawCover(state, settings);
-    drawProductPages(state, products, settings);
+    drawProductPages(state, products, settings, imageBufferBySku);
     if (settings.showPreorder) drawPreorderPage(state, avgWholesale, preorderPrice);
-    if (settings.showOrderForm) drawOrderFormPages(state, products, preorderPrice, avgWholesale);
+    if (settings.showOrderForm) drawOrderFormPages(state, products, preorderPrice, avgWholesale, settings.showInventory);
     if (settings.showTerms) drawTermsPage(state, avgWholesale, preorderPrice);
 
     doc.end();
@@ -481,6 +563,8 @@ export async function GET(request: NextRequest) {
       showPreorder: searchParams.get("preorder") !== "false",
       showOrderForm: searchParams.get("orderForm") !== "false",
       showTerms: searchParams.get("terms") !== "false",
+      showInventory: searchParams.get("showInventory") === "true",
+      minInventory: parseInt(searchParams.get("minInventory") || "10", 10),
       season: searchParams.get("season") || "Spring 2026",
       preorderDiscount: parseFloat(searchParams.get("preorderDiscount") || "0.2"),
     };
@@ -488,9 +572,44 @@ export async function GET(request: NextRequest) {
     const idsParam = searchParams.get("ids");
     const productIds = idsParam ? idsParam.split(",").filter(Boolean) : undefined;
     const exportProducts = await loadExportProducts(productIds);
-    const catalogProducts = toCatalogProducts(exportProducts);
 
-    const pdfBuffer = await generateCatalogPDF(catalogProducts, settings);
+    // Collect SKUs that will make it past the inventory filter, then batch-resolve
+    // Shopify images for them (a single paginated fetch cached in-process for 10 min).
+    const filteredSkus: string[] = [];
+    for (const ep of exportProducts) {
+      for (const s of ep.skus) {
+        if (s.sku && (settings.minInventory === 0 || (s.inventoryQuantity ?? 0) >= settings.minInventory)) {
+          filteredSkus.push(s.sku);
+        }
+      }
+    }
+    let shopifyImagesBySku = new Map<string, string>();
+    try {
+      shopifyImagesBySku = await getShopifyImagesForSkus("wholesale", filteredSkus);
+    } catch (e) {
+      console.warn("[pdf] Shopify image lookup failed, using local images only:", e);
+    }
+
+    const catalogProducts = toCatalogProducts(exportProducts, shopifyImagesBySku, settings.minInventory);
+
+    // Concurrently pre-fetch the actual image bytes (max 6 in flight)
+    const imageBufferBySku = new Map<string, Buffer>();
+    const entries = Array.from(shopifyImagesBySku.entries());
+    const CONCURRENCY = 6;
+    let cursor = 0;
+    await Promise.all(
+      Array.from({ length: CONCURRENCY }, async () => {
+        while (cursor < entries.length) {
+          const idx = cursor++;
+          const [sku, url] = entries[idx];
+          if (!url) continue;
+          const buf = await fetchImageBuffer(url);
+          if (buf) imageBufferBySku.set(sku, buf);
+        }
+      }),
+    );
+
+    const pdfBuffer = await generateCatalogPDF(catalogProducts, settings, imageBufferBySku);
     const safeSeason = settings.season.toLowerCase().replace(/\s+/g, "-");
 
     return new NextResponse(new Uint8Array(pdfBuffer), {

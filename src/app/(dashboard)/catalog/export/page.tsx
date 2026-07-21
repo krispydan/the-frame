@@ -50,6 +50,9 @@ export default function ExportPage() {
   const [showPreorder, setShowPreorder] = useState(true);
   const [showOrderForm, setShowOrderForm] = useState(true);
   const [showTerms, setShowTerms] = useState(true);
+  const [showInventory, setShowInventory] = useState(false);
+  const [inStockOnly, setInStockOnly] = useState(true);
+  const [minInventory, setMinInventory] = useState(10);
 
   // Get pre-selected IDs from URL
   const [selectedIds, setSelectedIds] = useState<string>("");
@@ -81,6 +84,9 @@ export default function ExportPage() {
     params.set("preorder", String(showPreorder));
     params.set("orderForm", String(showOrderForm));
     params.set("terms", String(showTerms));
+    params.set("showInventory", String(showInventory));
+    // minInventory=0 means include everything; toggle sets to 10 (or user's number) when on
+    params.set("minInventory", String(inStockOnly ? minInventory : 0));
     window.open(`/api/v1/catalog/export/pdf?${params}`, "_blank");
   };
 
@@ -149,28 +155,52 @@ export default function ExportPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap items-end gap-4">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Season</label>
-              <Input value={pdfSeason} onChange={(e) => setPdfSeason(e.target.value)} className="w-[180px]" />
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-end gap-4">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Season</label>
+                <Input value={pdfSeason} onChange={(e) => setPdfSeason(e.target.value)} className="w-[180px]" />
+              </div>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox checked={showPreorder} onCheckedChange={(v) => setShowPreorder(!!v)} />
+                  Pre-Order Page
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox checked={showOrderForm} onCheckedChange={(v) => setShowOrderForm(!!v)} />
+                  Order Form
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox checked={showTerms} onCheckedChange={(v) => setShowTerms(!!v)} />
+                  Terms Page
+                </label>
+              </div>
+              <Button onClick={handlePdfExport}>
+                <Download className="h-4 w-4 mr-1" /> Generate PDF
+              </Button>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4 pt-3 border-t">
               <label className="flex items-center gap-2 text-sm">
-                <Checkbox checked={showPreorder} onCheckedChange={(v) => setShowPreorder(!!v)} />
-                Pre-Order Page
+                <Checkbox checked={inStockOnly} onCheckedChange={(v) => setInStockOnly(!!v)} />
+                In-stock products only
               </label>
+              {inStockOnly && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span>Minimum units per variant:</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={minInventory}
+                    onChange={(e) => setMinInventory(parseInt(e.target.value, 10) || 10)}
+                    className="w-[80px] h-8"
+                  />
+                </div>
+              )}
               <label className="flex items-center gap-2 text-sm">
-                <Checkbox checked={showOrderForm} onCheckedChange={(v) => setShowOrderForm(!!v)} />
-                Order Form
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox checked={showTerms} onCheckedChange={(v) => setShowTerms(!!v)} />
-                Terms Page
+                <Checkbox checked={showInventory} onCheckedChange={(v) => setShowInventory(!!v)} />
+                Show inventory quantities
               </label>
             </div>
-            <Button onClick={handlePdfExport}>
-              <Download className="h-4 w-4 mr-1" /> Generate PDF
-            </Button>
           </div>
         </CardContent>
       </Card>
