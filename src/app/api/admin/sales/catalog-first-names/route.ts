@@ -23,6 +23,7 @@ import { firstNameForMerge } from "@/modules/sales/lib/faire-marketplace-parse";
 
 const RUN_KEY = "catalog_first_names_run";
 const OUR_DOMAIN = "getjaxy.com";
+const VERSION = "v3-storeecho-greetingonly"; // bump on logic change to confirm live build
 
 function getSetting(key: string): string | null {
   return (sqlite.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined)?.value?.trim() || null;
@@ -141,6 +142,7 @@ export async function GET(req: NextRequest) {
   const withName = leads.filter((l) => l.firstName);
   return NextResponse.json({
     ok: true,
+    version: VERSION,
     cohort: leads.length,
     haveFirstName: withName.length,
     missingFirstName: leads.length - withName.length,
