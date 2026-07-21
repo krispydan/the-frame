@@ -70,6 +70,21 @@ const NON_NAMES = new Set([
   "hope", "good", "great", "sorry", "checking", "reaching", "we", "i",
 ]);
 
+/** A name that's just an echo of a word in the store name (e.g. "Little" for
+ *  "Little Green Dress", "Eeluxury" for "eeluxury"). */
+function isStoreEcho(name: string, store: string): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const n = norm(name);
+  if (!n) return true;
+  const tokens = store.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).map(norm);
+  return tokens.includes(n) || norm(store) === n;
+}
+
+function isBadName(name: string | null | undefined, store: string): boolean {
+  const s = (name || "").trim();
+  return !s || NON_NAMES.has(s.toLowerCase()) || isStoreEcho(s, store);
+}
+
 /** Parse "Hi <Name>," from an outbound email snippet. Returns a clean first name
  *  or null (rejects merge-field failures, business words, the store name echo). */
 function nameFromSnippet(snippet: string | undefined, store: string): string | null {
@@ -81,13 +96,9 @@ function nameFromSnippet(snippet: string | undefined, store: string): string | n
   const rawName = m[1].replace(/[.'’-]+$/, "").trim();
   if (!rawName || rawName.length < 2) return null;
   if (NON_NAMES.has(rawName.toLowerCase())) return null;
-  // Reject if it's just an echo of a store-name word (e.g. "Hi Boutique,").
-  const storeWords = new Set(store.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
-  if (storeWords.has(rawName.toLowerCase())) return null;
-  // Final gate: firstNameForMerge blanks business/role/all-caps echoes and
-  // proper-cases. Pass the store so it can reject store-name matches too.
+  if (isStoreEcho(rawName, store)) return null;
   const clean = firstNameForMerge(rawName, store);
-  return clean || null;
+  return clean && !isStoreEcho(clean, store) ? clean : null;
 }
 
 /** Our outbound senders are on the getjaxy.com domain. */
@@ -98,26 +109,15 @@ function isOutbound(msg: { from?: Array<{ email_address?: string }> }): boolean 
 
 interface DealMsg {
   from?: Array<{ email_address?: string }>;
-  to?: Array<{ email_address?: string; linked_person_name?: string | null }>;
   snippet?: string;
 }
 
-/** Best first name from one OUTBOUND message: the greeting we wrote ("Hi X,"),
- *  else the recipient's Pipedrive-linked person name. Both validated. */
+/** Best first name from one OUTBOUND message: the greeting we actually wrote
+ *  ("Hi <Name>,"). The Pipedrive linked_person_name was tried as a fallback but
+ *  frequently returns the store name (Pipedrive links the "person" as the
+ *  store/email), so it's intentionally NOT used. */
 function nameFromMessage(m: DealMsg, store: string): string | null {
-  const fromGreeting = nameFromSnippet(m.snippet, store);
-  if (fromGreeting) return fromGreeting;
-  // Fallback: the "to" party Pipedrive linked to a person (skip our own team).
-  const recipient = (m.to || []).find((t) => !(t.email_address || "").toLowerCase().endsWith(`@${OUR_DOMAIN}`));
-  const linked = (recipient?.linked_person_name || "").trim();
-  if (linked) {
-    const first = linked.split(/\s+/)[0];
-    if (first && !NON_NAMES.has(first.toLowerCase())) {
-      const clean = firstNameForMerge(first, store);
-      if (clean) return clean;
-    }
-  }
-  return null;
+  return nameFromSnippet(m.snippet, store);
 }
 
 export async function GET(req: NextRequest) {
@@ -155,10 +155,9 @@ export async function POST(req: NextRequest) {
   const url = new URL(req.url);
   const commit = url.searchParams.get("commit") === "true";
   const overwrite = url.searchParams.get("overwrite") === "true";
-  // Process leads that are missing a name, have a bad-word name (a prior false
-  // positive to fix), or all when overwrite=true.
-  const needsName = (l: Lead) => !l.firstName || NON_NAMES.has(l.firstName.toLowerCase());
-  const leads = loadNamelessLeads().filter((l) => l.dealId && (overwrite || needsName(l)));
+  // Process leads that are missing a name, or have a bad name (blocklist word or
+  // store-name echo — prior false positives to fix), or all when overwrite=true.
+  const leads = loadNamelessLeads().filter((l) => l.dealId && (overwrite || isBadName(l.firstName, l.store)));
 
   if (!commit) {
     return NextResponse.json({ ok: true, commit: false, wouldScan: leads.length, note: "Re-run with commit=true to scan Pipedrive mail + write first names." });
@@ -193,8 +192,9 @@ export async function POST(req: NextRequest) {
             sqlite.prepare("INSERT INTO contacts (id, company_id, first_name, is_primary, source, created_at, updated_at) VALUES (?, ?, ?, 1, 'pipedrive_greeting', datetime('now'), datetime('now'))").run(crypto.randomUUID(), l.companyId, best);
           }
           written++;
-        } else if (l.contactId && l.firstName && NON_NAMES.has(l.firstName.toLowerCase())) {
-          // No valid name and the current one is a bad-word false positive → clear it.
+        } else if (l.contactId && l.firstName && isBadName(l.firstName, l.store)) {
+          // No valid name and the current one is a false positive (bad word or
+          // store-name echo) → clear it.
           sqlite.prepare("UPDATE contacts SET first_name = '', updated_at = datetime('now') WHERE id = ?").run(l.contactId);
           written++;
         }
