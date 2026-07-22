@@ -490,6 +490,36 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN pipedrive_synced_at TEXT"); 
 try { sqlite.exec("CREATE INDEX idx_companies_pipedrive_org ON companies (pipedrive_org_id)"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE orders ADD COLUMN pipedrive_deal_id INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_orders_pipedrive_deal ON orders (pipedrive_deal_id)"); } catch { /* exists */ }
+
+// International shipping: capture ship-to country + Shopify channel on orders,
+// and track the non-US Faire label workflow.
+try { sqlite.exec("ALTER TABLE orders ADD COLUMN ship_to_country TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE orders ADD COLUMN source_name TEXT"); } catch { /* exists */ }
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS international_shipping_requests (
+    id TEXT PRIMARY KEY NOT NULL,
+    order_id TEXT NOT NULL,
+    order_number TEXT NOT NULL,
+    external_id TEXT,
+    shiphero_order_id TEXT,
+    ship_to_country TEXT,
+    source_name TEXT,
+    status TEXT NOT NULL DEFAULT 'awaiting_dims',
+    email_sent_at TEXT,
+    resend_message_id TEXT,
+    packaged_length_in REAL,
+    packaged_width_in REAL,
+    packaged_height_in REAL,
+    packaged_weight_lb REAL,
+    box_count INTEGER DEFAULT 1,
+    dims_received_at TEXT,
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_intl_ship_order ON international_shipping_requests (order_id)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_intl_ship_status ON international_shipping_requests (status)");
+} catch { /* exists */ }
 // Instantly/PhoneBurner activity_feed rows mirrored to Pipedrive activities.
 // Stamp the Pipedrive activity id so each engagement event pushes once.
 try { sqlite.exec("ALTER TABLE activity_feed ADD COLUMN pipedrive_activity_id INTEGER"); } catch { /* exists */ }

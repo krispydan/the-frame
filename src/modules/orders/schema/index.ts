@@ -33,6 +33,12 @@ export const orders = sqliteTable("orders", {
   // Recipient from the order's shipping address (company || person name).
   // Captured at order-create; used directly in the fulfilled Slack alert.
   shipToName: text("ship_to_name"),
+  // Shipping destination country (ISO-2, e.g. "US", "CA", "GB"). Captured
+  // at order-create; drives the international-shipping-request flow.
+  shipToCountry: text("ship_to_country"),
+  // Shopify sales-channel attribution (order.source_name), e.g. "faire",
+  // "web", "pos". Used to confirm a wholesale order originated from Faire.
+  sourceName: text("source_name"),
   trackingNumber: text("tracking_number"),
   trackingCarrier: text("tracking_carrier"),
   placedAt: text("placed_at"),
@@ -81,4 +87,38 @@ export const returns = sqliteTable("returns", {
 }, (table) => [
   index("idx_returns_order_id").on(table.orderId),
   index("idx_returns_status").on(table.status),
+]);
+
+// ── International Shipping Requests ──
+// Non-US Faire orders require Jaxy to generate the shipping label through
+// Faire (customs/duties). This tracks the back-and-forth with the 3PL:
+// we email the warehouse for dims/weight, then create the label in Faire,
+// upload it to ShipHero, and mark it shipped.
+export const internationalShippingRequests = sqliteTable("international_shipping_requests", {
+  id: id(),
+  orderId: text("order_id").notNull().references(() => orders.id),
+  orderNumber: text("order_number").notNull(),
+  externalId: text("external_id"), // Shopify order ID
+  shipheroOrderId: text("shiphero_order_id"),
+  shipToCountry: text("ship_to_country"),
+  sourceName: text("source_name"), // e.g. "faire"
+  status: text("status", {
+    enum: ["awaiting_dims", "awaiting_label", "label_uploaded", "shipped", "cancelled"],
+  }).notNull().default("awaiting_dims"),
+  // Email tracking
+  emailSentAt: text("email_sent_at"),
+  resendMessageId: text("resend_message_id"),
+  // Dims/weight received from the warehouse (nullable until they reply)
+  packagedLengthIn: real("packaged_length_in"),
+  packagedWidthIn: real("packaged_width_in"),
+  packagedHeightIn: real("packaged_height_in"),
+  packagedWeightLb: real("packaged_weight_lb"),
+  boxCount: integer("box_count").default(1),
+  dimsReceivedAt: text("dims_received_at"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  index("idx_intl_ship_order_id").on(table.orderId),
+  index("idx_intl_ship_status").on(table.status),
 ]);

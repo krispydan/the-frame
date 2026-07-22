@@ -76,6 +76,8 @@ interface ShopifyOrder {
     first_name?: string;
     last_name?: string;
     company?: string;
+    country?: string;
+    country_code?: string; // ISO-2, e.g. "US", "CA"
   };
   fulfillments?: ShopifyFulfillment[];
 }
@@ -357,12 +359,25 @@ export async function handleOrderCreate(order: ShopifyOrder, shopDomain?: string
     notes: order.note || null,
     externalId: String(order.id),
     shipToName: deriveShipToName(order),
+    shipToCountry: order.shipping_address?.country_code || order.shipping_address?.country || null,
+    sourceName: order.source_name || null,
     placedAt: order.created_at,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }).returning().get();
 
   await mapLineItems(newOrder.id, order.line_items);
+
+  // International shipping: non-US Faire orders need a Faire-generated label,
+  // so we email the 3PL for dims/weight. Best-effort; never blocks order ingest.
+  void (async () => {
+    try {
+      const { maybeCreateInternationalShippingRequest } = await import("./international-shipping");
+      await maybeCreateInternationalShippingRequest(newOrder.id);
+    } catch (e) {
+      console.error("[Shopify Webhook] intl shipping check failed:", e);
+    }
+  })();
 
   // Auto-create customer account for the company
   if (companyId) {

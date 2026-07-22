@@ -3,7 +3,19 @@ const FROM_ADDRESS = "The Frame <noreply@theframe.getjaxy.com>";
 
 type Attachment = { filename: string; content: string }; // content = base64
 
-async function sendEmail(to: string, subject: string, html: string, attachments?: Attachment[]) {
+interface SendEmailOptions {
+  cc?: string;
+  replyTo?: string;
+  from?: string;
+}
+
+async function sendEmail(
+  to: string,
+  subject: string,
+  html: string,
+  attachments?: Attachment[],
+  opts?: SendEmailOptions,
+) {
   if (!RESEND_API_KEY) {
     console.error("[email] RESEND_API_KEY not set, skipping email to", to);
     return { ok: false, error: "RESEND_API_KEY not configured" };
@@ -13,8 +25,15 @@ async function sendEmail(to: string, subject: string, html: string, attachments?
   // an individual). Split into the array Resend expects; a single address
   // just yields a one-element array (unchanged behavior for existing callers).
   const recipients = to.split(/[,;]/).map((r) => r.trim()).filter(Boolean);
-  const body: Record<string, unknown> = { from: FROM_ADDRESS, to: recipients, subject, html };
+  const body: Record<string, unknown> = {
+    from: opts?.from || FROM_ADDRESS,
+    to: recipients,
+    subject,
+    html,
+  };
   if (attachments?.length) body.attachments = attachments;
+  if (opts?.cc) body.cc = opts.cc.split(/[,;]/).map((r) => r.trim()).filter(Boolean);
+  if (opts?.replyTo) body.reply_to = opts.replyTo;
 
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -32,6 +51,60 @@ async function sendEmail(to: string, subject: string, html: string, attachments?
   }
 
   return { ok: true, data: await res.json() };
+}
+
+// ── International Shipping (3PL dims request) ──
+
+export interface InternationalShippingEmailInput {
+  orderNumber: string;      // Shopify order name, e.g. "G4JWGQ7J94"
+  country: string;          // ship-to country
+  faireOrderUrl: string | null;
+  shipheroOrderUrl: string | null;
+  to?: string;              // defaults to the warehouse
+  cc?: string;              // defaults to wholesale@getjaxy.com
+  replyTo?: string;         // defaults to wholesale@getjaxy.com
+}
+
+/**
+ * Email the 3PL warehouse asking for packaged dims + weight on a non-US
+ * Faire order, so we can generate the Faire shipping label. Sends FROM the
+ * Resend-verified domain but sets reply-to/cc to wholesale@ so their reply
+ * lands in the right inbox.
+ */
+export async function sendInternationalShippingDimsEmail(input: InternationalShippingEmailInput) {
+  const to = input.to || "team@bigskyfulfillment.com";
+  const cc = input.cc || "wholesale@getjaxy.com";
+  const replyTo = input.replyTo || "wholesale@getjaxy.com";
+  const subject = `${input.orderNumber} DIMs for International Shipment`;
+
+  const linksHtml = [
+    input.faireOrderUrl ? `<li><a href="${input.faireOrderUrl}">Order in Faire</a></li>` : "",
+    input.shipheroOrderUrl ? `<li><a href="${input.shipheroOrderUrl}">Order in ShipHero</a></li>` : "",
+  ].filter(Boolean).join("");
+
+  const html = `
+  <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#18181b;max-width:560px;line-height:1.6;">
+    <p>Hi Big Sky team,</p>
+    <p>We have a new international Faire order (shipping to <strong>${input.country}</strong>) that needs shipping-label creation on our end. Before we can generate the label, we need the packaged dimensions and weight from you.</p>
+    <p><strong>Order #:</strong> ${input.orderNumber}</p>
+    <p>Please reply to this email with the following once the order is picked and packed:</p>
+    <ul style="margin:0 0 16px 0;padding-left:20px;">
+      <li>Length:</li>
+      <li>Width:</li>
+      <li>Height:</li>
+      <li>Weight:</li>
+    </ul>
+    <p style="color:#666;">If it's more than one box, please give us the dims/weight for each box.</p>
+    <p style="background:#FEF3C7;border-left:3px solid #B37800;padding:10px 14px;border-radius:4px;">
+      <strong>Please DO NOT ship the order yet.</strong> International Faire orders require us to generate the shipping label through Faire's system. Once you send us the dims, we'll create the label, upload it to ShipHero, and let you know it's ready to ship.
+    </p>
+    ${linksHtml ? `
+    <p style="margin-top:20px;"><strong>Links — for internal purposes</strong></p>
+    <ul style="margin:0 0 16px 0;padding-left:20px;">${linksHtml}</ul>` : ""}
+    <p>Thanks!<br/>Jaxy team</p>
+  </div>`;
+
+  return sendEmail(to, subject, html, undefined, { cc, replyTo });
 }
 
 /** One campaign the lead was part of, with its email + call touchpoints. */

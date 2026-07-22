@@ -29,6 +29,7 @@ import {
   Layers,
   Plug,
   ShoppingBag,
+  Globe,
 } from "lucide-react";
 import {
   Sidebar,
@@ -83,6 +84,7 @@ const salesNav: NavItem[] = [
 
 const operationsNav: NavItem[] = [
   { title: "Orders", href: "/orders", icon: ShoppingCart },
+  { title: "International Shipping", href: "/orders/international", icon: Globe },
   { title: "Catalog", href: "/catalog", icon: Package },
   { title: "Media Center", href: "/media", icon: ImageIcon },
   { title: "Inventory", href: "/inventory", icon: Warehouse },
@@ -117,7 +119,7 @@ const bottomNav = [
 const ROLE_ALLOWED_HREFS: Record<string, string[]> = {
   owner: ["*"],
   sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/segments", "/campaigns", "/customers", "/brands", "/catalog"],
-  warehouse: ["/dashboard", "/orders", "/catalog", "/media", "/inventory", "/inventory/purchase-orders", "/inventory/exports"],
+  warehouse: ["/dashboard", "/orders", "/orders/international", "/catalog", "/media", "/inventory", "/inventory/purchase-orders", "/inventory/exports"],
   finance: ["/dashboard", "/orders", "/finance", "/finance/cogs"],
   marketing: ["/dashboard", "/marketing", "/catalog", "/media", "/campaigns"],
   support: ["/dashboard", "/orders", "/customers"],
