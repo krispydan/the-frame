@@ -29,9 +29,12 @@ export interface MatchCandidate {
   sku: string;
   skuId: string;
   colorName: string | null;
-  /** 0-100. Filename hits are 90 (strong) / 55 (weak descriptor-only). */
+  /** 0-100. Filename hits are 90 (strong) / 55 (weak descriptor-only);
+   *  frame-shape hits carry the model's shape confidence. */
   confidence: number;
-  via?: "filename";
+  via?: "filename" | "frameshape";
+  /** Classified frame shape, when this candidate came via frame-shape. */
+  shape?: string;
 }
 
 // ── Filename signal ──

@@ -31,6 +31,9 @@ export const mediaMatches = sqliteTable("marketing_media_matches", {
     .default("pending"),
   /** JSON MatchCandidate[] — see sku-match.ts. Grouped per product. */
   candidatesJson: text("candidates_json"),
+  /** JSON of classified attributes used to pre-filter (e.g. detected
+   *  frame shapes: { frameShapes: [{shape, confidence}] }). */
+  attributesJson: text("attributes_json"),
   /** JSON string[] of catalog_products ids the reviewer confirmed. */
   confirmedProductIds: text("confirmed_product_ids"),
   error: text("error"),
