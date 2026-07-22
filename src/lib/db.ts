@@ -163,6 +163,10 @@ try { sqlite.exec("ALTER TABLE marketing_tiktok_sounds ADD COLUMN prev_synced_at
 // footage file and flag it — the clips are all we keep.
 try { sqlite.exec("ALTER TABLE marketing_video_sources ADD COLUMN raw_deleted INTEGER NOT NULL DEFAULT 0"); } catch { /* exists */ }
 
+// Reviewer notes on catalog images (SKU identifier) — separate from
+// alt_text, which feeds marketplace exports and must stay clean.
+try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN notes TEXT"); } catch { /* exists */ }
+
 // AI SKU identification: model suggestions + human confirmation per media
 // item (video clip poster or catalog image). See media-match.ts schema.
 sqlite.exec(`CREATE TABLE IF NOT EXISTS marketing_media_matches (

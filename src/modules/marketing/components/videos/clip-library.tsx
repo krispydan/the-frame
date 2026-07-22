@@ -223,7 +223,7 @@ export function ClipLibrary() {
           {showAutoClipper ? "Hide clipping status" : "Clipping status"}
         </Button>
         <Button variant="outline" render={<Link href="/marketing/videos/identify" />}>
-          <ScanSearch className="h-4 w-4 mr-1" /> Identify SKUs (AI)
+          <ScanSearch className="h-4 w-4 mr-1" /> Identify SKUs
         </Button>
         <Button variant="outline" onClick={() => setShowCategories(true)}>
           Categories

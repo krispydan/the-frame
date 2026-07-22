@@ -9,6 +9,7 @@ import { getTestDb, resetTestDb } from "../setup";
 import {
   identifyMedia,
   confirmMediaProducts,
+  saveMediaNotes,
 } from "@/modules/marketing/lib/video/sku-match";
 
 function seedCatalog() {
@@ -94,6 +95,26 @@ describe("filename SKU identification", () => {
     const row = db.prepare(`SELECT sku_id AS s FROM catalog_images WHERE id = 'img-1'`).get() as { s: string };
     expect(row.s).toBe("s-JX1006-BRW");
     expect(matchRow("img-1")?.status).toBe("confirmed");
+  });
+
+  it("saves reviewer notes on clips and images (empty clears, undefined leaves)", () => {
+    const db = getTestDb();
+    seedClip("clip-n", "whatever.mp4");
+    db.prepare(`INSERT INTO catalog_images (id, sku_id, file_path) VALUES ('img-n', 's-JX1005-BLK', 'x.jpg')`).run();
+
+    saveMediaNotes("clip", "clip-n", "model spins, close-up on temple logo");
+    saveMediaNotes("image", "img-n", "beach lifestyle, two products in frame");
+    expect((db.prepare(`SELECT notes FROM marketing_video_clips WHERE id='clip-n'`).get() as { notes: string }).notes)
+      .toBe("model spins, close-up on temple logo");
+    expect((db.prepare(`SELECT notes FROM catalog_images WHERE id='img-n'`).get() as { notes: string }).notes)
+      .toBe("beach lifestyle, two products in frame");
+
+    saveMediaNotes("clip", "clip-n", undefined); // untouched
+    expect((db.prepare(`SELECT notes FROM marketing_video_clips WHERE id='clip-n'`).get() as { notes: string }).notes)
+      .toBe("model spins, close-up on temple logo");
+    saveMediaNotes("clip", "clip-n", ""); // clears
+    expect((db.prepare(`SELECT notes FROM marketing_video_clips WHERE id='clip-n'`).get() as { notes: string | null }).notes)
+      .toBeNull();
   });
 
   it("identifies an image from its file path (lifestyle shoot naming)", () => {
