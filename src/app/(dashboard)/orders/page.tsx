@@ -2,6 +2,7 @@
 
 import { Suspense, useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import {
   ListFilter,
   Search,
@@ -14,6 +15,7 @@ import {
   CheckCircle2,
   XCircle,
   RefreshCw,
+  Globe,
 } from "lucide-react";
 // CreateOrderDialog removed — orders are created in Shopify/Faire and synced here
 
@@ -216,6 +218,13 @@ function OrdersPage() {
           <p className="text-sm text-muted-foreground">{total} orders total</p>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href="/orders/international"
+            className="inline-flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium hover:bg-muted"
+          >
+            <Globe className="h-4 w-4" />
+            International Shipping
+          </Link>
           <button
             onClick={async () => {
               setSyncingShopify(true);

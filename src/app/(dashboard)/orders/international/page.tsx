@@ -151,6 +151,46 @@ export default function InternationalShippingPage() {
         </div>
       </div>
 
+      {/* How it works / background */}
+      <Card className="bg-muted/40">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Package className="h-4 w-4" /> How this works
+          </CardTitle>
+          <CardDescription>Background &amp; the manual steps involved</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <p>
+            <strong className="text-foreground">Why this exists:</strong> Faire requires us to create the
+            shipping label for any international (non-US) order through Faire&apos;s own system — we
+            can&apos;t let the 3PL generate its own label like they do for US orders. To make the Faire
+            label we need the packaged dimensions and weight, which only the warehouse knows once the
+            order is picked and packed.
+          </p>
+          <div>
+            <strong className="text-foreground">What triggers a request:</strong>
+            <ul className="list-disc pl-5 mt-1 space-y-0.5">
+              <li>Order syncs in from the Shopify wholesale store</li>
+              <li>Ship-to country is <em>not</em> the US (territories like Puerto Rico count as international)</li>
+              <li>The Shopify sales channel is <em>Faire</em> (shown as the &quot;Faire&quot; badge below). Orders where we can&apos;t confirm the channel still queue but are flagged amber.</li>
+            </ul>
+          </div>
+          <div>
+            <strong className="text-foreground">The flow, step by step:</strong>
+            <ol className="list-decimal pl-5 mt-1 space-y-0.5">
+              <li><strong>Awaiting dims</strong> — we email <code>team@bigskyfulfillment.com</code> (cc <code>wholesale@getjaxy.com</code>) asking for L×W×H and weight. Replies come back to wholesale@.</li>
+              <li><strong>Ready to label</strong> — once you enter the dims here, create the shipping label inside Faire, then upload it to ShipHero.</li>
+              <li><strong>Label uploaded → Shipped</strong> — mark it labeled after uploading to ShipHero, then shipped once the warehouse sends it.</li>
+            </ol>
+          </div>
+          <p>
+            <strong className="text-foreground">Safety:</strong> the email tells the warehouse
+            <em> not to ship yet</em>. Nothing sends automatically until both toggles below are on — start
+            with the integration enabled but auto-send off so you review the first orders by hand.
+          </p>
+        </CardContent>
+      </Card>
+
       {/* Settings / feature flags */}
       <Card>
         <CardHeader>

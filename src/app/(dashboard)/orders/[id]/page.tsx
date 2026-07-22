@@ -769,6 +769,9 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
         {/* ── Sidebar (Right col) ── */}
         <div className="space-y-6">
+          {/* International shipping (only renders for non-US Faire orders) */}
+          <OrderIntlShippingCard orderId={order.id} />
+
           {/* COGS / Costing */}
           <OrderCogsCard orderId={order.id} />
 
@@ -1124,6 +1127,115 @@ function OrderCogsCard({ orderId }: { orderId: string }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── International Shipping card (non-US Faire orders only) ──
+
+interface IntlShipData {
+  id: string;
+  order_number: string;
+  ship_to_country: string | null;
+  source_name: string | null;
+  status: string;
+  email_sent_at: string | null;
+  packaged_length_in: number | null;
+  packaged_width_in: number | null;
+  packaged_height_in: number | null;
+  packaged_weight_lb: number | null;
+  box_count: number | null;
+  shiphero_order_id: string | null;
+  notes: string | null;
+}
+
+const INTL_STATUS: Record<string, { label: string; cls: string }> = {
+  awaiting_dims: { label: "Awaiting dims", cls: "bg-amber-100 text-amber-700" },
+  awaiting_label: { label: "Ready to label", cls: "bg-sky-100 text-sky-700" },
+  label_uploaded: { label: "Label uploaded", cls: "bg-indigo-100 text-indigo-700" },
+  shipped: { label: "Shipped", cls: "bg-green-100 text-green-700" },
+  cancelled: { label: "Cancelled", cls: "bg-gray-100 text-gray-500" },
+};
+
+function OrderIntlShippingCard({ orderId }: { orderId: string }) {
+  const [data, setData] = useState<IntlShipData | null>(null);
+  const [err, setErr] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/v1/orders/${orderId}/international-shipping`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => { if (active) setData(d); })
+      .catch(() => { if (active) setErr(true); });
+    return () => { active = false; };
+  }, [orderId]);
+
+  // No request for this order → render nothing (keeps the card off normal orders)
+  if (err || !data) return null;
+
+  const badge = INTL_STATUS[data.status] ?? INTL_STATUS.awaiting_dims;
+  const hasDims = data.packaged_weight_lb != null;
+  const faireConfirmed = data.source_name && /faire/i.test(data.source_name);
+
+  return (
+    <div className="bg-white dark:bg-gray-800 border-2 border-amber-200 rounded-lg p-6">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-base font-semibold flex items-center gap-1.5">🌍 International Shipping</h2>
+        <span className={`px-2 py-0.5 rounded text-xs font-medium ${badge.cls}`}>{badge.label}</span>
+      </div>
+      <p className="text-xs text-muted-foreground mb-3">
+        Faire requires us to create the shipping label for this non-US order. We email the warehouse for
+        dims, then generate the Faire label and upload to ShipHero.
+      </p>
+
+      <div className="space-y-2 text-sm">
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Ship to</span>
+          <span className="font-medium">{data.ship_to_country || "?"}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Channel</span>
+          <span className="font-medium">{faireConfirmed ? "Faire" : <span className="text-amber-600">{data.source_name || "unconfirmed"}</span>}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Dims request email</span>
+          <span className="font-medium">{data.email_sent_at ? `Sent ${data.email_sent_at.slice(0, 10)}` : "Not sent"}</span>
+        </div>
+        {hasDims && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Packaged</span>
+            <span className="font-medium">
+              {data.packaged_length_in}×{data.packaged_width_in}×{data.packaged_height_in} in · {data.packaged_weight_lb} lb
+              {(data.box_count ?? 1) > 1 ? ` · ${data.box_count} boxes` : ""}
+            </span>
+          </div>
+        )}
+        {data.notes && (
+          <div className="rounded-md bg-amber-50 text-amber-700 px-2 py-1.5 text-xs">{data.notes}</div>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3 mt-4 pt-3 border-t text-xs">
+        <a
+          href={`https://www.faire.com/messages/orders/${data.order_number.replace(/^#/, "")}`}
+          target="_blank" rel="noopener noreferrer"
+          className="text-blue-600 hover:underline"
+        >
+          Order in Faire ↗
+        </a>
+        {data.shiphero_order_id && (
+          <a
+            href={`https://app.shiphero.com/dashboard/orders/detail/${data.shiphero_order_id}`}
+            target="_blank" rel="noopener noreferrer"
+            className="text-blue-600 hover:underline"
+          >
+            Order in ShipHero ↗
+          </a>
+        )}
+        <a href="/orders/international" className="text-muted-foreground hover:text-foreground ml-auto">
+          Manage →
+        </a>
+      </div>
     </div>
   );
 }
