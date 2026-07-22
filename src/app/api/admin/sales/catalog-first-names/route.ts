@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { listDealMailMessages, getPerson, updatePerson } from "@/modules/sales/lib/pipedrive-client";
 import { firstNameForMerge } from "@/modules/sales/lib/faire-marketplace-parse";
+import { extractCatalogRecipientName } from "@/modules/sales/lib/ai/catalog-recipient-name";
 
 /**
  * Extract first names for the catalog mail-merge from the greeting line of the
@@ -23,7 +24,7 @@ import { firstNameForMerge } from "@/modules/sales/lib/faire-marketplace-parse";
 
 const RUN_KEY = "catalog_first_names_run";
 const OUR_DOMAIN = "getjaxy.com";
-const VERSION = "v4-update-names"; // bump on logic change to confirm live build
+const VERSION = "v5-call-names"; // bump on logic change to confirm live build
 
 function getSetting(key: string): string | null {
   return (sqlite.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined)?.value?.trim() || null;
@@ -157,6 +158,64 @@ export async function POST(req: NextRequest) {
   const url = new URL(req.url);
   const commit = url.searchParams.get("commit") === "true";
   const overwrite = url.searchParams.get("overwrite") === "true";
+
+  // ── action=call-names: for leads still missing a name, read their PhoneBurner
+  //    call notes/transcripts and AI-extract the owner/decision-maker to address
+  //    the catalog to (e.g. "owner Jeannie DeMarco"). Writes to the frame
+  //    contact; run action=update-names afterward to push to Pipedrive.
+  if (url.searchParams.get("action") === "call-names") {
+    const limit = url.searchParams.get("limit") ? Math.max(1, parseInt(url.searchParams.get("limit")!, 10)) : null;
+    const callText = (companyId: string) => {
+      const rows = sqlite
+        .prepare("SELECT notes, transcript FROM phoneburner_call_log WHERE company_id = ? ORDER BY called_at DESC")
+        .all(companyId) as Array<{ notes: string | null; transcript: string | null }>;
+      const notes = rows.map((r) => (r.notes || "").trim()).filter(Boolean).join("\n---\n");
+      const transcript = rows.map((r) => (r.transcript || "").trim()).filter(Boolean).join("\n---\n");
+      return { notes, transcript, has: !!(notes || transcript) };
+    };
+    let items = loadNamelessLeads()
+      .filter((l) => isBadName(l.firstName, l.store))
+      .map((l) => ({ lead: l, call: callText(l.companyId) }))
+      .filter((x) => x.call.has);
+    if (limit) items = items.slice(0, limit);
+
+    if (!commit) {
+      return NextResponse.json({ ok: true, commit: false, withCallLogs: items.length, note: "commit=true to AI-extract owner names from call notes/transcripts." });
+    }
+    setSetting(RUN_KEY, JSON.stringify({ state: "running", mode: "call-names", total: items.length, done: 0, found: 0, written: 0, startedAt: new Date().toISOString() }));
+    void (async () => {
+      let done = 0,
+        found = 0,
+        written = 0,
+        errors = 0;
+      const samples: Array<{ store: string; name: string; role: string | null }> = [];
+      const errSamples: string[] = [];
+      for (const { lead: l, call: ct } of items) {
+        try {
+          const r = await extractCatalogRecipientName({ store: l.store, notes: ct.notes, transcript: ct.transcript });
+          const first = r?.firstName ? firstNameForMerge(r.firstName, l.store) : null;
+          if (first && !isBadName(first, l.store)) {
+            found++;
+            const last = r?.lastName && !isStoreEcho(r.lastName, l.store) ? r.lastName : "";
+            if (l.contactId) {
+              sqlite.prepare("UPDATE contacts SET first_name = ?, last_name = COALESCE(NULLIF(?, ''), last_name), updated_at = datetime('now') WHERE id = ?").run(first, last, l.contactId);
+            } else {
+              sqlite.prepare("INSERT INTO contacts (id, company_id, first_name, last_name, is_primary, source, created_at, updated_at) VALUES (?, ?, ?, ?, 1, 'call_transcript', datetime('now'), datetime('now'))").run(crypto.randomUUID(), l.companyId, first, last);
+            }
+            written++;
+            if (samples.length < 25) samples.push({ store: l.store, name: `${first}${last ? " " + last : ""}`, role: r?.role ?? null });
+          }
+        } catch (e) {
+          errors++;
+          if (errSamples.length < 10) errSamples.push(`${l.store}: ${e instanceof Error ? e.message.slice(0, 100) : String(e)}`);
+        }
+        done++;
+        if (done % 5 === 0) setSetting(RUN_KEY, JSON.stringify({ state: "running", mode: "call-names", total: items.length, done, found, written, errors, samples, errSamples, updatedAt: new Date().toISOString() }));
+      }
+      setSetting(RUN_KEY, JSON.stringify({ state: "done", mode: "call-names", total: items.length, done, found, written, errors, samples, errSamples, finishedAt: new Date().toISOString() }));
+    })();
+    return NextResponse.json({ ok: true, started: true, withCallLogs: items.length, note: "Poll GET ?run=extract for progress." });
+  }
 
   // ── action=update-names: push frame first names to Pipedrive person records
   //    that don't already have a real personal name (store-echo / email / blank).
