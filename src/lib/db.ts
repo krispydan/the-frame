@@ -183,6 +183,9 @@ sqlite.exec(`CREATE TABLE IF NOT EXISTS marketing_media_matches (
 )`);
 sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_media_match_media ON marketing_media_matches(media_type, media_id)`);
 sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_media_match_status ON marketing_media_matches(status)`);
+// Frame-shape classification stores detected attributes used to pre-filter
+// suggestions (added after the table shipped).
+try { sqlite.exec("ALTER TABLE marketing_media_matches ADD COLUMN attributes_json TEXT"); } catch { /* exists */ }
 
 // Contact form URL — when scraping a prospect for classification, we ALSO
 // harvest contact info. If we found a contact-us page but no direct email,

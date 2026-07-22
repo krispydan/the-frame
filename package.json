@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "shiphero:register-webhooks": "tsx scripts/register-shiphero-webhooks.ts",
-    "shiphero:backfill-faire-slips": "tsx scripts/backfill-faire-slips.ts"
+    "shiphero:backfill-faire-slips": "tsx scripts/backfill-faire-slips.ts",
+    "sku:test-shape": "tsx scripts/test-frame-shape.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.1",

@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Check, FileText, Wand2, X } from "lucide-react";
+import { Check, FileText, Glasses, Sparkles, Wand2, X } from "lucide-react";
 
 type Candidate = {
   productId: string;
@@ -24,9 +24,12 @@ type Candidate = {
   sku: string;
   colorName: string | null;
   confidence: number;
-  via?: "filename";
+  via?: "filename" | "frameshape";
+  shape?: string;
   imageUrl?: string | null;
 };
+
+type FrameShape = { shape: string; confidence: number };
 
 type Item = {
   mediaType: "clip" | "image";
@@ -38,13 +41,16 @@ type Item = {
   currentProducts: Array<{ id: string; name: string | null; imageUrl?: string | null }>;
   currentSku?: string | null;
   notes: string | null;
+  categoryId?: string | null;
   matchStatus: string | null;
   candidates: Candidate[];
+  frameShapes?: FrameShape[];
   confirmedProductIds: string[];
   matchError: string | null;
 };
 
 type Product = { id: string; name: string | null; skuIds: string[]; imageUrl?: string | null };
+type Category = { id: string; name: string; slug: string };
 
 /** Product photo tile used across the pickers. */
 function ProductThumb({ url, className = "h-11 w-11" }: { url?: string | null; className?: string }) {
@@ -67,14 +73,18 @@ export function SkuIdentifier() {
   const [filter, setFilter] = useState<"queue" | "all">("queue");
   const [items, setItems] = useState<Item[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [aiConfigured, setAiConfigured] = useState(false);
   const [loading, setLoading] = useState(true);
   // Track the selected item by ID, not index — the list can reorder.
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
+  const [categoryId, setCategoryId] = useState<string>("");
   const [notes, setNotes] = useState("");
   const [catalogSearch, setCatalogSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [matching, setMatching] = useState(false);
+  const [shaping, setShaping] = useState(false);
   // Only auto-apply pre-selection once per item.
   const autoSelectedFor = useRef<string | null>(null);
 
@@ -83,6 +93,8 @@ export function SkuIdentifier() {
     const d = await res.json();
     setItems(d.items ?? []);
     setProducts(d.products ?? []);
+    setCategories(d.categories ?? []);
+    setAiConfigured(Boolean(d.aiConfigured));
     setLoading(false);
   }, [type, filter]);
 
@@ -115,6 +127,7 @@ export function SkuIdentifier() {
       setSelected(fromFile.slice(0, 1));
     }
     setNotes(item.notes ?? "");
+    setCategoryId(item.categoryId ?? "");
     setCatalogSearch("");
   }, [item]);
 
@@ -140,6 +153,50 @@ export function SkuIdentifier() {
     }
   };
 
+  /** AI: classify the frame shape for one clip and pre-load matching
+   *  products as suggestions. Reloads in place so the panel updates. */
+  const suggestShapeForCurrent = async () => {
+    if (!item) return;
+    setShaping(true);
+    const res = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mediaType: "clip", method: "frameshape", mediaIds: [item.mediaId] }),
+    });
+    const d = await res.json();
+    setShaping(false);
+    if (res.ok) {
+      await load();
+      toast[d.suggested > 0 ? "success" : "message"](
+        d.suggested > 0 ? "Frame shape identified — suggestions loaded below" : "No clear frame detected in this clip",
+      );
+    } else {
+      toast.error(d.error ?? "Frame-shape suggestion failed");
+    }
+  };
+
+  /** AI: classify frame shape across a batch of untagged clips. */
+  const suggestShapesBulk = async () => {
+    setShaping(true);
+    const res = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mediaType: "clip", method: "frameshape", all: true }),
+    });
+    const d = await res.json();
+    setShaping(false);
+    if (res.ok) {
+      toast.success(
+        `Classified ${d.scanned} clip${d.scanned === 1 ? "" : "s"} — ${d.suggested} got shape suggestions${
+          d.capped ? " (batch capped; run again for more)" : ""
+        }`,
+      );
+      load();
+    } else {
+      toast.error(d.error ?? "Frame-shape suggestion failed");
+    }
+  };
+
   const advance = () => {
     const idx = items.findIndex((i) => i.mediaId === currentId);
     const next = items[idx + 1] ?? items[idx - 1] ?? null;
@@ -148,13 +205,15 @@ export function SkuIdentifier() {
     autoSelectedFor.current = null;
   };
 
-  /** Skip without deciding — but persist an edited note so it isn't lost. */
+  /** Skip without deciding — but persist an edited note/category so it isn't lost. */
   const skip = async () => {
-    if (item && notes !== (item.notes ?? "")) {
+    const noteChanged = item && notes !== (item.notes ?? "");
+    const catChanged = item && type === "clip" && categoryId !== (item.categoryId ?? "");
+    if (item && (noteChanged || catChanged)) {
       await fetch(API, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mediaType: type, mediaId: item.mediaId, notes }),
+        body: JSON.stringify({ mediaType: type, mediaId: item.mediaId, notes, categoryId }),
       }).catch(() => {});
     }
     advance();
@@ -172,8 +231,8 @@ export function SkuIdentifier() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(
         noProduct
-          ? { mediaType: type, mediaId: item.mediaId, noProduct: true, notes }
-          : { mediaType: type, mediaId: item.mediaId, productIds: selected, notes },
+          ? { mediaType: type, mediaId: item.mediaId, noProduct: true, notes, categoryId }
+          : { mediaType: type, mediaId: item.mediaId, productIds: selected, notes, categoryId },
       ),
     });
     setSaving(false);
@@ -200,6 +259,8 @@ export function SkuIdentifier() {
   }, [products, catalogSearch, selected]);
 
   const fileMatches = item?.candidates.filter((c) => c.via === "filename") ?? [];
+  const shapeMatches = item?.candidates.filter((c) => c.via === "frameshape") ?? [];
+  const detectedShapes = item?.frameShapes ?? [];
 
   if (loading) return <div className="animate-pulse h-96 bg-muted rounded-lg" />;
 
@@ -231,6 +292,16 @@ export function SkuIdentifier() {
         </div>
         <span className="text-sm text-muted-foreground">{items.length} shown</span>
         <div className="flex-1" />
+        {type === "clip" && (
+          <Button
+            variant="secondary"
+            onClick={suggestShapesBulk}
+            disabled={shaping || !aiConfigured}
+            title={aiConfigured ? "AI-classify frame shape on a batch of untagged clips" : "Set ANTHROPIC_API_KEY to enable"}
+          >
+            <Sparkles className="h-4 w-4 mr-1" /> {shaping ? "Classifying…" : "Suggest by shape"}
+          </Button>
+        )}
         <Button onClick={matchFilenames} disabled={matching}>
           <Wand2 className="h-4 w-4 mr-1" /> {matching ? "Matching…" : "Match file names"}
         </Button>
@@ -323,6 +394,61 @@ export function SkuIdentifier() {
                 </div>
               )}
 
+              {/* Frame-shape suggestions (AI, clips only) */}
+              {type === "clip" && (
+                <div className="space-y-2 rounded-lg border p-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+                      <Glasses className="h-4 w-4" /> Frame shape
+                      {detectedShapes.map((s) => (
+                        <Badge key={s.shape} variant="secondary" className="capitalize">
+                          {s.shape} · {s.confidence}%
+                        </Badge>
+                      ))}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={suggestShapeForCurrent}
+                      disabled={shaping || !aiConfigured}
+                      title={aiConfigured ? "Classify this clip's frame shape" : "Set ANTHROPIC_API_KEY to enable"}
+                    >
+                      <Sparkles className="h-3.5 w-3.5 mr-1" />
+                      {shaping ? "…" : shapeMatches.length > 0 ? "Re-run" : "Suggest"}
+                    </Button>
+                  </div>
+                  {shapeMatches.length > 0 ? (
+                    <div className="grid max-h-[220px] grid-cols-2 gap-1.5 overflow-y-auto sm:grid-cols-3">
+                      {shapeMatches.map((c) => {
+                        const on = selected.includes(c.productId);
+                        return (
+                          <button
+                            key={c.productId}
+                            onClick={() => toggle(c.productId)}
+                            className={`relative flex flex-col items-center gap-1 rounded-lg border p-2 text-center ${on ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted"}`}
+                            title={c.productName}
+                          >
+                            {on && (
+                              <span className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                                <Check className="h-3 w-3" />
+                              </span>
+                            )}
+                            <ProductThumb url={c.imageUrl} className="h-14 w-full border-0" />
+                            <span className="w-full truncate text-xs">{c.productName}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      {aiConfigured
+                        ? "Classify the glasses shape to pre-load the matching products from the catalog."
+                        : "Set ANTHROPIC_API_KEY to enable AI shape suggestions."}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Full catalog */}
               <div>
                 <div className="flex items-center gap-2">
@@ -359,6 +485,25 @@ export function SkuIdentifier() {
                   )}
                 </div>
               </div>
+
+              {/* Video type (category) — clips only */}
+              {type === "clip" && (
+                <label className="block">
+                  <span className="text-sm font-medium">Video type</span>
+                  <select
+                    value={categoryId}
+                    onChange={(e) => setCategoryId(e.target.value)}
+                    className="mt-1 w-full rounded-md border bg-background px-2.5 py-1.5 text-sm"
+                  >
+                    <option value="">— Uncategorized —</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
               {/* Notes */}
               <label className="block">
