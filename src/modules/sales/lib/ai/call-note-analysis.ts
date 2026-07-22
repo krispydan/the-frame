@@ -98,7 +98,7 @@ Return ONLY minified JSON matching exactly this shape (no markdown, no commentar
     "carriesSunglasses": "yes|no|unknown",
     "currentBrands": ["competitor sunglass brands they already carry, normalized to the REAL brand name (see brand glossary below)"],
     "spokeWith": "owner|staff|<role or name>|null",
-    "contact": { "name": null, "role": "e.g. Director of Operations, or null", "email": "only if literally present, else null" },
+    "contact": { "name": "full name of the OWNER / buyer / decision-maker to address (see contact-name rule), or null", "role": "e.g. Director of Operations, or null", "email": "only if literally present, else null" },
     "alternateEmail": { "value": "email@x.com", "action": "add_contact|update_primary", "confidence": 0.0 } OR null,
     "emailReferencedUncaptured": true/false,
     "catalogSendTo": "best email to send the catalog to, or null",
@@ -112,6 +112,12 @@ Return ONLY minified JSON matching exactly this shape (no markdown, no commentar
     "email3": "final nudge, see EMAIL 3 above"
   }
 }
+
+CONTACT NAME rule — "contact.name" is the person our records and mail should be addressed to: the store OWNER / buyer / decision-maker.
+- If the owner/buyer is named, use THEIR full name — even if a different person (staff) answered the phone. Example: "spoke with Michelle, she'll pass it to owner Jeannie DeMarco" → contact.name = "Jeannie DeMarco" (NOT Michelle). Put Michelle in spokeWith instead.
+- If only the person who answered is named and no separate owner is mentioned, use that person's name.
+- Only use a name that is EXPLICITLY stated in the note/transcript. Never invent, guess, or use the store name as a person's name. If no personal name is stated, use null.
+- Transcripts are auto-transcribed and imperfect — only return a name you are confident is a real personal name that was said.
 
 BRAND GLOSSARY — the call transcripts are auto-transcribed from phone audio, so competitor brand names are OFTEN misheard. Map them to the real brand name in currentBrands (and when a competitor is referenced in an opener):
 - "I-Sea" is frequently transcribed as: I.C., I see, Icy, Icey, Icee, Eyesea, I-C, ICS. Normalize ALL of these to "I-Sea".

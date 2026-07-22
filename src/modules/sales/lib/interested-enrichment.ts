@@ -412,7 +412,9 @@ export async function enrichInterestedLead(
             org_id: company.pipedrive_org_id,
             email: [applied.newEmail],
           });
-        } else if (company.pipedrive_person_id && applied.name) {
+        } else if (company.pipedrive_person_id && applied.name && applied.name.trim().toLowerCase() !== (company.name ?? "").trim().toLowerCase()) {
+          // Sync the person-to-address (owner/decision-maker) name to Pipedrive.
+          // Guard against ever writing the store name as a person name.
           await updatePerson(company.pipedrive_person_id, { name: applied.name });
         }
       } catch (e) {
