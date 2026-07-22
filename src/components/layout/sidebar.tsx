@@ -29,7 +29,6 @@ import {
   Layers,
   Plug,
   ShoppingBag,
-  Globe,
 } from "lucide-react";
 import {
   Sidebar,
@@ -84,7 +83,6 @@ const salesNav: NavItem[] = [
 
 const operationsNav: NavItem[] = [
   { title: "Orders", href: "/orders", icon: ShoppingCart },
-  { title: "International Shipping", href: "/orders/international", icon: Globe },
   { title: "Catalog", href: "/catalog", icon: Package },
   { title: "Media Center", href: "/media", icon: ImageIcon },
   { title: "Inventory", href: "/inventory", icon: Warehouse },
