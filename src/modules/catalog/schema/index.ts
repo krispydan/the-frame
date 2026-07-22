@@ -161,6 +161,9 @@ export const images = sqliteTable("catalog_images", {
   imageTypeId: text("image_type_id").references(() => imageTypes.id),
   position: integer("position").default(0),
   altText: text("alt_text"),
+  /** Free-form reviewer notes (what the shot shows, context). NOT alt
+   *  text — alt_text feeds marketplace exports and stays clean. */
+  notes: text("notes"),
   width: integer("width"),
   height: integer("height"),
   aiModelUsed: text("ai_model_used"),

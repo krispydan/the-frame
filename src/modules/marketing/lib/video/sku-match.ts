@@ -179,6 +179,20 @@ export function confirmMediaProducts(
   });
 }
 
+/** Save free-form reviewer notes on the media (what the shot shows).
+ *  Empty string clears; null/undefined leaves the notes untouched. */
+export function saveMediaNotes(mediaType: MediaType, mediaId: string, notes: string | null | undefined): void {
+  if (notes == null) return;
+  const value = notes.trim() || null;
+  if (mediaType === "clip") {
+    sqlite
+      .prepare(`UPDATE marketing_video_clips SET notes = ?, updated_at = datetime('now') WHERE id = ?`)
+      .run(value, mediaId);
+  } else {
+    sqlite.prepare(`UPDATE catalog_images SET notes = ? WHERE id = ?`).run(value, mediaId);
+  }
+}
+
 // ── Identification (filename only) ──
 
 export interface IdentifyResult {

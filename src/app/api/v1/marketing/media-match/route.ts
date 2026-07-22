@@ -28,7 +28,7 @@ export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { videoUrl } from "@/lib/storage/videos";
-import { identifyMedia, confirmMediaProducts } from "@/modules/marketing/lib/video/sku-match";
+import { identifyMedia, confirmMediaProducts, saveMediaNotes } from "@/modules/marketing/lib/video/sku-match";
 
 type MediaType = "clip" | "image";
 
@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
         : "";
     const rows = sqlite.prepare(`
       SELECT c.id, c.file_name AS fileName, c.poster_path AS posterPath,
-             c.normalized_path AS normalizedPath, c.duration_sec AS durationSec,
+             c.normalized_path AS normalizedPath, c.duration_sec AS durationSec, c.notes,
              m.id AS matchId, m.status AS matchStatus, m.candidates_json AS candidatesJson,
              m.confirmed_product_ids AS confirmedProductIds, m.error AS matchError
       FROM marketing_video_clips c
@@ -102,6 +102,7 @@ export async function GET(request: NextRequest) {
         ...p,
         imageUrl: imgUrlFor(null, p.id),
       })),
+      notes: r.notes ?? null,
       matchStatus: r.matchStatus ?? null,
       candidates: r.candidatesJson ? enrichCandidates(JSON.parse(String(r.candidatesJson))) : [],
       confirmedProductIds: r.confirmedProductIds ? JSON.parse(String(r.confirmedProductIds)) : [],
@@ -115,7 +116,7 @@ export async function GET(request: NextRequest) {
         ? `AND i.sku_id IS NULL AND (m.status IS NULL OR m.status != 'no_product')`
         : "";
     const rows = sqlite.prepare(`
-      SELECT i.id, i.file_path AS filePath, i.alt_text AS altText,
+      SELECT i.id, i.file_path AS filePath, i.alt_text AS altText, i.notes,
              s.sku, s.color_name AS colorName, p.name AS productName, p.id AS productId,
              m.status AS matchStatus, m.candidates_json AS candidatesJson,
              m.confirmed_product_ids AS confirmedProductIds, m.error AS matchError
@@ -137,6 +138,7 @@ export async function GET(request: NextRequest) {
         ? [{ id: r.productId, name: r.productName, imageUrl: imgUrlFor(null, String(r.productId)) }]
         : [],
       currentSku: r.sku ?? null,
+      notes: r.notes ?? null,
       matchStatus: r.matchStatus ?? null,
       candidates: r.candidatesJson ? enrichCandidates(JSON.parse(String(r.candidatesJson))) : [],
       confirmedProductIds: r.confirmedProductIds ? JSON.parse(String(r.confirmedProductIds)) : [],
@@ -222,7 +224,14 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  let body: { mediaType?: string; mediaId?: string; productIds?: string[]; noProduct?: boolean };
+  let body: {
+    mediaType?: string;
+    mediaId?: string;
+    productIds?: string[];
+    noProduct?: boolean;
+    /** Free-form reviewer notes; saved with either decision. Omit to leave untouched. */
+    notes?: string | null;
+  };
   try {
     body = await request.json();
   } catch {
@@ -231,6 +240,8 @@ export async function PATCH(request: NextRequest) {
   const mediaType = parseType(body.mediaType ?? null);
   const mediaId = String(body.mediaId ?? "");
   if (!mediaId) return NextResponse.json({ error: "mediaId is required" }, { status: 400 });
+
+  if (typeof body.notes === "string") saveMediaNotes(mediaType, mediaId, body.notes);
 
   const now = new Date().toISOString();
   const match = sqlite
@@ -259,6 +270,10 @@ export async function PATCH(request: NextRequest) {
 
   const productIds = (body.productIds ?? []).map(String).filter(Boolean);
   if (productIds.length === 0) {
+    // Notes-only save: keep the item in the queue, just persist the note.
+    if (typeof body.notes === "string") {
+      return NextResponse.json({ saved: true, status: "notes_only" });
+    }
     return NextResponse.json({ error: "productIds (or noProduct) is required" }, { status: 400 });
   }
 

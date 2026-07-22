@@ -37,6 +37,7 @@ type Item = {
   durationSec: number | null;
   currentProducts: Array<{ id: string; name: string | null; imageUrl?: string | null }>;
   currentSku?: string | null;
+  notes: string | null;
   matchStatus: string | null;
   candidates: Candidate[];
   confirmedProductIds: string[];
@@ -70,6 +71,7 @@ export function SkuIdentifier() {
   // Track the selected item by ID, not index — the list can reorder.
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
+  const [notes, setNotes] = useState("");
   const [catalogSearch, setCatalogSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [matching, setMatching] = useState(false);
@@ -112,6 +114,7 @@ export function SkuIdentifier() {
       const fromFile = item.candidates.filter((c) => c.via === "filename").map((c) => c.productId);
       setSelected(fromFile.slice(0, 1));
     }
+    setNotes(item.notes ?? "");
     setCatalogSearch("");
   }, [item]);
 
@@ -145,6 +148,18 @@ export function SkuIdentifier() {
     autoSelectedFor.current = null;
   };
 
+  /** Skip without deciding — but persist an edited note so it isn't lost. */
+  const skip = async () => {
+    if (item && notes !== (item.notes ?? "")) {
+      await fetch(API, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mediaType: type, mediaId: item.mediaId, notes }),
+      }).catch(() => {});
+    }
+    advance();
+  };
+
   const save = async (noProduct = false) => {
     if (!item) return;
     if (!noProduct && selected.length === 0) {
@@ -157,8 +172,8 @@ export function SkuIdentifier() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(
         noProduct
-          ? { mediaType: type, mediaId: item.mediaId, noProduct: true }
-          : { mediaType: type, mediaId: item.mediaId, productIds: selected },
+          ? { mediaType: type, mediaId: item.mediaId, noProduct: true, notes }
+          : { mediaType: type, mediaId: item.mediaId, productIds: selected, notes },
       ),
     });
     setSaving(false);
@@ -345,6 +360,18 @@ export function SkuIdentifier() {
                 </div>
               </div>
 
+              {/* Notes */}
+              <label className="block">
+                <span className="text-sm font-medium">Notes</span>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="What's happening in this video / shot (optional) — saved with your decision"
+                  rows={2}
+                  className="mt-1 w-full resize-y rounded-md border bg-background px-2.5 py-1.5 text-sm"
+                />
+              </label>
+
               {/* Selection + actions */}
               {selected.length > 0 && (
                 <div className="flex flex-wrap gap-1">
@@ -366,7 +393,7 @@ export function SkuIdentifier() {
                 <Button variant="outline" onClick={() => save(true)} disabled={saving}>
                   No product visible
                 </Button>
-                <Button variant="ghost" onClick={advance}>Skip</Button>
+                <Button variant="ghost" onClick={skip}>Skip</Button>
               </div>
             </div>
           </div>
