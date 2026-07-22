@@ -29,11 +29,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { videoUrl } from "@/lib/storage/videos";
 import { identifyMedia, confirmMediaProducts, saveMediaNotes } from "@/modules/marketing/lib/video/sku-match";
+import { suggestFrameShape } from "@/modules/marketing/lib/video/frame-shape";
 
 type MediaType = "clip" | "image";
 
 function parseType(v: string | null): MediaType {
   return v === "image" ? "image" : "clip";
+}
+
+/** Detected frame shapes from a frame-shape match row's attributes_json. */
+function parseFrameShapes(attributesJson: unknown): Array<{ shape: string; confidence: number }> {
+  if (!attributesJson) return [];
+  try {
+    const parsed = JSON.parse(String(attributesJson)) as { frameShapes?: Array<{ shape: string; confidence: number }> };
+    return Array.isArray(parsed.frameShapes) ? parsed.frameShapes : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -75,8 +87,10 @@ export async function GET(request: NextRequest) {
     const rows = sqlite.prepare(`
       SELECT c.id, c.file_name AS fileName, c.poster_path AS posterPath,
              c.normalized_path AS normalizedPath, c.duration_sec AS durationSec, c.notes,
+             c.category_id AS categoryId,
              m.id AS matchId, m.status AS matchStatus, m.candidates_json AS candidatesJson,
-             m.confirmed_product_ids AS confirmedProductIds, m.error AS matchError
+             m.confirmed_product_ids AS confirmedProductIds, m.error AS matchError,
+             m.attributes_json AS attributesJson
       FROM marketing_video_clips c
       LEFT JOIN marketing_media_matches m ON m.media_type = 'clip' AND m.media_id = c.id
       WHERE c.status = 'ready' ${queueClause}
@@ -103,8 +117,10 @@ export async function GET(request: NextRequest) {
         imageUrl: imgUrlFor(null, p.id),
       })),
       notes: r.notes ?? null,
+      categoryId: r.categoryId ?? null,
       matchStatus: r.matchStatus ?? null,
       candidates: r.candidatesJson ? enrichCandidates(JSON.parse(String(r.candidatesJson))) : [],
+      frameShapes: parseFrameShapes(r.attributesJson),
       confirmedProductIds: r.confirmedProductIds ? JSON.parse(String(r.confirmedProductIds)) : [],
       matchError: r.matchError ?? null,
     }));
@@ -161,21 +177,73 @@ export async function GET(request: NextRequest) {
     .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""))
     .map((p) => ({ ...p, imageUrl: imgUrlFor(null, p.id) }));
 
+  // Clip categories (video type) for the categorize dropdown.
+  const categories = sqlite
+    .prepare(
+      `SELECT id, name, slug FROM marketing_video_clip_categories WHERE archived = 0 ORDER BY sort_order ASC, name ASC`,
+    )
+    .all() as Array<{ id: string; name: string; slug: string }>;
+
   return NextResponse.json({
     items,
     products,
+    categories,
     aiConfigured: Boolean(process.env.ANTHROPIC_API_KEY),
   });
 }
 
 export async function POST(request: NextRequest) {
-  let body: { mediaType?: string; mediaIds?: string[]; all?: boolean; apply?: boolean };
+  let body: { mediaType?: string; mediaIds?: string[]; all?: boolean; apply?: boolean; method?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
   const mediaType = parseType(body.mediaType ?? null);
+
+  // ── Frame-shape suggestion (AI): classify the frame shape and pre-load
+  // matching catalog products as suggestions. Clips only (needs a frame).
+  // Each item is an ffmpeg extract + one Haiku call, so batches are bounded
+  // to stay well under the request timeout; the UI calls it per visible page.
+  if (body.method === "frameshape") {
+    if (mediaType !== "clip") {
+      return NextResponse.json({ error: "Frame-shape suggestion is for clips only" }, { status: 400 });
+    }
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return NextResponse.json({ error: "AI is not configured (ANTHROPIC_API_KEY missing)" }, { status: 400 });
+    }
+    const CAP = 20;
+    let ids: string[];
+    if (body.all) {
+      ids = (sqlite.prepare(`
+        SELECT c.id FROM marketing_video_clips c
+        LEFT JOIN marketing_media_matches m ON m.media_type = 'clip' AND m.media_id = c.id
+        WHERE c.status = 'ready'
+          AND NOT EXISTS (SELECT 1 FROM marketing_video_clip_products cp WHERE cp.clip_id = c.id)
+          AND (m.status IS NULL OR m.status NOT IN ('confirmed','no_product'))
+        ORDER BY c.created_at DESC
+        LIMIT ${CAP}
+      `).all() as Array<{ id: string }>).map((r) => r.id);
+    } else {
+      ids = (body.mediaIds ?? []).map(String).filter(Boolean).slice(0, CAP);
+    }
+    if (ids.length === 0) {
+      return NextResponse.json({ scanned: 0, suggested: 0, failed: 0, message: "Nothing to classify" });
+    }
+    let suggested = 0;
+    let failed = 0;
+    for (const mediaId of ids) {
+      try {
+        const r = await suggestFrameShape("clip", mediaId);
+        if (r.status === "suggested") suggested++;
+        else if (r.status === "failed") failed++;
+      } catch {
+        failed++;
+      }
+    }
+    return NextResponse.json({ scanned: ids.length, suggested, failed, capped: ids.length >= CAP });
+  }
+
   // apply=true: strong filename matches are written straight onto the
   // media (the shoot naming convention is trusted); otherwise they're
   // stored as pre-ticked suggestions for review.
@@ -231,6 +299,9 @@ export async function PATCH(request: NextRequest) {
     noProduct?: boolean;
     /** Free-form reviewer notes; saved with either decision. Omit to leave untouched. */
     notes?: string | null;
+    /** Clip video-type category id (clips only). "" or null clears it;
+     *  omit to leave untouched. */
+    categoryId?: string | null;
   };
   try {
     body = await request.json();
@@ -242,6 +313,15 @@ export async function PATCH(request: NextRequest) {
   if (!mediaId) return NextResponse.json({ error: "mediaId is required" }, { status: 400 });
 
   if (typeof body.notes === "string") saveMediaNotes(mediaType, mediaId, body.notes);
+
+  // Categorize the clip by video type (independent of the product decision).
+  let categoryOnly = false;
+  if (body.categoryId !== undefined && mediaType === "clip") {
+    sqlite
+      .prepare(`UPDATE marketing_video_clips SET category_id = ?, updated_at = datetime('now') WHERE id = ?`)
+      .run(body.categoryId ? String(body.categoryId) : null, mediaId);
+    categoryOnly = true;
+  }
 
   const now = new Date().toISOString();
   const match = sqlite
@@ -270,9 +350,10 @@ export async function PATCH(request: NextRequest) {
 
   const productIds = (body.productIds ?? []).map(String).filter(Boolean);
   if (productIds.length === 0) {
-    // Notes-only save: keep the item in the queue, just persist the note.
-    if (typeof body.notes === "string") {
-      return NextResponse.json({ saved: true, status: "notes_only" });
+    // Metadata-only save: keep the item in the queue, just persist the
+    // note and/or category the reviewer set.
+    if (categoryOnly || typeof body.notes === "string") {
+      return NextResponse.json({ saved: true, status: categoryOnly ? "category_only" : "notes_only" });
     }
     return NextResponse.json({ error: "productIds (or noProduct) is required" }, { status: 400 });
   }
