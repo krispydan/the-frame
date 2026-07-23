@@ -1,5 +1,17 @@
 import { db, sqlite } from "@/lib/db";
 import { orders, orderItems } from "@/modules/orders/schema";
+
+/** Resolve a Faire line's SKU string to its catalog_skus id (exact match,
+ *  then alias map) so velocity/forecast queries that key on sku_id see
+ *  wholesale demand. Returns null for unknown SKUs (kept as text-only). */
+function resolveCatalogSkuId(sku: string | null | undefined): string | null {
+  if (!sku) return null;
+  const up = sku.trim().toUpperCase();
+  const hit = sqlite.prepare("SELECT id FROM catalog_skus WHERE UPPER(sku) = ? LIMIT 1").get(up) as { id: string } | undefined;
+  if (hit) return hit.id;
+  const alias = sqlite.prepare("SELECT sku_id FROM catalog_sku_aliases WHERE UPPER(alias) = ? LIMIT 1").get(up) as { sku_id: string } | undefined;
+  return alias?.sku_id ?? null;
+}
 import { companies } from "@/modules/sales/schema";
 import { eq } from "drizzle-orm";
 import { eventBus } from "@/modules/core/lib/event-bus";
@@ -108,6 +120,7 @@ export async function importFaireOrders(csvRows: FaireCsvRow[]): Promise<{ impor
       db.insert(orderItems).values({
         orderId: newOrder.id,
         sku: row.sku,
+        skuId: resolveCatalogSkuId(row.sku),
         productName: row.product_name,
         quantity: parseInt(row.quantity) || 1,
         unitPrice: parseFloat(row.unit_price) || 0,
@@ -260,6 +273,7 @@ function syncFaireOrder(faireOrder: FaireOrder): { action: "created" | "updated"
     db.insert(orderItems).values({
       orderId: newOrder.id,
       sku: item.sku || null,
+      skuId: resolveCatalogSkuId(item.sku),
       productName: item.product_name,
       colorName: item.variant_name || null,
       quantity: item.quantity,
