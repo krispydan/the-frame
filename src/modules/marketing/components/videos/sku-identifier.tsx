@@ -433,8 +433,8 @@ export function SkuIdentifier() {
                     </div>
                   )}
                   {shapeMatches.length > 0 ? (
-                    <div className="grid max-h-[220px] grid-cols-2 gap-1.5 overflow-y-auto sm:grid-cols-3">
-                      {shapeMatches.map((c) => {
+                    <div className="grid max-h-[460px] grid-cols-2 gap-2 overflow-y-auto">
+                      {shapeMatches.map((c, i) => {
                         const on = selected.includes(c.productId);
                         return (
                           <button
@@ -443,13 +443,16 @@ export function SkuIdentifier() {
                             className={`relative flex flex-col items-center gap-1 rounded-lg border p-2 text-center ${on ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted"}`}
                             title={c.productName}
                           >
+                            <span className="absolute top-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                              #{i + 1} · {c.confidence}%
+                            </span>
                             {on && (
-                              <span className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                                <Check className="h-3 w-3" />
+                              <span className="absolute top-1 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                                <Check className="h-3.5 w-3.5" />
                               </span>
                             )}
-                            <ProductThumb url={c.imageUrl} className="h-14 w-full border-0" />
-                            <span className="w-full truncate text-xs">{c.productName}</span>
+                            <ProductThumb url={c.imageUrl} className="h-28 w-full border-0" />
+                            <span className="w-full truncate text-sm font-medium">{c.productName}</span>
                           </button>
                         );
                       })}

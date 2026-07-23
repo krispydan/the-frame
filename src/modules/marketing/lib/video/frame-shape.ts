@@ -36,11 +36,12 @@ import { materializeVideo, videoScratchPath, saveVideo, videoUrl } from "@/lib/s
 import { materializeMedia } from "@/lib/storage/media";
 import {
   cropGlasses,
-  classifyFrameShapeFromImage,
+  matchProductsFromSheets,
   normShape,
   type ShapeGuess,
-  type ClassifyResult,
+  type ProductMatchResult,
 } from "./frame-shape-vision";
+import { buildContactSheets, type SheetEntry } from "./frame-shape-sheet";
 import type { MediaType, MatchCandidate } from "./sku-match";
 
 // ── Frame-shape vocabulary (grounded in the catalog) ──
@@ -212,12 +213,15 @@ export async function suggestFrameShape(
     return { status: "confirmed", shapes: [], candidates: JSON.parse(existing.candidatesJson ?? "[]"), attempts: 0 };
   }
 
-  const vocab = loadFrameShapeVocabulary();
   const stepSec = opts.stepSec ?? 2;
   const maxSec = opts.maxSec ?? (mediaType === "clip" ? 8 : 0);
   const maxAttempts = opts.maxAttempts ?? 5;
 
-  let result: ClassifyResult = { ok: false, shapes: [], clearShot: false };
+  // Numbered catalog contact sheet (cached) — the model matches the crop
+  // against this by frame shape.
+  const sheet = await buildContactSheets();
+
+  let result: ProductMatchResult = { ok: false, clearShot: false, shape: null, matches: [] };
   let attempts = 0;
   let lastCrop: Buffer | null = null;
   for (let t = 0.5; ; t += stepSec) {
@@ -227,7 +231,7 @@ export async function suggestFrameShape(
     try {
       const crop = await cropGlasses(still.path);
       lastCrop = crop.buffer;
-      result = await classifyFrameShapeFromImage(crop.base64, crop.mime, vocab);
+      result = await matchProductsFromSheets(crop.base64, crop.mime, sheet.sheets, sheet.entries.length);
     } finally {
       await still.cleanup();
     }
@@ -247,18 +251,49 @@ export async function suggestFrameShape(
     }
   }
 
+  // Frame-shape badge: the model's overall shape word, tagged with the top
+  // match's confidence.
+  const shapes: ShapeGuess[] = result.shape
+    ? [{ shape: result.shape, confidence: result.matches[0]?.confidence ?? 0 }]
+    : [];
+
   if (!result.ok) {
-    upsertShapeMatch(mediaType, mediaId, "failed", [], result.shapes, result.error ?? null, cropPath);
-    return { status: "failed", shapes: result.shapes, candidates: [], attempts };
+    upsertShapeMatch(mediaType, mediaId, "failed", [], shapes, result.error ?? null, cropPath);
+    return { status: "failed", shapes, candidates: [], attempts };
   }
-  if (!result.clearShot || result.shapes.length === 0) {
-    upsertShapeMatch(mediaType, mediaId, "suggested", [], [], null, cropPath);
-    return { status: "none", shapes: [], candidates: [], attempts };
+  if (!result.clearShot || result.matches.length === 0) {
+    upsertShapeMatch(mediaType, mediaId, "suggested", [], shapes, null, cropPath);
+    return { status: "none", shapes, candidates: [], attempts };
   }
 
-  const candidates = shapeCandidates(result.shapes);
-  upsertShapeMatch(mediaType, mediaId, "suggested", candidates, result.shapes, null, cropPath);
-  return { status: "suggested", shapes: result.shapes, candidates, attempts };
+  const candidates = matchesToCandidates(result.matches, sheet.entries, result.shape);
+  upsertShapeMatch(mediaType, mediaId, "suggested", candidates, shapes, null, cropPath);
+  return { status: "suggested", shapes, candidates, attempts };
+}
+
+/** Map the model's ranked tile numbers back onto catalog products. */
+function matchesToCandidates(
+  matches: ProductMatchResult["matches"],
+  entries: SheetEntry[],
+  shape: string | null,
+): MatchCandidate[] {
+  const byIndex = new Map(entries.map((e) => [e.index, e]));
+  const out: MatchCandidate[] = [];
+  for (const m of matches) {
+    const e = byIndex.get(m.index);
+    if (!e) continue;
+    out.push({
+      productId: e.productId,
+      productName: e.productName,
+      sku: e.sku,
+      skuId: e.skuId,
+      colorName: null,
+      confidence: m.confidence,
+      via: "frameshape",
+      shape: shape ?? undefined,
+    });
+  }
+  return out.slice(0, 10);
 }
 
 /** Public URL for a stored frame-shape crop (or null). */

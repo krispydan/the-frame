@@ -198,3 +198,135 @@ export async function classifyFrameShapeFromImage(
     return { ok: false, shapes: [], clearShot: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
+
+// ── Direct product match against a contact sheet ──
+
+export interface ProductMatchGuess {
+  /** The tile number from the contact sheet. */
+  index: number;
+  confidence: number; // 0-100
+}
+
+export interface ProductMatchResult {
+  ok: boolean;
+  clearShot: boolean;
+  /** Optional overall shape word the model named, for display. */
+  shape: string | null;
+  /** Ranked product tile numbers, best first (≤10). */
+  matches: ProductMatchGuess[];
+  error?: string;
+  usage?: { input_tokens: number; output_tokens: number };
+}
+
+const MATCH_TOOL = {
+  name: "match_products",
+  description:
+    "Rank the catalog products whose FRAME SHAPE best matches the target glasses, by tile number.",
+  input_schema: {
+    type: "object",
+    required: ["clearShot", "matches"],
+    properties: {
+      clearShot: {
+        type: "boolean",
+        description:
+          "true if the target glasses are clearly visible enough to judge their frame shape; false if none is visible or it's too small/blurry/occluded.",
+      },
+      shape: {
+        type: "string",
+        description: "One word for the target's overall frame shape (e.g. round, aviator, square). Optional.",
+      },
+      matches: {
+        type: "array",
+        maxItems: 10,
+        description:
+          "Up to 10 catalog tile numbers whose FRAME SHAPE best matches the target, most likely first. Empty when clearShot is false.",
+        items: {
+          type: "object",
+          required: ["number", "confidence"],
+          properties: {
+            number: { type: "integer", description: "A tile number from the catalog sheets." },
+            confidence: { type: "number", description: "0-100 likelihood this product is the same shape." },
+          },
+        },
+      },
+    },
+  },
+};
+
+/**
+ * Show the model the target crop + the numbered catalog contact sheet(s)
+ * and get back the top-10 products by FRAME SHAPE (colour ignored). One
+ * cheap call; hallucinated / out-of-range numbers are dropped. Never
+ * throws — returns ok:false on any error.
+ */
+export async function matchProductsFromSheets(
+  cropBase64: string,
+  cropMime: string,
+  sheets: Array<{ base64: string; mime: string }>,
+  productCount: number,
+  model = skuMatchModel(),
+): Promise<ProductMatchResult> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return { ok: false, clearShot: false, shape: null, matches: [], error: "ANTHROPIC_API_KEY not configured" };
+  if (sheets.length === 0) return { ok: false, clearShot: false, shape: null, matches: [], error: "No catalog sheets" };
+
+  const system =
+    "You identify eyewear by FRAME SHAPE for a sunglasses catalog. You are given a close-up of a target pair of glasses, " +
+    "then one or more catalog sheets showing every product we sell — one photo each, numbered. " +
+    "Judge ONLY the frame's outline shape: the silhouette, lens shape, proportions, brow line, corners. " +
+    "IGNORE colour, tint, lens darkness, and finish completely — a black pair matches a tortoise or clear pair if the shape is the same. " +
+    `Return up to 10 catalog tile numbers (1–${productCount}) whose frame shape best matches the target, ranked most-likely first, ` +
+    "each with a confidence 0–100. If no frame is clearly visible in the target, set clearShot=false and return an empty list.";
+
+  const content: unknown[] = [
+    { type: "text", text: "TARGET — identify this pair of glasses by its frame shape:" },
+    { type: "image", source: { type: "base64", media_type: cropMime, data: cropBase64 } },
+    { type: "text", text: `CATALOG — every product we sell, one photo each, numbered 1–${productCount}. Match by frame shape only:` },
+    ...sheets.map((s) => ({ type: "image", source: { type: "base64", media_type: s.mime, data: s.base64 } })),
+    {
+      type: "text",
+      text: "List the up-to-10 catalog numbers whose FRAME SHAPE best matches the target, ranked most-likely first with a confidence %. Ignore colour entirely.",
+    },
+  ];
+
+  const body = {
+    model,
+    max_tokens: 1024,
+    system,
+    tools: [MATCH_TOOL],
+    tool_choice: { type: "tool", name: MATCH_TOOL.name },
+    messages: [{ role: "user", content }],
+  };
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return { ok: false, clearShot: false, shape: null, matches: [], error: `Anthropic API ${res.status}: ${await res.text()}` };
+    const data = (await res.json()) as {
+      content: Array<{ type: string; input?: unknown }>;
+      usage?: { input_tokens: number; output_tokens: number };
+    };
+    const call = data.content.find((c) => c.type === "tool_use");
+    if (!call?.input) return { ok: false, clearShot: false, shape: null, matches: [], error: "No tool_use in response" };
+    const input = call.input as { clearShot?: boolean; shape?: string; matches?: Array<{ number?: number; confidence?: number }> };
+
+    const seen = new Set<number>();
+    const matches: ProductMatchGuess[] = (input.matches ?? [])
+      .map((m) => ({ index: Math.round(Number(m.number)), confidence: Math.max(0, Math.min(100, Number(m.confidence) || 0)) }))
+      .filter((m) => Number.isInteger(m.index) && m.index >= 1 && m.index <= productCount && !seen.has(m.index) && seen.add(m.index))
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, 10);
+    return {
+      ok: true,
+      clearShot: Boolean(input.clearShot) && matches.length > 0,
+      shape: input.shape ? normShape(input.shape) : null,
+      matches,
+      usage: data.usage,
+    };
+  } catch (e) {
+    return { ok: false, clearShot: false, shape: null, matches: [], error: e instanceof Error ? e.message : String(e) };
+  }
+}
