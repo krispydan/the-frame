@@ -3,6 +3,7 @@ export const maxDuration = 120;
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
+import { resolveCatalogSku } from "@/modules/catalog/lib/sku-resolve";
 
 /**
  * POST /api/admin/inventory/import-pos
@@ -30,7 +31,7 @@ import { sqlite } from "@/lib/db";
  * Auth: x-admin-key: jaxy2026.
  */
 
-const VERSION = "v1-import-pos";
+const VERSION = "v2-import-pos";
 
 const FACTORY_CODES: Record<string, string> = {
   taga: "JX1",
@@ -77,6 +78,21 @@ interface PoRow {
 export async function GET(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  // ?probe=JX1008-S-BLK,JX5004-R-BLK — report how each SKU resolves against
+  // the catalog (exact / alias / legacy fallback / prefix neighbors).
+  const probe = new URL(req.url).searchParams.get("probe");
+  if (probe) {
+    const likeStmt = sqlite.prepare(
+      "SELECT sku FROM catalog_skus WHERE sku LIKE ? ORDER BY sku LIMIT 6",
+    );
+    const results = probe.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean).map((sku) => {
+      const hit = resolveCatalogSku(sku);
+      const prefix = sku.slice(0, 6); // JX#### style prefix
+      const neighbors = (likeStmt.all(`${prefix}%`) as Array<{ sku: string }>).map((r) => r.sku);
+      return { sku, resolved: hit, neighbors };
+    });
+    return NextResponse.json({ ok: true, version: VERSION, probe: results });
   }
   const pos = sqlite.prepare(`
     SELECT po.po_number, f.name AS factory, po.status, po.total_units, po.total_cost,
@@ -133,17 +149,15 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── Resolve SKUs ──
-  const skuLookup = sqlite.prepare("SELECT id FROM catalog_skus WHERE UPPER(sku) = ? LIMIT 1");
-  const aliasLookup = sqlite.prepare("SELECT sku_id FROM catalog_sku_aliases WHERE UPPER(alias) = ? LIMIT 1");
+  // ── Resolve SKUs (exact → alias → legacy-format fallback) ──
   const unmatched: string[] = [];
+  const matchedVia: Record<string, number> = {};
   const resolved = rows.map((r) => {
     const skuUp = r.sku.trim().toUpperCase();
-    const hit = (skuLookup.get(skuUp) as { id: string } | undefined)?.id
-      ?? (aliasLookup.get(skuUp) as { sku_id: string } | undefined)?.sku_id
-      ?? null;
+    const hit = resolveCatalogSku(skuUp);
     if (!hit) unmatched.push(skuUp);
-    return { ...r, sku: skuUp, skuId: hit };
+    else matchedVia[hit.matchedVia] = (matchedVia[hit.matchedVia] ?? 0) + 1;
+    return { ...r, sku: skuUp, skuId: hit?.skuId ?? null };
   });
 
   // ── Group by PO ──
@@ -218,6 +232,7 @@ export async function POST(req: NextRequest) {
     counts: {
       rows: rows.length,
       pos: byPo.size,
+      matchedVia,
       unmatchedSkus: unmatched.length,
       newFactories: factoryPlan,
     },
