@@ -25,6 +25,7 @@
 import { sqlite } from "@/lib/db";
 import { resolveDepletionTarget } from "@/modules/finance/lib/fifo-engine";
 import { unitSkuOf } from "@/modules/finance/lib/pack-size";
+import { resolveCatalogSku } from "@/modules/catalog/lib/sku-resolve";
 
 /** JX SKU shape: JX<4 digits>-<S|R>-<color code>[-power/BL suffix] */
 const ROOT_PATTERN = /^(JX\d{4}-[SR]-[A-Z0-9]{2,4})(?:-.+)?$/i;
@@ -184,9 +185,11 @@ function makeResolver(): (sku: string | null, skuId: string | null) => string | 
         const row = skuOfUnitId.get(resolved.unitSkuId) as { sku: string } | undefined;
         root = rootSkuOf(row?.sku ?? resolved.unitSku ?? key);
       } else {
-        // Not in catalog at all — still bucket by its own root shape if it
-        // looks like a JX SKU (keeps demand visible even for unmapped rows).
-        root = ROOT_PATTERN.test(key) ? rootSkuOf(key) : null;
+        // Legacy-format fallback (JX1008-S-BLK ↔ JX1008-BLK), then bucket by
+        // the SKU's own root shape so demand stays visible even unmapped.
+        const flex = resolveCatalogSku(resolved.unitSku ?? key);
+        if (flex) root = rootSkuOf(flex.catalogSku);
+        else root = ROOT_PATTERN.test(key) ? rootSkuOf(key) : null;
       }
       bySku.set(key, root);
       if (root) return root;

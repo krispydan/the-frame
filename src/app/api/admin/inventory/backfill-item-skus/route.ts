@@ -3,6 +3,7 @@ export const maxDuration = 120;
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
+import { resolveCatalogSku } from "@/modules/catalog/lib/sku-resolve";
 
 /**
  * POST /api/admin/inventory/backfill-item-skus?commit=true
@@ -17,7 +18,7 @@ import { sqlite } from "@/lib/db";
  * Auth: x-admin-key: jaxy2026.
  */
 
-const VERSION = "v1-backfill-item-skus";
+const VERSION = "v2-backfill-item-skus";
 
 export async function GET(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
@@ -45,8 +46,6 @@ export async function POST(req: NextRequest) {
     WHERE oi.sku_id IS NULL AND oi.sku IS NOT NULL AND oi.sku != ''
   `).all() as Array<{ id: string; sku: string }>;
 
-  const skuLookup = sqlite.prepare("SELECT id FROM catalog_skus WHERE UPPER(sku) = ? LIMIT 1");
-  const aliasLookup = sqlite.prepare("SELECT sku_id FROM catalog_sku_aliases WHERE UPPER(alias) = ? LIMIT 1");
   const update = sqlite.prepare("UPDATE order_items SET sku_id = ? WHERE id = ?");
 
   const cache = new Map<string, string | null>();
@@ -64,9 +63,7 @@ export async function POST(req: NextRequest) {
     if (cache.has(up)) {
       skuId = cache.get(up)!;
     } else {
-      skuId = (skuLookup.get(up) as { id: string } | undefined)?.id
-        ?? (aliasLookup.get(up) as { sku_id: string } | undefined)?.sku_id
-        ?? null;
+      skuId = resolveCatalogSku(up)?.skuId ?? null;
       cache.set(up, skuId);
     }
     if (skuId) {
