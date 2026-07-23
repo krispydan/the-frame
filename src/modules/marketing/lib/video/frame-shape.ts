@@ -32,7 +32,7 @@ import { db, sqlite } from "@/lib/db";
 import { mediaMatches } from "@/modules/marketing/schema";
 import { skuMatchModel } from "../ai-model";
 import { runFfmpeg } from "./ffmpeg";
-import { materializeVideo, videoScratchPath } from "@/lib/storage/videos";
+import { materializeVideo, videoScratchPath, saveVideo, videoUrl } from "@/lib/storage/videos";
 import { materializeMedia } from "@/lib/storage/media";
 import {
   cropGlasses,
@@ -219,12 +219,14 @@ export async function suggestFrameShape(
 
   let result: ClassifyResult = { ok: false, shapes: [], clearShot: false };
   let attempts = 0;
+  let lastCrop: Buffer | null = null;
   for (let t = 0.5; ; t += stepSec) {
     if (attempts >= maxAttempts) break;
     attempts++;
     const still = await stillForMedia(mediaType, mediaId, t);
     try {
       const crop = await cropGlasses(still.path);
+      lastCrop = crop.buffer;
       result = await classifyFrameShapeFromImage(crop.base64, crop.mime, vocab);
     } finally {
       await still.cleanup();
@@ -233,18 +235,35 @@ export async function suggestFrameShape(
     if (!result.ok || result.clearShot || t + stepSec > maxSec) break;
   }
 
+  // Persist the exact crop the model judged, so the review UI can show the
+  // AI's actual input (crucial for debugging bad classifications).
+  let cropPath: string | null = null;
+  if (lastCrop) {
+    cropPath = `shape-crops/${mediaType}-${mediaId}.jpg`;
+    try {
+      await saveVideo(lastCrop, cropPath);
+    } catch {
+      cropPath = null;
+    }
+  }
+
   if (!result.ok) {
-    upsertShapeMatch(mediaType, mediaId, "failed", [], result.shapes, result.error ?? null);
+    upsertShapeMatch(mediaType, mediaId, "failed", [], result.shapes, result.error ?? null, cropPath);
     return { status: "failed", shapes: result.shapes, candidates: [], attempts };
   }
   if (!result.clearShot || result.shapes.length === 0) {
-    upsertShapeMatch(mediaType, mediaId, "suggested", [], [], null);
+    upsertShapeMatch(mediaType, mediaId, "suggested", [], [], null, cropPath);
     return { status: "none", shapes: [], candidates: [], attempts };
   }
 
   const candidates = shapeCandidates(result.shapes);
-  upsertShapeMatch(mediaType, mediaId, "suggested", candidates, result.shapes, null);
+  upsertShapeMatch(mediaType, mediaId, "suggested", candidates, result.shapes, null, cropPath);
   return { status: "suggested", shapes: result.shapes, candidates, attempts };
+}
+
+/** Public URL for a stored frame-shape crop (or null). */
+export function frameShapeCropUrl(cropPath: string | null | undefined): string | null {
+  return cropPath ? videoUrl(cropPath) : null;
 }
 
 function upsertShapeMatch(
@@ -254,9 +273,10 @@ function upsertShapeMatch(
   candidates: MatchCandidate[],
   shapes: ShapeGuess[],
   error: string | null,
+  cropPath: string | null = null,
 ): void {
   const now = new Date().toISOString();
-  const attrs = JSON.stringify({ frameShapes: shapes });
+  const attrs = JSON.stringify({ frameShapes: shapes, cropPath });
   const existing = sqlite
     .prepare(`SELECT id, status FROM marketing_media_matches WHERE media_type = ? AND media_id = ?`)
     .get(mediaType, mediaId) as { id: string; status: string } | undefined;

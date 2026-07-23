@@ -45,6 +45,7 @@ type Item = {
   matchStatus: string | null;
   candidates: Candidate[];
   frameShapes?: FrameShape[];
+  frameShapeCropUrl?: string | null;
   confirmedProductIds: string[];
   matchError: string | null;
 };
@@ -417,6 +418,20 @@ export function SkuIdentifier() {
                       {shaping ? "…" : shapeMatches.length > 0 ? "Re-run" : "Suggest"}
                     </Button>
                   </div>
+                  {item.frameShapeCropUrl && (
+                    <div className="flex items-center gap-2 rounded-md bg-muted/40 p-1.5">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={item.frameShapeCropUrl}
+                        alt="AI crop"
+                        className="h-24 w-auto rounded border bg-white object-contain"
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        This is the exact cropped frame sent to the AI. If the glasses aren’t clearly
+                        framed here, that’s why the match is off — tell me and I’ll adjust the crop.
+                      </span>
+                    </div>
+                  )}
                   {shapeMatches.length > 0 ? (
                     <div className="grid max-h-[220px] grid-cols-2 gap-1.5 overflow-y-auto sm:grid-cols-3">
                       {shapeMatches.map((c) => {
