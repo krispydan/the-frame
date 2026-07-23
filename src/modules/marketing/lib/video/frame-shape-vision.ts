@@ -82,6 +82,149 @@ export async function cropGlasses(
   };
 }
 
+/** Downscale a still (path or buffer) to a base64 JPEG — no crop. Used to
+ *  send the whole frame to the glasses detector. */
+export async function encodeImage(
+  src: string | Buffer,
+  maxDim = 768,
+): Promise<{ base64: string; mime: "image/jpeg" }> {
+  const buffer = await sharp(src)
+    .resize({ width: maxDim, height: maxDim, fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 82 })
+    .toBuffer();
+  return { base64: buffer.toString("base64"), mime: "image/jpeg" };
+}
+
+// ── Glasses detection (locate, then crop to the box) ──
+
+/** Bounding box as fractions of the image, top-left origin. */
+export interface GlassesBox { x: number; y: number; w: number; h: number }
+
+export interface DetectResult {
+  ok: boolean;
+  box: GlassesBox | null;
+  error?: string;
+  usage?: { input_tokens: number; output_tokens: number };
+}
+
+const DETECT_TOOL = {
+  name: "locate_glasses",
+  description: "Report a tight bounding box around the eyewear in the image.",
+  input_schema: {
+    type: "object",
+    required: ["found"],
+    properties: {
+      found: { type: "boolean", description: "true if a pair of glasses/sunglasses is visible." },
+      box: {
+        type: "object",
+        description: "Tight box around JUST the glasses (lenses + frame + temples), as fractions 0-1 of the image. Omit when found is false.",
+        required: ["x", "y", "w", "h"],
+        properties: {
+          x: { type: "number", description: "Left edge, 0-1 from the left." },
+          y: { type: "number", description: "Top edge, 0-1 from the top." },
+          w: { type: "number", description: "Width, 0-1 of image width." },
+          h: { type: "number", description: "Height, 0-1 of image height." },
+        },
+      },
+    },
+  },
+};
+
+/**
+ * Locate the glasses in a full frame so we can crop tightly to them —
+ * fixes worn/off-centre shots a fixed crop misses. One cheap call; never
+ * throws. Returns box=null when no glasses are found.
+ */
+export async function detectGlassesBox(
+  base64: string,
+  mime: string,
+  model = skuMatchModel(),
+): Promise<DetectResult> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return { ok: false, box: null, error: "ANTHROPIC_API_KEY not configured" };
+
+  const body = {
+    model,
+    max_tokens: 256,
+    system:
+      "You locate eyewear in a photo or video still. Return a TIGHT bounding box around just the glasses or sunglasses — " +
+      "the lenses, frame, and visible temples — whether worn on a face or held up. Coordinates are fractions of the image " +
+      "(0-1), x/y at the top-left of the box. If no glasses are visible, set found=false.",
+    tools: [DETECT_TOOL],
+    tool_choice: { type: "tool", name: DETECT_TOOL.name },
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: mime, data: base64 } },
+          { type: "text", text: "Locate the glasses and return a tight bounding box." },
+        ],
+      },
+    ],
+  };
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return { ok: false, box: null, error: `Anthropic API ${res.status}: ${await res.text()}` };
+    const data = (await res.json()) as {
+      content: Array<{ type: string; input?: unknown }>;
+      usage?: { input_tokens: number; output_tokens: number };
+    };
+    const call = data.content.find((c) => c.type === "tool_use");
+    if (!call?.input) return { ok: false, box: null, error: "No tool_use in response" };
+    const input = call.input as { found?: boolean; box?: { x?: number; y?: number; w?: number; h?: number } };
+    if (!input.found || !input.box) return { ok: true, box: null, usage: data.usage };
+    const b = input.box;
+    const box: GlassesBox = {
+      x: Math.max(0, Math.min(1, Number(b.x) || 0)),
+      y: Math.max(0, Math.min(1, Number(b.y) || 0)),
+      w: Math.max(0, Math.min(1, Number(b.w) || 0)),
+      h: Math.max(0, Math.min(1, Number(b.h) || 0)),
+    };
+    // A degenerate box is unusable — treat as not found.
+    if (box.w < 0.02 || box.h < 0.02) return { ok: true, box: null, usage: data.usage };
+    return { ok: true, box, usage: data.usage };
+  } catch (e) {
+    return { ok: false, box: null, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Crop a still to a detected glasses box (+ padding) and downscale.
+ * Padding is a little more vertically so temples/brow aren't clipped.
+ */
+export async function cropToBox(
+  src: string | Buffer,
+  box: GlassesBox,
+  opts: { pad?: number; maxDim?: number } = {},
+): Promise<{ buffer: Buffer; base64: string; mime: "image/jpeg"; width: number; height: number }> {
+  const meta = await sharp(src).metadata();
+  const W = meta.width ?? 0;
+  const H = meta.height ?? 0;
+  if (!W || !H) throw new Error("Could not read still dimensions");
+
+  const pad = opts.pad ?? 0.18;
+  const x0 = Math.max(0, Math.round((box.x - pad) * W));
+  const y0 = Math.max(0, Math.round((box.y - pad * 1.3) * H));
+  const x1 = Math.min(W, Math.round((box.x + box.w + pad) * W));
+  const y1 = Math.min(H, Math.round((box.y + box.h + pad * 1.3) * H));
+  const width = Math.max(1, x1 - x0);
+  const height = Math.max(1, y1 - y0);
+
+  const maxDim = opts.maxDim ?? 640;
+  const buffer = await sharp(src)
+    .extract({ left: x0, top: y0, width, height })
+    .resize({ width: maxDim, height: maxDim, fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 82 })
+    .toBuffer();
+  const out = await sharp(buffer).metadata();
+  return { buffer, base64: buffer.toString("base64"), mime: "image/jpeg", width: out.width ?? 0, height: out.height ?? 0 };
+}
+
 // ── AI classification (base64 vision, forced tool-use) ──
 
 export interface ShapeGuess {
