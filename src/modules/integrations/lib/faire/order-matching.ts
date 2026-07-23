@@ -69,22 +69,54 @@ async function faireApiFetch(path: string): Promise<Response> {
  * @param orderNumber - the order_number / partner_order_id from the
  *   ShipHero webhook payload. Leading "#" is stripped.
  */
+function toMatch(order: FaireOrderListItem): FaireOrderMatch {
+  const addr = order.shipping_address ?? order.address;
+  const country = addr?.country_code ?? addr?.country ?? null;
+  return {
+    faireOrderId: order.id,
+    displayId: order.display_id,
+    state: order.state,
+    shipToCountry: country ? country.toUpperCase() : null,
+  };
+}
+
+/** Fetch a single Faire order by its id (bo_xxx). Returns null on 404. */
+export async function fetchFaireOrderById(faireOrderId: string): Promise<FaireOrderListItem | null> {
+  const res = await faireApiFetch(`/orders/${faireOrderId}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Faire order fetch failed: ${res.status} ${res.statusText}`);
+  const body = (await res.json()) as { order?: FaireOrderListItem } & Partial<FaireOrderListItem>;
+  const order = body.order ?? (body.id ? (body as FaireOrderListItem) : null);
+  return order && order.id ? order : null;
+}
+
 export async function findFaireOrderByOrderNumber(
   orderNumber: string,
 ): Promise<FaireOrderMatch | null> {
-  // TODO: Once verified with Faire support, switch to a direct
-  // `?filter=display_id&value=<code>` (or equivalent) query parameter.
-  // That would make this O(1) instead of O(N) page scanning. The exact
-  // query-string syntax for filtering by display_id is not yet confirmed
-  // against real Faire data, so we use the bounded-paginate fallback below.
-
   const code = orderNumber.replace(/^#/, "").trim();
   if (!DISPLAY_ID_PATTERN.test(code)) return null;
+
+  const target = code.toUpperCase();
+
+  // Fast path (O(1), window/sort-proof): Faire order ids are `bo_` + the
+  // lowercased display_id, so fetch the order directly. The paginated scan
+  // below returns orders OLDEST-updated first and only covers the first
+  // ~300 — so a freshly-created order (exactly what the webhook fires for)
+  // often falls outside it and was misread as "not a Faire order". The
+  // direct fetch avoids that entirely; the scan stays as a fallback in case
+  // the id convention ever changes.
+  try {
+    const direct = await fetchFaireOrderById(`bo_${code.toLowerCase()}`);
+    if (direct && (direct.display_id || "").toUpperCase() === target) {
+      return toMatch(direct);
+    }
+  } catch (e) {
+    console.warn("[faire/order-matching] direct fetch failed, falling back to scan:", e instanceof Error ? e.message : e);
+  }
 
   const updatedAtMin = new Date(
     Date.now() - MAX_AGE_DAYS * 24 * 60 * 60 * 1000,
   ).toISOString();
-  const target = code.toUpperCase();
 
   for (let page = 1; page <= MAX_PAGES; page++) {
     const params = new URLSearchParams({
