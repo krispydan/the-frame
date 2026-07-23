@@ -365,6 +365,8 @@ export interface ProductMatchResult {
   shape: string | null;
   /** Ranked product tile numbers, best first (≤10). */
   matches: ProductMatchGuess[];
+  /** Video-type slug picked from the provided options (when asked). */
+  videoType: string | null;
   error?: string;
   usage?: TokenUsage;
 }
@@ -385,6 +387,11 @@ const MATCH_TOOL = {
       shape: {
         type: "string",
         description: "One word for the target's overall frame shape (e.g. round, aviator, square). Optional.",
+      },
+      videoType: {
+        type: "string",
+        description:
+          "Only when a VIDEO TYPES list is provided: the slug of the option that best describes the video, judged from the full frame. Omit otherwise.",
       },
       matches: {
         type: "array",
@@ -417,12 +424,18 @@ const MATCH_TOOL = {
 export async function matchProductsFromSheets(
   crops: Array<{ base64: string; mime: string }>,
   catalog: Array<{ label: string; base64: string }>,
+  opts: {
+    /** One full (uncropped) frame — context for video-type classification. */
+    fullFrame?: { base64: string; mime: string };
+    /** Video-type options; when present the model also classifies the video. */
+    videoTypes?: Array<{ slug: string; name: string; description: string | null }>;
+  } = {},
   model = skuMatchModel(),
 ): Promise<ProductMatchResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return { ok: false, clearShot: false, shape: null, matches: [], error: "ANTHROPIC_API_KEY not configured" };
-  if (catalog.length === 0) return { ok: false, clearShot: false, shape: null, matches: [], error: "No catalog images" };
-  if (crops.length === 0) return { ok: false, clearShot: false, shape: null, matches: [], error: "No target crops" };
+  if (!apiKey) return { ok: false, clearShot: false, shape: null, matches: [], videoType: null, error: "ANTHROPIC_API_KEY not configured" };
+  if (catalog.length === 0) return { ok: false, clearShot: false, shape: null, matches: [], videoType: null, error: "No catalog images" };
+  if (crops.length === 0) return { ok: false, clearShot: false, shape: null, matches: [], videoType: null, error: "No target crops" };
   const productCount = catalog.length;
 
   const system =
@@ -456,9 +469,27 @@ export async function matchProductsFromSheets(
   for (const c of crops) {
     content.push({ type: "image", source: { type: "base64", media_type: c.mime, data: c.base64 } });
   }
+  if (opts.videoTypes?.length && opts.fullFrame) {
+    const typeList = opts.videoTypes
+      .map((t) => `- ${t.slug}: ${t.name}${t.description ? ` — ${t.description}` : ""}`)
+      .join("\n");
+    content.push(
+      {
+        type: "text",
+        text:
+          "FULL FRAME — one uncropped still, for classifying the VIDEO TYPE (what kind of shot this is):",
+      },
+      { type: "image", source: { type: "base64", media_type: opts.fullFrame.mime, data: opts.fullFrame.base64 } },
+      {
+        type: "text",
+        text: `VIDEO TYPES — pick the one slug that best describes this video:\n${typeList}`,
+      },
+    );
+  }
   content.push({
     type: "text",
-    text: "List the up-to-10 product numbers whose FRAME SHAPE best matches the target, ranked most-likely first with a confidence %. Ignore colour entirely.",
+    text: "List the up-to-10 product numbers whose FRAME SHAPE best matches the target, ranked most-likely first with a confidence %. Ignore colour entirely." +
+      (opts.videoTypes?.length ? " Also set videoType to the best-fitting slug." : ""),
   });
 
   const body = {
@@ -476,14 +507,22 @@ export async function matchProductsFromSheets(
       headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) return { ok: false, clearShot: false, shape: null, matches: [], error: `Anthropic API ${res.status}: ${await res.text()}` };
+    if (!res.ok) return { ok: false, clearShot: false, shape: null, matches: [], videoType: null, error: `Anthropic API ${res.status}: ${await res.text()}` };
     const data = (await res.json()) as {
       content: Array<{ type: string; input?: unknown }>;
       usage?: TokenUsage;
     };
     const call = data.content.find((c) => c.type === "tool_use");
-    if (!call?.input) return { ok: false, clearShot: false, shape: null, matches: [], error: "No tool_use in response" };
-    const input = call.input as { clearShot?: boolean; shape?: string; matches?: Array<{ number?: number; confidence?: number }> };
+    if (!call?.input) return { ok: false, clearShot: false, shape: null, matches: [], videoType: null, error: "No tool_use in response" };
+    const input = call.input as {
+      clearShot?: boolean;
+      shape?: string;
+      videoType?: string;
+      matches?: Array<{ number?: number; confidence?: number }>;
+    };
+    const allowedTypes = new Set((opts.videoTypes ?? []).map((t) => t.slug));
+    const videoType =
+      input.videoType && allowedTypes.has(String(input.videoType).trim()) ? String(input.videoType).trim() : null;
 
     const seen = new Set<number>();
     const matches: ProductMatchGuess[] = (input.matches ?? [])
@@ -496,9 +535,10 @@ export async function matchProductsFromSheets(
       clearShot: Boolean(input.clearShot) && matches.length > 0,
       shape: input.shape ? normShape(input.shape) : null,
       matches,
+      videoType,
       usage: data.usage,
     };
   } catch (e) {
-    return { ok: false, clearShot: false, shape: null, matches: [], error: e instanceof Error ? e.message : String(e) };
+    return { ok: false, clearShot: false, shape: null, matches: [], videoType: null, error: e instanceof Error ? e.message : String(e) };
   }
 }

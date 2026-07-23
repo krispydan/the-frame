@@ -54,6 +54,49 @@ registerJobHandler("marketing.media.identify", async (input) => {
   return identifyMedia(mediaType, mediaId, { apply: false }) as unknown as Record<string, unknown>;
 });
 
+registerJobHandler("marketing.media.frameshape-all", async () => {
+  // Bulk AI identification: run frame-shape matching (+ video-type
+  // classification) over EVERY ready clip that has no products tagged and
+  // hasn't been reviewed. Idempotent: suggestFrameShape never touches
+  // confirmed rows, and re-running just refreshes suggestions. Runs in the
+  // background worker so there's no request-timeout cap.
+  const { sqlite } = await import("@/lib/db");
+  const { suggestFrameShape } = await import("./frame-shape");
+
+  const ids = (sqlite.prepare(`
+    SELECT c.id FROM marketing_video_clips c
+    LEFT JOIN marketing_media_matches m ON m.media_type = 'clip' AND m.media_id = c.id
+    WHERE c.status = 'ready'
+      AND NOT EXISTS (SELECT 1 FROM marketing_video_clip_products cp WHERE cp.clip_id = c.id)
+      AND (m.status IS NULL OR m.status NOT IN ('confirmed','no_product'))
+    ORDER BY c.created_at DESC
+  `).all() as Array<{ id: string }>).map((r) => r.id);
+
+  let suggested = 0;
+  let none = 0;
+  let failed = 0;
+  let costUsd = 0;
+  for (const [i, clipId] of ids.entries()) {
+    try {
+      const r = await suggestFrameShape("clip", clipId);
+      costUsd += r.costUsd ?? 0;
+      if (r.status === "suggested") suggested++;
+      else if (r.status === "failed") failed++;
+      else none++;
+    } catch (e) {
+      failed++;
+      console.warn(`[frame-shape] bulk: clip ${clipId} failed: ${e instanceof Error ? e.message : e}`);
+    }
+    if ((i + 1) % 10 === 0) {
+      console.info(`[frame-shape] bulk progress: ${i + 1}/${ids.length}, cost so far ≈ $${costUsd.toFixed(2)}`);
+    }
+  }
+  console.info(
+    `[frame-shape] bulk done: ${ids.length} clips — ${suggested} suggested, ${none} no-clear-shot, ${failed} failed, total ≈ $${costUsd.toFixed(2)}`,
+  );
+  return { scanned: ids.length, suggested, none, failed, costUsd: Math.round(costUsd * 10000) / 10000 };
+});
+
 registerJobHandler("marketing.video.render-post", async (input) => {
   const postId = input.postId;
   if (!postId || typeof postId !== "string") {

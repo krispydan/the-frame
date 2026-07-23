@@ -217,10 +217,11 @@ export async function POST(request: NextRequest) {
   }
   const mediaType = parseType(body.mediaType ?? null);
 
-  // ── Frame-shape suggestion (AI): classify the frame shape and pre-load
-  // matching catalog products as suggestions. Clips only (needs a frame).
-  // Each item is an ffmpeg extract + one Haiku call, so batches are bounded
-  // to stay well under the request timeout; the UI calls it per visible page.
+  // ── Frame-shape suggestion (AI): match against the catalog and pre-load
+  // ranked product suggestions (+ video-type classification). Clips only.
+  // `all` runs as a BACKGROUND JOB over every untagged clip (no cap —
+  // review when it finishes); specific mediaIds run synchronously so the
+  // panel updates in place.
   if (body.method === "frameshape") {
     if (mediaType !== "clip") {
       return NextResponse.json({ error: "Frame-shape suggestion is for clips only" }, { status: 400 });
@@ -228,21 +229,24 @@ export async function POST(request: NextRequest) {
     if (!process.env.ANTHROPIC_API_KEY) {
       return NextResponse.json({ error: "AI is not configured (ANTHROPIC_API_KEY missing)" }, { status: 400 });
     }
-    const CAP = 20;
-    let ids: string[];
+
     if (body.all) {
-      ids = (sqlite.prepare(`
-        SELECT c.id FROM marketing_video_clips c
+      const total = (sqlite.prepare(`
+        SELECT COUNT(*) AS n FROM marketing_video_clips c
         LEFT JOIN marketing_media_matches m ON m.media_type = 'clip' AND m.media_id = c.id
         WHERE c.status = 'ready'
           AND NOT EXISTS (SELECT 1 FROM marketing_video_clip_products cp WHERE cp.clip_id = c.id)
           AND (m.status IS NULL OR m.status NOT IN ('confirmed','no_product'))
-        ORDER BY c.created_at DESC
-        LIMIT ${CAP}
-      `).all() as Array<{ id: string }>).map((r) => r.id);
-    } else {
-      ids = (body.mediaIds ?? []).map(String).filter(Boolean).slice(0, CAP);
+      `).get() as { n: number }).n;
+      if (total === 0) {
+        return NextResponse.json({ queued: false, total: 0, message: "Nothing to classify" });
+      }
+      const { jobQueue } = await import("@/modules/core/lib/job-queue");
+      jobQueue.enqueue("marketing.media.frameshape-all", "marketing", {}, { priority: 5 });
+      return NextResponse.json({ queued: true, total });
     }
+
+    const ids = (body.mediaIds ?? []).map(String).filter(Boolean).slice(0, 20);
     if (ids.length === 0) {
       return NextResponse.json({ scanned: 0, suggested: 0, failed: 0, message: "Nothing to classify" });
     }
@@ -257,7 +261,7 @@ export async function POST(request: NextRequest) {
         failed++;
       }
     }
-    return NextResponse.json({ scanned: ids.length, suggested, failed, capped: ids.length >= CAP });
+    return NextResponse.json({ scanned: ids.length, suggested, failed });
   }
 
   // apply=true: strong filename matches are written straight onto the
