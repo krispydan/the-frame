@@ -38,6 +38,7 @@ import { runOrderDealSweep, runActivitySweep } from "@/modules/sales/lib/pipedri
 import { enrichViaGoogleMaps } from "@/modules/sales/lib/google-maps-enrichment";
 import { recalculateAllHealthScores } from "@/modules/customers/lib/health-scoring";
 import { refreshReorderEstimates } from "@/modules/customers/lib/reorder-engine";
+import { calculateSellThrough } from "@/modules/inventory/lib/sell-through";
 import { runWeeklyFaireExport } from "@/modules/sales/lib/faire-customer-export";
 import { topUpVideoQueue } from "@/modules/marketing/lib/video/scheduler";
 import { runVideoStorageHygiene } from "@/modules/marketing/lib/video/cleanup";
@@ -91,6 +92,19 @@ export const CRON_JOBS: CronJob[] = [
     schedule: "20 11 * * *",  // 11:20 UTC ≈ 4:20am PT (after health scores)
     description: "Refresh next-reorder-date estimates for all customer accounts",
     handler: async () => ({ updated: refreshReorderEstimates() }),
+  },
+  {
+    id: "inventory-velocity-refresh",
+    schedule: "40 11 * * *",  // 11:40 UTC ≈ 4:40am PT (after ShipHero sync window opens)
+    description: "Recompute per-SKU sell-through velocity + reorder flags (all channels, pack-expanded) and write back to inventory",
+    handler: async () => {
+      const results = calculateSellThrough(30);
+      return {
+        skus: results.length,
+        needsReorder: results.filter((r) => r.needsReorder).length,
+        dead: results.filter((r) => r.velocity === "dead").length,
+      };
+    },
   },
   {
     id: "faire-interested-export",

@@ -10,6 +10,7 @@
 
 import { db, sqlite } from "@/lib/db";
 import { sql } from "drizzle-orm";
+import { resolveDepletionTarget } from "@/modules/finance/lib/fifo-engine";
 
 export type SellThroughResult = {
   skuId: string;
@@ -39,21 +40,30 @@ export function calculateSellThrough(windowDays: number = 30): SellThroughResult
   cutoff.setDate(cutoff.getDate() - windowDays);
   const cutoffStr = cutoff.toISOString();
 
-  // Get units sold per SKU in the window
-  const soldData = db.all(sql`
-    SELECT
-      oi.sku_id,
-      SUM(oi.quantity) as total_sold
+  // Units sold per SKU in the window. Resolve each line via the FIFO
+  // resolver (sku string → catalog id, packs expanded, aliases honored) so
+  // Faire/wholesale lines that carry only the `sku` TEXT — and 12-pack
+  // lines — count toward velocity. A plain GROUP BY sku_id misses both.
+  const soldLines = db.all(sql`
+    SELECT oi.sku, oi.sku_id, oi.quantity
     FROM order_items oi
     JOIN orders o ON oi.order_id = o.id
     WHERE o.placed_at >= ${cutoffStr}
       AND o.status NOT IN ('cancelled', 'returned')
-    GROUP BY oi.sku_id
-  `) as Array<{ sku_id: string; total_sold: number }>;
+  `) as Array<{ sku: string | null; sku_id: string | null; quantity: number }>;
 
   const soldMap = new Map<string, number>();
-  for (const row of soldData) {
-    soldMap.set(row.sku_id, row.total_sold);
+  const resolveCache = new Map<string, { unitSkuId: string | null; packSize: number }>();
+  for (const line of soldLines) {
+    const cacheKey = `${line.sku ?? ""}|${line.sku_id ?? ""}`;
+    let hit = resolveCache.get(cacheKey);
+    if (!hit) {
+      const r = resolveDepletionTarget({ sku: line.sku, skuId: line.sku_id, quantity: 1 });
+      hit = { unitSkuId: r.unitSkuId, packSize: r.packSize };
+      resolveCache.set(cacheKey, hit);
+    }
+    if (!hit.unitSkuId) continue;
+    soldMap.set(hit.unitSkuId, (soldMap.get(hit.unitSkuId) ?? 0) + line.quantity * hit.packSize);
   }
 
   // Get all inventory with factory info
@@ -103,7 +113,7 @@ export function calculateSellThrough(windowDays: number = 30): SellThroughResult
     const unitsSold = soldMap.get(skuId) || 0;
     
     // If no actual sales data, use existing sell_through (from seed)
-    let weeklyRate = unitsSold > 0 ? Math.round((unitsSold / weeks) * 10) / 10 : (item.current_sell_through as number) || 0;
+    const weeklyRate = unitsSold > 0 ? Math.round((unitsSold / weeks) * 10) / 10 : (item.current_sell_through as number) || 0;
     
     const dailyRate = weeklyRate / 7;
     const daysOfStock = dailyRate > 0 ? Math.round((available / dailyRate) * 10) / 10 : 9999;
