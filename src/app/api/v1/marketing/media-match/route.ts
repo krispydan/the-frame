@@ -29,7 +29,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { videoUrl } from "@/lib/storage/videos";
 import { identifyMedia, confirmMediaProducts, saveMediaNotes } from "@/modules/marketing/lib/video/sku-match";
-import { suggestFrameShape } from "@/modules/marketing/lib/video/frame-shape";
+import { suggestFrameShape, frameShapeCropUrl } from "@/modules/marketing/lib/video/frame-shape";
 
 type MediaType = "clip" | "image";
 
@@ -37,14 +37,23 @@ function parseType(v: string | null): MediaType {
   return v === "image" ? "image" : "clip";
 }
 
-/** Detected frame shapes from a frame-shape match row's attributes_json. */
-function parseFrameShapes(attributesJson: unknown): Array<{ shape: string; confidence: number }> {
-  if (!attributesJson) return [];
+/** Detected frame shapes + stored crop path from a match row's attributes_json. */
+function parseAttrs(attributesJson: unknown): {
+  frameShapes: Array<{ shape: string; confidence: number }>;
+  cropPath: string | null;
+} {
+  if (!attributesJson) return { frameShapes: [], cropPath: null };
   try {
-    const parsed = JSON.parse(String(attributesJson)) as { frameShapes?: Array<{ shape: string; confidence: number }> };
-    return Array.isArray(parsed.frameShapes) ? parsed.frameShapes : [];
+    const parsed = JSON.parse(String(attributesJson)) as {
+      frameShapes?: Array<{ shape: string; confidence: number }>;
+      cropPath?: string | null;
+    };
+    return {
+      frameShapes: Array.isArray(parsed.frameShapes) ? parsed.frameShapes : [],
+      cropPath: parsed.cropPath ?? null,
+    };
   } catch {
-    return [];
+    return { frameShapes: [], cropPath: null };
   }
 }
 
@@ -120,7 +129,8 @@ export async function GET(request: NextRequest) {
       categoryId: r.categoryId ?? null,
       matchStatus: r.matchStatus ?? null,
       candidates: r.candidatesJson ? enrichCandidates(JSON.parse(String(r.candidatesJson))) : [],
-      frameShapes: parseFrameShapes(r.attributesJson),
+      frameShapes: parseAttrs(r.attributesJson).frameShapes,
+      frameShapeCropUrl: frameShapeCropUrl(parseAttrs(r.attributesJson).cropPath),
       confirmedProductIds: r.confirmedProductIds ? JSON.parse(String(r.confirmedProductIds)) : [],
       matchError: r.matchError ?? null,
     }));
