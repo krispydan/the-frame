@@ -397,40 +397,57 @@ const MATCH_TOOL = {
 };
 
 /**
- * Show the model the target crop + the numbered catalog contact sheet(s)
- * and get back the top-10 products by FRAME SHAPE (colour ignored). One
- * cheap call; hallucinated / out-of-range numbers are dropped. Never
- * throws — returns ok:false on any error.
+ * Show the model the catalog — each product photo individually, preceded
+ * by a plain-text label ("#12 — Solstice (JX1006)") — then the target
+ * crop, and get back the top-10 products by FRAME SHAPE (colour ignored).
+ *
+ * The catalog comes FIRST and carries a cache_control breakpoint: it's
+ * byte-identical across clips, so subsequent calls read it from the
+ * prompt cache (~10x cheaper) and only the small crop varies. One call;
+ * hallucinated / out-of-range numbers are dropped. Never throws.
  */
 export async function matchProductsFromSheets(
   cropBase64: string,
   cropMime: string,
-  sheets: Array<{ base64: string; mime: string }>,
-  productCount: number,
+  catalog: Array<{ label: string; base64: string }>,
   model = skuMatchModel(),
 ): Promise<ProductMatchResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: false, clearShot: false, shape: null, matches: [], error: "ANTHROPIC_API_KEY not configured" };
-  if (sheets.length === 0) return { ok: false, clearShot: false, shape: null, matches: [], error: "No catalog sheets" };
+  if (catalog.length === 0) return { ok: false, clearShot: false, shape: null, matches: [], error: "No catalog images" };
+  const productCount = catalog.length;
 
   const system =
-    "You identify eyewear by FRAME SHAPE for a sunglasses catalog. You are given a close-up of a target pair of glasses, " +
-    "then one or more catalog sheets showing every product we sell — one photo each, numbered. " +
+    "You identify eyewear by FRAME SHAPE for a sunglasses catalog. You are given every product we sell — one labelled photo " +
+    "each — then a close-up of a target pair of glasses. " +
     "Judge ONLY the frame's outline shape: the silhouette, lens shape, proportions, brow line, corners. " +
     "IGNORE colour, tint, lens darkness, and finish completely — a black pair matches a tortoise or clear pair if the shape is the same. " +
-    `Return up to 10 catalog tile numbers (1–${productCount}) whose frame shape best matches the target, ranked most-likely first, ` +
+    `Return up to 10 product numbers (1–${productCount}) whose frame shape best matches the target, ranked most-likely first, ` +
     "each with a confidence 0–100. If no frame is clearly visible in the target, set clearShot=false and return an empty list.";
 
+  // Catalog prefix (stable → cacheable), then the varying target.
   const content: unknown[] = [
+    { type: "text", text: `CATALOG — all ${productCount} products, one labelled photo each:` },
+  ];
+  catalog.forEach((c, i) => {
+    content.push({ type: "text", text: c.label });
+    const img: Record<string, unknown> = {
+      type: "image",
+      source: { type: "base64", media_type: "image/jpeg", data: c.base64 },
+    };
+    // Cache breakpoint on the last catalog image — everything up to here is
+    // identical across clips.
+    if (i === catalog.length - 1) img.cache_control = { type: "ephemeral" };
+    content.push(img);
+  });
+  content.push(
     { type: "text", text: "TARGET — identify this pair of glasses by its frame shape:" },
     { type: "image", source: { type: "base64", media_type: cropMime, data: cropBase64 } },
-    { type: "text", text: `CATALOG — every product we sell, one photo each, numbered 1–${productCount}. Match by frame shape only:` },
-    ...sheets.map((s) => ({ type: "image", source: { type: "base64", media_type: s.mime, data: s.base64 } })),
     {
       type: "text",
-      text: "List the up-to-10 catalog numbers whose FRAME SHAPE best matches the target, ranked most-likely first with a confidence %. Ignore colour entirely.",
+      text: "List the up-to-10 product numbers whose FRAME SHAPE best matches the target, ranked most-likely first with a confidence %. Ignore colour entirely.",
     },
-  ];
+  );
 
   const body = {
     model,

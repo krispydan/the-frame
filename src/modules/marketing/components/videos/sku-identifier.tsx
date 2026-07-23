@@ -86,8 +86,11 @@ export function SkuIdentifier() {
   const [saving, setSaving] = useState(false);
   const [matching, setMatching] = useState(false);
   const [shaping, setShaping] = useState(false);
-  // The product contact sheet fed to the AI (for inspection).
-  const [sheet, setSheet] = useState<{ pages: string[]; productCount: number } | null>(null);
+  // The labelled product reference fed to the AI (for inspection).
+  const [sheet, setSheet] = useState<{
+    productCount: number;
+    items: Array<{ index: number; label: string; imageDataUrl: string }>;
+  } | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetLoading, setSheetLoading] = useState(false);
   // Only auto-apply pre-selection once per item.
@@ -211,7 +214,7 @@ export function SkuIdentifier() {
       try {
         const res = await fetch(`${API}/catalog-sheet`);
         const d = await res.json();
-        if (res.ok) setSheet({ pages: d.pages ?? [], productCount: d.productCount ?? 0 });
+        if (res.ok) setSheet({ items: d.items ?? [], productCount: d.productCount ?? 0 });
         else toast.error(d.error ?? "Could not load the catalog sheet");
       } catch {
         toast.error("Could not load the catalog sheet");
@@ -341,15 +344,24 @@ export function SkuIdentifier() {
           <CardContent className="space-y-2 p-3">
             <p className="text-sm text-muted-foreground">
               {sheetLoading
-                ? "Building the catalog sheet…"
+                ? "Building the catalog reference…"
                 : sheet
-                  ? `This is exactly what the AI matches against — ${sheet.productCount} products, one image each, numbered. It judges frame shape only.`
-                  : "No catalog sheet available."}
+                  ? `This is exactly what the AI matches against — ${sheet.productCount} products, each sent as its own image with the text label shown. It judges frame shape only (told to ignore colour).`
+                  : "No catalog reference available."}
             </p>
-            {sheet?.pages.map((url, i) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img key={i} src={url} alt={`Catalog sheet ${i + 1}`} className="w-full rounded border" />
-            ))}
+            {sheet && (
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+                {sheet.items.map((it) => (
+                  <div key={it.index} className="rounded border p-1.5 text-center">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={it.imageDataUrl} alt={it.label} className="w-full rounded bg-white object-contain" />
+                    <span className="mt-1 block truncate text-[11px] text-muted-foreground" title={it.label}>
+                      {it.label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

@@ -44,7 +44,7 @@ import {
   type ShapeGuess,
   type ProductMatchResult,
 } from "./frame-shape-vision";
-import { buildContactSheets, type SheetEntry } from "./frame-shape-sheet";
+import { buildCatalogReference, type CatalogItem } from "./frame-shape-sheet";
 import type { MediaType, MatchCandidate } from "./sku-match";
 
 // ── Frame-shape vocabulary (grounded in the catalog) ──
@@ -220,9 +220,9 @@ export async function suggestFrameShape(
   const maxSec = opts.maxSec ?? (mediaType === "clip" ? 8 : 0);
   const maxAttempts = opts.maxAttempts ?? 5;
 
-  // Numbered catalog contact sheet (cached) — the model matches the crop
-  // against this by frame shape.
-  const sheet = await buildContactSheets();
+  // Labelled catalog reference (cached) — the model matches the crop
+  // against these per-product images by frame shape.
+  const catalog = await buildCatalogReference();
 
   let result: ProductMatchResult = { ok: false, clearShot: false, shape: null, matches: [] };
   let attempts = 0;
@@ -243,7 +243,7 @@ export async function suggestFrameShape(
       // Detector ran and found no glasses on this frame — try a later one
       // before giving up (cheap; the match call is the expensive part).
       if (det.ok && !det.box && t + stepSec <= maxSec) continue;
-      result = await matchProductsFromSheets(crop.base64, crop.mime, sheet.sheets, sheet.entries.length);
+      result = await matchProductsFromSheets(crop.base64, crop.mime, catalog.items);
     } finally {
       await still.cleanup();
     }
@@ -278,7 +278,7 @@ export async function suggestFrameShape(
     return { status: "none", shapes, candidates: [], attempts };
   }
 
-  const candidates = matchesToCandidates(result.matches, sheet.entries, result.shape);
+  const candidates = matchesToCandidates(result.matches, catalog.items, result.shape);
   upsertShapeMatch(mediaType, mediaId, "suggested", candidates, shapes, null, cropPath);
   return { status: "suggested", shapes, candidates, attempts };
 }
@@ -286,7 +286,7 @@ export async function suggestFrameShape(
 /** Map the model's ranked tile numbers back onto catalog products. */
 function matchesToCandidates(
   matches: ProductMatchResult["matches"],
-  entries: SheetEntry[],
+  entries: CatalogItem[],
   shape: string | null,
 ): MatchCandidate[] {
   const byIndex = new Map(entries.map((e) => [e.index, e]));

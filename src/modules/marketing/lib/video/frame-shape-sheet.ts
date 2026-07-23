@@ -1,47 +1,49 @@
 /**
- * Product contact sheet — one image per product, numbered, tiled into a
- * grid the vision model can reference.
+ * Catalog reference for the frame-shape matcher — one labelled image per
+ * product.
  *
- * The frame-shape matcher sends this sheet alongside a clip crop and asks
- * the model "which of these numbered products has the same FRAME SHAPE?".
- * Building the sheet means downloading ~one image per product and
- * compositing them, so it's cached: in-memory for the process, and in
- * storage keyed by a catalog signature so restarts don't rebuild. The
- * signature changes when products or their chosen images change, which
- * transparently invalidates both caches.
+ * Originally this composited numbered contact-sheet grids, but the number
+ * badges depended on fonts the production container doesn't have (they
+ * rendered as tofu), and a big grid dilutes the model's attention anyway.
+ * Now each product is sent as its OWN image block preceded by a plain-text
+ * label ("#12 — Solstice (JX1006)") — no compositing, no fonts, and the
+ * model can attend to each product photo individually.
+ *
+ * Building means downloading ~one image per product, so the prepared
+ * reference is cached: in-memory for the process, and as a JSON blob in
+ * storage keyed by a catalog signature (products + chosen images + tile
+ * version). Signature change transparently invalidates both caches.
  */
 import { createHash } from "crypto";
 import sharp from "sharp";
 import { sqlite } from "@/lib/db";
 import { materializeMedia } from "@/lib/storage/media";
-import { saveVideo, readVideo, videoStat, videoUrl } from "@/lib/storage/videos";
+import { saveVideo, readVideo, videoStat } from "@/lib/storage/videos";
 
-export interface SheetEntry {
-  /** 1-based number burned onto the tile — what the model returns. */
+export interface CatalogItem {
+  /** 1-based number in the reference — what the model returns. */
   index: number;
   productId: string;
   productName: string;
   sku: string;
   skuId: string;
+  /** Text label preceding the image in the prompt. */
+  label: string;
+  /** Tile JPEG, base64. */
+  base64: string;
 }
 
-export interface ContactSheets {
-  /** One or more JPEG pages (base64), each a numbered grid. */
-  sheets: Array<{ base64: string; mime: "image/jpeg" }>;
-  entries: SheetEntry[];
+export interface CatalogReference {
+  items: CatalogItem[];
   sig: string;
 }
 
-// Grid geometry — kept so each page's long edge stays under ~1568px (the
-// point where cheaper vision models downscale), so tiles stay legible.
-const COLS = 6;
-const TILE = 168;
-const GAP = 6;
-const PAD = 10;
-const ROWS_PER_PAGE = 8; // 48 products per page
-const SHEET_W = PAD * 2 + COLS * TILE + (COLS - 1) * GAP;
+/** Bump to invalidate cached tiles when rendering changes. */
+const TILE_VERSION = "v3-labeled";
+/** Square tile edge — small keeps tokens cheap, big enough to judge shape. */
+const TILE = 192;
 
-let cache: ContactSheets | null = null;
+let cache: CatalogReference | null = null;
 
 type ProductImage = { productId: string; productName: string; sku: string; skuId: string; imagePath: string };
 
@@ -81,113 +83,75 @@ async function tileBuffer(imagePath: string): Promise<Buffer> {
   }
 }
 
-/** SVG overlay drawing a numbered badge on each tile. */
-function numberOverlay(height: number, cells: Array<{ n: number; x: number; y: number }>): Buffer {
-  const badges = cells
-    .map(
-      (c) => `<g transform="translate(${c.x + 3},${c.y + 3})">
-        <rect width="28" height="17" rx="3" fill="rgba(0,0,0,0.72)"/>
-        <text x="14" y="13" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">${c.n}</text>
-      </g>`,
-    )
-    .join("");
-  return Buffer.from(
-    `<svg width="${SHEET_W}" height="${height}" xmlns="http://www.w3.org/2000/svg">${badges}</svg>`,
-  );
-}
-
-const sheetKey = (sig: string, page: number) => `shape-sheets/${sig}/page-${page}.jpg`;
-const manifestKey = (sig: string) => `shape-sheets/${sig}/manifest.json`;
-
-/** Reload prebuilt sheets from storage (fast path across restarts). */
-async function loadFromStorage(sig: string, entries: SheetEntry[]): Promise<ContactSheets | null> {
-  const stat = await videoStat(manifestKey(sig));
-  if (!stat.exists) return null;
-  try {
-    const manifest = JSON.parse((await readVideo(manifestKey(sig))).toString()) as { pages: number };
-    const sheets: ContactSheets["sheets"] = [];
-    for (let i = 0; i < manifest.pages; i++) {
-      const buf = await readVideo(sheetKey(sig, i));
-      sheets.push({ base64: buf.toString("base64"), mime: "image/jpeg" });
-    }
-    return { sheets, entries, sig };
-  } catch {
-    return null;
-  }
-}
+const blobKey = (sig: string) => `shape-sheets/${sig}/catalog.json`;
 
 /**
- * Build (or return cached) numbered contact sheets for the whole catalog.
- * Entry `index` is the number to map a model answer back to a product.
+ * Build (or return cached) the labelled catalog reference. Item `index`
+ * maps a model answer back to a product.
  */
-export async function buildContactSheets(): Promise<ContactSheets> {
+export async function buildCatalogReference(): Promise<CatalogReference> {
   const prods = loadProductImages();
   const sig = createHash("sha256")
-    .update(prods.map((p) => `${p.productId}:${p.imagePath}`).join("|"))
+    .update(`${TILE_VERSION}|` + prods.map((p) => `${p.productId}:${p.imagePath}`).join("|"))
     .digest("hex")
     .slice(0, 16);
   if (cache?.sig === sig) return cache;
 
-  const entries: SheetEntry[] = prods.map((p, i) => ({
-    index: i + 1,
-    productId: p.productId,
-    productName: p.productName,
-    sku: p.sku,
-    skuId: p.skuId,
-  }));
-
-  const stored = await loadFromStorage(sig, entries);
-  if (stored) {
-    cache = stored;
-    return stored;
+  // Storage fast-path (across restarts).
+  const stat = await videoStat(blobKey(sig));
+  if (stat.exists) {
+    try {
+      const items = JSON.parse((await readVideo(blobKey(sig))).toString()) as CatalogItem[];
+      cache = { items, sig };
+      return cache;
+    } catch {
+      /* rebuild below */
+    }
   }
 
-  const perPage = COLS * ROWS_PER_PAGE;
-  const sheets: ContactSheets["sheets"] = [];
-  for (let page = 0; page * perPage < prods.length; page++) {
-    const slice = prods.slice(page * perPage, page * perPage + perPage);
-    const rows = Math.max(1, Math.ceil(slice.length / COLS));
-    const sheetH = PAD * 2 + rows * TILE + (rows - 1) * GAP;
-
-    const tiles = await Promise.all(slice.map((p) => tileBuffer(p.imagePath).catch(() => null)));
-    const composites: sharp.OverlayOptions[] = [];
-    const cells: Array<{ n: number; x: number; y: number }> = [];
-    slice.forEach((_p, idx) => {
-      const col = idx % COLS;
-      const row = Math.floor(idx / COLS);
-      const x = PAD + col * (TILE + GAP);
-      const y = PAD + row * (TILE + GAP);
-      const buf = tiles[idx];
-      if (buf) composites.push({ input: buf, left: x, top: y });
-      cells.push({ n: page * perPage + idx + 1, x, y });
-    });
-    composites.push({ input: numberOverlay(sheetH, cells), left: 0, top: 0 });
-
-    const sheetBuf = await sharp({
-      create: { width: SHEET_W, height: sheetH, channels: 3, background: { r: 245, g: 245, b: 245 } },
-    })
-      .composite(composites)
-      .jpeg({ quality: 82 })
-      .toBuffer();
-    sheets.push({ base64: sheetBuf.toString("base64"), mime: "image/jpeg" });
-    await saveVideo(sheetBuf, sheetKey(sig, page)).catch(() => {});
+  const items: CatalogItem[] = [];
+  for (let i = 0; i < prods.length; i++) {
+    const p = prods[i];
+    try {
+      const buf = await tileBuffer(p.imagePath);
+      items.push({
+        index: items.length + 1,
+        productId: p.productId,
+        productName: p.productName,
+        sku: p.sku,
+        skuId: p.skuId,
+        label: `#${items.length + 1} — ${p.productName} (${p.sku})`,
+        base64: buf.toString("base64"),
+      });
+    } catch {
+      /* skip products whose image fails to load */
+    }
   }
 
-  await saveVideo(Buffer.from(JSON.stringify({ pages: sheets.length })), manifestKey(sig)).catch(() => {});
-  const result: ContactSheets = { sheets, entries, sig };
-  cache = result;
-  return result;
+  await saveVideo(Buffer.from(JSON.stringify(items)), blobKey(sig)).catch(() => {});
+  cache = { items, sig };
+  return cache;
 }
 
 /**
- * Build (or reuse) the sheets and return their served URLs — so the exact
- * catalog fed to the model can be inspected in the review UI.
+ * What the AI receives, for inspection in the review UI: the label + a
+ * data URL per product (exact tile bytes it sees).
  */
-export async function contactSheetUrls(): Promise<{ sig: string; productCount: number; pages: string[] }> {
-  const s = await buildContactSheets();
+export async function catalogReferenceForDisplay(): Promise<{
+  sig: string;
+  productCount: number;
+  items: Array<{ index: number; label: string; productName: string; sku: string; imageDataUrl: string }>;
+}> {
+  const ref = await buildCatalogReference();
   return {
-    sig: s.sig,
-    productCount: s.entries.length,
-    pages: s.sheets.map((_, i) => videoUrl(sheetKey(s.sig, i))),
+    sig: ref.sig,
+    productCount: ref.items.length,
+    items: ref.items.map((i) => ({
+      index: i.index,
+      label: i.label,
+      productName: i.productName,
+      sku: i.sku,
+      imageDataUrl: `data:image/jpeg;base64,${i.base64}`,
+    })),
   };
 }
