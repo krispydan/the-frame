@@ -43,6 +43,7 @@ import {
   normShape,
   type ShapeGuess,
   type ProductMatchResult,
+  type TokenUsage,
 } from "./frame-shape-vision";
 import { buildCatalogReference, type CatalogItem } from "./frame-shape-sheet";
 import type { MediaType, MatchCandidate } from "./sku-match";
@@ -190,22 +191,39 @@ export interface SuggestResult {
   shapes: ShapeGuess[];
   candidates: MatchCandidate[];
   attempts: number;
+  /** Measured API cost of this identification (USD), from token usage. */
+  costUsd?: number;
+}
+
+// Haiku 4.5 pricing per million tokens; cache writes 1.25x, reads 0.1x.
+const IN_PER_M = 1, OUT_PER_M = 5, CACHE_WRITE_MULT = 1.25, CACHE_READ_MULT = 0.1;
+
+function usageCostUsd(usages: Array<TokenUsage | undefined>): number {
+  let usd = 0;
+  for (const u of usages) {
+    if (!u) continue;
+    usd +=
+      ((u.input_tokens ?? 0) * IN_PER_M +
+        (u.cache_creation_input_tokens ?? 0) * IN_PER_M * CACHE_WRITE_MULT +
+        (u.cache_read_input_tokens ?? 0) * IN_PER_M * CACHE_READ_MULT +
+        (u.output_tokens ?? 0) * OUT_PER_M) /
+      1_000_000;
+  }
+  return usd;
 }
 
 /**
- * Map classified shapes onto catalog products and store them as
+ * Match the media against the catalog and store the ranked products as
  * `suggested` candidates for review. Confirmed rows are never touched.
- * Never auto-applies — shape isn't unique to one product.
+ * Never auto-applies — a shape match isn't proof of the exact product.
  *
- * "clear shot" retry: if the first still doesn't show a frame clearly and
- * the media is a clip, walk forward every `stepSec` (up to `maxSec`)
- * pulling a new frame until the model reports a clear shot. Cheap stills,
- * bounded attempts.
+ * Clips are sampled at 25% / 50% / 75%; every frame where the detector
+ * finds glasses becomes a reference crop, and all crops go to the matcher
+ * together (multiple angles of the same pair beat any single frame).
  */
 export async function suggestFrameShape(
   mediaType: MediaType,
   mediaId: string,
-  opts: { stepSec?: number; maxSec?: number; maxAttempts?: number } = {},
 ): Promise<SuggestResult> {
   const existing = db
     .select()
@@ -216,50 +234,81 @@ export async function suggestFrameShape(
     return { status: "confirmed", shapes: [], candidates: JSON.parse(existing.candidatesJson ?? "[]"), attempts: 0 };
   }
 
-  const stepSec = opts.stepSec ?? 2;
-  const maxSec = opts.maxSec ?? (mediaType === "clip" ? 8 : 0);
-  const maxAttempts = opts.maxAttempts ?? 5;
+  // Sample frames from ACROSS the clip (25% / 50% / 75%), not the start —
+  // openings are often transitions; the product is usually shown clearly
+  // somewhere in the middle. Every frame with a detected pair of glasses
+  // becomes a reference; all crops go to the matcher in ONE call.
+  let times: number[] = [0.5];
+  if (mediaType === "clip") {
+    const row = sqlite
+      .prepare(`SELECT duration_sec AS d FROM marketing_video_clips WHERE id = ?`)
+      .get(mediaId) as { d: number | null } | undefined;
+    times =
+      row?.d && row.d > 1
+        ? [0.25, 0.5, 0.75].map((f) => Math.max(0.2, Math.min(row.d! - 0.2, row.d! * f)))
+        : [0.5, 2, 3.5]; // duration unknown — best effort spread
+  }
 
-  // Labelled catalog reference (cached) — the model matches the crop
+  // Labelled catalog reference (cached) — the model matches the crops
   // against these per-product images by frame shape.
   const catalog = await buildCatalogReference();
 
-  let result: ProductMatchResult = { ok: false, clearShot: false, shape: null, matches: [] };
+  const crops: Array<{ buffer: Buffer; base64: string; mime: "image/jpeg" }> = [];
+  const usages: Array<TokenUsage | undefined> = [];
   let attempts = 0;
-  let lastCrop: Buffer | null = null;
-  for (let t = 0.5; ; t += stepSec) {
-    if (attempts >= maxAttempts) break;
+  for (const t of times) {
     attempts++;
-    const still = await stillForMedia(mediaType, mediaId, t);
+    let still: { path: string; cleanup: () => Promise<void> } | null = null;
     try {
+      still = await stillForMedia(mediaType, mediaId, t);
       // AI-locate the glasses on the full frame, then crop tight to them.
       // A fixed crop misses worn/off-centre shots; the detector fixes that.
       const full = await encodeImage(still.path, 768);
       const det = await detectGlassesBox(full.base64, full.mime);
-      const crop = det.box
-        ? await cropToBox(still.path, det.box)
-        : await cropGlasses(still.path); // heuristic fallback if detection fails
-      lastCrop = crop.buffer;
-      // Detector ran and found no glasses on this frame — try a later one
-      // before giving up (cheap; the match call is the expensive part).
-      if (det.ok && !det.box && t + stepSec <= maxSec) continue;
-      result = await matchProductsFromSheets(crop.base64, crop.mime, catalog.items);
+      usages.push(det.usage);
+      if (det.box) crops.push(await cropToBox(still.path, det.box));
+      else if (!det.ok) crops.push(await cropGlasses(still.path)); // detector errored — heuristic fallback
+      // det.ok && no box → no glasses in this frame; skip it.
+    } catch {
+      /* one bad frame must not sink the run */
     } finally {
-      await still.cleanup();
+      await still?.cleanup();
     }
-    // Stop on a clear read, a hard error, or once we've walked past maxSec.
-    if (!result.ok || result.clearShot || t + stepSec > maxSec) break;
+  }
+  // Nothing detected anywhere — last resort: heuristic crop of the middle frame.
+  if (crops.length === 0) {
+    let still: { path: string; cleanup: () => Promise<void> } | null = null;
+    try {
+      still = await stillForMedia(mediaType, mediaId, times[Math.floor(times.length / 2)]);
+      crops.push(await cropGlasses(still.path));
+    } catch {
+      /* media unreadable — handled below as failed */
+    } finally {
+      await still?.cleanup();
+    }
   }
 
-  // Persist the exact crop the model judged, so the review UI can show the
-  // AI's actual input (crucial for debugging bad classifications).
-  let cropPath: string | null = null;
-  if (lastCrop) {
-    cropPath = `shape-crops/${mediaType}-${mediaId}.jpg`;
+  const result: ProductMatchResult =
+    crops.length > 0
+      ? await matchProductsFromSheets(crops, catalog.items)
+      : { ok: false, clearShot: false, shape: null, matches: [], error: "Could not extract a frame" };
+  usages.push(result.usage);
+  const costUsd = usageCostUsd(usages);
+  console.info(
+    `[frame-shape] ${mediaType} ${mediaId}: ${crops.length} crop(s) from ${attempts} frame(s) → ` +
+      `${result.matches.length} match(es), cost ≈ $${costUsd.toFixed(4)}`,
+  );
+
+  // Persist the exact crops the model judged, so the review UI can show the
+  // AI's actual inputs (crucial for debugging bad classifications).
+  const cropPaths: string[] = [];
+  for (let i = 0; i < crops.length; i++) {
+    const p = `shape-crops/${mediaType}-${mediaId}-${i}.jpg`;
     try {
-      await saveVideo(lastCrop, cropPath);
+      await saveVideo(crops[i].buffer, p);
+      cropPaths.push(p);
     } catch {
-      cropPath = null;
+      /* non-fatal */
     }
   }
 
@@ -270,17 +319,17 @@ export async function suggestFrameShape(
     : [];
 
   if (!result.ok) {
-    upsertShapeMatch(mediaType, mediaId, "failed", [], shapes, result.error ?? null, cropPath);
-    return { status: "failed", shapes, candidates: [], attempts };
+    upsertShapeMatch(mediaType, mediaId, "failed", [], shapes, result.error ?? null, cropPaths);
+    return { status: "failed", shapes, candidates: [], attempts, costUsd };
   }
   if (!result.clearShot || result.matches.length === 0) {
-    upsertShapeMatch(mediaType, mediaId, "suggested", [], shapes, null, cropPath);
-    return { status: "none", shapes, candidates: [], attempts };
+    upsertShapeMatch(mediaType, mediaId, "suggested", [], shapes, null, cropPaths);
+    return { status: "none", shapes, candidates: [], attempts, costUsd };
   }
 
   const candidates = matchesToCandidates(result.matches, catalog.items, result.shape);
-  upsertShapeMatch(mediaType, mediaId, "suggested", candidates, shapes, null, cropPath);
-  return { status: "suggested", shapes, candidates, attempts };
+  upsertShapeMatch(mediaType, mediaId, "suggested", candidates, shapes, null, cropPaths);
+  return { status: "suggested", shapes, candidates, attempts, costUsd };
 }
 
 /** Map the model's ranked tile numbers back onto catalog products. */
@@ -308,9 +357,9 @@ function matchesToCandidates(
   return out.slice(0, 10);
 }
 
-/** Public URL for a stored frame-shape crop (or null). */
-export function frameShapeCropUrl(cropPath: string | null | undefined): string | null {
-  return cropPath ? videoUrl(cropPath) : null;
+/** Public URLs for the stored frame-shape crops. */
+export function frameShapeCropUrls(cropPaths: string[] | null | undefined): string[] {
+  return (cropPaths ?? []).map((p) => videoUrl(p));
 }
 
 function upsertShapeMatch(
@@ -320,10 +369,10 @@ function upsertShapeMatch(
   candidates: MatchCandidate[],
   shapes: ShapeGuess[],
   error: string | null,
-  cropPath: string | null = null,
+  cropPaths: string[] = [],
 ): void {
   const now = new Date().toISOString();
-  const attrs = JSON.stringify({ frameShapes: shapes, cropPath });
+  const attrs = JSON.stringify({ frameShapes: shapes, cropPaths });
   const existing = sqlite
     .prepare(`SELECT id, status FROM marketing_media_matches WHERE media_type = ? AND media_id = ?`)
     .get(mediaType, mediaId) as { id: string; status: string } | undefined;
