@@ -31,7 +31,7 @@ import { resolveCatalogSku } from "@/modules/catalog/lib/sku-resolve";
  * Auth: x-admin-key: jaxy2026.
  */
 
-const VERSION = "v2-import-pos";
+const VERSION = "v3-import-pos";
 
 const FACTORY_CODES: Record<string, string> = {
   taga: "JX1",

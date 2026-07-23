@@ -19,7 +19,7 @@ export type SkuResolution = {
   skuId: string;
   /** The catalog row's actual sku string. */
   catalogSku: string;
-  matchedVia: "exact" | "alias" | "legacy-exact" | "legacy-alias";
+  matchedVia: "exact" | "alias" | "legacy-exact" | "legacy-alias" | "power-representative";
 };
 
 export function resolveCatalogSku(raw: string | null | undefined): SkuResolution | null {
@@ -54,6 +54,17 @@ export function resolveCatalogSku(raw: string | null | undefined): SkuResolution
        WHERE UPPER(a.alias) = ? LIMIT 1`,
     ).get(legacy) as { sku_id: string; sku: string } | undefined;
     if (lalias) return { skuId: lalias.sku_id, catalogSku: lalias.sku, matchedVia: "legacy-alias" };
+  }
+
+  // Reader colorway with per-power rows only (catalog has JX1019-R-BLK-100…
+  // -300 but no base JX1019-R-BLK row): resolve to the lowest power variant
+  // as a deterministic representative. Forecasting rolls per-power rows up
+  // to the colorway root, so aggregate math stays correct.
+  if (/^JX\d{4}-R-[A-Z0-9]{2,4}$/.test(up)) {
+    const rep = sqlite.prepare(
+      "SELECT id, sku FROM catalog_skus WHERE UPPER(sku) LIKE ? ORDER BY sku LIMIT 1",
+    ).get(`${up}-%`) as { id: string; sku: string } | undefined;
+    if (rep) return { skuId: rep.id, catalogSku: rep.sku, matchedVia: "power-representative" };
   }
 
   return null;
