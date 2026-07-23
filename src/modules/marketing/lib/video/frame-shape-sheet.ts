@@ -14,7 +14,7 @@ import { createHash } from "crypto";
 import sharp from "sharp";
 import { sqlite } from "@/lib/db";
 import { materializeMedia } from "@/lib/storage/media";
-import { saveVideo, readVideo, videoStat } from "@/lib/storage/videos";
+import { saveVideo, readVideo, videoStat, videoUrl } from "@/lib/storage/videos";
 
 export interface SheetEntry {
   /** 1-based number burned onto the tile — what the model returns. */
@@ -177,4 +177,17 @@ export async function buildContactSheets(): Promise<ContactSheets> {
   const result: ContactSheets = { sheets, entries, sig };
   cache = result;
   return result;
+}
+
+/**
+ * Build (or reuse) the sheets and return their served URLs — so the exact
+ * catalog fed to the model can be inspected in the review UI.
+ */
+export async function contactSheetUrls(): Promise<{ sig: string; productCount: number; pages: string[] }> {
+  const s = await buildContactSheets();
+  return {
+    sig: s.sig,
+    productCount: s.entries.length,
+    pages: s.sheets.map((_, i) => videoUrl(sheetKey(s.sig, i))),
+  };
 }

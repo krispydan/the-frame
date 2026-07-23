@@ -86,6 +86,10 @@ export function SkuIdentifier() {
   const [saving, setSaving] = useState(false);
   const [matching, setMatching] = useState(false);
   const [shaping, setShaping] = useState(false);
+  // The product contact sheet fed to the AI (for inspection).
+  const [sheet, setSheet] = useState<{ pages: string[]; productCount: number } | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetLoading, setSheetLoading] = useState(false);
   // Only auto-apply pre-selection once per item.
   const autoSelectedFor = useRef<string | null>(null);
 
@@ -198,6 +202,24 @@ export function SkuIdentifier() {
     }
   };
 
+  /** Show the exact numbered catalog sheet the AI matches against. */
+  const toggleSheet = async () => {
+    const next = !sheetOpen;
+    setSheetOpen(next);
+    if (next && !sheet) {
+      setSheetLoading(true);
+      try {
+        const res = await fetch(`${API}/catalog-sheet`);
+        const d = await res.json();
+        if (res.ok) setSheet({ pages: d.pages ?? [], productCount: d.productCount ?? 0 });
+        else toast.error(d.error ?? "Could not load the catalog sheet");
+      } catch {
+        toast.error("Could not load the catalog sheet");
+      }
+      setSheetLoading(false);
+    }
+  };
+
   const advance = () => {
     const idx = items.findIndex((i) => i.mediaId === currentId);
     const next = items[idx + 1] ?? items[idx - 1] ?? null;
@@ -294,6 +316,11 @@ export function SkuIdentifier() {
         <span className="text-sm text-muted-foreground">{items.length} shown</span>
         <div className="flex-1" />
         {type === "clip" && (
+          <Button variant="ghost" onClick={toggleSheet} title="See the catalog images fed to the AI">
+            <FileText className="h-4 w-4 mr-1" /> {sheetOpen ? "Hide AI catalog" : "View AI catalog"}
+          </Button>
+        )}
+        {type === "clip" && (
           <Button
             variant="secondary"
             onClick={suggestShapesBulk}
@@ -307,6 +334,25 @@ export function SkuIdentifier() {
           <Wand2 className="h-4 w-4 mr-1" /> {matching ? "Matching…" : "Match file names"}
         </Button>
       </div>
+
+      {/* AI catalog viewer — the exact numbered sheet fed to the model */}
+      {sheetOpen && (
+        <Card>
+          <CardContent className="space-y-2 p-3">
+            <p className="text-sm text-muted-foreground">
+              {sheetLoading
+                ? "Building the catalog sheet…"
+                : sheet
+                  ? `This is exactly what the AI matches against — ${sheet.productCount} products, one image each, numbered. It judges frame shape only.`
+                  : "No catalog sheet available."}
+            </p>
+            {sheet?.pages.map((url, i) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img key={i} src={url} alt={`Catalog sheet ${i + 1}`} className="w-full rounded border" />
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {items.length === 0 ? (
         <Card>
