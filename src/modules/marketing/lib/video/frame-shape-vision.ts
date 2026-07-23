@@ -13,6 +13,14 @@ import { skuMatchModel } from "../ai-model";
 export const normShape = (s: string | null | undefined): string =>
   (s ?? "").trim().toLowerCase();
 
+/** Token usage from the API — cache fields power accurate cost logging. */
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+}
+
 // ── Crop (deterministic) ──
 
 export interface CropOptions {
@@ -104,7 +112,7 @@ export interface DetectResult {
   ok: boolean;
   box: GlassesBox | null;
   error?: string;
-  usage?: { input_tokens: number; output_tokens: number };
+  usage?: TokenUsage;
 }
 
 const DETECT_TOOL = {
@@ -172,7 +180,7 @@ export async function detectGlassesBox(
     if (!res.ok) return { ok: false, box: null, error: `Anthropic API ${res.status}: ${await res.text()}` };
     const data = (await res.json()) as {
       content: Array<{ type: string; input?: unknown }>;
-      usage?: { input_tokens: number; output_tokens: number };
+      usage?: TokenUsage;
     };
     const call = data.content.find((c) => c.type === "tool_use");
     if (!call?.input) return { ok: false, box: null, error: "No tool_use in response" };
@@ -239,7 +247,7 @@ export interface ClassifyResult {
   /** False when the model couldn't see a frame clearly (send another frame). */
   clearShot: boolean;
   error?: string;
-  usage?: { input_tokens: number; output_tokens: number };
+  usage?: TokenUsage;
 }
 
 const CLASSIFY_TOOL = {
@@ -326,7 +334,7 @@ export async function classifyFrameShapeFromImage(
     if (!res.ok) return { ok: false, shapes: [], clearShot: false, error: `Anthropic API ${res.status}: ${await res.text()}` };
     const data = (await res.json()) as {
       content: Array<{ type: string; name?: string; input?: unknown }>;
-      usage?: { input_tokens: number; output_tokens: number };
+      usage?: TokenUsage;
     };
     const call = data.content.find((c) => c.type === "tool_use");
     if (!call?.input) return { ok: false, shapes: [], clearShot: false, error: "No tool_use in response" };
@@ -358,7 +366,7 @@ export interface ProductMatchResult {
   /** Ranked product tile numbers, best first (≤10). */
   matches: ProductMatchGuess[];
   error?: string;
-  usage?: { input_tokens: number; output_tokens: number };
+  usage?: TokenUsage;
 }
 
 const MATCH_TOOL = {
@@ -407,23 +415,24 @@ const MATCH_TOOL = {
  * hallucinated / out-of-range numbers are dropped. Never throws.
  */
 export async function matchProductsFromSheets(
-  cropBase64: string,
-  cropMime: string,
+  crops: Array<{ base64: string; mime: string }>,
   catalog: Array<{ label: string; base64: string }>,
   model = skuMatchModel(),
 ): Promise<ProductMatchResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: false, clearShot: false, shape: null, matches: [], error: "ANTHROPIC_API_KEY not configured" };
   if (catalog.length === 0) return { ok: false, clearShot: false, shape: null, matches: [], error: "No catalog images" };
+  if (crops.length === 0) return { ok: false, clearShot: false, shape: null, matches: [], error: "No target crops" };
   const productCount = catalog.length;
 
   const system =
     "You identify eyewear by FRAME SHAPE for a sunglasses catalog. You are given every product we sell — one labelled photo " +
-    "each — then a close-up of a target pair of glasses. " +
+    "each — then one or more stills of the SAME target pair of glasses taken at different moments of a video. " +
+    "Use every still together: different angles of the same pair reveal the shape better than any single frame. " +
     "Judge ONLY the frame's outline shape: the silhouette, lens shape, proportions, brow line, corners. " +
     "IGNORE colour, tint, lens darkness, and finish completely — a black pair matches a tortoise or clear pair if the shape is the same. " +
     `Return up to 10 product numbers (1–${productCount}) whose frame shape best matches the target, ranked most-likely first, ` +
-    "each with a confidence 0–100. If no frame is clearly visible in the target, set clearShot=false and return an empty list.";
+    "each with a confidence 0–100. If no frame is clearly visible in any still, set clearShot=false and return an empty list.";
 
   // Catalog prefix (stable → cacheable), then the varying target.
   const content: unknown[] = [
@@ -440,14 +449,17 @@ export async function matchProductsFromSheets(
     if (i === catalog.length - 1) img.cache_control = { type: "ephemeral" };
     content.push(img);
   });
-  content.push(
-    { type: "text", text: "TARGET — identify this pair of glasses by its frame shape:" },
-    { type: "image", source: { type: "base64", media_type: cropMime, data: cropBase64 } },
-    {
-      type: "text",
-      text: "List the up-to-10 product numbers whose FRAME SHAPE best matches the target, ranked most-likely first with a confidence %. Ignore colour entirely.",
-    },
-  );
+  content.push({
+    type: "text",
+    text: `TARGET — the same pair of glasses, seen in ${crops.length} still${crops.length === 1 ? "" : "s"} from the video:`,
+  });
+  for (const c of crops) {
+    content.push({ type: "image", source: { type: "base64", media_type: c.mime, data: c.base64 } });
+  }
+  content.push({
+    type: "text",
+    text: "List the up-to-10 product numbers whose FRAME SHAPE best matches the target, ranked most-likely first with a confidence %. Ignore colour entirely.",
+  });
 
   const body = {
     model,
@@ -467,7 +479,7 @@ export async function matchProductsFromSheets(
     if (!res.ok) return { ok: false, clearShot: false, shape: null, matches: [], error: `Anthropic API ${res.status}: ${await res.text()}` };
     const data = (await res.json()) as {
       content: Array<{ type: string; input?: unknown }>;
-      usage?: { input_tokens: number; output_tokens: number };
+      usage?: TokenUsage;
     };
     const call = data.content.find((c) => c.type === "tool_use");
     if (!call?.input) return { ok: false, clearShot: false, shape: null, matches: [], error: "No tool_use in response" };

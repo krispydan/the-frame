@@ -45,7 +45,7 @@ type Item = {
   matchStatus: string | null;
   candidates: Candidate[];
   frameShapes?: FrameShape[];
-  frameShapeCropUrl?: string | null;
+  frameShapeCropUrls?: string[];
   confirmedProductIds: string[];
   matchError: string | null;
 };
@@ -374,13 +374,13 @@ export function SkuIdentifier() {
         </Card>
       ) : !item ? null : (
         <>
-          {/* Thumbnail strip */}
-          <div className="flex gap-1.5 overflow-x-auto pb-1">
+          {/* Thumbnail strip — compact, single row */}
+          <div className="flex gap-1 overflow-x-auto pb-0.5">
             {items.slice(0, 60).map((i) => (
               <button
                 key={i.mediaId}
                 onClick={() => setCurrentId(i.mediaId)}
-                className={`relative h-16 w-11 shrink-0 overflow-hidden rounded border ${i.mediaId === currentId ? "ring-2 ring-primary" : ""}`}
+                className={`relative h-11 w-8 shrink-0 overflow-hidden rounded border ${i.mediaId === currentId ? "ring-2 ring-primary" : ""}`}
                 title={i.fileName}
               >
                 {i.mediaUrl ? (
@@ -390,17 +390,18 @@ export function SkuIdentifier() {
                   <span className="flex h-full w-full items-center justify-center bg-muted text-[10px]">?</span>
                 )}
                 {i.matchStatus === "suggested" && (
-                  <span className="absolute bottom-0.5 right-0.5 h-2 w-2 rounded-full bg-blue-500" />
+                  <span className="absolute bottom-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-blue-500" />
                 )}
               </button>
             ))}
           </div>
 
-          {/* Review panel */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 min-w-0">
+          {/* Review panel — sized to fit one screen on desktop; only the
+              catalog list scrolls, so the save actions stay visible. */}
+          <div className="grid grid-cols-1 lg:grid-cols-[230px_minmax(0,1fr)] gap-3 min-w-0">
             {/* Media */}
-            <div className="space-y-2 min-w-0">
-              <div className="aspect-[9/16] max-w-[280px] mx-auto bg-muted rounded-lg overflow-hidden">
+            <div className="space-y-1 min-w-0">
+              <div className="aspect-[9/16] max-w-[230px] mx-auto lg:mx-0 bg-muted rounded-lg overflow-hidden">
                 {item.previewUrl ? (
                   <video
                     key={item.mediaId}
@@ -416,16 +417,16 @@ export function SkuIdentifier() {
                   <img src={item.mediaUrl} alt={item.fileName} className="w-full h-full object-contain bg-white" />
                 ) : null}
               </div>
-              <p className="text-center text-xs text-muted-foreground truncate">{item.fileName}</p>
+              <p className="text-center lg:text-left text-xs text-muted-foreground truncate">{item.fileName}</p>
               {item.currentProducts.length > 0 && (
-                <p className="text-center text-xs text-muted-foreground">
-                  currently tagged: {item.currentProducts.map((p) => p.name).join(", ")}
+                <p className="text-center lg:text-left text-xs text-muted-foreground truncate">
+                  tagged: {item.currentProducts.map((p) => p.name).join(", ")}
                 </p>
               )}
             </div>
 
-            {/* Catalog picker */}
-            <div className="space-y-2 min-w-0">
+            {/* Catalog picker — viewport-capped column; catalog scrolls inside */}
+            <div className="flex flex-col gap-2 min-w-0 lg:max-h-[calc(100vh-15rem)]">
               {/* Filename match (pre-ticked) */}
               {fileMatches.length > 0 && (
                 <div className="space-y-1.5">
@@ -440,7 +441,7 @@ export function SkuIdentifier() {
                         <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${on ? "bg-primary border-primary text-primary-foreground" : ""}`}>
                           {on && <Check className="h-3.5 w-3.5" />}
                         </span>
-                        <ProductThumb url={c.imageUrl} className="h-16 w-24" />
+                        <ProductThumb url={c.imageUrl} className="h-12 w-16" />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-medium">{c.productName}</span>
                           <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -476,23 +477,18 @@ export function SkuIdentifier() {
                       {shaping ? "…" : shapeMatches.length > 0 ? "Re-run" : "Suggest"}
                     </Button>
                   </div>
-                  {item.frameShapeCropUrl && (
-                    <div className="flex items-center gap-2 rounded-md bg-muted/40 p-1.5">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={item.frameShapeCropUrl}
-                        alt="AI crop"
-                        className="h-24 w-auto rounded border bg-white object-contain"
-                      />
-                      <span className="text-xs text-muted-foreground">
-                        This is the exact cropped frame sent to the AI. If the glasses aren’t clearly
-                        framed here, that’s why the match is off — tell me and I’ll adjust the crop.
-                      </span>
+                  {(item.frameShapeCropUrls?.length ?? 0) > 0 && (
+                    <div className="flex items-center gap-1.5 overflow-x-auto rounded-md bg-muted/40 p-1" title="The exact crops sent to the AI (sampled across the clip)">
+                      {item.frameShapeCropUrls!.map((u, i) => (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img key={i} src={u} alt={`AI crop ${i + 1}`} className="h-14 w-auto rounded border bg-white object-contain" />
+                      ))}
+                      <span className="shrink-0 px-1 text-[10px] text-muted-foreground">AI inputs</span>
                     </div>
                   )}
                   {shapeMatches.length > 0 ? (
-                    <div className="grid max-h-[460px] grid-cols-2 gap-2 overflow-y-auto">
-                      {shapeMatches.map((c, i) => {
+                    <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5">
+                      {shapeMatches.map((c) => {
                         const on = selected.includes(c.productId);
                         return (
                           <button
@@ -501,16 +497,16 @@ export function SkuIdentifier() {
                             className={`relative flex flex-col items-center gap-1 rounded-lg border p-2 text-center ${on ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted"}`}
                             title={c.productName}
                           >
-                            <span className="absolute top-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                              #{i + 1} · {c.confidence}%
+                            <span className="absolute top-0.5 left-0.5 z-10 rounded bg-black/70 px-1 py-0.5 text-[10px] font-semibold text-white">
+                              {c.confidence}%
                             </span>
                             {on && (
                               <span className="absolute top-1 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
                                 <Check className="h-3.5 w-3.5" />
                               </span>
                             )}
-                            <ProductThumb url={c.imageUrl} className="h-28 w-full border-0" />
-                            <span className="w-full truncate text-sm font-medium">{c.productName}</span>
+                            <ProductThumb url={c.imageUrl} className="h-16 w-full border-0" />
+                            <span className="w-full truncate text-xs font-medium">{c.productName}</span>
                           </button>
                         );
                       })}
@@ -525,8 +521,8 @@ export function SkuIdentifier() {
                 </div>
               )}
 
-              {/* Full catalog */}
-              <div>
+              {/* Full catalog — fills the remaining height, scrolls inside */}
+              <div className="flex min-h-0 flex-1 flex-col">
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-medium">Catalog</p>
                   <Input
@@ -536,7 +532,7 @@ export function SkuIdentifier() {
                     className="h-8 flex-1"
                   />
                 </div>
-                <div className="mt-1.5 grid max-h-[420px] grid-cols-2 gap-1.5 overflow-y-auto rounded-lg border p-1.5 sm:grid-cols-3">
+                <div className="mt-1.5 grid min-h-[120px] flex-1 grid-cols-3 gap-1.5 overflow-y-auto rounded-lg border p-1.5 content-start max-h-[300px] lg:max-h-none sm:grid-cols-4">
                   {catalog.map((p) => {
                     const on = selected.includes(p.id);
                     return (
@@ -551,7 +547,7 @@ export function SkuIdentifier() {
                             <Check className="h-3 w-3" />
                           </span>
                         )}
-                        <ProductThumb url={p.imageUrl} className="h-14 w-full border-0" />
+                        <ProductThumb url={p.imageUrl} className="h-12 w-full border-0" />
                         <span className="w-full truncate text-xs">{p.name ?? "Unnamed"}</span>
                       </button>
                     );
@@ -562,52 +558,39 @@ export function SkuIdentifier() {
                 </div>
               </div>
 
-              {/* Video type (category) — clips only */}
-              {type === "clip" && (
+              {/* Video type + notes — one compact row */}
+              <div className={`grid gap-2 ${type === "clip" ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
+                {type === "clip" && (
+                  <label className="block">
+                    <span className="text-xs font-medium">Video type</span>
+                    <select
+                      value={categoryId}
+                      onChange={(e) => setCategoryId(e.target.value)}
+                      className="mt-0.5 h-9 w-full rounded-md border bg-background px-2.5 text-sm"
+                    >
+                      <option value="">— Uncategorized —</option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <label className="block">
-                  <span className="text-sm font-medium">Video type</span>
-                  <select
-                    value={categoryId}
-                    onChange={(e) => setCategoryId(e.target.value)}
-                    className="mt-1 w-full rounded-md border bg-background px-2.5 py-1.5 text-sm"
-                  >
-                    <option value="">— Uncategorized —</option>
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                  <span className="text-xs font-medium">Notes</span>
+                  <textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="What's in this video (optional)"
+                    rows={1}
+                    className="mt-0.5 h-9 w-full resize-y rounded-md border bg-background px-2.5 py-1.5 text-sm"
+                  />
                 </label>
-              )}
-
-              {/* Notes */}
-              <label className="block">
-                <span className="text-sm font-medium">Notes</span>
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="What's happening in this video / shot (optional) — saved with your decision"
-                  rows={2}
-                  className="mt-1 w-full resize-y rounded-md border bg-background px-2.5 py-1.5 text-sm"
-                />
-              </label>
+              </div>
 
               {/* Selection + actions */}
-              {selected.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {selected.map((id) => {
-                    const p = products.find((x) => x.id === id);
-                    return (
-                      <Badge key={id} variant="secondary" className="gap-1">
-                        {p?.name ?? id}
-                        <button onClick={() => toggle(id)}><X className="h-3 w-3" /></button>
-                      </Badge>
-                    );
-                  })}
-                </div>
-              )}
-              <div className="flex flex-wrap gap-2 pt-1">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button onClick={() => save(false)} disabled={saving || selected.length === 0}>
                   <Check className="h-4 w-4 mr-1" /> Save {selected.length > 1 ? `${selected.length} products` : "product"}
                 </Button>
@@ -615,6 +598,15 @@ export function SkuIdentifier() {
                   No product visible
                 </Button>
                 <Button variant="ghost" onClick={skip}>Skip</Button>
+                {selected.map((id) => {
+                  const p = products.find((x) => x.id === id);
+                  return (
+                    <Badge key={id} variant="secondary" className="gap-1">
+                      {p?.name ?? id}
+                      <button onClick={() => toggle(id)}><X className="h-3 w-3" /></button>
+                    </Badge>
+                  );
+                })}
               </div>
             </div>
           </div>
