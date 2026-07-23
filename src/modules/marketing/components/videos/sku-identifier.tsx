@@ -432,11 +432,13 @@ export function SkuIdentifier() {
               )}
             </div>
 
-            {/* Catalog picker — viewport-capped column; catalog scrolls inside */}
-            <div className="flex flex-col gap-2 min-w-0 lg:max-h-[calc(100vh-15rem)]">
+            {/* Catalog picker — fixed-height column on desktop (a definite
+                height lets flexbox actually shrink the catalog list); only
+                the catalog scrolls inside, so actions stay visible. */}
+            <div className="flex flex-col gap-2 min-w-0 lg:h-[calc(100vh-15rem)] lg:min-h-[480px]">
               {/* Filename match (pre-ticked) */}
               {fileMatches.length > 0 && (
-                <div className="space-y-1.5">
+                <div className="shrink-0 space-y-1.5">
                   {fileMatches.map((c) => {
                     const on = selected.includes(c.productId);
                     return (
@@ -463,7 +465,7 @@ export function SkuIdentifier() {
 
               {/* Frame-shape suggestions (AI, clips only) */}
               {type === "clip" && (
-                <div className="space-y-2 rounded-lg border p-2.5">
+                <div className="shrink-0 space-y-2 rounded-lg border p-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
                       <Glasses className="h-4 w-4" /> Frame shape
@@ -539,7 +541,7 @@ export function SkuIdentifier() {
                     className="h-8 flex-1"
                   />
                 </div>
-                <div className="mt-1.5 grid min-h-[120px] flex-1 grid-cols-3 gap-1.5 overflow-y-auto rounded-lg border p-1.5 content-start max-h-[300px] lg:max-h-none sm:grid-cols-4">
+                <div className="mt-1.5 grid min-h-0 flex-1 grid-cols-3 gap-1.5 overflow-y-auto rounded-lg border p-1.5 content-start max-h-[300px] lg:max-h-none sm:grid-cols-4">
                   {catalog.map((p) => {
                     const on = selected.includes(p.id);
                     return (
@@ -566,7 +568,7 @@ export function SkuIdentifier() {
               </div>
 
               {/* Video type + notes — one compact row */}
-              <div className={`grid gap-2 ${type === "clip" ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
+              <div className={`shrink-0 grid gap-2 ${type === "clip" ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
                 {type === "clip" && (
                   <label className="block">
                     <span className="text-xs font-medium">Video type</span>
@@ -597,7 +599,7 @@ export function SkuIdentifier() {
               </div>
 
               {/* Selection + actions */}
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="shrink-0 flex flex-wrap items-center gap-2">
                 <Button onClick={() => save(false)} disabled={saving || selected.length === 0}>
                   <Check className="h-4 w-4 mr-1" /> Save {selected.length > 1 ? `${selected.length} products` : "product"}
                 </Button>
