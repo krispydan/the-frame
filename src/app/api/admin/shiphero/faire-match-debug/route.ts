@@ -3,7 +3,7 @@ export const maxDuration = 120;
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
-import { findFaireOrderByOrderNumber } from "@/modules/integrations/lib/faire/order-matching";
+import { findFaireOrderByOrderNumber, fetchFaireOrderById } from "@/modules/integrations/lib/faire/order-matching";
 
 /**
  * GET /api/admin/shiphero/faire-match-debug?orderNumber=RDVK4VZ3NX
@@ -37,6 +37,16 @@ export async function GET(req: NextRequest) {
     matchResult = await findFaireOrderByOrderNumber(orderNumber);
   } catch (e) {
     matchError = e instanceof Error ? e.message : String(e);
+  }
+
+  // 2b. Direct order-detail fetch (the new fast path): bo_<lowercased code>.
+  let directFetch: unknown = null;
+  let directError: string | null = null;
+  try {
+    const o = await fetchFaireOrderById(`bo_${code.toLowerCase()}`);
+    directFetch = o ? { id: o.id, display_id: o.display_id, state: o.state } : null;
+  } catch (e) {
+    directError = e instanceof Error ? e.message : String(e);
   }
 
   // 3. Raw Faire scan — widen to 12 pages, report where the target appears +
@@ -84,7 +94,8 @@ export async function GET(req: NextRequest) {
     orderNumber,
     code,
     localOrders: local,
-    matcher: { result: matchResult, error: matchError, matchedWithin300: !!matchResult },
+    matcher: { result: matchResult, error: matchError },
+    directFetch: { result: directFetch, error: directError },
     faireScan: { foundOnPage, pagesScanned: scan.length, scanError, pages: scan },
   });
 }
