@@ -183,7 +183,7 @@ export function SkuIdentifier() {
     }
   };
 
-  /** AI: classify frame shape across a batch of untagged clips. */
+  /** AI: run identification over EVERY untagged clip as a background job. */
   const suggestShapesBulk = async () => {
     setShaping(true);
     const res = await fetch(API, {
@@ -194,12 +194,15 @@ export function SkuIdentifier() {
     const d = await res.json();
     setShaping(false);
     if (res.ok) {
-      toast.success(
-        `Classified ${d.scanned} clip${d.scanned === 1 ? "" : "s"} — ${d.suggested} got shape suggestions${
-          d.capped ? " (batch capped; run again for more)" : ""
-        }`,
-      );
-      load();
+      if (d.queued) {
+        toast.success(
+          `Identifying ${d.total} untagged clip${d.total === 1 ? "" : "s"} in the background — products AND video types. ` +
+            `Refresh in a few minutes to review.`,
+          { duration: 8000 },
+        );
+      } else {
+        toast.message(d.message ?? "Nothing to classify");
+      }
     } else {
       toast.error(d.error ?? "Frame-shape suggestion failed");
     }
@@ -328,9 +331,13 @@ export function SkuIdentifier() {
             variant="secondary"
             onClick={suggestShapesBulk}
             disabled={shaping || !aiConfigured}
-            title={aiConfigured ? "AI-classify frame shape on a batch of untagged clips" : "Set ANTHROPIC_API_KEY to enable"}
+            title={
+              aiConfigured
+                ? "AI-identify every untagged clip in the background: ranked product suggestions + video type"
+                : "Set ANTHROPIC_API_KEY to enable"
+            }
           >
-            <Sparkles className="h-4 w-4 mr-1" /> {shaping ? "Classifying…" : "Suggest by shape"}
+            <Sparkles className="h-4 w-4 mr-1" /> {shaping ? "Queuing…" : "Identify all (AI)"}
           </Button>
         )}
         <Button onClick={matchFilenames} disabled={matching}>

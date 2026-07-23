@@ -253,10 +253,28 @@ export async function suggestFrameShape(
   // against these per-product images by frame shape.
   const catalog = await buildCatalogReference();
 
+  // Video-type classification rides along when the clip has no category
+  // yet: the model sees one full frame + the category options and picks one.
+  let askVideoTypes: Array<{ slug: string; name: string; description: string | null }> | undefined;
+  if (mediaType === "clip") {
+    const cat = sqlite
+      .prepare(`SELECT category_id AS categoryId FROM marketing_video_clips WHERE id = ?`)
+      .get(mediaId) as { categoryId: string | null } | undefined;
+    if (cat && !cat.categoryId) {
+      const rows = sqlite
+        .prepare(
+          `SELECT slug, name, description FROM marketing_video_clip_categories WHERE archived = 0 ORDER BY sort_order ASC, name ASC`,
+        )
+        .all() as Array<{ slug: string; name: string; description: string | null }>;
+      if (rows.length > 0) askVideoTypes = rows;
+    }
+  }
+
   const crops: Array<{ buffer: Buffer; base64: string; mime: "image/jpeg" }> = [];
   const usages: Array<TokenUsage | undefined> = [];
+  let fullFrame: { base64: string; mime: string } | undefined;
   let attempts = 0;
-  for (const t of times) {
+  for (const [fi, t] of times.entries()) {
     attempts++;
     let still: { path: string; cleanup: () => Promise<void> } | null = null;
     try {
@@ -264,6 +282,8 @@ export async function suggestFrameShape(
       // AI-locate the glasses on the full frame, then crop tight to them.
       // A fixed crop misses worn/off-centre shots; the detector fixes that.
       const full = await encodeImage(still.path, 768);
+      // Keep the middle full frame as context for video-type classification.
+      if (fi === Math.floor(times.length / 2)) fullFrame = full;
       const det = await detectGlassesBox(full.base64, full.mime);
       usages.push(det.usage);
       if (det.box) crops.push(await cropToBox(still.path, det.box));
@@ -290,13 +310,30 @@ export async function suggestFrameShape(
 
   const result: ProductMatchResult =
     crops.length > 0
-      ? await matchProductsFromSheets(crops, catalog.items)
-      : { ok: false, clearShot: false, shape: null, matches: [], error: "Could not extract a frame" };
+      ? await matchProductsFromSheets(crops, catalog.items, { fullFrame, videoTypes: askVideoTypes })
+      : { ok: false, clearShot: false, shape: null, matches: [], videoType: null, error: "Could not extract a frame" };
   usages.push(result.usage);
   const costUsd = usageCostUsd(usages);
+
+  // Save the classified video type — only onto a clip that still has no
+  // category, so a human pick is never clobbered.
+  if (result.videoType && askVideoTypes) {
+    const catRow = sqlite
+      .prepare(`SELECT id FROM marketing_video_clip_categories WHERE slug = ? AND archived = 0`)
+      .get(result.videoType) as { id: string } | undefined;
+    if (catRow) {
+      sqlite
+        .prepare(
+          `UPDATE marketing_video_clips SET category_id = ?, updated_at = datetime('now')
+            WHERE id = ? AND category_id IS NULL`,
+        )
+        .run(catRow.id, mediaId);
+    }
+  }
+
   console.info(
     `[frame-shape] ${mediaType} ${mediaId}: ${crops.length} crop(s) from ${attempts} frame(s) → ` +
-      `${result.matches.length} match(es), cost ≈ $${costUsd.toFixed(4)}`,
+      `${result.matches.length} match(es)${result.videoType ? `, type=${result.videoType}` : ""}, cost ≈ $${costUsd.toFixed(4)}`,
   );
 
   // Persist the exact crops the model judged, so the review UI can show the
