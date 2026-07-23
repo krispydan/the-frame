@@ -36,6 +36,9 @@ import { materializeVideo, videoScratchPath, saveVideo, videoUrl } from "@/lib/s
 import { materializeMedia } from "@/lib/storage/media";
 import {
   cropGlasses,
+  cropToBox,
+  encodeImage,
+  detectGlassesBox,
   matchProductsFromSheets,
   normShape,
   type ShapeGuess,
@@ -229,8 +232,17 @@ export async function suggestFrameShape(
     attempts++;
     const still = await stillForMedia(mediaType, mediaId, t);
     try {
-      const crop = await cropGlasses(still.path);
+      // AI-locate the glasses on the full frame, then crop tight to them.
+      // A fixed crop misses worn/off-centre shots; the detector fixes that.
+      const full = await encodeImage(still.path, 768);
+      const det = await detectGlassesBox(full.base64, full.mime);
+      const crop = det.box
+        ? await cropToBox(still.path, det.box)
+        : await cropGlasses(still.path); // heuristic fallback if detection fails
       lastCrop = crop.buffer;
+      // Detector ran and found no glasses on this frame — try a later one
+      // before giving up (cheap; the match call is the expensive part).
+      if (det.ok && !det.box && t + stepSec <= maxSec) continue;
       result = await matchProductsFromSheets(crop.base64, crop.mime, sheet.sheets, sheet.entries.length);
     } finally {
       await still.cleanup();
