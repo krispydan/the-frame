@@ -14,6 +14,8 @@ import { videoPosts } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
 import { deleteVideo, videoUrl } from "@/lib/storage/videos";
 import { SLOTS, type Slot } from "@/modules/marketing/lib/video/scheduler";
+import { permutationHash, FALLBACK_RECIPE_ID } from "@/modules/marketing/lib/video/composer";
+import { jobQueue } from "@/modules/core/lib/job-queue";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -76,8 +78,62 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
 
   const updates: Partial<typeof videoPosts.$inferInsert> = { updatedAt: new Date().toISOString() };
+  let rerenderQueued = false;
 
   if (body.caption !== undefined) updates.caption = String(body.caption);
+  // Posting instructions (text overlay, audio note, cover, first comment)
+  // edited directly in the detail page.
+  if (body.instructions !== undefined) {
+    if (typeof body.instructions !== "object" || body.instructions === null) {
+      return NextResponse.json({ error: "instructions must be an object" }, { status: 400 });
+    }
+    updates.instructions = JSON.stringify(body.instructions);
+  }
+
+  // ── Mini editor: replace the clip sequence → reset render + re-render ──
+  if (body.clipIds !== undefined) {
+    if (!Array.isArray(body.clipIds) || body.clipIds.length === 0) {
+      return NextResponse.json({ error: "clipIds must be a non-empty array" }, { status: 400 });
+    }
+    if (existing.status === "posted") {
+      return NextResponse.json({ error: "Cannot edit clips on a posted video" }, { status: 400 });
+    }
+    const newClipIds = body.clipIds.map(String);
+    const clipStmt = sqlite.prepare(
+      `SELECT id, status, duration_sec AS durationSec FROM marketing_video_clips WHERE id = ?`,
+    );
+    let newDuration = 0;
+    for (const cid of new Set(newClipIds)) {
+      const clip = clipStmt.get(cid) as { id: string; status: string; durationSec: number | null } | undefined;
+      if (!clip) return NextResponse.json({ error: `Clip not found: ${cid}` }, { status: 400 });
+      if (clip.status !== "ready") {
+        return NextResponse.json({ error: `Clip ${cid} is not ready (status: ${clip.status})` }, { status: 400 });
+      }
+    }
+    for (const cid of newClipIds) {
+      newDuration += (clipStmt.get(cid) as { durationSec: number | null }).durationSec ?? 0;
+    }
+
+    // Audio: keep the previously-audible clips that survived the edit.
+    const oldAudible = JSON.parse(existing.audibleClipIds || "[]") as string[];
+    const keep = new Set(newClipIds);
+    const audible = oldAudible.filter((cid) => keep.has(cid));
+    const audioTreatment: "silent" | "partial" | "full" =
+      audible.length === 0 ? "silent" : audible.length === newClipIds.length ? "full" : "partial";
+
+    updates.clipIds = JSON.stringify(newClipIds);
+    updates.audibleClipIds = JSON.stringify(audible);
+    updates.audioTreatment = audioTreatment;
+    updates.permutationHash = permutationHash(existing.recipeId ?? FALLBACK_RECIPE_ID, newClipIds, audioTreatment);
+    updates.durationSec = newDuration;
+    // Reset the render: old files removed after a successful DB update.
+    updates.filePath = null;
+    updates.posterPath = null;
+    updates.sizeBytes = null;
+    updates.status = "queued";
+    updates.error = null;
+    rerenderQueued = true;
+  }
   if (body.hashtags !== undefined) {
     if (!Array.isArray(body.hashtags)) {
       return NextResponse.json({ error: "hashtags must be an array" }, { status: 400 });
@@ -125,10 +181,27 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     if (msg.includes("idx_video_post_slot")) {
       return NextResponse.json({ error: "That slot already has a post" }, { status: 409 });
     }
+    if (msg.includes("permutation_hash")) {
+      return NextResponse.json({ error: "A video with this exact clip sequence already exists" }, { status: 409 });
+    }
     throw e;
   }
 
-  return NextResponse.json({ post: loadPost(id) });
+  if (rerenderQueued) {
+    // Old render files are stale now — remove, then queue the re-render.
+    if (existing.filePath) await deleteVideo(existing.filePath).catch(() => {});
+    if (existing.posterPath) await deleteVideo(existing.posterPath).catch(() => {});
+    // skipCopy: a post that already has a caption keeps it (the operator
+    // may have hand-edited it); a fresh post gets AI copy as usual.
+    jobQueue.enqueue(
+      "marketing.video.render-post",
+      "marketing",
+      { postId: id, skipCopy: Boolean(existing.caption) },
+      { priority: 2 },
+    );
+  }
+
+  return NextResponse.json({ post: loadPost(id), rerenderQueued });
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {

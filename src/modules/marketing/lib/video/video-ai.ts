@@ -222,6 +222,88 @@ function fallbackCopy(
 }
 
 /**
+ * Revise a post's copy from natural-language feedback — the video-side
+ * twin of the email editor's revise-copy. Re-reads the post's CURRENT
+ * caption/hashtags/instructions plus the clip context, sends it all to
+ * the model with the operator's feedback, and persists the revision.
+ * Unlike generateVideoCopy there is NO fallback — a failed call leaves
+ * the copy untouched and returns the error.
+ */
+export async function reviseVideoCopy(
+  postId: string,
+  feedback: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const post = db.select().from(videoPosts).where(eq(videoPosts.id, postId)).get();
+  if (!post) throw new Error(`Post not found: ${postId}`);
+
+  const clipIds = JSON.parse(post.clipIds) as string[];
+  const clipContext = loadClipContext(clipIds);
+  const clipSequence = clipContext.map((c, i) => ({
+    position: i + 1,
+    category: c.categorySlug ?? "uncategorized",
+    durationSec: c.durationSec ?? 0,
+    products: c.products,
+  }));
+  const { list: chartSounds, promptJson: trendingSoundsJson } = soundsForPrompt();
+
+  const systemBase = extractPromptBody(getDocContent("system-prompt-base"))
+    .replace(/\{\{?AUDIENCE\}?\}/g, "retail")
+    .replace(/\{IF\s+audience[^}]*\}([\s\S]*?)\{(ELSE[^}]*|ENDIF)\}/g, "$1");
+
+  const current = {
+    caption: post.caption ?? "",
+    hashtags: post.hashtags ? JSON.parse(post.hashtags) : [],
+    postingInstructions: post.instructions ? JSON.parse(post.instructions) : {},
+  };
+
+  const userPrompt = [
+    "You are revising the caption + posting instructions for a short vertical video (TikTok/Instagram).",
+    "",
+    "CURRENT COPY (revise from this, don't start over):",
+    JSON.stringify(current, null, 2),
+    "",
+    "VIDEO — clip sequence:",
+    JSON.stringify(clipSequence, null, 2),
+    `Audio: ${post.audioTreatment}. Duration: ${(post.durationSec ?? 0).toFixed(1)}s.`,
+    "",
+    "TRENDING SOUNDS (pick suggestedSoundIds from these ids only):",
+    chartSounds.length > 0 ? trendingSoundsJson : "(no chart synced)",
+    "",
+    "OPERATOR FEEDBACK — apply this to the copy:",
+    feedback,
+    "",
+    "Keep everything that the feedback doesn't ask to change.",
+  ].join("\n");
+
+  const result = await callClaude({
+    systemPrompt: systemBase,
+    userPrompt,
+    tool: SUBMIT_TOOL,
+    maxTokens: 2048,
+    model: videoModel(),
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+
+  const copy = result.output as unknown as VideoCopy;
+  const instructions: PostingInstructions & { suggestedSoundIds?: unknown } = {
+    ...(copy.postingInstructions ?? ({} as PostingInstructions)),
+  };
+  instructions.suggestedSounds = hydrateSuggestedSounds(instructions.suggestedSoundIds, chartSounds);
+  delete instructions.suggestedSoundIds;
+
+  db.update(videoPosts)
+    .set({
+      caption: copy.caption,
+      hashtags: JSON.stringify(copy.hashtags ?? []),
+      instructions: JSON.stringify(instructions),
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(videoPosts.id, postId))
+    .run();
+  return { ok: true };
+}
+
+/**
  * Generate + persist caption/hashtags/instructions for a rendered post.
  * Returns { ok, usedFallback }. Only flips status rendered → ready on a
  * real AI success; fallback copy keeps status=rendered so the queue UI
