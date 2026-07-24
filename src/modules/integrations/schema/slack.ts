@@ -59,6 +59,7 @@ export type SlackTopic =
   | "orders.stuck"
   // Sales
   | "sales.phoneburner_interested"
+  | "sales.facebook_lead"
   // Digests
   | "digest.daily"
   | "digest.weekly"
@@ -105,6 +106,7 @@ export const SLACK_TOPICS: { topic: SlackTopic; label: string; defaultChannel: s
 
   // Sales
   { topic: "sales.phoneburner_interested", label: "PhoneBurner interested lead", defaultChannel: "sales-leads", group: "Sales", description: "Fires the moment an agent sets a 'Set Appointment' disposition in PhoneBurner. Includes company, phone, ICP, agent, recording link, and a one-click jump into The Frame." },
+  { topic: "sales.facebook_lead", label: "Facebook/Instagram lead", defaultChannel: "sales-leads", group: "Sales", description: "Fires when a new Facebook/Instagram Lead Ad submission lands in the frame. Includes name, email, phone, the ad/campaign it came from, and links into the frame + Pipedrive." },
 
   // Digests
   { topic: "digest.daily",            label: "Daily morning digest",          defaultChannel: "jaxy-daily-digest",  group: "Digests",      description: "Yesterday's orders, fulfillment, inventory at 7am PT." },

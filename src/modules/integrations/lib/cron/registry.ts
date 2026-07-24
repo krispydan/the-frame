@@ -43,6 +43,8 @@ import { runWeeklyFaireExport } from "@/modules/sales/lib/faire-customer-export"
 import { topUpVideoQueue } from "@/modules/marketing/lib/video/scheduler";
 import { runVideoStorageHygiene } from "@/modules/marketing/lib/video/cleanup";
 import { enqueueSoundsSync } from "@/modules/marketing/lib/video/tiktok-sounds";
+import { drainMetaLeads, reconcileMetaLeads } from "@/modules/integrations/lib/meta/lead-ingest";
+import { runCapiSyncAndDrain } from "@/modules/integrations/lib/meta/capi";
 
 export type CronJob = {
   id: string;                         // stable, kebab-case
@@ -105,6 +107,34 @@ export const CRON_JOBS: CronJob[] = [
         dead: results.filter((r) => r.velocity === "dead").length,
       };
     },
+  },
+  // ── Meta (Facebook/Instagram) Lead Ads ──
+  // The leadgen webhook is the real-time path; these are the reliability net.
+  // - drain: re-process any leads that failed or were interrupted by a
+  //   container restart (rows stay 'received'/'error'). Cheap no-op when clean.
+  // - capi-sync: derive funnel-stage events (Contacted/Qualified/Converted)
+  //   from current DB state and flush the CAPI queue to Meta.
+  // - reconcile: hourly re-poll of known forms to catch any dropped webhook.
+  {
+    id: "meta-leads-drain",
+    schedule: "*/3 * * * *",  // every 3 min
+    description: "Process any pending/errored Facebook Lead Ads leads (webhook safety net) → frame + Pipedrive + Slack",
+    handler: () => drainMetaLeads(25),
+    fireAndForget: true,
+  },
+  {
+    id: "meta-capi-sync",
+    schedule: "*/10 * * * *",  // every 10 min
+    description: "Derive Facebook lead funnel-stage events from CRM state and push them to Meta's Conversions API",
+    handler: () => runCapiSyncAndDrain(),
+    fireAndForget: true,
+  },
+  {
+    id: "meta-leads-reconcile",
+    schedule: "17 * * * *",  // hourly at :17
+    description: "Re-poll known Facebook lead forms for any submissions the webhook dropped (safety net)",
+    handler: () => reconcileMetaLeads(50),
+    fireAndForget: true,
   },
   {
     id: "faire-interested-export",

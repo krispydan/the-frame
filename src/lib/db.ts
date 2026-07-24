@@ -588,6 +588,63 @@ try {
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_pd_webhook_object ON pipedrive_webhook_events (object, pipedrive_id)");
 } catch (e) { console.error("[db] pipedrive_webhook_events table error:", e); }
 
+// Meta (Facebook/Instagram) Lead Ads. leadgen_id is Meta's unique id for a
+// form submission and doubles as the CAPI `lead_id` sent back to Meta. UNIQUE
+// makes webhook + reconciliation-poll ingestion idempotent (Meta retries
+// deliveries). field_data holds the raw answers JSON; status walks
+// received → processed | skipped | error.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS meta_leads (
+    id TEXT PRIMARY KEY NOT NULL,
+    leadgen_id TEXT UNIQUE NOT NULL,
+    form_id TEXT,
+    page_id TEXT,
+    campaign_name TEXT,
+    adset_name TEXT,
+    ad_name TEXT,
+    field_data TEXT,
+    full_name TEXT,
+    email TEXT,
+    phone TEXT,
+    company_id TEXT,
+    pipedrive_person_id INTEGER,
+    pipedrive_deal_id INTEGER,
+    status TEXT DEFAULT 'received',
+    error TEXT,
+    created_time TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    processed_at TEXT
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_leads_status ON meta_leads (status)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_leads_company ON meta_leads (company_id)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_leads_form ON meta_leads (form_id)");
+} catch (e) { console.error("[db] meta_leads table error:", e); }
+
+// Meta Conversions API outbound queue: one row per (lead, funnel-stage) event
+// we push back to Meta's dataset so ad delivery optimizes toward leads that
+// convert. UNIQUE(meta_lead_id, event_name) makes stage derivation idempotent —
+// each lead sends each stage at most once. status walks pending → sent | error.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS meta_capi_events (
+    id TEXT PRIMARY KEY NOT NULL,
+    meta_lead_id TEXT NOT NULL,
+    leadgen_id TEXT,
+    company_id TEXT,
+    event_name TEXT NOT NULL,
+    event_time INTEGER,
+    email TEXT,
+    phone TEXT,
+    status TEXT DEFAULT 'pending',
+    attempts INTEGER DEFAULT 0,
+    error TEXT,
+    fbtrace_id TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    sent_at TEXT,
+    UNIQUE (meta_lead_id, event_name)
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_capi_status ON meta_capi_events (status)");
+} catch (e) { console.error("[db] meta_capi_events table error:", e); }
+
 // Image upload system: new columns on catalog_images
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN url TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN file_size INTEGER"); } catch { /* exists */ }
