@@ -105,6 +105,24 @@ registerJobHandler("marketing.video.render-post", async (input) => {
   const { renderPost } = await import("./render");
   const render = await renderPost(postId);
 
+  // skipCopy: a clip-edit re-render keeps the existing (possibly
+  // hand-edited) caption — flip straight back to ready instead of
+  // regenerating copy over the operator's words.
+  if (input.skipCopy === true) {
+    const { db: appDb } = await import("@/lib/db");
+    const { videoPosts } = await import("@/modules/marketing/schema");
+    const { eq } = await import("drizzle-orm");
+    const post = appDb.select().from(videoPosts).where(eq(videoPosts.id, postId)).get();
+    if (post?.caption && post.status === "rendered") {
+      appDb
+        .update(videoPosts)
+        .set({ status: "ready", updatedAt: new Date().toISOString() })
+        .where(eq(videoPosts.id, postId))
+        .run();
+    }
+    return { ...render, copy: { ok: true, skipped: true } } as unknown as Record<string, unknown>;
+  }
+
   // Copy generation is best-effort: a failed AI call leaves the post
   // `rendered` (video usable, copy regenerable via the queue UI).
   const { generateVideoCopy } = await import("./video-ai");

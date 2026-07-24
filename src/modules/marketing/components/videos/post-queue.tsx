@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -481,6 +482,13 @@ function PostCard({ post, onChanged }: { post: Post; onChanged: () => void }) {
           </div>
           <div className="flex-1 min-w-0 space-y-1.5">
             <div className="flex flex-wrap items-center gap-1">
+              <Link
+                href={`/marketing/videos/posts/${post.id}`}
+                className="mr-1 text-xs font-medium underline-offset-2 hover:underline"
+                title="Open the editor — caption, text overlay, AI edits, clip sequence"
+              >
+                Edit
+              </Link>
               <Badge variant={STATUS_VARIANT[post.status] ?? "outline"}>{post.status}</Badge>
               {post.scheduled_slot && (
                 <Badge variant="outline" className="text-[10px]">{SLOT_LABEL[post.scheduled_slot]}</Badge>
