@@ -68,6 +68,9 @@ export async function GET(request: NextRequest) {
   const type = parseType(searchParams.get("type"));
   const filter = searchParams.get("filter") === "all" ? "all" : "queue";
   const limit = Math.min(Math.max(Number(searchParams.get("limit")) || 100, 1), 300);
+  // Single-item mode: fetch one media row regardless of queue/tag state —
+  // used by the review UI's undo/"recent" to reopen a decided item.
+  const focusId = searchParams.get("mediaId");
 
   // Best catalog image for a colorway (or the parent product) — shown on the
   // candidate cards so a reviewer can eyeball the media against the product.
@@ -94,8 +97,9 @@ export async function GET(request: NextRequest) {
     // "Untagged only" (queue) = clips with NO product tags yet, minus ones
     // already reviewed as "no product". "All" shows tagged clips too so you
     // can change/add their products.
-    const queueClause =
-      filter === "queue"
+    const queueClause = focusId
+      ? `AND c.id = @focusId`
+      : filter === "queue"
         ? `AND NOT EXISTS (SELECT 1 FROM marketing_video_clip_products cp2 WHERE cp2.clip_id = c.id)
            AND (m.status IS NULL OR m.status != 'no_product')`
         : "";
@@ -108,10 +112,10 @@ export async function GET(request: NextRequest) {
              m.attributes_json AS attributesJson
       FROM marketing_video_clips c
       LEFT JOIN marketing_media_matches m ON m.media_type = 'clip' AND m.media_id = c.id
-      WHERE c.status = 'ready' ${queueClause}
+      WHERE c.status != 'archived' ${focusId ? "" : "AND c.status = 'ready'"} ${queueClause}
       ORDER BY (m.status = 'suggested') DESC, c.created_at DESC
-      LIMIT ?
-    `).all(limit) as Array<Record<string, unknown>>;
+      LIMIT @limit
+    `).all(focusId ? { focusId, limit } : { limit }) as Array<Record<string, unknown>>;
 
     const productStmt = sqlite.prepare(`
       SELECT DISTINCT p.id, p.name
@@ -143,8 +147,9 @@ export async function GET(request: NextRequest) {
   } else {
     // Catalog images already belong to a SKU, so "untagged" = no SKU
     // assigned. Use "All" to review/reassign images that already have one.
-    const queueClause =
-      filter === "queue"
+    const queueClause = focusId
+      ? `AND i.id = @focusId`
+      : filter === "queue"
         ? `AND i.sku_id IS NULL AND (m.status IS NULL OR m.status != 'no_product')`
         : "";
     const rows = sqlite.prepare(`
@@ -158,8 +163,8 @@ export async function GET(request: NextRequest) {
       LEFT JOIN marketing_media_matches m ON m.media_type = 'image' AND m.media_id = i.id
       WHERE i.file_path IS NOT NULL ${queueClause}
       ORDER BY (m.status = 'suggested') DESC, i.created_at DESC
-      LIMIT ?
-    `).all(limit) as Array<Record<string, unknown>>;
+      LIMIT @limit
+    `).all(focusId ? { focusId, limit } : { limit }) as Array<Record<string, unknown>>;
     items = rows.map((r) => ({
       mediaType: "image",
       mediaId: r.id,
@@ -364,6 +369,11 @@ export async function PATCH(request: NextRequest) {
   };
 
   if (body.noProduct) {
+    // A mis-tagged clip being corrected to "no product" must actually
+    // lose its tags — otherwise the wrong products stick around.
+    if (mediaType === "clip") {
+      sqlite.prepare(`DELETE FROM marketing_video_clip_products WHERE clip_id = ?`).run(mediaId);
+    }
     upsert("no_product", null);
     return NextResponse.json({ saved: true, status: "no_product" });
   }
