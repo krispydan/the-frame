@@ -12,6 +12,9 @@
 
 import { postSlack, type SlackBlock } from "./client";
 import type { LeadTouchpoints, LeadPipedrive } from "@/lib/email";
+import { db } from "@/lib/db";
+import { slackChannelRouting } from "@/modules/integrations/schema/slack";
+import { eq } from "drizzle-orm";
 
 /* ── Formatters ── */
 
@@ -466,6 +469,78 @@ export async function notifyLeadConverted(opts: {
     text: `🎉 Lead converted: ${who} placed a wholesale order (${total})`,
     blocks,
   });
+}
+
+/* ── Facebook / Instagram Lead Ad ── */
+
+export async function notifyFacebookLead(opts: {
+  contactName: string | null;
+  companyName: string | null;
+  email: string | null;
+  phone: string | null;
+  campaignName: string | null;
+  adName: string | null;
+  formName: string | null;
+  source: string; // "Facebook" | "Instagram" | "Facebook/Instagram"
+  frameUrl?: string | null;
+  pipedriveDealUrl?: string | null;
+  matchedExisting?: boolean;
+}) {
+  const who = opts.contactName || opts.companyName || opts.email || "A new lead";
+  const contactBits = [
+    opts.email ? `📧 ${opts.email}` : "",
+    opts.phone ? `📞 ${opts.phone}` : "",
+  ].filter(Boolean).join("  ·  ");
+  const attribution = [
+    opts.campaignName ? `Campaign: *${opts.campaignName}*` : "",
+    opts.adName ? `Ad: ${opts.adName}` : "",
+    opts.formName ? `Form: ${opts.formName}` : "",
+  ].filter(Boolean).join("  ·  ");
+  const links = [
+    opts.frameUrl ? `<${opts.frameUrl}|Open in the frame>` : "",
+    opts.pipedriveDealUrl ? `<${opts.pipedriveDealUrl}|View deal in Pipedrive>` : "",
+  ].filter(Boolean).join("  ·  ");
+
+  const blocks: SlackBlock[] = [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `📲 *New ${opts.source} lead* — *${who}* just filled out a lead form 🎯${opts.matchedExisting ? "\n_(matched an existing company in the frame)_" : ""}`,
+      },
+    },
+  ];
+  if (contactBits) blocks.push({ type: "section", text: { type: "mrkdwn", text: contactBits } });
+  if (attribution) blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: attribution }] });
+  if (links) blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: links }] });
+
+  // Route to the sales.facebook_lead channel. If the user hasn't configured
+  // that topic yet, fall back to whatever channel sales.phoneburner_interested
+  // uses (both are "new sales lead" alerts, default #sales-leads) so leads are
+  // never silently dropped before the topic is wired up.
+  const primary = await postSlack({
+    topic: "sales.facebook_lead",
+    text: `📲 New ${opts.source} lead: ${who}`,
+    blocks,
+  });
+  if (!primary.ok && /no slack channel routed|disabled/i.test(primary.error || "")) {
+    try {
+      const [fallback] = await db
+        .select()
+        .from(slackChannelRouting)
+        .where(eq(slackChannelRouting.topic, "sales.phoneburner_interested"));
+      if (fallback?.channelId && fallback.enabled) {
+        await postSlack({
+          topic: "sales.facebook_lead",
+          text: `📲 New ${opts.source} lead: ${who}`,
+          blocks,
+          channelOverride: fallback.channelId,
+        });
+      }
+    } catch {
+      // best-effort — never break ingestion on a Slack routing miss
+    }
+  }
 }
 
 export async function notifyConnectedStore(opts: {
