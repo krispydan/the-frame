@@ -2,7 +2,8 @@
  * GET /api/v1/marketing/videos/clips — clip library list.
  *
  * Filters: status, category (id or slug), skuId, talent (name, or "none"
- * for clips with nobody in them), untagged=1, search.
+ * for clips with nobody in them), untagged=1 (no category), products
+ * ("tagged" = has ≥1 product, "untagged" = has none), search.
  * Returns clips with category + product joins and public asset URLs,
  * plus the distinct talent list for the UI's pickers/datalists.
  */
@@ -19,6 +20,7 @@ export async function GET(request: NextRequest) {
   const skuId = searchParams.get("skuId") || "";
   const talent = searchParams.get("talent") || "";
   const untagged = searchParams.get("untagged") === "1";
+  const productsFilter = searchParams.get("products") || ""; // "tagged" | "untagged"
   const search = searchParams.get("search") || "";
   const limit = Math.min(500, parseInt(searchParams.get("limit") || "200", 10));
   const offset = parseInt(searchParams.get("offset") || "0", 10);
@@ -36,6 +38,12 @@ export async function GET(request: NextRequest) {
     params.push(category, category);
   }
   if (untagged) clauses.push("c.category_id IS NULL");
+  // Product tagging: whether the clip has any SKU tagged in it.
+  if (productsFilter === "tagged") {
+    clauses.push("EXISTS (SELECT 1 FROM marketing_video_clip_products cp WHERE cp.clip_id = c.id)");
+  } else if (productsFilter === "untagged") {
+    clauses.push("NOT EXISTS (SELECT 1 FROM marketing_video_clip_products cp WHERE cp.clip_id = c.id)");
+  }
   if (talent === "none") {
     clauses.push("c.talent IS NULL");
   } else if (talent) {

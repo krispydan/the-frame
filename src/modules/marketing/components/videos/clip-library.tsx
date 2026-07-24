@@ -64,6 +64,7 @@ export function ClipLibrary() {
   const [filterStatus, setFilterStatus] = useState("");
   const [filterTalent, setFilterTalent] = useState("");
   const [filterUntagged, setFilterUntagged] = useState(false);
+  const [filterProducts, setFilterProducts] = useState(""); // "" | "tagged" | "untagged"
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editClip, setEditClip] = useState<Clip | null>(null);
   const [showCategories, setShowCategories] = useState(false);
@@ -79,6 +80,7 @@ export function ClipLibrary() {
     if (filterStatus) params.set("status", filterStatus);
     if (filterTalent) params.set("talent", filterTalent);
     if (filterUntagged) params.set("untagged", "1");
+    if (filterProducts) params.set("products", filterProducts);
     params.set("limit", String(PAGE_SIZE));
     params.set("offset", String(page * PAGE_SIZE));
     Promise.all([
@@ -94,7 +96,7 @@ export function ClipLibrary() {
       // If a page emptied out (e.g. after deleting its last clips), step back.
       if (list.length === 0 && page > 0) setPage((p) => Math.max(0, p - 1));
     });
-  }, [filterCategory, filterStatus, filterTalent, filterUntagged, page]);
+  }, [filterCategory, filterStatus, filterTalent, filterUntagged, filterProducts, page]);
 
   useEffect(() => {
     load();
@@ -103,7 +105,7 @@ export function ClipLibrary() {
   // Any filter change resets to the first page.
   useEffect(() => {
     setPage(0);
-  }, [filterCategory, filterStatus, filterTalent, filterUntagged]);
+  }, [filterCategory, filterStatus, filterTalent, filterUntagged, filterProducts]);
 
   useEffect(() => {
     fetch("/api/v1/marketing/videos/skus")
@@ -260,9 +262,19 @@ export function ClipLibrary() {
             <option key={t} value={t}>{t}</option>
           ))}
         </select>
-        <label className="flex items-center gap-1.5 text-sm">
+        <select
+          value={filterProducts}
+          onChange={(e) => setFilterProducts(e.target.value)}
+          className="border rounded px-2 py-1.5 text-sm bg-background"
+          title="Filter by whether the clip has products/SKUs tagged in it"
+        >
+          <option value="">All products</option>
+          <option value="tagged">Tagged products</option>
+          <option value="untagged">Untagged products</option>
+        </select>
+        <label className="flex items-center gap-1.5 text-sm" title="Clips with no category assigned">
           <input type="checkbox" checked={filterUntagged} onChange={(e) => setFilterUntagged(e.target.checked)} />
-          Untagged only
+          Uncategorized only
         </label>
         <Button variant="ghost" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /></Button>
       </div>
