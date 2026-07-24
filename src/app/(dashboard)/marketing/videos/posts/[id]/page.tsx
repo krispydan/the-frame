@@ -19,6 +19,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { VideoPlayer } from "@/components/ui/video-player";
+import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import {
   ArrowDown, ArrowLeft, ArrowUp, Clapperboard, Loader2, MessageSquare,
   Plus, RefreshCw, Scissors, Send, Trash2, X,
@@ -87,6 +89,9 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // Show the video's name in the breadcrumb instead of the raw id.
+  const { setOverride } = useBreadcrumbOverride();
+
   // Editable copy state
   const [caption, setCaption] = useState("");
   const [hashtags, setHashtags] = useState("");
@@ -124,6 +129,12 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
   useEffect(() => {
     load();
   }, [load]);
+
+  // Reflect the video in the breadcrumb ("… / Videos / <name>"); clear on leave.
+  useEffect(() => {
+    setOverride(post?.recipe_name ? post.recipe_name : "Video");
+    return () => setOverride(null);
+  }, [post?.recipe_name, setOverride]);
 
   // Poll while a re-render is in flight so the player appears when done.
   useEffect(() => {
@@ -315,18 +326,21 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[300px_minmax(0,1fr)] min-w-0">
         {/* Video */}
         <div className="space-y-2 min-w-0">
-          <div className="aspect-[9/16] w-full max-w-[300px] mx-auto lg:mx-0 overflow-hidden rounded-lg bg-muted">
-            {rendering ? (
-              <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground">
-                <Loader2 className="h-6 w-6 animate-spin" />
-                <span className="text-sm">Re-rendering…</span>
-              </div>
-            ) : post.videoUrl ? (
-              <video key={post.videoUrl} src={post.videoUrl} poster={post.posterUrl ?? undefined} controls playsInline className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">No render yet</div>
-            )}
-          </div>
+          {rendering ? (
+            <div className="flex aspect-[9/16] w-full max-w-[300px] mx-auto lg:mx-0 flex-col items-center justify-center gap-2 rounded-lg bg-muted text-muted-foreground">
+              <Loader2 className="h-6 w-6 animate-spin" />
+              <span className="text-sm">Re-rendering…</span>
+            </div>
+          ) : (
+            <VideoPlayer
+              key={post.videoUrl ?? "none"}
+              src={post.videoUrl}
+              poster={post.posterUrl}
+              size="lg"
+              className="aspect-[9/16] w-full max-w-[300px] mx-auto lg:mx-0 rounded-lg"
+              placeholder={<span className="text-sm text-muted-foreground">No render yet</span>}
+            />
+          )}
           <p className="text-xs text-muted-foreground">
             {(post.duration_sec ?? 0).toFixed(1)}s · audio: {post.audio_treatment} · {post.platform}
           </p>

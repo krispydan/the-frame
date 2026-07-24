@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Bell, Search } from "lucide-react";
 import {
   Breadcrumb,
@@ -16,7 +16,8 @@ import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 
-const moduleTitles: Record<string, string> = {
+/** Friendly labels for path segments (top-level modules + nested pages). */
+const SEGMENT_LABELS: Record<string, string> = {
   dashboard: "Dashboard",
   prospects: "Prospects",
   pipeline: "Pipeline",
@@ -32,7 +33,34 @@ const moduleTitles: Record<string, string> = {
   notifications: "Notifications",
   settings: "Settings",
   profile: "Profile",
+  // Marketing sub-pages
+  videos: "Videos",
+  clips: "Clips",
+  recipes: "Recipes",
+  posts: "Posts",
+  identify: "Identify products",
+  calendar: "Calendar",
+  email: "Email",
+  prompts: "Prompts",
+  "designer-queue": "Designer queue",
+  plan: "Plan",
+  sounds: "Trending audio",
 };
+
+/**
+ * Some path segments aren't navigable on their own (no index route) — map
+ * them to the nearest real page so the breadcrumb link doesn't 404.
+ */
+const SEGMENT_HREF: Record<string, string> = {
+  "/marketing/videos/posts": "/marketing/videos",
+};
+
+/** A raw id (uuid / long hex) segment — friendlier than showing the id. */
+const IDISH = /^[0-9a-f]{8}-[0-9a-f]{4}|^[0-9a-f]{12,}$/i;
+
+function titleize(seg: string) {
+  return seg.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 export function AppHeader() {
   const pathname = usePathname();
@@ -40,8 +68,6 @@ export function AppHeader() {
   const [unreadCount, setUnreadCount] = useState(0);
   const { override } = useBreadcrumbOverride();
   const segments = pathname.split("/").filter(Boolean);
-  const currentModule = segments[0] || "dashboard";
-  const title = moduleTitles[currentModule] || currentModule;
 
   useEffect(() => {
     const fetchCount = () => {
@@ -65,30 +91,26 @@ export function AppHeader() {
           <BreadcrumbItem>
             <BreadcrumbLink href="/dashboard">Home</BreadcrumbLink>
           </BreadcrumbItem>
-          {segments.length > 0 && (
-            <>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                {segments.length === 1 ? (
-                  <BreadcrumbPage>{title}</BreadcrumbPage>
-                ) : (
-                  <BreadcrumbLink href={`/${currentModule}`}>
-                    {title}
-                  </BreadcrumbLink>
-                )}
-              </BreadcrumbItem>
-              {segments.length > 1 && (
-                <>
-                  <BreadcrumbSeparator />
-                  <BreadcrumbItem>
-                    <BreadcrumbPage>
-                      {override || segments[segments.length - 1]}
-                    </BreadcrumbPage>
-                  </BreadcrumbItem>
-                </>
-              )}
-            </>
-          )}
+          {segments.map((seg, i) => {
+            const isLast = i === segments.length - 1;
+            const path = `/${segments.slice(0, i + 1).join("/")}`;
+            const href = SEGMENT_HREF[path] ?? path;
+            let label = SEGMENT_LABELS[seg] ?? titleize(seg);
+            if (isLast && override) label = override;
+            else if (IDISH.test(seg) && !SEGMENT_LABELS[seg]) label = "Details";
+            return (
+              <Fragment key={path}>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  {isLast ? (
+                    <BreadcrumbPage>{label}</BreadcrumbPage>
+                  ) : (
+                    <BreadcrumbLink href={href}>{label}</BreadcrumbLink>
+                  )}
+                </BreadcrumbItem>
+              </Fragment>
+            );
+          })}
         </BreadcrumbList>
       </Breadcrumb>
 
