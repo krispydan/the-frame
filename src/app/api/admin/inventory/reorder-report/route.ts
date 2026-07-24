@@ -19,7 +19,7 @@ import { runDemandForecast, type ForecastResult, type Velocity } from "@/modules
  * Auth: x-admin-key: jaxy2026.
  */
 
-const VERSION = "v2-reorder-report";
+const VERSION = "v3-reorder-report";
 
 function toCsv(rows: ForecastResult[]): string {
   const header = [

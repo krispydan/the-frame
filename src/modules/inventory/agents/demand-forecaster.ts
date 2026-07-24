@@ -100,6 +100,31 @@ type RootAgg = {
   seedRate: number;
 };
 
+/**
+ * Average seasonal factor over a day-offset span from today. Sampled every
+ * 10 days — plenty for monthly-grain factors. Used to (a) DEseasonalize
+ * observed sell-through windows (negative offsets) and (b) REseasonalize
+ * over the future coverage window. Applying the current month's factor to
+ * the current month's actual sales — what v1 did — double-counts the season
+ * (July actuals × July 1.5 ≈ +50% phantom demand in peak).
+ */
+function avgFactorOverDays(
+  factors: Record<number, number>,
+  startOffsetDays: number,
+  endOffsetDays: number,
+): number {
+  if (endOffsetDays <= startOffsetDays) return 1;
+  let sum = 0;
+  let n = 0;
+  for (let d = startOffsetDays; d <= endOffsetDays; d += 10) {
+    const dt = new Date();
+    dt.setDate(dt.getDate() + d);
+    sum += factors[dt.getMonth() + 1] ?? 1;
+    n++;
+  }
+  return n > 0 ? sum / n : 1;
+}
+
 function stddev(values: number[]): number {
   if (values.length < 2) return 0;
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
@@ -219,8 +244,10 @@ export function runDemandForecast(
   const learned = getLearnedSeasonality();
   const seasonalitySource: "learned" | "default" = learned ? "learned" : "default";
   const factors = learned ?? DEFAULT_SEASONAL_FACTORS;
-  const currentMonth = new Date().getMonth() + 1;
-  const seasonalFactor = factors[currentMonth] ?? 1.0;
+  // Deseasonalization divisors for each observed window (trailing spans).
+  const obsFactor30 = avgFactorOverDays(factors, -30, 0);
+  const obsFactor60 = avgFactorOverDays(factors, -60, 0);
+  const obsFactor90 = avgFactorOverDays(factors, -90, 0);
 
   // Roots that sold recently but have no inventory row at all (e.g. never
   // synced) still deserve a line — surface them with zero stock.
@@ -268,10 +295,23 @@ export function runDemandForecast(
       else if (ratio < 0.85) trendDirection = "decelerating";
     }
 
-    const avgRate = (rate30 * 3 + rate60 * 2 + rate90 * 1) / 6;
-    const projectedWeeklyRate = Math.round(avgRate * seasonalFactor * 10) / 10;
-    const dailyRate = projectedWeeklyRate / 7;
-    const velocity = classifyVelocity(projectedWeeklyRate);
+    const leadDays = agg.productionLeadDays + agg.transitLeadDays;
+    const leadWeeks = leadDays / 7;
+
+    // Deseasonalized base rate (units/week at a "factor 1.0" month), then
+    // re-seasonalized: near-term (next ~6 weeks) drives stockout/urgency;
+    // the coverage-window average drives how much to buy.
+    const baseWeekly =
+      (rate30 / obsFactor30) * 0.5 +
+      (rate60 / obsFactor60) * (2 / 6) +
+      (rate90 / obsFactor90) * (1 / 6);
+    const nearFactor = avgFactorOverDays(factors, 0, 45);
+    const coverageFactor = avgFactorOverDays(factors, 0, leadDays + targetStockDays);
+    const nearWeekly = baseWeekly * nearFactor;
+    const projectedWeeklyRate = Math.round(nearWeekly * 10) / 10;
+    const dailyRate = nearWeekly / 7;
+    const velocity = classifyVelocity(Math.round(baseWeekly * 10) / 10);
+    const seasonalFactor = Math.round(coverageFactor * 100) / 100;
 
     const available = Math.max(0, agg.quantity - agg.reserved);
     const inc = incoming.get(root) ?? { units: 0, arrival: null };
@@ -297,22 +337,20 @@ export function runDemandForecast(
       }
     }
 
-    const leadDays = agg.productionLeadDays + agg.transitLeadDays;
-    const leadWeeks = leadDays / 7;
-
     // Safety stock from weekly demand variability. Thin history → assume
     // σ ≈ 60% of the weekly rate (typical for intermittent retail demand).
     const series = weeklySeries.get(root);
     const sigmaWeekly = series && series.filter((v) => v > 0).length >= 4
       ? stddev(series)
-      : projectedWeeklyRate * 0.6;
+      : nearWeekly * 0.6;
     const safetyStock = dailyRate > 0 ? Math.ceil(SERVICE_Z * sigmaWeekly * Math.sqrt(leadWeeks)) : 0;
 
-    // Net reorder need over lead time + target cover, minus what we have and
-    // what's already on the water.
+    // Net reorder need over lead time + target cover — demand priced at the
+    // coverage-window's seasonal level — minus what we have and what's
+    // already on the water.
     let recommendedReorderQty = 0;
     if (dailyRate > 0) {
-      const need = dailyRate * (leadDays + targetStockDays) + safetyStock - available - inc.units;
+      const need = (baseWeekly / 7) * coverageFactor * (leadDays + targetStockDays) + safetyStock - available - inc.units;
       if (need > 0) {
         let qty = Math.ceil(need / INNER_PACK) * INNER_PACK;
         if (qty < agg.moq) qty = agg.moq;
