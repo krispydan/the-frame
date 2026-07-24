@@ -16,7 +16,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Check, ChevronDown, ChevronRight, FileText, Glasses, Sparkles, Wand2, X } from "lucide-react";
+import { VideoPlayer } from "@/components/ui/video-player";
+import { ImageZoomDialog } from "@/components/ui/image-zoom";
+import { Check, ChevronDown, ChevronRight, FileText, Glasses, Sparkles, Wand2, X, ZoomIn } from "lucide-react";
 
 type Candidate = {
   productId: string;
@@ -67,6 +69,25 @@ function ProductThumb({ url, className = "h-11 w-11" }: { url?: string | null; c
   );
 }
 
+/**
+ * Small magnifier overlaid on a product tile — opens the image large so
+ * you can read the frame detail. Stops propagation so it doesn't also
+ * toggle the tile's selection.
+ */
+function ZoomButton({ onZoom }: { onZoom: (e: React.MouseEvent) => void }) {
+  return (
+    <span
+      role="button"
+      tabIndex={-1}
+      onClick={onZoom}
+      title="View larger"
+      className="absolute bottom-0.5 right-0.5 z-20 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition group-hover/thumb:opacity-100 hover:bg-black/80"
+    >
+      <ZoomIn className="h-3 w-3" />
+    </span>
+  );
+}
+
 const API = "/api/v1/marketing/media-match";
 
 export function SkuIdentifier() {
@@ -98,6 +119,8 @@ export function SkuIdentifier() {
   } | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetLoading, setSheetLoading] = useState(false);
+  // Click any product/crop image to inspect it large + zoom in.
+  const [zoom, setZoom] = useState<{ url: string; label: string } | null>(null);
   // Only auto-apply pre-selection once per item.
   const autoSelectedFor = useRef<string | null>(null);
 
@@ -470,22 +493,22 @@ export function SkuIdentifier() {
           <div className="grid grid-cols-1 lg:grid-cols-[230px_minmax(0,1fr)] gap-3 min-w-0">
             {/* Media */}
             <div className="space-y-1 min-w-0">
-              <div className="aspect-[9/16] max-w-[230px] mx-auto lg:mx-0 bg-muted rounded-lg overflow-hidden">
-                {item.previewUrl ? (
-                  <video
-                    key={item.mediaId}
-                    src={item.previewUrl}
-                    poster={item.mediaUrl ?? undefined}
-                    controls
-                    muted
-                    playsInline
-                    className="w-full h-full object-cover"
-                  />
-                ) : item.mediaUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={item.mediaUrl} alt={item.fileName} className="w-full h-full object-contain bg-white" />
-                ) : null}
-              </div>
+              {item.previewUrl ? (
+                <VideoPlayer
+                  key={item.mediaId}
+                  src={item.previewUrl}
+                  poster={item.mediaUrl}
+                  size="md"
+                  className="aspect-[9/16] max-w-[230px] mx-auto lg:mx-0 rounded-lg"
+                />
+              ) : (
+                <div className="aspect-[9/16] max-w-[230px] mx-auto lg:mx-0 bg-muted rounded-lg overflow-hidden">
+                  {item.mediaUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={item.mediaUrl} alt={item.fileName} className="w-full h-full object-contain bg-white" />
+                  ) : null}
+                </div>
+              )}
               <p className="text-center lg:text-left text-xs text-muted-foreground truncate">{item.fileName}</p>
               {item.currentProducts.length > 0 && (
                 <p className="text-center lg:text-left text-xs text-muted-foreground truncate">
@@ -557,10 +580,19 @@ export function SkuIdentifier() {
                     </Button>
                   </div>
                   {shapeOpen && (item.frameShapeCropUrls?.length ?? 0) > 0 && (
-                    <div className="flex items-center gap-1.5 overflow-x-auto rounded-md bg-muted/40 p-1" title="The exact crops sent to the AI (sampled across the clip)">
+                    <div className="flex items-center gap-1.5 overflow-x-auto rounded-md bg-muted/40 p-1" title="The exact crops sent to the AI (sampled across the clip) — click to enlarge">
                       {item.frameShapeCropUrls!.map((u, i) => (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img key={i} src={u} alt={`AI crop ${i + 1}`} className="h-10 w-auto rounded border bg-white object-contain" />
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => setZoom({ url: u, label: `AI input crop ${i + 1}` })}
+                          className="group/thumb relative shrink-0"
+                          title="Click to enlarge"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={u} alt={`AI crop ${i + 1}`} className="h-10 w-auto rounded border bg-white object-contain" />
+                          <ZoomButton onZoom={() => setZoom({ url: u, label: `AI input crop ${i + 1}` })} />
+                        </button>
                       ))}
                       <span className="shrink-0 px-1 text-[10px] text-muted-foreground">AI inputs</span>
                     </div>
@@ -573,7 +605,7 @@ export function SkuIdentifier() {
                           <button
                             key={c.productId}
                             onClick={() => toggle(c.productId)}
-                            className={`relative flex flex-col items-center gap-0.5 rounded-lg border p-1 text-center ${on ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted"}`}
+                            className={`group/thumb relative flex flex-col items-center gap-0.5 rounded-lg border p-1 text-center ${on ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted"}`}
                             title={`${c.productName} — ${c.confidence}%`}
                           >
                             <span className="absolute top-0.5 left-0.5 z-10 rounded bg-black/70 px-1 py-0.5 text-[9px] font-semibold text-white">
@@ -585,6 +617,14 @@ export function SkuIdentifier() {
                               </span>
                             )}
                             <ProductThumb url={c.imageUrl} className="h-12 w-full border-0" />
+                            {c.imageUrl && (
+                              <ZoomButton
+                                onZoom={(e) => {
+                                  e.stopPropagation();
+                                  setZoom({ url: c.imageUrl!, label: `${c.productName}${c.sku ? ` (${c.sku})` : ""} — ${c.confidence}% shape match` });
+                                }}
+                              />
+                            )}
                             <span className="w-full truncate text-[10px] font-medium">{c.productName}</span>
                           </button>
                         );
@@ -618,7 +658,7 @@ export function SkuIdentifier() {
                       <button
                         key={p.id}
                         onClick={() => toggle(p.id)}
-                        className={`relative flex flex-col items-center gap-1 rounded-lg border p-2 text-center ${on ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted"}`}
+                        className={`group/thumb relative flex flex-col items-center gap-1 rounded-lg border p-2 text-center ${on ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted"}`}
                         title={p.name ?? undefined}
                       >
                         {on && (
@@ -627,6 +667,14 @@ export function SkuIdentifier() {
                           </span>
                         )}
                         <ProductThumb url={p.imageUrl} className="h-12 w-full border-0" />
+                        {p.imageUrl && (
+                          <ZoomButton
+                            onZoom={(e) => {
+                              e.stopPropagation();
+                              setZoom({ url: p.imageUrl!, label: p.name ?? "Product" });
+                            }}
+                          />
+                        )}
                         <span className="w-full truncate text-xs">{p.name ?? "Unnamed"}</span>
                       </button>
                     );
@@ -691,6 +739,8 @@ export function SkuIdentifier() {
           </div>
         </>
       )}
+
+      {zoom && <ImageZoomDialog url={zoom.url} label={zoom.label} onClose={() => setZoom(null)} />}
     </div>
   );
 }

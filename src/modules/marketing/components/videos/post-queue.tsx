@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { VideoPlayer } from "@/components/ui/video-player";
 import {
   Check,
   Copy,
@@ -24,6 +25,7 @@ import {
   ExternalLink,
   Music,
   Pause,
+  Pencil,
   Play,
   RefreshCw,
   ShoppingBag,
@@ -463,32 +465,20 @@ function PostCard({ post, onChanged }: { post: Post; onChanged: () => void }) {
       <CardContent className="p-3 space-y-2">
         <div className="flex gap-3">
           <div className="w-24 shrink-0">
-            <div className="aspect-[9/16] rounded bg-muted overflow-hidden">
-              {post.videoUrl ? (
-                <video
-                  src={post.videoUrl}
-                  poster={post.posterUrl ?? undefined}
-                  controls
-                  muted
-                  preload="none"
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground text-center p-1">
+            <VideoPlayer
+              src={post.videoUrl}
+              poster={post.posterUrl}
+              size="sm"
+              className="aspect-[9/16] rounded-md ring-1 ring-border"
+              placeholder={
+                <span className="px-1 text-center text-[10px] text-muted-foreground">
                   {post.status === "failed" ? "render failed" : "rendering…"}
-                </div>
-              )}
-            </div>
+                </span>
+              }
+            />
           </div>
           <div className="flex-1 min-w-0 space-y-1.5">
             <div className="flex flex-wrap items-center gap-1">
-              <Link
-                href={`/marketing/videos/posts/${post.id}`}
-                className="mr-1 text-xs font-medium underline-offset-2 hover:underline"
-                title="Open the editor — caption, text overlay, AI edits, clip sequence"
-              >
-                Edit
-              </Link>
               <Badge variant={STATUS_VARIANT[post.status] ?? "outline"}>{post.status}</Badge>
               {post.scheduled_slot && (
                 <Badge variant="outline" className="text-[10px]">{SLOT_LABEL[post.scheduled_slot]}</Badge>
@@ -579,6 +569,11 @@ function PostCard({ post, onChanged }: { post: Post; onChanged: () => void }) {
 
         {/* Actions */}
         <div className="flex flex-wrap gap-1.5">
+          {post.status !== "posted" && (
+            <Button size="sm" variant="secondary" render={<Link href={`/marketing/videos/posts/${post.id}`} />}>
+              <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
+            </Button>
+          )}
           {post.videoUrl && (
             <Button
               size="sm"
