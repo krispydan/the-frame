@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Check, FileText, Glasses, Sparkles, Wand2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, FileText, Glasses, Sparkles, Wand2, X } from "lucide-react";
 
 type Candidate = {
   productId: string;
@@ -86,6 +86,8 @@ export function SkuIdentifier() {
   const [saving, setSaving] = useState(false);
   const [matching, setMatching] = useState(false);
   const [shaping, setShaping] = useState(false);
+  // Frame-shape suggestions panel open/collapsed (collapse to see the catalog).
+  const [shapeOpen, setShapeOpen] = useState(true);
   // The labelled product reference fed to the AI (for inspection).
   const [sheet, setSheet] = useState<{
     productCount: number;
@@ -467,14 +469,22 @@ export function SkuIdentifier() {
               {type === "clip" && (
                 <div className="shrink-0 space-y-2 rounded-lg border p-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
-                      <Glasses className="h-4 w-4" /> Frame shape
+                    <button
+                      onClick={() => setShapeOpen((o) => !o)}
+                      className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 text-left text-sm font-medium"
+                      title={shapeOpen ? "Collapse AI suggestions to see the full catalog" : "Show AI suggestions"}
+                    >
+                      {shapeOpen ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+                      <Glasses className="h-4 w-4" /> AI suggestions
                       {detectedShapes.map((s) => (
                         <Badge key={s.shape} variant="secondary" className="capitalize">
                           {s.shape} · {s.confidence}%
                         </Badge>
                       ))}
-                    </span>
+                      {!shapeOpen && shapeMatches.length > 0 && (
+                        <span className="text-xs font-normal text-muted-foreground">{shapeMatches.length} suggestions hidden</span>
+                      )}
+                    </button>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -486,7 +496,7 @@ export function SkuIdentifier() {
                       {shaping ? "…" : shapeMatches.length > 0 ? "Re-run" : "Suggest"}
                     </Button>
                   </div>
-                  {(item.frameShapeCropUrls?.length ?? 0) > 0 && (
+                  {shapeOpen && (item.frameShapeCropUrls?.length ?? 0) > 0 && (
                     <div className="flex items-center gap-1.5 overflow-x-auto rounded-md bg-muted/40 p-1" title="The exact crops sent to the AI (sampled across the clip)">
                       {item.frameShapeCropUrls!.map((u, i) => (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -495,7 +505,7 @@ export function SkuIdentifier() {
                       <span className="shrink-0 px-1 text-[10px] text-muted-foreground">AI inputs</span>
                     </div>
                   )}
-                  {shapeMatches.length > 0 ? (
+                  {!shapeOpen ? null : shapeMatches.length > 0 ? (
                     <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5">
                       {shapeMatches.map((c) => {
                         const on = selected.includes(c.productId);
