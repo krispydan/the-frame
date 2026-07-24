@@ -88,6 +88,9 @@ export function SkuIdentifier() {
   const [shaping, setShaping] = useState(false);
   // Frame-shape suggestions panel open/collapsed (collapse to see the catalog).
   const [shapeOpen, setShapeOpen] = useState(true);
+  // Recently decided items (this session) so a mis-tag is easy to reopen —
+  // once tagged, an item leaves the queue and is otherwise hard to find.
+  const [recents, setRecents] = useState<Array<{ mediaId: string; fileName: string; mediaUrl: string | null; label: string }>>([]);
   // The labelled product reference fed to the AI (for inspection).
   const [sheet, setSheet] = useState<{
     productCount: number;
@@ -236,6 +239,35 @@ export function SkuIdentifier() {
     autoSelectedFor.current = null;
   };
 
+  /** Record a just-decided item at the top of the recents strip. */
+  const pushRecent = (decided: Item, label: string) => {
+    setRecents((prev) => [
+      { mediaId: decided.mediaId, fileName: decided.fileName, mediaUrl: decided.mediaUrl, label },
+      ...prev.filter((r) => r.mediaId !== decided.mediaId),
+    ].slice(0, 12));
+  };
+
+  /** Reopen a decided item (fetched by id, ignoring the queue filter) so
+   *  a mis-identification can be corrected. */
+  const reopen = async (mediaId: string) => {
+    // Already in the list? just select it.
+    if (items.some((i) => i.mediaId === mediaId)) {
+      setCurrentId(mediaId);
+      autoSelectedFor.current = null;
+      return;
+    }
+    const res = await fetch(`${API}?type=${type}&mediaId=${encodeURIComponent(mediaId)}`);
+    const d = await res.json();
+    const fetched = (d.items ?? [])[0] as Item | undefined;
+    if (!fetched) {
+      toast.error("Couldn't reopen that item");
+      return;
+    }
+    setItems((prev) => [fetched, ...prev.filter((i) => i.mediaId !== mediaId)]);
+    setCurrentId(mediaId);
+    autoSelectedFor.current = null;
+  };
+
   /** Skip without deciding — but persist an edited note/category so it isn't lost. */
   const skip = async () => {
     const noteChanged = item && notes !== (item.notes ?? "");
@@ -268,6 +300,10 @@ export function SkuIdentifier() {
     });
     setSaving(false);
     if (res.ok) {
+      const label = noProduct
+        ? "no product"
+        : selected.map((pid) => products.find((p) => p.id === pid)?.name ?? "?").join(", ");
+      pushRecent(item, label);
       toast.success(noProduct ? "Marked: no product visible" : "Products saved");
       advance();
     } else {
@@ -375,6 +411,30 @@ export function SkuIdentifier() {
         </Card>
       )}
 
+      {/* Recently decided — reopen to fix a mis-tag (an item leaves the
+          queue once tagged, so this is how you find it again). */}
+      {recents.length > 0 && (
+        <div className="flex items-center gap-1.5 overflow-x-auto rounded-md border bg-muted/30 p-1.5">
+          <span className="shrink-0 text-xs font-medium text-muted-foreground">Just tagged — click to fix:</span>
+          {recents.map((r) => (
+            <button
+              key={r.mediaId}
+              onClick={() => reopen(r.mediaId)}
+              className={`flex shrink-0 items-center gap-1.5 rounded border px-1.5 py-1 text-left hover:bg-muted ${r.mediaId === currentId ? "border-primary bg-primary/5" : "bg-background"}`}
+              title={`${r.fileName} → ${r.label} · click to reopen and re-tag`}
+            >
+              <span className="h-8 w-6 shrink-0 overflow-hidden rounded bg-muted">
+                {r.mediaUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={r.mediaUrl} alt="" className="h-full w-full object-cover" />
+                ) : null}
+              </span>
+              <span className="max-w-[120px] truncate text-[11px]">{r.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {items.length === 0 ? (
         <Card>
           <CardContent className="p-10 text-center text-muted-foreground">
@@ -437,7 +497,7 @@ export function SkuIdentifier() {
             {/* Catalog picker — fixed-height column on desktop (a definite
                 height lets flexbox actually shrink the catalog list); only
                 the catalog scrolls inside, so actions stay visible. */}
-            <div className="flex flex-col gap-2 min-w-0 lg:h-[calc(100vh-15rem)] lg:min-h-[480px]">
+            <div className="flex flex-col gap-2 min-w-0 lg:h-[calc(100vh-12.5rem)] lg:min-h-[480px]">
               {/* Filename match (pre-ticked) */}
               {fileMatches.length > 0 && (
                 <div className="shrink-0 space-y-1.5">
@@ -467,7 +527,7 @@ export function SkuIdentifier() {
 
               {/* Frame-shape suggestions (AI, clips only) */}
               {type === "clip" && (
-                <div className="shrink-0 space-y-2 rounded-lg border p-2.5">
+                <div className="shrink-0 space-y-1.5 rounded-lg border p-2">
                   <div className="flex items-center justify-between gap-2">
                     <button
                       onClick={() => setShapeOpen((o) => !o)}
@@ -500,23 +560,23 @@ export function SkuIdentifier() {
                     <div className="flex items-center gap-1.5 overflow-x-auto rounded-md bg-muted/40 p-1" title="The exact crops sent to the AI (sampled across the clip)">
                       {item.frameShapeCropUrls!.map((u, i) => (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img key={i} src={u} alt={`AI crop ${i + 1}`} className="h-14 w-auto rounded border bg-white object-contain" />
+                        <img key={i} src={u} alt={`AI crop ${i + 1}`} className="h-10 w-auto rounded border bg-white object-contain" />
                       ))}
                       <span className="shrink-0 px-1 text-[10px] text-muted-foreground">AI inputs</span>
                     </div>
                   )}
                   {!shapeOpen ? null : shapeMatches.length > 0 ? (
-                    <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5">
+                    <div className="grid grid-cols-5 gap-1 md:grid-cols-10">
                       {shapeMatches.map((c) => {
                         const on = selected.includes(c.productId);
                         return (
                           <button
                             key={c.productId}
                             onClick={() => toggle(c.productId)}
-                            className={`relative flex flex-col items-center gap-1 rounded-lg border p-2 text-center ${on ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted"}`}
-                            title={c.productName}
+                            className={`relative flex flex-col items-center gap-0.5 rounded-lg border p-1 text-center ${on ? "border-primary bg-primary/5 ring-1 ring-primary" : "hover:bg-muted"}`}
+                            title={`${c.productName} — ${c.confidence}%`}
                           >
-                            <span className="absolute top-0.5 left-0.5 z-10 rounded bg-black/70 px-1 py-0.5 text-[10px] font-semibold text-white">
+                            <span className="absolute top-0.5 left-0.5 z-10 rounded bg-black/70 px-1 py-0.5 text-[9px] font-semibold text-white">
                               {c.confidence}%
                             </span>
                             {on && (
@@ -524,8 +584,8 @@ export function SkuIdentifier() {
                                 <Check className="h-3.5 w-3.5" />
                               </span>
                             )}
-                            <ProductThumb url={c.imageUrl} className="h-16 w-full border-0" />
-                            <span className="w-full truncate text-xs font-medium">{c.productName}</span>
+                            <ProductThumb url={c.imageUrl} className="h-12 w-full border-0" />
+                            <span className="w-full truncate text-[10px] font-medium">{c.productName}</span>
                           </button>
                         );
                       })}
