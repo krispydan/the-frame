@@ -33,7 +33,8 @@ function loadPost(id: string) {
 
   const clipStmt = sqlite.prepare(`
     SELECT c.id, c.file_name AS fileName, c.duration_sec AS durationSec,
-           c.poster_path AS posterPath, c.audio_mode AS audioMode, cat.slug AS category
+           c.poster_path AS posterPath, c.normalized_path AS normalizedPath,
+           c.audio_mode AS audioMode, cat.slug AS category
     FROM marketing_video_clips c
     LEFT JOIN marketing_video_clip_categories cat ON cat.id = c.category_id
     WHERE c.id = ?
@@ -53,6 +54,7 @@ function loadPost(id: string) {
         id: cid,
         ...clip,
         posterUrl: clip?.posterPath ? videoUrl(String(clip.posterPath)) : null,
+        previewUrl: clip?.normalizedPath ? videoUrl(String(clip.normalizedPath)) : null,
       };
     }),
   };

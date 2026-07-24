@@ -12,7 +12,7 @@
  *     the video re-renders in the background with the new sequence.
  */
 
-import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -21,7 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   ArrowDown, ArrowLeft, ArrowUp, Clapperboard, Loader2, MessageSquare,
-  Plus, RefreshCw, Send, Trash2, X,
+  Plus, RefreshCw, Scissors, Send, Trash2, X,
 } from "lucide-react";
 
 type OnScreenText = { text: string; timing: string; placement: string };
@@ -40,6 +40,7 @@ type PostClip = {
   fileName?: string;
   durationSec?: number | null;
   posterUrl?: string | null;
+  previewUrl?: string | null;
   category?: string | null;
 };
 
@@ -96,6 +97,12 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
   const [pickerOpen, setPickerOpen] = useState(false);
   const [library, setLibrary] = useState<LibClip[]>([]);
   const [libSearch, setLibSearch] = useState("");
+  // Trim dialog: which sequence index is being trimmed + the in/out points.
+  const [trimIdx, setTrimIdx] = useState<number | null>(null);
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(0);
+  const [trimming, setTrimming] = useState(false);
+  const trimVideoRef = useRef<HTMLVideoElement | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch(api);
@@ -224,6 +231,41 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
       }
     } finally {
       setChatBusy(false);
+    }
+  };
+
+  const openTrim = (i: number) => {
+    const c = clipSeq[i];
+    setTrimIdx(i);
+    setTrimStart(0);
+    setTrimEnd(Math.round((c.durationSec ?? 0) * 10) / 10);
+  };
+
+  const applyTrim = async () => {
+    if (trimIdx === null) return;
+    const target = clipSeq[trimIdx];
+    setTrimming(true);
+    try {
+      const res = await fetch(`/api/v1/marketing/videos/clips/${target.id}/trim`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ startSec: trimStart, endSec: trimEnd }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        toast.error(d.error ?? "Trim failed");
+        return;
+      }
+      const c = d.clip as { id: string; fileName: string; durationSec: number | null; posterUrl: string | null; previewUrl: string | null; category: string | null };
+      setClipSeq((prev) => prev.map((row, j) => (j === trimIdx ? { position: row.position, ...c } : row)));
+      setTrimIdx(null);
+      toast.success(
+        d.deduped
+          ? "That exact trim already existed — swapped it in. Hit Save & re-render."
+          : "Trimmed clip ready — hit Save & re-render to apply it.",
+      );
+    } finally {
+      setTrimming(false);
     }
   };
 
@@ -448,6 +490,15 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
                         {(c.durationSec ?? 0).toFixed(1)}s{c.category ? ` · ${c.category}` : ""}
                       </span>
                     </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openTrim(i)}
+                      disabled={!c.previewUrl}
+                      title={c.previewUrl ? "Trim — cut this clip at a different point" : "No preview available to trim"}
+                    >
+                      <Scissors className="h-4 w-4" />
+                    </Button>
                     <Button variant="ghost" size="sm" onClick={() => moveClip(i, -1)} disabled={i === 0}>
                       <ArrowUp className="h-4 w-4" />
                     </Button>
@@ -482,6 +533,78 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
                 </Button>
                 {clipsDirty && <span className="text-xs text-amber-600">Unsaved changes — the video will re-render on save.</span>}
               </div>
+
+              {/* Trim dialog */}
+              {trimIdx !== null && clipSeq[trimIdx] && (
+                <div className="space-y-2 rounded-lg border p-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="flex items-center gap-1.5 text-xs font-medium">
+                      <Scissors className="h-3.5 w-3.5" /> Trim “{clipSeq[trimIdx].fileName}”
+                    </p>
+                    <Button variant="ghost" size="sm" onClick={() => setTrimIdx(null)}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="flex flex-wrap items-start gap-3">
+                    <video
+                      ref={trimVideoRef}
+                      key={clipSeq[trimIdx].id}
+                      src={clipSeq[trimIdx].previewUrl ?? undefined}
+                      controls
+                      muted
+                      playsInline
+                      className="aspect-[9/16] w-36 rounded bg-muted object-cover"
+                    />
+                    <div className="min-w-[240px] flex-1 space-y-2">
+                      {(
+                        [
+                          ["Start", trimStart, setTrimStart],
+                          ["End", trimEnd, setTrimEnd],
+                        ] as Array<[string, number, (v: number) => void]>
+                      ).map(([label, value, setter]) => (
+                        <div key={label} className="space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="w-9 text-xs font-medium">{label}</span>
+                            <input
+                              type="range"
+                              min={0}
+                              max={clipSeq[trimIdx].durationSec ?? 0}
+                              step={0.1}
+                              value={value}
+                              onChange={(e) => setter(Number(e.target.value))}
+                              className="flex-1"
+                            />
+                            <span className="w-10 text-right text-xs tabular-nums">{value.toFixed(1)}s</span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-6 px-1.5 text-[11px]"
+                              onClick={() => {
+                                const t = trimVideoRef.current?.currentTime ?? 0;
+                                setter(Math.round(t * 10) / 10);
+                              }}
+                              title="Use the player's current position"
+                            >
+                              playhead
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                      <p className="text-xs text-muted-foreground">
+                        Keeps {Math.max(0, trimEnd - trimStart).toFixed(1)}s of {(clipSeq[trimIdx].durationSec ?? 0).toFixed(1)}s.
+                        The original clip stays in the library; the trim becomes a new clip in this position.
+                      </p>
+                      <div className="flex gap-2">
+                        <Button size="sm" onClick={applyTrim} disabled={trimming || trimEnd - trimStart < 1}>
+                          {trimming ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Scissors className="h-4 w-4 mr-1" />}
+                          {trimming ? "Trimming…" : "Apply trim"}
+                        </Button>
+                        {trimEnd - trimStart < 1 && <span className="self-center text-xs text-amber-600">Minimum 1s</span>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Clip picker */}
               {pickerOpen && (
