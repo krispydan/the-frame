@@ -10,11 +10,13 @@
  * changes persist per user. The server only returns datasets the role may see.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useUser } from "@/hooks/use-user";
 import { Button } from "@/components/ui/button";
 import { WidgetFrame } from "@/components/dashboard/widget-frame";
 import { WIDGETS, SIZE_CLASS, groupByCategory, type WidgetId } from "@/modules/dashboard/widgets";
+import { HEAVY_WIDGETS } from "@/modules/dashboard/lib/metrics";
+import { KpiSkeleton, WidgetSkeleton } from "@/components/dashboard/skeletons";
 import {
   type Bundle,
   KpisWidget, RevenueTrendWidget, ChannelMixWidget, TopSellersWidget, MoversWidget,
@@ -51,7 +53,12 @@ const RANGES: { id: string; label: string }[] = [
 export default function DashboardPage() {
   const { user } = useUser();
   const [range, setRange] = useState("30d");
-  const [data, setData] = useState<Bundle | null>(null);
+  // Two-phase load: `core` is cheap indexed aggregates and paints the page;
+  // `heavy` (product performance, FIFO P&L, business health) scans whole
+  // tables and arrives behind per-card skeletons. Both are cached server-side.
+  const [core, setCore] = useState<Bundle | null>(null);
+  const [heavy, setHeavy] = useState<Bundle | null>(null);
+  const [heavyPending, setHeavyPending] = useState(true);
   const [loading, setLoading] = useState(true);
   const [layout, setLayout] = useState<WidgetId[]>([]);
   const [allowed, setAllowed] = useState<WidgetId[]>([]);
@@ -87,17 +94,46 @@ export default function DashboardPage() {
       .catch(() => {});
   }, []);
 
-  const loadData = useCallback(() => {
-    setLoading(true);
-    fetch(`/api/v1/dashboard?range=${range}`)
-      .then((r) => r.json())
-      .then((d) => setData(d.error ? null : d))
-      .finally(() => setLoading(false));
-  }, [range]);
+  const [nonce, setNonce] = useState(0);
+  const loadData = useCallback(() => setNonce((n) => n + 1), []);
 
+  // Both parts are requested in parallel; core resolves first and paints.
+  // Nothing setStates synchronously in the effect body — state only settles in
+  // the async continuations, so switching range keeps the old cards on screen
+  // (stale-while-revalidate) instead of flashing an empty page.
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    let cancelled = false;
+    const fresh = nonce > 0 ? "&fresh=1" : "";
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/v1/dashboard?range=${range}&part=core${fresh}`);
+        const d = await res.json();
+        if (!cancelled) setCore(d.error ? null : d);
+      } catch { /* keep prior */ } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/v1/dashboard?range=${range}&part=heavy${fresh}`);
+        const d = await res.json();
+        if (!cancelled) setHeavy(d.error ? null : d);
+      } catch { /* keep prior */ } finally {
+        if (!cancelled) setHeavyPending(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [range, nonce]);
+
+  // Merge the two payloads into the single bundle the widgets consume.
+  const data = useMemo<Bundle | null>(() => {
+    if (!core && !heavy) return null;
+    const base = core ?? heavy!;
+    return { ...base, widgets: { ...(core?.widgets ?? {}), ...(heavy?.widgets ?? {}) } };
+  }, [core, heavy]);
 
   const persist = useCallback((next: WidgetId[]) => {
     setLayout(next);
@@ -156,8 +192,14 @@ export default function DashboardPage() {
               </button>
             ))}
           </div>
-          <Button variant="ghost" size="sm" onClick={loadData} aria-label="Refresh">
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={loadData}
+            aria-label="Refresh"
+            title={core?.cached ? "Showing cached figures — click to recompute" : "Refresh"}
+          >
+            <RefreshCw className={`h-4 w-4 ${loading || heavyPending ? "animate-spin" : ""}`} />
           </Button>
           <Button variant={customizing ? "default" : "outline"} size="sm" onClick={() => setCustomizing((v) => !v)}>
             {customizing ? <><Check className="mr-1 h-4 w-4" /> Done</> : <><Settings2 className="mr-1 h-4 w-4" /> Customize</>}
@@ -190,10 +232,23 @@ export default function DashboardPage() {
 
       {/* Grid */}
       {loading && !data ? (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-48 animate-pulse rounded-xl border bg-muted/40" />
-          ))}
+        // First paint: mirror the real layout (KPI strip + a section of cards)
+        // so nothing jumps when the data lands.
+        <div className="space-y-6">
+          <KpiSkeleton />
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 border-b pb-1.5">
+              <div className="h-4 w-32 animate-pulse rounded bg-muted" />
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="rounded-xl border bg-card">
+                  <div className="border-b px-4 py-2.5"><div className="h-4 w-28 animate-pulse rounded bg-muted" /></div>
+                  <div className="p-4"><WidgetSkeleton widgetId="default" /></div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       ) : (
         <div className="space-y-6">
@@ -240,6 +295,10 @@ export default function DashboardPage() {
                           }
                         : {};
 
+                      // A heavy widget whose payload hasn't arrived yet shows
+                      // its own shaped skeleton rather than blocking the page.
+                      const awaitingHeavy = HEAVY_WIDGETS.includes(id) && heavyPending && !heavy;
+
                       // KPI strip renders full-width without the card frame.
                       if (id === "kpis") {
                         return (
@@ -266,7 +325,7 @@ export default function DashboardPage() {
                             onHide={() => hide(id)}
                             className="h-full"
                           >
-                            <Comp data={data} />
+                            {awaitingHeavy ? <WidgetSkeleton widgetId={id} /> : <Comp data={data} />}
                           </WidgetFrame>
                         </div>
                       );
