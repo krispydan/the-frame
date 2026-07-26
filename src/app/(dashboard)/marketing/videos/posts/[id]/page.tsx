@@ -21,8 +21,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { VideoPlayer } from "@/components/ui/video-player";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
+import { lintRetention, RETENTION_OPTIMIZER_FEEDBACK } from "@/modules/marketing/lib/video/retention-lint";
 import {
-  ArrowLeft, ArrowRight, Clapperboard, Crop, FastForward, Focus, Loader2,
+  ArrowLeft, ArrowRight, Clapperboard, Crop, FastForward, Focus, Gauge, Loader2,
   MessageSquare, Plus, RefreshCw, Rewind, Scissors, Send, X,
 } from "lucide-react";
 
@@ -195,6 +196,19 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
     [clipSeq],
   );
 
+  // Deterministic retention checks on the live edit (engine #5).
+  const retentionIssues = useMemo(
+    () =>
+      lintRetention({
+        hook: instr.hook,
+        captionLength: caption.length,
+        onScreenTextCount: instr.onScreenText?.length ?? 0,
+        clipDurations: clipSeq.map((c) => c.durationSec ?? 0),
+        totalDurationSec: totalDuration,
+      }),
+    [instr.hook, instr.onScreenText, caption, clipSeq, totalDuration],
+  );
+
   const saveClips = async () => {
     if (!clipsDirty || clipSeq.length === 0) return;
     const ok = await patch({ clipIds: clipSeq.map((c) => c.id) }, "Clip sequence saved — re-rendering in the background");
@@ -250,6 +264,29 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
         setChatThread((t) => [...t, { role: "ai", text: "✓ Updated the caption + instructions — review below." }]);
       } else {
         setChatThread((t) => [...t, { role: "ai", text: `⚠ ${d.error ?? "Couldn't apply that."}` }]);
+      }
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
+  // Engine #5 — one-click "tighten for retention" via the revise endpoint.
+  const runOptimizer = async () => {
+    if (chatBusy) return;
+    setChatThread((t) => [...t, { role: "you", text: "Tighten this for retention." }]);
+    setChatBusy(true);
+    try {
+      const res = await fetch(`${api}/revise-copy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback: RETENTION_OPTIMIZER_FEEDBACK }),
+      });
+      const d = await res.json();
+      if (res.ok) {
+        await load();
+        setChatThread((t) => [...t, { role: "ai", text: "✓ Tightened the hook + caption for watch time — review below." }]);
+      } else {
+        setChatThread((t) => [...t, { role: "ai", text: `⚠ ${d.error ?? "Couldn't optimize."}` }]);
       }
     } finally {
       setChatBusy(false);
@@ -767,6 +804,27 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
                   {chatBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </Button>
               </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="outline" onClick={runOptimizer} disabled={chatBusy} title="Sharpen the hook + caption for watch time">
+                  <Gauge className="h-3.5 w-3.5 mr-1" /> Tighten for retention
+                </Button>
+                {/* Vitality checks — deterministic, live */}
+                {retentionIssues.length === 0 ? (
+                  <span className="text-xs text-emerald-600">✓ Vitality checks pass</span>
+                ) : (
+                  <span className="text-xs text-muted-foreground">{retentionIssues.filter((i) => i.level === "warn").length} to fix · {retentionIssues.filter((i) => i.level === "tip").length} tips</span>
+                )}
+              </div>
+              {retentionIssues.length > 0 && (
+                <ul className="space-y-1 rounded-md border bg-muted/30 p-2 text-xs">
+                  {retentionIssues.map((i) => (
+                    <li key={i.code} className="flex items-start gap-1.5">
+                      <span className={i.level === "warn" ? "text-amber-600" : "text-muted-foreground"}>{i.level === "warn" ? "⚠" : "○"}</span>
+                      <span className="text-muted-foreground">{i.message}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </CardContent>
           </Card>
 
