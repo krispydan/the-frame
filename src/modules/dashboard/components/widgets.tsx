@@ -17,7 +17,15 @@ import {
   AlertTriangle, Phone, Mail, Facebook, Sparkles, Activity as ActivityIcon,
 } from "lucide-react";
 
-export type Bundle = { role: string; range: string; widgets: Record<string, unknown> };
+export type Bundle = {
+  role: string;
+  range: string;
+  widgets: Record<string, unknown>;
+  /** True when the server served this from its stale-while-revalidate cache. */
+  cached?: boolean;
+  /** When the payload was actually computed (epoch ms). */
+  builtAt?: number;
+};
 
 const g = <T,>(b: Bundle, k: string): T | undefined => b.widgets[k] as T | undefined;
 

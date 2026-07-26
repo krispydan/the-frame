@@ -222,10 +222,25 @@ function buildActivity() {
 
 // ── orchestrator ──
 
-export function buildDashboard(role: string, range: Range) {
+/**
+ * Widgets split by cost. "core" widgets are simple indexed aggregates and
+ * return in milliseconds; "heavy" ones scan whole tables (product performance
+ * resolves every order line; FIFO P&L and business health run many queries).
+ * The client requests them separately so the page paints immediately and the
+ * expensive cards fill in behind their own skeletons.
+ */
+export type Part = "core" | "heavy" | "all";
+
+/** Widget ids served by the heavy part. */
+export const HEAVY_WIDGETS: WidgetId[] = ["top-sellers", "movers", "finance", "business-health"];
+
+export function buildDashboard(role: string, range: Range, part: Part = "all") {
   const { start, priorStart, priorEnd, days } = rangeStart(range);
   const now = new Date().toISOString();
-  const has = (id: WidgetId) => canSeeWidget(role, id);
+  const wantCore = part === "core" || part === "all";
+  const wantHeavy = part === "heavy" || part === "all";
+  const has = (id: WidgetId) =>
+    canSeeWidget(role, id) && (HEAVY_WIDGETS.includes(id) ? wantHeavy : wantCore);
 
   const widgets: Record<string, unknown> = {};
   // Each builder is isolated: a missing table or query error blanks that one
@@ -238,7 +253,7 @@ export function buildDashboard(role: string, range: Range) {
   };
 
   // KPIs are always computed (the strip adapts to role client-side).
-  safe("kpis", () => buildKpis(start, priorStart, priorEnd), null);
+  if (wantCore) safe("kpis", () => buildKpis(start, priorStart, priorEnd), null);
 
   if (has("revenue-trend")) safe("revenueTrend", () => buildRevenueTrend(start, days), []);
   if (has("channel-mix")) safe("channelMix", () => buildChannelMix(start), []);
@@ -255,5 +270,5 @@ export function buildDashboard(role: string, range: Range) {
   if (has("business-health")) safe("businessHealth", () => calculateBusinessHealth(), { error: "unavailable" });
   if (has("activity")) safe("activity", () => buildActivity(), []);
 
-  return { role, range, generatedAt: now, widgets };
+  return { role, range, part, generatedAt: now, widgets };
 }
