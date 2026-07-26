@@ -45,6 +45,8 @@ export const AI_DOCS: DocMeta[] = [
   { slug: "month-plan-prompt", category: "prompt", title: "Month planner", description: "Proposes one brief per slot across a planning window.", file: path.join(PROMPTS_DIR, "month-plan-prompt.md") },
   { slug: "video-caption-prompt", category: "prompt", title: "Video captions (Remix Studio)", description: "Caption + hashtags + manual posting checklist for generated TikTok/IG videos.", file: path.join(PROMPTS_DIR, "video-caption-prompt.md") },
   { slug: "brand-bible", category: "brand", title: "Brand bible", description: "The full brand voice + rules (drives retail voice).", file: path.join(BRAND_DIR, "brand-bible.md") },
+  { slug: "audience-profile", category: "brand", title: "Audience profile (video)", description: "Who every generated video speaks to — injected into all video copy. The backbone of video vitality.", file: path.join(BRAND_DIR, "audience-profile.md") },
+  { slug: "content-pillars", category: "brand", title: "Content pillars (video)", description: "The recurring video themes + hook energy per pillar. Steers every video's angle.", file: path.join(BRAND_DIR, "content-pillars.md") },
   { slug: "wholesale-voice", category: "brand", title: "Wholesale voice", description: "Voice + rules for wholesale (Christina) emails.", file: path.join(BRAND_DIR, "wholesale-voice.md") },
   { slug: "visual-guidelines", category: "brand", title: "Visual guidelines", description: "Brand visual system reference.", file: path.join(BRAND_DIR, "visual-guidelines.md") },
   { slug: "photography-aesthetic", category: "brand", title: "Photography aesthetic", description: "Locked into every image brief so renders stay on-brand.", file: path.join(BRAND_DIR, "photography-aesthetic.md") },

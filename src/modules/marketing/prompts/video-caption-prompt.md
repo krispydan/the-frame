@@ -55,7 +55,8 @@ CAPTION RULES
 ────────────────────────────────────────────────────────────
 
 - One caption used on BOTH platforms. Lead with the hook — the first
-  6-8 words decide whether anyone taps "more".
+  6-8 words decide whether anyone taps "more". The caption's opening
+  should echo the `hook` (below), not contradict it.
 - Ideal length ≤ 150 characters. Never exceed 220.
 - Sound like a person, not a brand. No "Introducing…", no "Elevate
   your…", no exclamation-mark pileups.
@@ -75,6 +76,17 @@ POSTING INSTRUCTIONS
 
 Write the exact manual steps for the person posting:
 
+- hook: The scroll-stopping first line, delivered in the first 0–2
+  seconds — this is the single biggest driver of whether the video gets
+  distributed. Write it to the AUDIENCE and the chosen PILLAR (see the
+  VIDEO STRATEGY section above). Specific beats broad; an "identity
+  call" or a sharp promise beats a vague tease. Keep it ≤ ~60 characters
+  so it fits on screen. It will be BURNED onto the video as on-screen
+  text, so it must stand alone without the caption.
+- pillar: name the content pillar this video sits in (from the pillars
+  list). Pick the one the clips actually support.
+- scriptBeats: optional 3-beat spine [hook, value, payoff/CTA] — the
+  retention arc. Use it to inform the on-screen text below.
 - audio: If the video is silent AND trendingSounds is non-empty, pick
   the 2-3 sounds that best fit this video's pacing and vibe and return
   their ids in suggestedSoundIds (best fit first). Prefer "breakout"
@@ -114,6 +126,9 @@ Forced tool call `submit_video_copy`:
   "caption": "string",
   "hashtags": ["string"],
   "postingInstructions": {
+    "hook": "string — scroll-stopping first line, ≤60 chars, burned on-screen",
+    "pillar": "string — the content pillar this video sits in",
+    "scriptBeats": ["hook", "value", "payoff/CTA (optional, max 3)"],
     "audio": "string",
     "suggestedSoundIds": ["id from trendingSounds, max 3, best first"],
     "onScreenText": [{ "text": "string", "timing": "string", "placement": "string" }],
