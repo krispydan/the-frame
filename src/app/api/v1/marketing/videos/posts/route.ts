@@ -66,7 +66,8 @@ export async function GET(request: NextRequest) {
     const clipIds = JSON.parse(String(row.clip_ids || "[]")) as string[];
     return {
       ...row,
-      videoUrl: row.file_path ? videoUrl(String(row.file_path)) : null,
+      // Prefer the hook-burned variant; fall back to the clean render.
+      videoUrl: (row.burned_path || row.file_path) ? videoUrl(String(row.burned_path || row.file_path)) : null,
       posterUrl: row.poster_path ? videoUrl(String(row.poster_path)) : null,
       hashtags: row.hashtags ? JSON.parse(String(row.hashtags)) : [],
       instructions: row.instructions ? JSON.parse(String(row.instructions)) : null,

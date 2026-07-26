@@ -54,6 +54,12 @@ try {
   sqlite.exec("ALTER TABLE marketing_seo_keywords ADD COLUMN difficulty INTEGER");
 } catch { /* column already exists */ }
 
+// Video hook burn-in (vitality backbone): the hook line baked onto the
+// render. filePath stays clean; burnedPath is the derived, served file.
+try { sqlite.exec("ALTER TABLE marketing_video_posts ADD COLUMN burn_hook INTEGER DEFAULT 1"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE marketing_video_posts ADD COLUMN burned_path TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE marketing_video_posts ADD COLUMN burned_hook TEXT"); } catch { /* exists */ }
+
 // ── Retire legacy single-value attribute columns on catalog_products ──
 // These are now derived from catalog_tags (see curated-attributes.ts).
 // SQLite supports DROP COLUMN since 3.35; throws if already gone.

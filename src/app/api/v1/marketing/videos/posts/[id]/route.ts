@@ -42,7 +42,11 @@ function loadPost(id: string) {
   const clipIds = JSON.parse(String(row.clip_ids || "[]")) as string[];
   return {
     ...row,
-    videoUrl: row.file_path ? videoUrl(String(row.file_path)) : null,
+    // Prefer the hook-burned variant; fall back to the clean render.
+    videoUrl: (row.burned_path || row.file_path) ? videoUrl(String(row.burned_path || row.file_path)) : null,
+    cleanVideoUrl: row.file_path ? videoUrl(String(row.file_path)) : null,
+    burnHook: row.burn_hook == null ? true : row.burn_hook === 1,
+    hookBurned: Boolean(row.burned_path),
     posterUrl: row.poster_path ? videoUrl(String(row.poster_path)) : null,
     hashtags: row.hashtags ? JSON.parse(String(row.hashtags)) : [],
     instructions: row.instructions ? JSON.parse(String(row.instructions)) : null,
@@ -91,6 +95,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     }
     updates.instructions = JSON.stringify(body.instructions);
   }
+  if (body.burnHook !== undefined) updates.burnHook = body.burnHook ? 1 : 0;
 
   // ── Mini editor: replace the clip sequence → reset render + re-render ──
   if (body.clipIds !== undefined) {
@@ -132,6 +137,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     updates.filePath = null;
     updates.posterPath = null;
     updates.sizeBytes = null;
+    updates.burnedPath = null;
+    updates.burnedHook = null;
     updates.status = "queued";
     updates.error = null;
     rerenderQueued = true;
@@ -201,6 +208,10 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       { postId: id, skipCopy: Boolean(existing.caption) },
       { priority: 2 },
     );
+  } else if ((body.instructions !== undefined || body.burnHook !== undefined) && existing.filePath) {
+    // Hook text or the burn toggle changed on an already-rendered post —
+    // re-bake the on-screen hook (background) without a full re-render.
+    jobQueue.enqueue("marketing.video.burn-hook", "marketing", { postId: id }, { priority: 2 });
   }
 
   return NextResponse.json({ post: loadPost(id), rerenderQueued });
@@ -225,6 +236,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
 
   if (post.filePath) await deleteVideo(post.filePath).catch(() => {});
   if (post.posterPath) await deleteVideo(post.posterPath).catch(() => {});
+  if (post.burnedPath) await deleteVideo(post.burnedPath).catch(() => {});
 
   return NextResponse.json({ discarded: true });
 }

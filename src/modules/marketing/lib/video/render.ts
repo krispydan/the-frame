@@ -205,6 +205,10 @@ export async function renderPost(postId: string): Promise<RenderResult> {
         posterPath: posterRel,
         durationSec: probe.durationSec,
         sizeBytes: probe.sizeBytes,
+        // A fresh clean render invalidates any prior burned variant — the
+        // hook re-burns (from this clean file) after copy generation.
+        burnedPath: null,
+        burnedHook: null,
         error: null,
         updatedAt: new Date().toISOString(),
       })

@@ -36,6 +36,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: "Video not rendered yet — copy comes with the render" }, { status: 400 });
     }
     const result = await generateVideoCopy(id);
+    // The hook may have changed — re-bake it onto the render (background).
+    if (result.ok) {
+      const { jobQueue } = await import("@/modules/core/lib/job-queue");
+      jobQueue.enqueue("marketing.video.burn-hook", "marketing", { postId: id }, { priority: 2 });
+    }
     return NextResponse.json(result, { status: result.ok ? 200 : 502 });
   }
 
@@ -60,6 +65,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     .run();
   if (post.filePath) await deleteVideo(post.filePath).catch(() => {});
   if (post.posterPath) await deleteVideo(post.posterPath).catch(() => {});
+  if (post.burnedPath) await deleteVideo(post.burnedPath).catch(() => {});
 
   const ctx = loadComposerContext(slot?.date ?? new Date().toISOString().slice(0, 10));
   const { post: replacement, warning } = composeAndInsertPost(ctx, slot);
