@@ -98,23 +98,25 @@ export async function runVideoStorageHygiene(): Promise<HygieneReport> {
   // ── 1. Renders for posts posted > RETAIN_POSTED_DAYS ago ──
   const cutoff = new Date(Date.now() - RETAIN_POSTED_DAYS * 86400000).toISOString();
   const expired = sqlite.prepare(`
-    SELECT id, file_path AS filePath, poster_path AS posterPath
+    SELECT id, file_path AS filePath, poster_path AS posterPath, burned_path AS burnedPath
     FROM marketing_video_posts
     WHERE status = 'posted' AND posted_at < ? AND file_path IS NOT NULL
-  `).all(cutoff) as Array<{ id: string; filePath: string; posterPath: string | null }>;
+  `).all(cutoff) as Array<{ id: string; filePath: string; posterPath: string | null; burnedPath: string | null }>;
 
   // ── 2. Renders for discarded/failed posts ──
   const dead = sqlite.prepare(`
-    SELECT id, file_path AS filePath, poster_path AS posterPath
+    SELECT id, file_path AS filePath, poster_path AS posterPath, burned_path AS burnedPath
     FROM marketing_video_posts
     WHERE status IN ('discarded','failed') AND file_path IS NOT NULL
-  `).all() as Array<{ id: string; filePath: string; posterPath: string | null }>;
+  `).all() as Array<{ id: string; filePath: string; posterPath: string | null; burnedPath: string | null }>;
 
   for (const post of [...expired, ...dead]) {
     await deleteVideo(post.filePath).catch(() => {});
     if (post.posterPath) await deleteVideo(post.posterPath).catch(() => {});
+    // The burned (hook overlay) variant is derived from filePath — clean it up too.
+    if (post.burnedPath) await deleteVideo(post.burnedPath).catch(() => {});
     sqlite.prepare(
-      `UPDATE marketing_video_posts SET file_path = NULL, poster_path = NULL, updated_at = datetime('now') WHERE id = ?`,
+      `UPDATE marketing_video_posts SET file_path = NULL, poster_path = NULL, burned_path = NULL, burned_hook = NULL, updated_at = datetime('now') WHERE id = ?`,
     ).run(post.id);
     deletedRenderFiles++;
   }
