@@ -19,6 +19,8 @@ import {
   HeartHandshake,
   Building,
   Megaphone,
+  Kanban,
+  Truck,
   BarChart3,
   Bell,
   User,
@@ -72,12 +74,15 @@ const salesNav: NavItem[] = [
     title: "Prospects", href: "/prospects", icon: Users,
     children: [
       { title: "Review Queue", href: "/prospects/review", icon: Search },
+      { title: "Facebook Leads", href: "/prospects/facebook-leads", icon: Megaphone },
       { title: "Lead Sources", href: "/prospects/sources", icon: Database },
       { title: "Segments", href: "/segments", icon: Layers3 },
       { title: "Brand Accounts", href: "/brands", icon: Building },
     ],
   },
   { title: "Campaigns", href: "/campaigns", icon: Mail },
+  { title: "Outreach", href: "/marketing/outreach", icon: Megaphone },
+  { title: "Pipeline", href: "/pipeline", icon: Kanban },
   { title: "Customers", href: "/customers", icon: HeartHandshake },
 ];
 
@@ -87,6 +92,7 @@ const operationsNav: NavItem[] = [
   { title: "Media Center", href: "/media", icon: ImageIcon },
   { title: "Inventory", href: "/inventory", icon: Warehouse },
   { title: "Product Performance", href: "/inventory/performance", icon: BarChart3 },
+  { title: "Reorder Plan", href: "/inventory/reorder", icon: Truck },
   { title: "Purchase Orders", href: "/inventory/purchase-orders", icon: Package },
   { title: "Warehouse Exports", href: "/inventory/exports", icon: Database },
   { title: "Finance", href: "/finance", icon: DollarSign },
@@ -117,10 +123,10 @@ const bottomNav = [
 
 const ROLE_ALLOWED_HREFS: Record<string, string[]> = {
   owner: ["*"],
-  sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/segments", "/campaigns", "/customers", "/brands", "/catalog", "/inventory/performance"],
-  warehouse: ["/dashboard", "/orders", "/orders/international", "/catalog", "/media", "/inventory", "/inventory/performance", "/inventory/purchase-orders", "/inventory/exports"],
-  finance: ["/dashboard", "/orders", "/finance", "/finance/cogs"],
-  marketing: ["/dashboard", "/marketing", "/catalog", "/media", "/campaigns"],
+  sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/prospects/facebook-leads", "/segments", "/campaigns", "/marketing/outreach", "/pipeline", "/customers", "/brands", "/catalog", "/inventory/performance"],
+  warehouse: ["/dashboard", "/orders", "/orders/international", "/catalog", "/media", "/inventory", "/inventory/performance", "/inventory/reorder", "/inventory/purchase-orders", "/inventory/exports"],
+  finance: ["/dashboard", "/orders", "/finance", "/finance/cogs", "/inventory/performance"],
+  marketing: ["/dashboard", "/marketing", "/marketing/outreach", "/catalog", "/media", "/campaigns", "/prospects/facebook-leads", "/inventory/performance"],
   support: ["/dashboard", "/orders", "/customers"],
   ai: ["/dashboard", "/ai"],
 };
