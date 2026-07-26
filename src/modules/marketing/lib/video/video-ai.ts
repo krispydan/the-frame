@@ -39,6 +39,35 @@ export interface PostingInstructions {
   firstComment?: string;
   /** Concrete trending sounds to use, hydrated from the synced chart. */
   suggestedSounds?: SuggestedSound[];
+  /** Scroll-stopping first line (0–2s). Burned into the render + the
+   *  spine of the caption. The single biggest retention lever. */
+  hook?: string;
+  /** Which content pillar this video sits in (see content-pillars.md). */
+  pillar?: string;
+  /** Optional 3-beat retention spine: hook → value → payoff/CTA. */
+  scriptBeats?: string[];
+}
+
+/**
+ * The video strategy backbone — audience profile + content pillars,
+ * injected into EVERY video copy generation so hooks and captions are
+ * written to a real person and land in a deliberate theme, not generic
+ * "sunglasses buyer" filler. Both docs are live-editable in the app
+ * (AI documents), so this stays current without a redeploy.
+ */
+export function videoStrategyBlock(): string {
+  const audience = getDocContent("audience-profile").trim();
+  const pillars = getDocContent("content-pillars").trim();
+  const parts: string[] = [];
+  if (audience) parts.push(`AUDIENCE — write to THIS person:\n\n${audience}`);
+  if (pillars) parts.push(`CONTENT PILLARS — pick one, write the hook to its energy:\n\n${pillars}`);
+  if (parts.length === 0) return "";
+  return (
+    `\n\n────────────────────────────────────────────────────────────\n` +
+    `VIDEO STRATEGY (the backbone — applies to every video)\n` +
+    `────────────────────────────────────────────────────────────\n\n` +
+    parts.join("\n\n────────────────\n\n")
+  );
 }
 
 export interface VideoCopy {
@@ -102,8 +131,23 @@ const SUBMIT_TOOL = {
       hashtags: { type: "array", items: { type: "string" }, minItems: 3, maxItems: 6 },
       postingInstructions: {
         type: "object",
-        required: ["audio", "onScreenText", "tagProducts", "coverSuggestion"],
+        required: ["audio", "onScreenText", "tagProducts", "coverSuggestion", "hook", "pillar"],
         properties: {
+          hook: {
+            type: "string",
+            description:
+              "The scroll-stopping first line (delivered in the first 0–2 seconds). Specific to the audience, tied to the chosen pillar. This gets burned onto the video as on-screen text AND anchors the caption. Max ~60 chars so it fits the screen.",
+          },
+          pillar: {
+            type: "string",
+            description: "Which content pillar this video sits in (name it from the content-pillars list).",
+          },
+          scriptBeats: {
+            type: "array",
+            items: { type: "string" },
+            maxItems: 3,
+            description: "Optional 3-beat retention spine: [hook, value, payoff/CTA]. Guides on-screen text + pacing.",
+          },
           audio: { type: "string" },
           suggestedSoundIds: {
             type: "array",
@@ -276,7 +320,7 @@ export async function reviseVideoCopy(
   ].join("\n");
 
   const result = await callClaude({
-    systemPrompt: systemBase,
+    systemPrompt: systemBase + videoStrategyBlock(),
     userPrompt,
     tool: SUBMIT_TOOL,
     maxTokens: 2048,
@@ -381,7 +425,7 @@ export async function generateVideoCopy(postId: string): Promise<{ ok: boolean; 
   });
 
   const result = await callClaude({
-    systemPrompt: systemBase,
+    systemPrompt: systemBase + videoStrategyBlock(),
     userPrompt,
     tool: SUBMIT_TOOL,
     maxTokens: 2048,

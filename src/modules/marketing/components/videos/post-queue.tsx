@@ -45,6 +45,8 @@ type SuggestedSound = {
 };
 
 type Instructions = {
+  hook?: string;
+  pillar?: string;
   audio?: string;
   suggestedSounds?: SuggestedSound[];
   onScreenText?: Array<{ text: string; timing: string; placement: string }>;
@@ -516,6 +518,17 @@ function PostCard({ post, onChanged }: { post: Post; onChanged: () => void }) {
             </div>
           </div>
         </div>
+
+        {/* Hook — the scroll-stopper, most important line */}
+        {instructions?.hook && (
+          <div className="flex items-start gap-1.5 rounded border border-primary/30 bg-primary/5 p-2 text-xs">
+            <Sparkles className="h-3.5 w-3.5 shrink-0 mt-px text-primary" />
+            <span>
+              <b>Hook:</b> “{instructions.hook}”
+              {instructions.pillar && <span className="ml-1 text-muted-foreground">· {instructions.pillar}</span>}
+            </span>
+          </div>
+        )}
 
         {/* Posting checklist */}
         {instructions && post.status !== "posted" && (

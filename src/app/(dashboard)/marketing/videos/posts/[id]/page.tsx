@@ -28,6 +28,9 @@ import {
 
 type OnScreenText = { text: string; timing: string; placement: string };
 type Instructions = {
+  hook?: string;
+  pillar?: string;
+  scriptBeats?: string[];
   audio?: string;
   onScreenText?: OnScreenText[];
   tagProducts?: string[];
@@ -782,6 +785,18 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
+              <label className="block text-xs font-medium">
+                <span className="flex items-center gap-1.5">
+                  Hook <span className="text-[10px] font-normal text-muted-foreground">first 0–2s · burned on-screen · the scroll-stopper</span>
+                  {instr.pillar && <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">{instr.pillar}</span>}
+                </span>
+                <Input
+                  value={instr.hook ?? ""}
+                  onChange={(e) => setInstr((p) => ({ ...p, hook: e.target.value }))}
+                  placeholder="e.g. This shape has no business being $25"
+                  className="mt-0.5 font-medium"
+                />
+              </label>
               <label className="block text-xs font-medium">
                 Audio
                 <Input value={instr.audio ?? ""} onChange={(e) => setInstr((p) => ({ ...p, audio: e.target.value }))} className="mt-0.5" />
