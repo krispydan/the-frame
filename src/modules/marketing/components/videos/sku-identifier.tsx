@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { VideoPlayer } from "@/components/ui/video-player";
 import { ImageZoomDialog } from "@/components/ui/image-zoom";
 import { Check, ChevronDown, ChevronRight, FileText, Glasses, Sparkles, Wand2, X, ZoomIn } from "lucide-react";
+import { IdentifyProgress, milestoneCrossed, type Progress } from "./identify-progress";
 
 type Candidate = {
   productId: string;
@@ -123,6 +124,13 @@ export function SkuIdentifier() {
   const [zoom, setZoom] = useState<{ url: string; label: string } | null>(null);
   // Only auto-apply pre-selection once per item.
   const autoSelectedFor = useRef<string | null>(null);
+  // ── Gamified progress ──
+  // Queue totals come from the API; session count / streak are local so the
+  // scoreboard resets naturally each sitting and needs no schema.
+  const [progress, setProgress] = useState<Progress | null>(null);
+  const [sessionCount, setSessionCount] = useState(0);
+  const [streak, setStreak] = useState(0);
+  const [celebrate, setCelebrate] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch(`${API}?type=${type}&filter=${filter}`);
@@ -131,6 +139,7 @@ export function SkuIdentifier() {
     setProducts(d.products ?? []);
     setCategories(d.categories ?? []);
     setAiConfigured(Boolean(d.aiConfigured));
+    setProgress(d.progress ?? null);
     setLoading(false);
   }, [type, filter]);
 
@@ -291,6 +300,28 @@ export function SkuIdentifier() {
     autoSelectedFor.current = null;
   };
 
+  /**
+   * Count a decided item toward the session score: bump the counters, advance
+   * the local progress bar optimistically (so the "N left" number moves the
+   * instant you save), and fire a celebration on milestones.
+   */
+  const scoreDecision = () => {
+    setSessionCount((prev) => {
+      const next = prev + 1;
+      const hit = milestoneCrossed(prev, next);
+      if (hit) {
+        setCelebrate(hit);
+        toast.success(`🎉 ${hit} identified this session! Nice run.`, { duration: 4000 });
+        setTimeout(() => setCelebrate(null), 6000);
+      }
+      return next;
+    });
+    setStreak((s) => s + 1);
+    setProgress((p) =>
+      p ? { ...p, done: p.done + 1, remaining: Math.max(0, p.remaining - 1), doneToday: p.doneToday + 1 } : p,
+    );
+  };
+
   /** Skip without deciding — but persist an edited note/category so it isn't lost. */
   const skip = async () => {
     const noteChanged = item && notes !== (item.notes ?? "");
@@ -302,6 +333,7 @@ export function SkuIdentifier() {
         body: JSON.stringify({ mediaType: type, mediaId: item.mediaId, notes, categoryId }),
       }).catch(() => {});
     }
+    setStreak(0); // a skip breaks the run
     advance();
   };
 
@@ -327,6 +359,8 @@ export function SkuIdentifier() {
         ? "no product"
         : selected.map((pid) => products.find((p) => p.id === pid)?.name ?? "?").join(", ");
       pushRecent(item, label);
+      // Re-tagging something already decided shouldn't inflate the score.
+      if (item.currentProducts.length === 0) scoreDecision();
       toast.success(noProduct ? "Marked: no product visible" : "Products saved");
       advance();
     } else {
@@ -356,6 +390,14 @@ export function SkuIdentifier() {
 
   return (
     <div className="space-y-4 min-w-0">
+      {/* Progress + session scoreboard */}
+      <IdentifyProgress
+        progress={progress}
+        sessionCount={sessionCount}
+        streak={streak}
+        celebrate={celebrate}
+      />
+
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex rounded-md border overflow-hidden">
