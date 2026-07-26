@@ -14,14 +14,15 @@ import { useCallback, useEffect, useState } from "react";
 import { useUser } from "@/hooks/use-user";
 import { Button } from "@/components/ui/button";
 import { WidgetFrame } from "@/components/dashboard/widget-frame";
-import { WIDGETS, SIZE_CLASS, type WidgetId } from "@/modules/dashboard/widgets";
+import { WIDGETS, SIZE_CLASS, groupByCategory, type WidgetId } from "@/modules/dashboard/widgets";
 import {
   type Bundle,
   KpisWidget, RevenueTrendWidget, ChannelMixWidget, TopSellersWidget, MoversWidget,
   InventoryHealthWidget, ReorderAlertsWidget, OutreachWidget, MetaLeadsWidget,
   PipelineWidget, CustomersWidget, FinanceWidget, BusinessHealthWidget, ActivityWidget,
 } from "@/modules/dashboard/components/widgets";
-import { RefreshCw, Settings2, RotateCcw, Plus, Check } from "lucide-react";
+import Link from "next/link";
+import { RefreshCw, Settings2, RotateCcw, Plus, Check, ChevronDown, ArrowUpRight } from "lucide-react";
 
 const COMPONENTS: Record<WidgetId, React.FC<{ data: Bundle }>> = {
   kpis: KpisWidget,
@@ -56,6 +57,24 @@ export default function DashboardPage() {
   const [allowed, setAllowed] = useState<WidgetId[]>([]);
   const [customizing, setCustomizing] = useState(false);
   const [dragId, setDragId] = useState<WidgetId | null>(null);
+  // Collapsed sections are a local viewing preference, not part of the shared
+  // layout — keep them in localStorage rather than round-tripping to the API.
+  const [collapsed, setCollapsed] = useState<string[]>([]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("dashboard:collapsed");
+      if (raw) setCollapsed(JSON.parse(raw) as string[]);
+    } catch { /* ignore */ }
+  }, []);
+
+  const toggleSection = (id: string) => {
+    setCollapsed((prev) => {
+      const next = prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id];
+      try { localStorage.setItem("dashboard:collapsed", JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
 
   // Load the user's layout once.
   useEffect(() => {
@@ -177,50 +196,84 @@ export default function DashboardPage() {
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {layout.map((id) => {
-            const def = WIDGETS[id];
-            if (!def || !data) return null;
-            const Comp = COMPONENTS[id];
-            const spanClass = SIZE_CLASS[def.size];
-            const dragProps = customizing
-              ? {
-                  draggable: true,
-                  onDragStart: () => setDragId(id),
-                  onDragOver: (e: React.DragEvent) => e.preventDefault(),
-                  onDrop: () => onDrop(id),
-                  onDragEnd: () => setDragId(null),
-                }
-              : {};
-
-            // KPI strip renders full-width without the card frame.
-            if (id === "kpis") {
-              return (
-                <div key={id} className={`${spanClass} ${dragId === id ? "opacity-50" : ""}`} {...dragProps}>
-                  {customizing && (
-                    <div className="mb-1 flex items-center justify-between rounded-md bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
-                      <span>⋮⋮ Key metrics</span>
-                      <button onClick={() => hide(id)} className="hover:text-foreground">Hide</button>
-                    </div>
-                  )}
-                  <Comp data={data} />
-                </div>
-              );
-            }
-
+        <div className="space-y-6">
+          {groupByCategory(layout).map(({ category, widgets }) => {
+            const isCollapsed = collapsed.includes(category.id);
             return (
-              <div key={id} className={`${spanClass} ${dragId === id ? "opacity-50" : ""}`} {...dragProps}>
-                <WidgetFrame
-                  title={def.title}
-                  subtitle={def.subtitle}
-                  href={def.href}
-                  customizing={customizing}
-                  onHide={() => hide(id)}
-                  className="h-full"
-                >
-                  <Comp data={data} />
-                </WidgetFrame>
-              </div>
+              <section key={category.id} className="space-y-3">
+                {/* Section header — orientation + a way into the full area */}
+                <div className="flex items-center gap-2 border-b pb-1.5">
+                  <button
+                    onClick={() => toggleSection(category.id)}
+                    className="flex min-w-0 items-center gap-1.5 text-left"
+                    aria-expanded={!isCollapsed}
+                  >
+                    <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
+                    <span className="text-sm font-semibold">{category.title}</span>
+                    <span className="hidden truncate text-xs text-muted-foreground sm:inline">· {category.blurb}</span>
+                  </button>
+                  <div className="flex-1" />
+                  {category.href && (
+                    <Link
+                      href={category.href}
+                      className="inline-flex shrink-0 items-center gap-0.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      Open <ArrowUpRight className="h-3.5 w-3.5" />
+                    </Link>
+                  )}
+                </div>
+
+                {!isCollapsed && (
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {widgets.map((id) => {
+                      const def = WIDGETS[id];
+                      if (!def || !data) return null;
+                      const Comp = COMPONENTS[id];
+                      const spanClass = SIZE_CLASS[def.size];
+                      const dragProps = customizing
+                        ? {
+                            draggable: true,
+                            onDragStart: () => setDragId(id),
+                            onDragOver: (e: React.DragEvent) => e.preventDefault(),
+                            onDrop: () => onDrop(id),
+                            onDragEnd: () => setDragId(null),
+                          }
+                        : {};
+
+                      // KPI strip renders full-width without the card frame.
+                      if (id === "kpis") {
+                        return (
+                          <div key={id} className={`${spanClass} ${dragId === id ? "opacity-50" : ""}`} {...dragProps}>
+                            {customizing && (
+                              <div className="mb-1 flex items-center justify-between rounded-md bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+                                <span>⋮⋮ Key metrics</span>
+                                <button onClick={() => hide(id)} className="hover:text-foreground">Hide</button>
+                              </div>
+                            )}
+                            <Comp data={data} />
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div key={id} className={`${spanClass} ${dragId === id ? "opacity-50" : ""}`} {...dragProps}>
+                          <WidgetFrame
+                            title={def.title}
+                            subtitle={def.subtitle}
+                            href={def.href}
+                            linkLabel={def.linkLabel}
+                            customizing={customizing}
+                            onHide={() => hide(id)}
+                            className="h-full"
+                          >
+                            <Comp data={data} />
+                          </WidgetFrame>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
             );
           })}
         </div>

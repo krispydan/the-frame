@@ -29,33 +29,66 @@ export type WidgetId =
 
 export type WidgetSize = "sm" | "md" | "lg" | "full";
 
+/** Cards are grouped into these sections on the dashboard, in this order. */
+export type CategoryId = "overview" | "sales" | "products" | "pipeline" | "marketing" | "customers" | "finance" | "activity";
+
+export interface CategoryDef {
+  id: CategoryId;
+  title: string;
+  /** One-line orientation shown under the section heading. */
+  blurb: string;
+  /** Where "see everything in this area" goes. */
+  href?: string;
+}
+
+export const CATEGORIES: CategoryDef[] = [
+  { id: "overview", title: "Overview", blurb: "The numbers that matter right now" },
+  { id: "sales", title: "Sales & revenue", blurb: "What sold, through which channel", href: "/orders" },
+  { id: "products", title: "Products & inventory", blurb: "What's moving, what needs reordering", href: "/inventory/performance" },
+  { id: "pipeline", title: "Pipeline & leads", blurb: "Deals in flight and where they came from", href: "/pipeline" },
+  { id: "marketing", title: "Marketing & outreach", blurb: "Calls, email and ads working the top of funnel", href: "/marketing/outreach" },
+  { id: "customers", title: "Customers", blurb: "Who's healthy, who's slipping away", href: "/customers" },
+  { id: "finance", title: "Finance", blurb: "Margin, COGS and overall business health", href: "/finance" },
+  { id: "activity", title: "Activity", blurb: "What just happened across the frame", href: "/notifications" },
+];
+
 export interface WidgetDef {
   id: WidgetId;
   title: string;
   subtitle?: string;
-  domain: "sales" | "inventory" | "marketing" | "pipeline" | "customers" | "finance" | "ops";
+  /** Which dashboard section this card belongs to. */
+  category: CategoryId;
   /** Roles allowed to see this widget. "owner" is implicitly allowed everywhere. */
   roles: Role[];
   size: WidgetSize;
-  /** Deep link to the full page for this domain. */
+  /** Deep link to the page that shows this data in full. */
   href?: string;
+  /** Label for the deep link ("View" by default). */
+  linkLabel?: string;
 }
 
 export const WIDGETS: Record<WidgetId, WidgetDef> = {
-  kpis: { id: "kpis", title: "Key metrics", domain: "sales", roles: ["owner", "sales_manager", "warehouse", "finance", "marketing", "support"], size: "full" },
-  "revenue-trend": { id: "revenue-trend", title: "Revenue trend", domain: "sales", roles: ["owner", "sales_manager", "finance", "marketing"], size: "lg", href: "/finance" },
-  "channel-mix": { id: "channel-mix", title: "Sales by channel", domain: "sales", roles: ["owner", "sales_manager", "finance"], size: "md", href: "/orders" },
-  "top-sellers": { id: "top-sellers", title: "Top sellers", subtitle: "wholesale vs retail", domain: "sales", roles: ["owner", "sales_manager", "warehouse", "marketing"], size: "md", href: "/inventory/performance" },
-  movers: { id: "movers", title: "Rising & falling", subtitle: "vs prior half-period", domain: "sales", roles: ["owner", "sales_manager", "warehouse", "marketing"], size: "md", href: "/inventory/performance" },
-  "inventory-health": { id: "inventory-health", title: "Inventory health", domain: "inventory", roles: ["owner", "warehouse"], size: "md", href: "/inventory" },
-  "reorder-alerts": { id: "reorder-alerts", title: "Reorder now", subtitle: "critical & urgent", domain: "inventory", roles: ["owner", "warehouse"], size: "md", href: "/inventory" },
-  outreach: { id: "outreach", title: "Outreach performance", domain: "marketing", roles: ["owner", "sales_manager", "marketing"], size: "md", href: "/campaigns" },
-  "meta-leads": { id: "meta-leads", title: "Facebook / Instagram leads", domain: "marketing", roles: ["owner", "marketing", "sales_manager"], size: "md", href: "/prospects" },
-  pipeline: { id: "pipeline", title: "Pipeline", domain: "pipeline", roles: ["owner", "sales_manager"], size: "lg", href: "/prospects" },
-  customers: { id: "customers", title: "Customer health", domain: "customers", roles: ["owner", "sales_manager", "finance"], size: "md", href: "/customers" },
-  finance: { id: "finance", title: "Finance snapshot", subtitle: "month to date", domain: "finance", roles: ["owner", "finance"], size: "md", href: "/finance" },
-  "business-health": { id: "business-health", title: "Business health", domain: "finance", roles: ["owner", "finance"], size: "md", href: "/intelligence" },
-  activity: { id: "activity", title: "Recent activity", domain: "ops", roles: ["owner", "sales_manager", "warehouse", "finance", "marketing", "support"], size: "md", href: "/notifications" },
+  kpis: { id: "kpis", title: "Key metrics", category: "overview", roles: ["owner", "sales_manager", "warehouse", "finance", "marketing", "support"], size: "full" },
+
+  "revenue-trend": { id: "revenue-trend", title: "Revenue trend", category: "sales", roles: ["owner", "sales_manager", "finance", "marketing"], size: "lg", href: "/finance", linkLabel: "Finance" },
+  "channel-mix": { id: "channel-mix", title: "Sales by channel", category: "sales", roles: ["owner", "sales_manager", "finance"], size: "md", href: "/orders", linkLabel: "Orders" },
+
+  "top-sellers": { id: "top-sellers", title: "Top sellers", subtitle: "wholesale vs retail", category: "products", roles: ["owner", "sales_manager", "warehouse", "marketing"], size: "md", href: "/inventory/performance", linkLabel: "All products" },
+  movers: { id: "movers", title: "Rising & falling", subtitle: "vs prior half-period", category: "products", roles: ["owner", "sales_manager", "warehouse", "marketing"], size: "md", href: "/inventory/performance", linkLabel: "All products" },
+  "inventory-health": { id: "inventory-health", title: "Inventory health", category: "products", roles: ["owner", "warehouse"], size: "md", href: "/inventory", linkLabel: "Stock" },
+  "reorder-alerts": { id: "reorder-alerts", title: "Reorder now", subtitle: "critical & urgent", category: "products", roles: ["owner", "warehouse"], size: "md", href: "/inventory/reorder", linkLabel: "Reorder plan" },
+
+  pipeline: { id: "pipeline", title: "Pipeline", category: "pipeline", roles: ["owner", "sales_manager"], size: "lg", href: "/pipeline", linkLabel: "Pipeline" },
+  "meta-leads": { id: "meta-leads", title: "Facebook / Instagram leads", category: "pipeline", roles: ["owner", "marketing", "sales_manager"], size: "md", href: "/prospects/facebook-leads", linkLabel: "All leads" },
+
+  outreach: { id: "outreach", title: "Outreach performance", category: "marketing", roles: ["owner", "sales_manager", "marketing"], size: "md", href: "/marketing/outreach", linkLabel: "Outreach" },
+
+  customers: { id: "customers", title: "Customer health", category: "customers", roles: ["owner", "sales_manager", "finance"], size: "md", href: "/customers", linkLabel: "Customers" },
+
+  finance: { id: "finance", title: "Finance snapshot", subtitle: "month to date", category: "finance", roles: ["owner", "finance"], size: "md", href: "/finance", linkLabel: "P&L" },
+  "business-health": { id: "business-health", title: "Business health", category: "finance", roles: ["owner", "finance"], size: "md", href: "/intelligence", linkLabel: "Intelligence" },
+
+  activity: { id: "activity", title: "Recent activity", category: "activity", roles: ["owner", "sales_manager", "warehouse", "finance", "marketing", "support"], size: "md", href: "/notifications", linkLabel: "All activity" },
 };
 
 export const ALL_WIDGET_IDS = Object.keys(WIDGETS) as WidgetId[];
@@ -106,6 +139,27 @@ export function sanitizeLayout(role: string, ids: string[]): WidgetId[] {
     }
   }
   return out;
+}
+
+/**
+ * Group an ordered layout into category sections, preserving the user's
+ * within-section order and dropping empty sections. Sections themselves render
+ * in CATEGORIES order so the page always reads Overview → Sales → Products →
+ * Pipeline → Marketing → Customers → Finance → Activity.
+ */
+export function groupByCategory(layout: WidgetId[]): Array<{ category: CategoryDef; widgets: WidgetId[] }> {
+  const byCat = new Map<CategoryId, WidgetId[]>();
+  for (const id of layout) {
+    const def = WIDGETS[id];
+    if (!def) continue;
+    const list = byCat.get(def.category) ?? [];
+    list.push(id);
+    byCat.set(def.category, list);
+  }
+  return CATEGORIES.filter((c) => (byCat.get(c.id)?.length ?? 0) > 0).map((category) => ({
+    category,
+    widgets: byCat.get(category.id)!,
+  }));
 }
 
 export const SIZE_CLASS: Record<WidgetSize, string> = {
