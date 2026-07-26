@@ -23,6 +23,7 @@ import {
   Copy,
   Download,
   ExternalLink,
+  Lightbulb,
   Music,
   Pause,
   Pencil,
@@ -109,6 +110,7 @@ export function PostQueue() {
   const [loading, setLoading] = useState(true);
   const [showGenerate, setShowGenerate] = useState(false);
   const [showSounds, setShowSounds] = useState(false);
+  const [showIdeas, setShowIdeas] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
 
   const load = useCallback(() => {
@@ -162,6 +164,9 @@ export function PostQueue() {
         </div>
         <div className="flex-1" />
         <Button variant="ghost" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /></Button>
+        <Button variant="outline" onClick={() => setShowIdeas(true)}>
+          <Lightbulb className="h-4 w-4 mr-1" /> Idea bank
+        </Button>
         <Button variant="outline" onClick={() => setShowSounds(true)}>
           <Music className="h-4 w-4 mr-1" /> Trending audio
         </Button>
@@ -214,7 +219,120 @@ export function PostQueue() {
       )}
 
       {showSounds && <TrendingSoundsDialog onClose={() => setShowSounds(false)} />}
+      {showIdeas && <IdeaBankDialog onClose={() => setShowIdeas(false)} />}
     </div>
+  );
+}
+
+// ── Idea bank (engine #3) ──
+
+type Idea = {
+  id: string;
+  angle: string;
+  pillar: string;
+  hook: string;
+  concept: string;
+  productName: string | null;
+  status: "new" | "used" | "dismissed";
+};
+
+function IdeaBankDialog({ onClose }: { onClose: () => void }) {
+  const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [count, setCount] = useState(8);
+
+  const load = useCallback(() => {
+    fetch("/api/v1/marketing/videos/ideas?status=new")
+      .then((r) => r.json())
+      .then((d) => {
+        setIdeas(d.ideas ?? []);
+        setLoading(false);
+      });
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const generate = async () => {
+    setGenerating(true);
+    const res = await fetch("/api/v1/marketing/videos/ideas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ count }),
+    });
+    const d = await res.json();
+    setGenerating(false);
+    if (res.ok) {
+      toast.success(`${d.ideas?.length ?? 0} fresh ideas — written to your audience + pillars`);
+      load();
+    } else {
+      toast.error(d.error ?? "Couldn't generate ideas");
+    }
+  };
+
+  const setStatus = async (id: string, status: "used" | "dismissed") => {
+    setIdeas((prev) => prev.filter((i) => i.id !== id));
+    await fetch("/api/v1/marketing/videos/ideas", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, status }),
+    }).catch(() => {});
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Idea bank</DialogTitle>
+        </DialogHeader>
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Concepts written to your audience profile + content pillars.</span>
+          <div className="flex-1" />
+          <Input
+            type="number"
+            min={1}
+            max={20}
+            value={count}
+            onChange={(e) => setCount(Number(e.target.value) || 8)}
+            className="h-8 w-16"
+          />
+          <Button size="sm" onClick={generate} disabled={generating}>
+            <Sparkles className={`h-4 w-4 mr-1 ${generating ? "animate-spin" : ""}`} />
+            {generating ? "Thinking…" : "Generate"}
+          </Button>
+        </div>
+
+        {loading ? (
+          <div className="animate-pulse h-40 bg-muted rounded" />
+        ) : ideas.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            No ideas yet — hit <b>Generate</b> to stock the shelf.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {ideas.map((idea) => (
+              <div key={idea.id} className="rounded-lg border p-2.5 text-sm">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-medium">{idea.angle}</span>
+                  {idea.pillar && <Badge variant="secondary" className="text-[10px]">{idea.pillar}</Badge>}
+                  {idea.productName && <Badge variant="outline" className="text-[10px]"><ShoppingBag className="h-2.5 w-2.5 mr-0.5" />{idea.productName}</Badge>}
+                  <div className="flex-1" />
+                  <Button size="sm" variant="ghost" title="Mark used" onClick={() => setStatus(idea.id, "used")}>
+                    <Check className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button size="sm" variant="ghost" title="Dismiss" onClick={() => setStatus(idea.id, "dismissed")}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                {idea.hook && <p className="mt-1 font-medium text-primary">“{idea.hook}”</p>}
+                {idea.concept && <p className="mt-0.5 text-xs text-muted-foreground">{idea.concept}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
