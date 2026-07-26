@@ -108,6 +108,16 @@ registerJobHandler("marketing.video.render-post", async (input) => {
   // skipCopy: a clip-edit re-render keeps the existing (possibly
   // hand-edited) caption — flip straight back to ready instead of
   // regenerating copy over the operator's words.
+  // Bake the hook onto the render (best-effort — a burn failure leaves
+  // the clean render usable). Runs AFTER copy exists so there's a hook.
+  const burnHook = async () => {
+    const { burnHookIntoRender } = await import("./caption-burn");
+    return burnHookIntoRender(postId).catch((e) => {
+      console.warn(`[video] hook burn-in failed for ${postId}: ${e instanceof Error ? e.message : e}`);
+      return { burned: false as const };
+    });
+  };
+
   if (input.skipCopy === true) {
     const { db: appDb } = await import("@/lib/db");
     const { videoPosts } = await import("@/modules/marketing/schema");
@@ -120,7 +130,8 @@ registerJobHandler("marketing.video.render-post", async (input) => {
         .where(eq(videoPosts.id, postId))
         .run();
     }
-    return { ...render, copy: { ok: true, skipped: true } } as unknown as Record<string, unknown>;
+    const burn = await burnHook();
+    return { ...render, copy: { ok: true, skipped: true }, burn } as unknown as Record<string, unknown>;
   }
 
   // Copy generation is best-effort: a failed AI call leaves the post
@@ -132,5 +143,15 @@ registerJobHandler("marketing.video.render-post", async (input) => {
     error: e instanceof Error ? e.message : String(e),
   }));
 
-  return { ...render, copy } as unknown as Record<string, unknown>;
+  const burn = await burnHook();
+  return { ...render, copy, burn } as unknown as Record<string, unknown>;
+});
+
+// Re-bake the on-screen hook after a hook edit or burn-toggle (no full
+// re-render needed — derives from the existing clean render).
+registerJobHandler("marketing.video.burn-hook", async (input) => {
+  const postId = input.postId;
+  if (!postId || typeof postId !== "string") throw new Error("postId is required for marketing.video.burn-hook jobs");
+  const { burnHookIntoRender } = await import("./caption-burn");
+  return (await burnHookIntoRender(postId)) as unknown as Record<string, unknown>;
 });

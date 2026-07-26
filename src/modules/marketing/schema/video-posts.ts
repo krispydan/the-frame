@@ -84,6 +84,13 @@ export const videoPosts = sqliteTable("marketing_video_posts", {
   hashtags: text("hashtags"),
   /** JSON PostingInstructions — see video-ai.ts. */
   instructions: text("instructions"),
+  /** Burn the hook onto the render as on-screen text (1=on, default on). */
+  burnHook: integer("burn_hook").default(1),
+  /** Derived render with the hook burned in — served in preference to
+   *  filePath. filePath stays the clean concat; this never stacks text. */
+  burnedPath: text("burned_path"),
+  /** The exact hook text baked into burnedPath (idempotency guard). */
+  burnedHook: text("burned_hook"),
   /** JSON snapshot of what the composer/AI saw (recipe, focus SKUs,
    *  trends, events) — audit trail for "why this video". */
   aiContext: text("ai_context"),

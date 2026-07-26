@@ -57,6 +57,8 @@ type Post = {
   instructions: Instructions | null;
   videoUrl: string | null;
   posterUrl: string | null;
+  burnHook?: boolean;
+  hookBurned?: boolean;
   duration_sec?: number | null;
   recipe_name?: string | null;
   scheduled_date?: string | null;
@@ -705,6 +707,24 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
           <p className="text-xs text-muted-foreground">
             {(post.duration_sec ?? 0).toFixed(1)}s · audio: {post.audio_treatment} · {post.platform}
           </p>
+          {/* Hook burn-in toggle — bakes the hook onto the first seconds. */}
+          <button
+            type="button"
+            onClick={() => patch({ burnHook: !post.burnHook }, post.burnHook ? "Hook overlay off — re-baking clean" : "Baking the hook onto the video…")}
+            disabled={saving}
+            className={`flex w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition ${post.burnHook ? "border-primary/40 bg-primary/5" : "hover:bg-muted"}`}
+            title="Burn the hook line onto the first ~3 seconds as on-screen text"
+          >
+            <span className={`flex h-4 w-7 shrink-0 items-center rounded-full px-0.5 transition ${post.burnHook ? "bg-primary" : "bg-muted-foreground/30"}`}>
+              <span className={`h-3 w-3 rounded-full bg-white transition ${post.burnHook ? "translate-x-3" : ""}`} />
+            </span>
+            <span className="flex-1">
+              Burn hook onto video
+              <span className="block text-[10px] text-muted-foreground">
+                {post.hookBurned ? "on-screen text is baked in ✓" : post.burnHook ? "will bake on next render" : "clean video, no overlay"}
+              </span>
+            </span>
+          </button>
           {post.error && <p className="text-xs text-red-600">{post.error}</p>}
         </div>
 
