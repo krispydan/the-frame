@@ -164,6 +164,15 @@ function lineUnits(sku: string | null, quantity: number): number {
 }
 
 /**
+ * Public factory for the memoized root-SKU resolver — lets other analytics
+ * (product performance) bucket order lines exactly the way the forecast does,
+ * so units never disagree between screens.
+ */
+export function makeRootResolver(): (sku: string | null, skuId: string | null) => string | null {
+  return makeResolver();
+}
+
+/**
  * Returns a memoized (sku text, sku_id) → root SKU resolver. Resolution order:
  *   1. sku string → resolveDepletionTarget (packs + exact catalog + aliases)
  *   2. sku_id → catalog_skus lookup (Shopify lines that carry only the FK)

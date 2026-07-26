@@ -17,6 +17,7 @@ import { calculatePnl } from "@/modules/finance/lib/pnl";
 import { getHealthSummary } from "@/modules/customers/lib/health-scoring";
 import { calculateBusinessHealth } from "@/modules/intelligence/lib/business-health";
 import { loadPhoneBurnerMetrics } from "@/modules/integrations/lib/slack/digests";
+import { getProductPerformance } from "@/modules/inventory/lib/product-performance";
 
 export type Range = "7d" | "30d" | "90d" | "ytd";
 
@@ -92,16 +93,38 @@ function buildChannelMix(start: string) {
     .all(start) as Array<{ channel: string; revenue: number; orders: number }>;
 }
 
-function buildTopSellers(start: string) {
-  return sqlite
-    .prepare(
-      `SELECT oi.sku, MAX(oi.product_name) name, MAX(oi.color_name) color,
-              SUM(oi.quantity) units, SUM(oi.total_price) revenue
-         FROM order_items oi JOIN orders o ON o.id = oi.order_id
-        WHERE o.${NOT_CANCELLED} AND COALESCE(o.placed_at,o.created_at) >= ? AND oi.sku IS NOT NULL
-        GROUP BY oi.sku ORDER BY revenue DESC LIMIT 8`,
-    )
-    .all(start) as Array<{ sku: string; name: string; color: string; units: number; revenue: number }>;
+/**
+ * Top sellers + movers share one pass of the product-performance engine (it
+ * resolves every order line through the pack/alias-aware root resolver, so it's
+ * the expensive part — computing it twice would double the work).
+ */
+function buildProductInsight(days: number) {
+  const perf = getProductPerformance({ windowDays: days });
+  const rows = perf.rows;
+  const scored = rows.filter((r) => r.trendPct != null && r.units >= 8);
+  return {
+    topSellers: rows.slice(0, 8).map((r) => ({
+      sku: r.rootSku,
+      name: r.productName,
+      color: r.colorName,
+      units: r.units,
+      revenue: r.revenue,
+      unitsWholesale: r.unitsWholesale,
+      unitsRetail: r.unitsRetail,
+      wholesaleSharePct: r.wholesaleSharePct,
+      avgOrderQty: r.avgOrderQty,
+      accounts: r.accounts,
+    })),
+    movers: {
+      rising: [...scored].sort((a, b) => (b.trendPct ?? 0) - (a.trendPct ?? 0)).slice(0, 4)
+        .map((r) => ({ sku: r.rootSku, name: r.productName, color: r.colorName, trendPct: r.trendPct, units: r.units, daysCover: r.daysCover })),
+      falling: [...scored].filter((r) => (r.trendPct ?? 0) < 0).sort((a, b) => (a.trendPct ?? 0) - (b.trendPct ?? 0)).slice(0, 4)
+        .map((r) => ({ sku: r.rootSku, name: r.productName, color: r.colorName, trendPct: r.trendPct, units: r.units, daysCover: r.daysCover })),
+      breakout: rows.filter((r) => r.trend === "new" && r.units >= 8).sort((a, b) => b.units - a.units).slice(0, 3)
+        .map((r) => ({ sku: r.rootSku, name: r.productName, color: r.colorName, units: r.units })),
+    },
+    wholesaleSharePct: perf.totals.wholesaleSharePct,
+  };
 }
 
 function buildInventoryHealth() {
@@ -219,7 +242,9 @@ export function buildDashboard(role: string, range: Range) {
 
   if (has("revenue-trend")) safe("revenueTrend", () => buildRevenueTrend(start, days), []);
   if (has("channel-mix")) safe("channelMix", () => buildChannelMix(start), []);
-  if (has("top-sellers")) safe("topSellers", () => buildTopSellers(start), []);
+  if (has("top-sellers") || has("movers")) {
+    safe("productInsight", () => buildProductInsight(days), null);
+  }
   if (has("inventory-health")) safe("inventoryHealth", () => buildInventoryHealth(), null);
   if (has("reorder-alerts")) safe("reorderAlerts", () => buildReorderAlerts(), []);
   if (has("outreach")) safe("outreach", () => buildOutreach(start, now, priorStart, priorEnd), null);

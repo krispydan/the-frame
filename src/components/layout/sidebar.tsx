@@ -86,6 +86,7 @@ const operationsNav: NavItem[] = [
   { title: "Catalog", href: "/catalog", icon: Package },
   { title: "Media Center", href: "/media", icon: ImageIcon },
   { title: "Inventory", href: "/inventory", icon: Warehouse },
+  { title: "Product Performance", href: "/inventory/performance", icon: BarChart3 },
   { title: "Purchase Orders", href: "/inventory/purchase-orders", icon: Package },
   { title: "Warehouse Exports", href: "/inventory/exports", icon: Database },
   { title: "Finance", href: "/finance", icon: DollarSign },
@@ -116,8 +117,8 @@ const bottomNav = [
 
 const ROLE_ALLOWED_HREFS: Record<string, string[]> = {
   owner: ["*"],
-  sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/segments", "/campaigns", "/customers", "/brands", "/catalog"],
-  warehouse: ["/dashboard", "/orders", "/orders/international", "/catalog", "/media", "/inventory", "/inventory/purchase-orders", "/inventory/exports"],
+  sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/segments", "/campaigns", "/customers", "/brands", "/catalog", "/inventory/performance"],
+  warehouse: ["/dashboard", "/orders", "/orders/international", "/catalog", "/media", "/inventory", "/inventory/performance", "/inventory/purchase-orders", "/inventory/exports"],
   finance: ["/dashboard", "/orders", "/finance", "/finance/cogs"],
   marketing: ["/dashboard", "/marketing", "/catalog", "/media", "/campaigns"],
   support: ["/dashboard", "/orders", "/customers"],
