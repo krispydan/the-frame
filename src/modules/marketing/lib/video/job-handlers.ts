@@ -153,5 +153,11 @@ registerJobHandler("marketing.video.burn-hook", async (input) => {
   const postId = input.postId;
   if (!postId || typeof postId !== "string") throw new Error("postId is required for marketing.video.burn-hook jobs");
   const { burnHookIntoRender } = await import("./caption-burn");
-  return (await burnHookIntoRender(postId)) as unknown as Record<string, unknown>;
+  // Best-effort: a burn failure must not retry-storm — the clean render is
+  // still usable and serving falls back to it.
+  const result = await burnHookIntoRender(postId).catch((e) => {
+    console.warn(`[video] burn-hook job failed for ${postId}: ${e instanceof Error ? e.message : e}`);
+    return { burned: false as const };
+  });
+  return result as unknown as Record<string, unknown>;
 });

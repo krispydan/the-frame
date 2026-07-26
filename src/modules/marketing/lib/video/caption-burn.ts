@@ -25,7 +25,7 @@ import {
   storeVideoFile,
   videoScratchPath,
   videoStat,
-  renderPath,
+  deleteVideo,
 } from "@/lib/storage/videos";
 import { runFfmpeg, ffprobe } from "./ffmpeg";
 
@@ -41,9 +41,11 @@ export interface BurnResult {
   burnedPath?: string | null;
 }
 
-/** The burned variant path — clean render path with a `_hook` suffix. */
-function burnedPathFor(postId: string, yyyymm: string): string {
-  return renderPath(postId, yyyymm, "mp4").replace(/\.mp4$/, "_hook.mp4");
+/** The burned variant path — co-located with the clean render (same
+ *  directory + `_hook` suffix) so a re-burn overwrites in place and the
+ *  file never orphans in a different month than its source. */
+function burnedPathFor(cleanFilePath: string): string {
+  return cleanFilePath.replace(/\.mp4$/i, "_hook.mp4");
 }
 
 /**
@@ -51,7 +53,7 @@ function burnedPathFor(postId: string, yyyymm: string): string {
  * ellipsising anything that overflows. Returns the wrapped text (real
  * newlines) — written to a textfile so ffmpeg needs no escaping.
  */
-export function wrapHook(raw: string, maxChars = 18, maxLines = 3): string {
+export function wrapHook(raw: string, maxChars = 20, maxLines = 3): string {
   const words = raw.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
   const lines: string[] = [];
   let line = "";
@@ -72,10 +74,6 @@ export function wrapHook(raw: string, maxChars = 18, maxLines = 3): string {
   return kept.join("\n");
 }
 
-function yyyymmOf(date: Date): string {
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
 /**
  * Burn the post's hook onto its render. Idempotent: re-burning the same
  * hook is a no-op; no hook / burn disabled clears any prior burn.
@@ -88,9 +86,10 @@ export async function burnHookIntoRender(postId: string): Promise<BurnResult> {
   const instructions = post.instructions ? (JSON.parse(post.instructions) as { hook?: string }) : {};
   const hook = (instructions.hook ?? "").trim();
 
-  // Nothing to serve as burned → drop any stale burned pointer.
+  // Nothing to serve as burned → drop any stale burned pointer AND file.
   if (!burnEnabled || !hook || !post.filePath) {
     if (post.burnedPath || post.burnedHook) {
+      if (post.burnedPath) await deleteVideo(post.burnedPath).catch(() => {});
       db.update(videoPosts).set({ burnedPath: null, burnedHook: null, updatedAt: new Date().toISOString() }).where(eq(videoPosts.id, postId)).run();
     }
     return { burned: false, reason: !burnEnabled ? "disabled" : !hook ? "no hook" : "no render" };
@@ -104,15 +103,17 @@ export async function burnHookIntoRender(postId: string): Promise<BurnResult> {
   const src = await materializeVideo(post.filePath);
   const tmpOut = videoScratchPath(`hook-${postId}.mp4`);
   const tmpTxt = videoScratchPath(`hook-${postId}.txt`);
-  const outRel = burnedPathFor(postId, yyyymmOf(new Date()));
+  const outRel = burnedPathFor(post.filePath);
   try {
     const wrapped = wrapHook(hook);
     const lineCount = wrapped.split("\n").length;
     await writeFile(tmpTxt, wrapped, "utf-8");
     const fontSize = lineCount >= 3 ? 54 : 64;
-    // Font/text paths are POSIX (no colons) so no filtergraph escaping needed.
+    // Paths are POSIX (no colons) so the filtergraph needs no escaping, and
+    // expansion=none makes drawtext render the textfile verbatim — a hook
+    // containing \, {, } or %{ can't be mis-read as an escape/expansion.
     const vf =
-      `drawtext=fontfile=${FONT}:textfile=${tmpTxt}:fontcolor=white:fontsize=${fontSize}:` +
+      `drawtext=fontfile=${FONT}:textfile=${tmpTxt}:expansion=none:fontcolor=white:fontsize=${fontSize}:` +
       `box=1:boxcolor=black@0.5:boxborderw=22:line_spacing=14:` +
       `x=(w-text_w)/2:y=h*0.14:enable='between(t,0,${HOLD_SEC})'`;
     await runFfmpeg([

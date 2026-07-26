@@ -73,6 +73,13 @@ describe("burnHookIntoRender (real ffmpeg)", () => {
     expect(r2.skipped).toBe(true);
   }, 120_000);
 
+  it("burns a hook with drawtext-special chars without breaking (expansion=none)", async () => {
+    resetTestDb();
+    seedPost("Why {this} shape wins \\ 50%");
+    const r = await burnHookIntoRender("post1");
+    expect(r.burned).toBe(true);
+  }, 120_000);
+
   it("clears the burned pointer when burn is disabled or no hook", async () => {
     resetTestDb();
     seedPost("Some hook line", 0); // burn disabled

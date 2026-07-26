@@ -15,6 +15,7 @@ import { db } from "@/lib/db";
 import { videoPosts } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
 import { reviseVideoCopy } from "@/modules/marketing/lib/video/video-ai";
+import { jobQueue } from "@/modules/core/lib/job-queue";
 
 export async function POST(
   request: NextRequest,
@@ -37,6 +38,11 @@ export async function POST(
   try {
     const result = await reviseVideoCopy(id, feedback);
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
+    // The hook may have changed — re-bake it onto the render (background),
+    // otherwise the previously-burned hook keeps being served.
+    if (post.filePath) {
+      jobQueue.enqueue("marketing.video.burn-hook", "marketing", { postId: id }, { priority: 2 });
+    }
     return NextResponse.json({ ok: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
