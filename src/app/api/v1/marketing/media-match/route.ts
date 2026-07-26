@@ -210,7 +210,62 @@ export async function GET(request: NextRequest) {
     products,
     categories,
     aiConfigured: Boolean(process.env.ANTHROPIC_API_KEY),
+    progress: buildProgress(type),
   });
+}
+
+/**
+ * Review progress for the identification queue — the numbers behind the
+ * progress bar. "Done" means a human (or an applied filename match) has
+ * resolved the item: it carries product tags, or it was explicitly marked
+ * as having no product visible.
+ */
+function buildProgress(type: "clip" | "image") {
+  const n = (sql: string): number => {
+    try {
+      const r = sqlite.prepare(sql).get() as Record<string, number> | undefined;
+      const v = r ? Object.values(r)[0] : 0;
+      return typeof v === "number" ? v : 0;
+    } catch {
+      return 0;
+    }
+  };
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayIso = todayStart.toISOString();
+
+  if (type === "clip") {
+    const total = n(`SELECT COUNT(*) v FROM marketing_video_clips WHERE status = 'ready'`);
+    const tagged = n(`
+      SELECT COUNT(*) v FROM marketing_video_clips c
+       WHERE c.status = 'ready'
+         AND EXISTS (SELECT 1 FROM marketing_video_clip_products cp WHERE cp.clip_id = c.id)`);
+    const noProduct = n(`
+      SELECT COUNT(*) v FROM marketing_video_clips c
+       JOIN marketing_media_matches m ON m.media_type = 'clip' AND m.media_id = c.id
+       WHERE c.status = 'ready' AND m.status = 'no_product'
+         AND NOT EXISTS (SELECT 1 FROM marketing_video_clip_products cp WHERE cp.clip_id = c.id)`);
+    const doneToday = n(`
+      SELECT COUNT(*) v FROM marketing_media_matches
+       WHERE media_type = 'clip' AND status IN ('confirmed','no_product')
+         AND updated_at >= '${todayIso}'`);
+    const done = tagged + noProduct;
+    return { type, total, done, tagged, noProduct, remaining: Math.max(0, total - done), doneToday };
+  }
+
+  const total = n(`SELECT COUNT(*) v FROM catalog_images WHERE file_path IS NOT NULL`);
+  const tagged = n(`SELECT COUNT(*) v FROM catalog_images WHERE file_path IS NOT NULL AND sku_id IS NOT NULL`);
+  const noProduct = n(`
+    SELECT COUNT(*) v FROM catalog_images i
+     JOIN marketing_media_matches m ON m.media_type = 'image' AND m.media_id = i.id
+     WHERE i.file_path IS NOT NULL AND i.sku_id IS NULL AND m.status = 'no_product'`);
+  const doneToday = n(`
+    SELECT COUNT(*) v FROM marketing_media_matches
+     WHERE media_type = 'image' AND status IN ('confirmed','no_product')
+       AND updated_at >= '${todayIso}'`);
+  const done = tagged + noProduct;
+  return { type, total, done, tagged, noProduct, remaining: Math.max(0, total - done), doneToday };
 }
 
 export async function POST(request: NextRequest) {
