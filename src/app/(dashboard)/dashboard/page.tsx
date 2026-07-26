@@ -17,7 +17,7 @@ import { WidgetFrame } from "@/components/dashboard/widget-frame";
 import { WIDGETS, SIZE_CLASS, type WidgetId } from "@/modules/dashboard/widgets";
 import {
   type Bundle,
-  KpisWidget, RevenueTrendWidget, ChannelMixWidget, TopSellersWidget,
+  KpisWidget, RevenueTrendWidget, ChannelMixWidget, TopSellersWidget, MoversWidget,
   InventoryHealthWidget, ReorderAlertsWidget, OutreachWidget, MetaLeadsWidget,
   PipelineWidget, CustomersWidget, FinanceWidget, BusinessHealthWidget, ActivityWidget,
 } from "@/modules/dashboard/components/widgets";
@@ -28,6 +28,7 @@ const COMPONENTS: Record<WidgetId, React.FC<{ data: Bundle }>> = {
   "revenue-trend": RevenueTrendWidget,
   "channel-mix": ChannelMixWidget,
   "top-sellers": TopSellersWidget,
+  movers: MoversWidget,
   "inventory-health": InventoryHealthWidget,
   "reorder-alerts": ReorderAlertsWidget,
   outreach: OutreachWidget,

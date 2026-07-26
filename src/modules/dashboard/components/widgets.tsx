@@ -10,11 +10,11 @@
 import { StatTile } from "@/components/dashboard/stat-tile";
 import { AreaTrend, Donut, HBars, Meter } from "@/components/dashboard/charts";
 import { Delta } from "@/components/dashboard/delta";
-import { money, num, deltaPct } from "@/components/dashboard/format";
+import { money, num, pct, deltaPct } from "@/components/dashboard/format";
 import { seriesColor, channelColor, channelLabel, STATUS } from "@/components/dashboard/palette";
 import {
-  DollarSign, ShoppingCart, Receipt, TrendingUp, PackageX, Megaphone,
-  AlertTriangle, Phone, Mail, Facebook, Activity as ActivityIcon,
+  DollarSign, ShoppingCart, Receipt, TrendingUp, TrendingDown, PackageX, Megaphone,
+  AlertTriangle, Phone, Mail, Facebook, Sparkles, Activity as ActivityIcon,
 } from "lucide-react";
 
 export type Bundle = { role: string; range: string; widgets: Record<string, unknown> };
@@ -65,19 +65,114 @@ export function ChannelMixWidget({ data }: { data: Bundle }) {
   return <Donut slices={slices} centerLabel={money(rows.reduce((a, r) => a + r.revenue, 0), { compact: true })} />;
 }
 
-// ── Top sellers ──
+// ── Top sellers (wholesale vs retail split) ──
+type TopSeller = {
+  sku: string; name: string; color: string; units: number; revenue: number;
+  unitsWholesale: number; unitsRetail: number; wholesaleSharePct: number;
+  avgOrderQty: number; accounts: number;
+};
+type ProductInsight = {
+  topSellers: TopSeller[];
+  movers: {
+    rising: Array<{ sku: string; name: string; color: string; trendPct: number | null; units: number; daysCover: number | null }>;
+    falling: Array<{ sku: string; name: string; color: string; trendPct: number | null; units: number; daysCover: number | null }>;
+    breakout: Array<{ sku: string; name: string; color: string; units: number }>;
+  };
+  wholesaleSharePct: number;
+};
+
+const WHOLESALE_COLOR = seriesColor(0);
+const RETAIL_COLOR = seriesColor(1);
+
 export function TopSellersWidget({ data }: { data: Bundle }) {
-  const rows = g<Array<{ sku: string; name: string; color: string; units: number; revenue: number }>>(data, "topSellers") ?? [];
+  const insight = g<ProductInsight>(data, "productInsight");
+  const rows = insight?.topSellers ?? [];
+  if (!rows.length) return <div className="flex h-24 items-center justify-center text-xs text-muted-foreground">No sales in this range</div>;
+  const max = Math.max(...rows.map((r) => r.units), 1);
   return (
-    <HBars
-      rows={rows.map((r, i) => ({
-        label: `${r.name ?? r.sku}${r.color ? ` · ${r.color}` : ""}`,
-        value: r.revenue,
-        sub: `${num(r.units)} u`,
-        color: seriesColor(i % 6),
-      }))}
-      format={(v) => money(v, { compact: v >= 10000 })}
-    />
+    <div className="space-y-3">
+      {/* Legend — identity is never color-alone */}
+      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-sm" style={{ backgroundColor: WHOLESALE_COLOR }} /> Wholesale</span>
+        <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-sm" style={{ backgroundColor: RETAIL_COLOR }} /> Retail</span>
+        {insight && <span className="ml-auto">{pct(insight.wholesaleSharePct)} wholesale overall</span>}
+      </div>
+      <ul className="space-y-2.5">
+        {rows.map((r) => {
+          const wPct = (r.unitsWholesale / max) * 100;
+          const rPct = (r.unitsRetail / max) * 100;
+          return (
+            <li key={r.sku} className="space-y-1">
+              <div className="flex items-baseline justify-between gap-2 text-sm">
+                <span className="truncate font-medium">{r.name}<span className="text-muted-foreground"> · {r.color}</span></span>
+                <span className="shrink-0 tabular-nums text-muted-foreground">
+                  {money(r.revenue, { compact: r.revenue >= 10000 })}<span className="ml-1 text-xs">{num(r.units)} u</span>
+                </span>
+              </div>
+              {/* Stacked units bar: 2px gap between segments per chart spec */}
+              <div className="flex h-2 w-full gap-[2px] overflow-hidden rounded-full bg-muted">
+                {r.unitsWholesale > 0 && <div className="h-full rounded-full" style={{ width: `${Math.max(2, wPct)}%`, backgroundColor: WHOLESALE_COLOR }} />}
+                {r.unitsRetail > 0 && <div className="h-full rounded-full" style={{ width: `${Math.max(2, rPct)}%`, backgroundColor: RETAIL_COLOR }} />}
+              </div>
+              <div className="flex gap-3 text-[11px] text-muted-foreground">
+                <span>{pct(r.wholesaleSharePct)} wholesale</span>
+                <span>{r.avgOrderQty.toFixed(1)} avg qty/order</span>
+                {r.accounts > 0 && <span>{num(r.accounts)} {r.accounts === 1 ? "door" : "doors"}</span>}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+// ── Rising & falling ──
+export function MoversWidget({ data }: { data: Bundle }) {
+  const insight = g<ProductInsight>(data, "productInsight");
+  const m = insight?.movers;
+  if (!m || (!m.rising.length && !m.falling.length && !m.breakout.length)) {
+    return <div className="flex h-24 items-center justify-center text-xs text-muted-foreground">Not enough volume to detect trends yet</div>;
+  }
+  const Row = ({ r, up }: { r: { sku: string; name: string; color: string; trendPct?: number | null; units: number; daysCover?: number | null }; up: boolean }) => (
+    <li className="flex items-center justify-between gap-2 py-1 text-sm">
+      <div className="min-w-0">
+        <span className="truncate font-medium">{r.name}</span>
+        <span className="text-muted-foreground"> · {r.color}</span>
+        <span className="ml-1 text-[11px] text-muted-foreground">{num(r.units)} u</span>
+      </div>
+      <span className="flex shrink-0 items-center gap-1.5">
+        {/* A rising seller with thin cover is a stockout risk, not just a win */}
+        {up && r.daysCover != null && r.daysCover < 30 && (
+          <span className="rounded px-1 text-[10px] font-medium" style={{ backgroundColor: `${STATUS.serious}1a`, color: STATUS.serious }}>
+            {r.daysCover}d cover
+          </span>
+        )}
+        {r.trendPct != null && <Delta value={r.trendPct} goodWhenUp />}
+      </span>
+    </li>
+  );
+  return (
+    <div className="space-y-3">
+      {m.rising.length > 0 && (
+        <div>
+          <div className="mb-0.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><TrendingUp className="h-3.5 w-3.5" /> Gaining</div>
+          <ul className="divide-y">{m.rising.map((r) => <Row key={r.sku} r={r} up />)}</ul>
+        </div>
+      )}
+      {m.falling.length > 0 && (
+        <div>
+          <div className="mb-0.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><TrendingDown className="h-3.5 w-3.5" /> Slipping</div>
+          <ul className="divide-y">{m.falling.map((r) => <Row key={r.sku} r={r} up={false} />)}</ul>
+        </div>
+      )}
+      {m.breakout.length > 0 && (
+        <div>
+          <div className="mb-0.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><Sparkles className="h-3.5 w-3.5" /> New this period</div>
+          <ul className="divide-y">{m.breakout.map((r) => <Row key={r.sku} r={r} up />)}</ul>
+        </div>
+      )}
+    </div>
   );
 }
 

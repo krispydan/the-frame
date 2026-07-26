@@ -16,6 +16,7 @@ export type WidgetId =
   | "revenue-trend"
   | "channel-mix"
   | "top-sellers"
+  | "movers"
   | "inventory-health"
   | "reorder-alerts"
   | "outreach"
@@ -44,7 +45,8 @@ export const WIDGETS: Record<WidgetId, WidgetDef> = {
   kpis: { id: "kpis", title: "Key metrics", domain: "sales", roles: ["owner", "sales_manager", "warehouse", "finance", "marketing", "support"], size: "full" },
   "revenue-trend": { id: "revenue-trend", title: "Revenue trend", domain: "sales", roles: ["owner", "sales_manager", "finance", "marketing"], size: "lg", href: "/finance" },
   "channel-mix": { id: "channel-mix", title: "Sales by channel", domain: "sales", roles: ["owner", "sales_manager", "finance"], size: "md", href: "/orders" },
-  "top-sellers": { id: "top-sellers", title: "Top sellers", subtitle: "by revenue", domain: "sales", roles: ["owner", "sales_manager", "warehouse", "marketing"], size: "md", href: "/catalog" },
+  "top-sellers": { id: "top-sellers", title: "Top sellers", subtitle: "wholesale vs retail", domain: "sales", roles: ["owner", "sales_manager", "warehouse", "marketing"], size: "md", href: "/inventory/performance" },
+  movers: { id: "movers", title: "Rising & falling", subtitle: "vs prior half-period", domain: "sales", roles: ["owner", "sales_manager", "warehouse", "marketing"], size: "md", href: "/inventory/performance" },
   "inventory-health": { id: "inventory-health", title: "Inventory health", domain: "inventory", roles: ["owner", "warehouse"], size: "md", href: "/inventory" },
   "reorder-alerts": { id: "reorder-alerts", title: "Reorder now", subtitle: "critical & urgent", domain: "inventory", roles: ["owner", "warehouse"], size: "md", href: "/inventory" },
   outreach: { id: "outreach", title: "Outreach performance", domain: "marketing", roles: ["owner", "sales_manager", "marketing"], size: "md", href: "/campaigns" },
@@ -60,11 +62,11 @@ export const ALL_WIDGET_IDS = Object.keys(WIDGETS) as WidgetId[];
 
 /** Default ordered layout per role. Users customize from here. */
 export const ROLE_DEFAULT_LAYOUT: Record<Role, WidgetId[]> = {
-  owner: ["kpis", "revenue-trend", "channel-mix", "pipeline", "top-sellers", "outreach", "inventory-health", "reorder-alerts", "customers", "finance", "business-health", "meta-leads", "activity"],
-  sales_manager: ["kpis", "revenue-trend", "pipeline", "channel-mix", "top-sellers", "outreach", "meta-leads", "customers", "activity"],
-  warehouse: ["kpis", "inventory-health", "reorder-alerts", "top-sellers", "activity"],
+  owner: ["kpis", "revenue-trend", "channel-mix", "pipeline", "top-sellers", "movers", "outreach", "inventory-health", "reorder-alerts", "customers", "finance", "business-health", "meta-leads", "activity"],
+  sales_manager: ["kpis", "revenue-trend", "pipeline", "channel-mix", "top-sellers", "movers", "outreach", "meta-leads", "customers", "activity"],
+  warehouse: ["kpis", "inventory-health", "reorder-alerts", "top-sellers", "movers", "activity"],
   finance: ["kpis", "finance", "revenue-trend", "channel-mix", "business-health", "customers", "activity"],
-  marketing: ["kpis", "outreach", "meta-leads", "revenue-trend", "top-sellers", "activity"],
+  marketing: ["kpis", "outreach", "meta-leads", "revenue-trend", "top-sellers", "movers", "activity"],
   support: ["kpis", "activity"],
   ai: ["kpis"],
 };
