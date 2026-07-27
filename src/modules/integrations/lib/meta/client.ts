@@ -130,12 +130,13 @@ export interface MetaLeadDetail {
  */
 export async function fetchLead(leadgenId: string): Promise<MetaLeadDetail | null> {
   const c = metaConfig();
-  if (!c.pageToken) {
+  const token = await pageScopedToken();
+  if (!token) {
     console.warn("[meta] fetchLead skipped — META_PAGE_TOKEN not set");
     return null;
   }
   const fields = "id,created_time,field_data,form_id,campaign_name,adset_name,ad_name,ad_id";
-  const url = `${GRAPH_BASE}/${c.graphVersion}/${leadgenId}?fields=${fields}&access_token=${encodeURIComponent(c.pageToken)}`;
+  const url = `${GRAPH_BASE}/${c.graphVersion}/${leadgenId}?fields=${fields}&access_token=${encodeURIComponent(token)}`;
   try {
     const res = await fetch(url);
     const data = (await res.json()) as MetaLeadDetail & { error?: { message?: string } };
@@ -156,10 +157,11 @@ export async function fetchLead(leadgenId: string): Promise<MetaLeadDetail | nul
  */
 export async function fetchFormLeads(formId: string, limit = 50): Promise<MetaLeadDetail[]> {
   const c = metaConfig();
-  if (!c.pageToken) return [];
+  const token = await pageScopedToken();
+  if (!token) return [];
   const fields = "id,created_time,field_data,campaign_name,adset_name,ad_name,ad_id";
   let url: string | null =
-    `${GRAPH_BASE}/${c.graphVersion}/${formId}/leads?fields=${fields}&limit=${limit}&access_token=${encodeURIComponent(c.pageToken)}`;
+    `${GRAPH_BASE}/${c.graphVersion}/${formId}/leads?fields=${fields}&limit=${limit}&access_token=${encodeURIComponent(token)}`;
   const out: MetaLeadDetail[] = [];
   try {
     // One page is enough for a safety-net sweep; guard against runaway paging.
@@ -189,6 +191,63 @@ export interface MetaPage {
   leadgenSubscribed?: boolean;
   forms?: Array<{ id: string; name?: string; status?: string; leads_count?: number }>;
   error?: string;
+}
+
+/**
+ * Page-scoped tokens, derived once per process.
+ *
+ * Lead Ads endpoints (`/{page}/leadgen_forms`, `/{form}/leads`, the lead
+ * itself) reject anything that isn't a PAGE access token with
+ * "(#190) This method must be called with a Page Access Token". People
+ * naturally paste a User or System-User token instead, so rather than demand
+ * the exact right one we exchange whatever we're given: `/me/accounts` returns
+ * each assigned Page together with its own token. If the configured value is
+ * already a Page token, `/me/accounts` returns nothing useful and we fall
+ * back to using it directly.
+ */
+let pageTokenCache: { at: number; pages: Array<{ id: string; name?: string; token: string }> } | null = null;
+const PAGE_TOKEN_TTL_MS = 10 * 60_000;
+
+export async function resolvePageTokens(force = false): Promise<Array<{ id: string; name?: string; token: string }>> {
+  const c = metaConfig();
+  if (!c.pageToken) return [];
+  if (!force && pageTokenCache && Date.now() - pageTokenCache.at < PAGE_TOKEN_TTL_MS) {
+    return pageTokenCache.pages;
+  }
+
+  const pages: Array<{ id: string; name?: string; token: string }> = [];
+  try {
+    const res = await fetch(
+      `${GRAPH_BASE}/${c.graphVersion}/me/accounts?fields=id,name,access_token&limit=50&access_token=${encodeURIComponent(c.pageToken)}`,
+    );
+    const data = (await res.json()) as { data?: Array<{ id: string; name?: string; access_token?: string }> };
+    for (const p of data.data ?? []) {
+      if (p.access_token) pages.push({ id: p.id, name: p.name, token: p.access_token });
+    }
+  } catch {
+    /* fall through to the configured token */
+  }
+
+  // Already a Page token (or /me/accounts unavailable): use it as-is. Identify
+  // the page so page-scoped calls still have an id to work with.
+  if (pages.length === 0) {
+    try {
+      const res = await fetch(`${GRAPH_BASE}/${c.graphVersion}/me?fields=id,name&access_token=${encodeURIComponent(c.pageToken)}`);
+      const me = (await res.json()) as { id?: string; name?: string };
+      if (me.id) pages.push({ id: me.id, name: me.name, token: c.pageToken });
+    } catch {
+      /* nothing more we can do */
+    }
+  }
+
+  pageTokenCache = { at: Date.now(), pages };
+  return pages;
+}
+
+/** The best token for page-scoped reads: a derived Page token, else the raw one. */
+async function pageScopedToken(): Promise<string | null> {
+  const pages = await resolvePageTokens();
+  return pages[0]?.token ?? metaConfig().pageToken;
 }
 
 async function graph<T>(path: string, token: string): Promise<T | { error: string }> {
@@ -231,26 +290,27 @@ export async function diagnoseLeadAccess(): Promise<{
         scopes: dbg.data?.scopes,
       };
 
-  // Which pages can this token act for?
-  const accounts = await graph<{ data?: Array<{ id: string; name?: string }> }>("/me/accounts?limit=25", c.pageToken);
-  const pageList = "error" in accounts ? [] : accounts.data ?? [];
+  // Exchange for page-scoped tokens — page-level reads reject user tokens
+  // with "(#190) This method must be called with a Page Access Token".
+  const resolved = await resolvePageTokens(true);
 
   const pages: MetaPage[] = [];
-  for (const p of pageList.slice(0, 10)) {
+  for (const p of resolved.slice(0, 10)) {
     const page: MetaPage = { id: p.id, name: p.name };
 
     const subs = await graph<{ data?: Array<{ id?: string; name?: string; subscribed_fields?: string[] }> }>(
-      `/${p.id}/subscribed_apps`, c.pageToken,
+      `/${p.id}/subscribed_apps`, p.token,
     );
-    if (!("error" in subs)) {
+    if ("error" in subs) page.error = subs.error;
+    else {
       page.subscribedApps = subs.data ?? [];
       page.leadgenSubscribed = (subs.data ?? []).some((a) => (a.subscribed_fields ?? []).includes("leadgen"));
     }
 
     const forms = await graph<{ data?: Array<{ id: string; name?: string; status?: string; leads_count?: number }> }>(
-      `/${p.id}/leadgen_forms?fields=id,name,status,leads_count&limit=50`, c.pageToken,
+      `/${p.id}/leadgen_forms?fields=id,name,status,leads_count&limit=50`, p.token,
     );
-    if ("error" in forms) page.error = forms.error;
+    if ("error" in forms) page.error = page.error ?? forms.error;
     else page.forms = forms.data ?? [];
 
     pages.push(page);
@@ -259,7 +319,9 @@ export async function diagnoseLeadAccess(): Promise<{
   return {
     token,
     pages,
-    error: "error" in accounts ? accounts.error : undefined,
+    error: resolved.length === 0
+      ? "This token can't reach any Page. Assign the Jaxy Page to the System User (Manage Page access) and regenerate, or paste a Page access token."
+      : undefined,
   };
 }
 
@@ -271,9 +333,12 @@ export async function diagnoseLeadAccess(): Promise<{
 export async function subscribePageToLeadgen(pageId: string): Promise<{ ok: boolean; error?: string }> {
   const c = metaConfig();
   if (!c.pageToken) return { ok: false, error: "META_PAGE_TOKEN not set" };
+  // Subscribing a Page also requires that Page's own token.
+  const pages = await resolvePageTokens();
+  const token = pages.find((p) => p.id === pageId)?.token ?? c.pageToken;
   try {
     const res = await fetch(
-      `${GRAPH_BASE}/${c.graphVersion}/${pageId}/subscribed_apps?subscribed_fields=leadgen&access_token=${encodeURIComponent(c.pageToken)}`,
+      `${GRAPH_BASE}/${c.graphVersion}/${pageId}/subscribed_apps?subscribed_fields=leadgen&access_token=${encodeURIComponent(token)}`,
       { method: "POST" },
     );
     const data = (await res.json()) as { success?: boolean; error?: { message?: string } };
