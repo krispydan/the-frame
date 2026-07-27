@@ -58,9 +58,11 @@ export interface PostingInstructions {
 export function videoStrategyBlock(): string {
   const audience = getDocContent("audience-profile").trim();
   const pillars = getDocContent("content-pillars").trim();
+  const hooks = getDocContent("hook-formulas").trim();
   const parts: string[] = [];
   if (audience) parts.push(`AUDIENCE — write to THIS person:\n\n${audience}`);
   if (pillars) parts.push(`CONTENT PILLARS — pick one, write the hook to its energy:\n\n${pillars}`);
+  if (hooks) parts.push(`HOOK FORMULAS — write the hook in ONE of these trending styles:\n\n${hooks}`);
   if (parts.length === 0) return "";
   return (
     `\n\n────────────────────────────────────────────────────────────\n` +

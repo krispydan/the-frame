@@ -85,11 +85,12 @@ Write the exact manual steps for the person posting:
 
 - hook: The scroll-stopping first line, delivered in the first 0–2
   seconds — this is the single biggest driver of whether the video gets
-  distributed. Write it to the AUDIENCE and the chosen PILLAR (see the
-  VIDEO STRATEGY section above). Specific beats broad; an "identity
-  call" or a sharp promise beats a vague tease. Keep it ≤ ~60 characters
-  so it fits on screen. It will be BURNED onto the video as on-screen
-  text, so it must stand alone without the caption.
+  distributed. Write it in ONE of the trending HOOK FORMULAS (see the
+  VIDEO STRATEGY section above), adapted to the AUDIENCE and chosen
+  PILLAR — rotate formulas across videos, don't reuse the same one.
+  Specific beats broad. Keep it ≤ ~60 characters so it fits on screen.
+  It will be BURNED onto the video as on-screen text, so it must stand
+  alone without the caption.
 - pillar: name the content pillar this video sits in (from the pillars
   list). Pick the one the clips actually support.
 - scriptBeats: optional 3-beat spine [hook, value, payoff/CTA] — the
