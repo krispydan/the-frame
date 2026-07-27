@@ -3,7 +3,10 @@ export const maxDuration = 600;
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
-import { phoneBurnerClient } from "@/modules/sales/lib/phoneburner-client";
+import {
+  phoneBurnerClientFor, pbOwnerFor, type PbRep,
+} from "@/modules/sales/lib/phoneburner-client";
+import { ensureFreshPhoneBurnerToken } from "@/modules/sales/lib/phoneburner-oauth";
 import { formatToPbPhone } from "@/modules/sales/lib/phone-utils";
 
 /**
@@ -53,8 +56,15 @@ async function handle(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  let body: { folder_id?: string; limit?: number; dryRun?: boolean; pipedrivePushedOnly?: boolean } = {};
+  let body: {
+    folder_id?: string; limit?: number; dryRun?: boolean;
+    pipedrivePushedOnly?: boolean; rep?: string;
+  } = {};
   try { body = await req.json(); } catch { /* empty */ }
+  // Christina dials from her OWN PhoneBurner account, not the shared one, so
+  // the target account has to be explicit — pushing to the right folder id in
+  // the wrong account silently lands the leads where nobody sees them.
+  const rep: PbRep = body.rep === "christina" ? "christina" : "sandra";
   const folderId = String(body.folder_id || AJM_FOLDER).trim();
   const limit = Math.min(5000, Math.max(1, body.limit ?? 2000));
   // Default to the leads we actually pushed to Pipedrive (have a deal) —
@@ -128,13 +138,15 @@ async function handle(req: NextRequest) {
     return NextResponse.json({ ok: true, cohort_total: 0, pushed: 0, message: "Nothing to push.", ajm_universe: universe });
   }
 
-  // Resolve owner_id (PB requires it on every create).
+  // Target account. Christina's is OAuth-based, so refresh her token first.
+  const client = phoneBurnerClientFor(rep);
+  if (rep === "christina") await ensureFreshPhoneBurnerToken("christina").catch(() => null);
+
+  // Resolve owner_id for THAT account (PB requires it on every create).
   let ownerId: string;
   try {
-    const cached = sqlite.prepare("SELECT value FROM settings WHERE key='phoneburner_owner_id' LIMIT 1")
-      .get() as { value: string | null } | undefined;
-    ownerId = cached?.value || (await phoneBurnerClient.discoverOwnerId()) || "";
-    if (!ownerId) throw new Error("owner_id unavailable");
+    ownerId = pbOwnerFor(rep) || (await client.discoverOwnerId()) || "";
+    if (!ownerId) throw new Error(`owner_id unavailable for ${rep}`);
   } catch (e) {
     return NextResponse.json({ ok: false, error: `owner_id: ${e instanceof Error ? e.message : e}` }, { status: 502 });
   }
@@ -152,7 +164,7 @@ async function handle(req: NextRequest) {
     const formatted = formatToPbPhone(row.primary_phone);
     if (!formatted) { skippedNoPhone++; continue; }
     try {
-      const created = await phoneBurnerClient.createContact({
+      const created = await client.createContact({
         owner_id: ownerId,
         first_name: (row.first_name || row.name).slice(0, 64),
         last_name: row.last_name || row.state || "",
@@ -194,7 +206,8 @@ async function handle(req: NextRequest) {
     already_pushed: alreadyPushed,
     skipped_no_phone: skippedNoPhone,
     errors,
+    rep,
     ajm_universe: universe,
-    note: `Pushed ${pushed} AJM leads to folder ${folderId} for Christina.`,
+    note: `Pushed ${pushed} AJM leads to folder ${folderId} in ${rep}'s PhoneBurner account.`,
   });
 }
