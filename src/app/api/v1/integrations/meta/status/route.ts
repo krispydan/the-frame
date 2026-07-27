@@ -52,10 +52,32 @@ export async function GET() {
 
   // What's still missing, in the order it needs doing.
   const missing: Array<{ key: string; label: string; where: string }> = [];
-  if (!c.appSecret) missing.push({ key: "META_APP_SECRET", label: "App secret", where: "developers.facebook.com → your app → App settings → Basic" });
-  if (!c.verifyToken) missing.push({ key: "META_VERIFY_TOKEN", label: "Webhook verify token", where: "You choose this — any random string, used in both Railway and Meta" });
-  if (!c.pageToken) missing.push({ key: "META_PAGE_TOKEN", label: "Page access token", where: "business.facebook.com → Business settings → Users → System users → Generate token (leads_retrieval)" });
-  if (!c.capiToken) missing.push({ key: "META_CAPI_TOKEN", label: "Conversions API token", where: "Events Manager → your dataset → Settings → Generate access token" });
+  if (!c.appSecret) {
+    missing.push({
+      key: "META_APP_SECRET", label: "App secret",
+      where: "developers.facebook.com → your app → App settings → Basic → App secret (click Show).",
+    });
+  }
+  if (!c.verifyToken) {
+    missing.push({
+      key: "META_VERIFY_TOKEN", label: "Webhook verify token",
+      where: "You invent this one — any random string (e.g. jaxy_meta_7f3a9c). Put the SAME value in Railway and in Meta's webhook setup; they're compared to each other.",
+    });
+  }
+  if (!c.pageToken) {
+    missing.push({
+      key: "META_PAGE_TOKEN", label: "Page access token",
+      where: "business.facebook.com → Business settings → Users → System users → add/select a user → Generate new token → pick your app → tick leads_retrieval, pages_read_engagement, pages_manage_metadata, pages_show_list.",
+    });
+  }
+  if (!c.capiToken) {
+    missing.push({
+      key: "META_CAPI_TOKEN", label: "Conversions API token",
+      where:
+        `If you followed Meta's "Send a CRM event" guide, you already have this: it's the access_token= value in the endpoint URL that page shows you (…/${c.datasetId}/events?access_token=THIS_PART). ` +
+        "Otherwise: Events Manager → Data sources → your dataset → Settings → Conversions API → Generate access token.",
+    });
+  }
 
   return NextResponse.json({
     ok: true,
