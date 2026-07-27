@@ -41,12 +41,22 @@ type Status = {
   canEdit: boolean;
 };
 
+type Diagnosis = {
+  token: { valid: boolean; type?: string; error?: string };
+  pages: Array<{
+    id: string; name?: string; leadgenSubscribed?: boolean; error?: string;
+    forms?: Array<{ id: string; name?: string; leads_count?: number }>;
+  }>;
+  error?: string;
+};
+
 export default function MetaIntegrationPage() {
   const [data, setData] = useState<Status | null>(null);
   const [loading, setLoading] = useState(true);
   const [nonce, setNonce] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [testCode, setTestCode] = useState("");
+  const [diag, setDiag] = useState<Diagnosis | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,11 +83,32 @@ export default function MetaIntegrationPage() {
       });
       const d = await res.json();
       if (res.ok && d.ok) {
-        toast.success(
-          action === "test-event" ? "Test event accepted — check Events Manager → Test Events"
-          : action === "ensure-pipeline" ? "Facebook Leads pipeline ready in Pipedrive"
-          : "Done",
-        );
+        if (action === "diagnose") {
+          setDiag({ token: d.token, pages: d.pages ?? [], error: d.error });
+          const subscribed = (d.pages ?? []).filter((p: { leadgenSubscribed?: boolean }) => p.leadgenSubscribed).length;
+          toast[subscribed > 0 ? "success" : "message"](
+            subscribed > 0
+              ? `Connection looks good — ${subscribed} page${subscribed === 1 ? "" : "s"} subscribed to leadgen`
+              : "No page is subscribed to leadgen yet — see the details below",
+          );
+        } else if (action === "import-existing") {
+          const r = d.result;
+          toast[r.processed > 0 ? "success" : "message"](
+            r.processed > 0
+              ? `Imported ${r.processed} lead${r.processed === 1 ? "" : "s"} from ${r.forms} form${r.forms === 1 ? "" : "s"}`
+              : r.forms > 0
+                ? `Found ${r.forms} form${r.forms === 1 ? "" : "s"} but no leads to import`
+                : "No lead forms found on the connected pages",
+          );
+          if (r.errors?.length) toast.error(r.errors[0]);
+        } else {
+          toast.success(
+            action === "test-event" ? "Test event accepted — check Events Manager → Test Events"
+            : action === "ensure-pipeline" ? "Facebook Leads pipeline ready in Pipedrive"
+            : action === "subscribe-page" ? "Page subscribed to leadgen"
+            : "Done",
+          );
+        }
         reload();
       } else {
         toast.error(d.result?.error ?? d.error ?? "Failed");
@@ -184,15 +215,66 @@ export default function MetaIntegrationPage() {
 
                 {data.canEdit && (
                   <div className="flex flex-wrap gap-2">
+                    <Button size="sm" disabled={busy !== null || !data.inbound.ready} onClick={() => run("diagnose")}>
+                      {busy === "diagnose" ? "Checking…" : "Check connection"}
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={busy !== null || !data.inbound.ready} onClick={() => run("import-existing")}>
+                      {busy === "import-existing" ? "Importing…" : "Import existing leads"}
+                    </Button>
                     <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => run("ensure-pipeline")}>
-                      {busy === "ensure-pipeline" ? "Working…" : "Provision Pipedrive pipeline"}
+                      Provision pipeline
                     </Button>
                     <Button size="sm" variant="outline" disabled={busy !== null || !data.inbound.ready} onClick={() => run("drain")}>
                       Process pending
                     </Button>
-                    <Button size="sm" variant="outline" disabled={busy !== null || !data.inbound.ready} onClick={() => run("reconcile")}>
-                      Re-poll forms
-                    </Button>
+                  </div>
+                )}
+
+                {/* Connection diagnosis — the "connected but nothing arrives" answer */}
+                {diag && (
+                  <div className="space-y-2 rounded-lg border p-3 text-sm">
+                    <div className="flex items-center gap-2">
+                      {diag.token.valid
+                        ? <CheckCircle2 className="h-4 w-4" style={{ color: STATUS.good }} />
+                        : <AlertTriangle className="h-4 w-4" style={{ color: STATUS.critical }} />}
+                      <span className="font-medium">
+                        {diag.token.valid ? `Token valid (${diag.token.type ?? "token"})` : `Token problem: ${diag.token.error ?? "invalid"}`}
+                      </span>
+                    </div>
+                    {diag.error && <p className="text-xs" style={{ color: STATUS.critical }}>{diag.error}</p>}
+                    {diag.pages.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        This token can&apos;t see any Pages. In Business settings → System users, assign the Jaxy Page to
+                        the user with Manage Page access, then regenerate the token.
+                      </p>
+                    ) : (
+                      diag.pages.map((p) => (
+                        <div key={p.id} className="rounded-md bg-muted/40 p-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium">{p.name ?? p.id}</span>
+                            {p.leadgenSubscribed
+                              ? <Badge className="bg-green-600 hover:bg-green-700">leadgen subscribed</Badge>
+                              : data.canEdit && (
+                                  <Button size="sm" variant="outline" disabled={busy !== null}
+                                    onClick={() => run("subscribe-page", { pageId: p.id })}>
+                                    Subscribe to leadgen
+                                  </Button>
+                                )}
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {(p.forms?.length ?? 0)} form{(p.forms?.length ?? 0) === 1 ? "" : "s"}
+                            {p.forms && p.forms.length > 0 && ` · ${p.forms.reduce((a, f) => a + (f.leads_count ?? 0), 0)} leads on Meta`}
+                          </p>
+                          {p.error && <p className="text-xs" style={{ color: STATUS.critical }}>{p.error}</p>}
+                          {p.forms?.slice(0, 6).map((f) => (
+                            <div key={f.id} className="flex justify-between text-xs text-muted-foreground">
+                              <span className="truncate">{f.name ?? f.id}</span>
+                              <span>{f.leads_count ?? 0}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ))
+                    )}
                   </div>
                 )}
                 <Link href="/prospects/facebook-leads" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
