@@ -12,7 +12,7 @@
  */
 
 import { sqlite } from "@/lib/db";
-import { canSeeWidget, type WidgetId } from "../widgets";
+import { canSeeWidget, HEAVY_WIDGETS, type WidgetId } from "../widgets";
 import { calculatePnl } from "@/modules/finance/lib/pnl";
 import { getHealthSummary } from "@/modules/customers/lib/health-scoring";
 import { calculateBusinessHealth } from "@/modules/intelligence/lib/business-health";
@@ -233,8 +233,6 @@ function buildActivity() {
 export type Part = "core" | "heavy" | "all";
 
 /** Widget ids served by the heavy part. */
-export const HEAVY_WIDGETS: WidgetId[] = ["top-sellers", "movers", "finance", "business-health"];
-
 export function buildDashboard(role: string, range: Range, part: Part = "all") {
   const { start, priorStart, priorEnd, days } = rangeStart(range);
   const now = new Date().toISOString();
