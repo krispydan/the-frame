@@ -192,6 +192,7 @@ export async function importMetaLeadCsv(
       leadgenId: lead.id,
       formId: lead.form_id ?? null,
       createdTime: lead.created_time ?? null,
+      source: "csv",
     });
     if (isNew) result.newLeads++;
 

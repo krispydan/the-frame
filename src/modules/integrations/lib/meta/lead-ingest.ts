@@ -210,6 +210,8 @@ export interface LeadgenEntry {
   formId?: string | null;
   pageId?: string | null;
   createdTime?: string | null;
+  /** How the lead reached us. Defaults to the real-time webhook path. */
+  source?: "webhook" | "csv";
 }
 
 /**
@@ -220,10 +222,13 @@ export interface LeadgenEntry {
 export function recordLeadgenEvent(entry: LeadgenEntry): boolean {
   const inserted = sqlite
     .prepare(
-      `INSERT OR IGNORE INTO meta_leads (id, leadgen_id, form_id, page_id, created_time, status)
-       VALUES (?, ?, ?, ?, ?, 'received')`,
+      `INSERT OR IGNORE INTO meta_leads (id, leadgen_id, form_id, page_id, created_time, status, source)
+       VALUES (?, ?, ?, ?, ?, 'received', ?)`,
     )
-    .run(crypto.randomUUID(), entry.leadgenId, entry.formId ?? null, entry.pageId ?? null, entry.createdTime ?? null).changes;
+    .run(
+      crypto.randomUUID(), entry.leadgenId, entry.formId ?? null, entry.pageId ?? null,
+      entry.createdTime ?? null, entry.source ?? "webhook",
+    ).changes;
   if (entry.formId) rememberForm(entry.formId);
   return inserted > 0;
 }
