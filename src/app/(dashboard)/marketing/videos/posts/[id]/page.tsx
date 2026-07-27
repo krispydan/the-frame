@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { VideoPlayer } from "@/components/ui/video-player";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
@@ -75,8 +76,13 @@ type LibClip = {
   fileName: string;
   durationSec: number | null;
   posterUrl: string | null;
+  previewUrl: string | null;
   category: string | null;
+  talent: string | null;
+  createdAt: string | null;
+  products: string[];
 };
+type LibCategory = { id: string; slug: string; name: string };
 
 const STATUS_COLORS: Record<string, string> = {
   queued: "bg-amber-100 text-amber-800",
@@ -108,6 +114,14 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
   const [pickerOpen, setPickerOpen] = useState(false);
   const [library, setLibrary] = useState<LibClip[]>([]);
   const [libSearch, setLibSearch] = useState("");
+  const [libCategory, setLibCategory] = useState("");
+  const [libTalent, setLibTalent] = useState("");
+  const [libCats, setLibCats] = useState<LibCategory[]>([]);
+  const [libTalents, setLibTalents] = useState<string[]>([]);
+  const [libTotal, setLibTotal] = useState(0);
+  const [libLoading, setLibLoading] = useState(false);
+  const [previewClip, setPreviewClip] = useState<LibClip | null>(null);
+  const LIB_LIMIT = 60;
   // Trim dialog: which sequence index is being trimmed + the in/out points.
   const [trimIdx, setTrimIdx] = useState<number | null>(null);
   const [trimStart, setTrimStart] = useState(0);
@@ -225,10 +239,15 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
     });
   };
 
-  const openPicker = async () => {
-    setPickerOpen(true);
-    if (library.length > 0) return;
-    const res = await fetch(`/api/v1/marketing/videos/clips?status=ready&limit=500`);
+  // Server-side search/filter — never loads the whole 750+ library into
+  // the browser. Fetches a capped page ordered newest-first.
+  const loadLibrary = useCallback(async () => {
+    setLibLoading(true);
+    const params = new URLSearchParams({ status: "ready", limit: String(LIB_LIMIT) });
+    if (libSearch.trim()) params.set("search", libSearch.trim());
+    if (libCategory) params.set("category", libCategory);
+    if (libTalent) params.set("talent", libTalent);
+    const res = await fetch(`/api/v1/marketing/videos/clips?${params}`);
     const d = await res.json();
     setLibrary(
       (d.clips ?? []).map((c: Record<string, unknown>) => ({
@@ -236,9 +255,41 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
         fileName: String(c.fileName ?? c.file_name ?? ""),
         durationSec: (c.durationSec ?? c.duration_sec) as number | null,
         posterUrl: (c.posterUrl ?? c.poster_url ?? null) as string | null,
-        category: (c.category ?? null) as string | null,
+        previewUrl: (c.previewUrl ?? null) as string | null,
+        category: (c.category_name ?? c.category_slug ?? c.category ?? null) as string | null,
+        talent: (c.talent ?? null) as string | null,
+        createdAt: (c.created_at ?? null) as string | null,
+        products: Array.isArray(c.products) ? (c.products as Array<{ productName?: string }>).map((p) => p.productName ?? "").filter(Boolean) : [],
       })),
     );
+    setLibTotal(Number(d.total ?? 0));
+    if (Array.isArray(d.talents)) setLibTalents(d.talents as string[]);
+    setLibLoading(false);
+  }, [libSearch, libCategory, libTalent]);
+
+  const openPicker = async () => {
+    setPickerOpen(true);
+    if (libCats.length === 0) {
+      fetch("/api/v1/marketing/videos/categories")
+        .then((r) => r.json())
+        .then((d) => setLibCats((d.categories ?? []).filter((c: { archived?: number }) => !c.archived)))
+        .catch(() => {});
+    }
+    loadLibrary();
+  };
+
+  // Debounced refetch while the picker is open and its filters change.
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const t = setTimeout(loadLibrary, 250);
+    return () => clearTimeout(t);
+  }, [pickerOpen, loadLibrary]);
+
+  const addLibClip = (c: LibClip) => {
+    setClipSeq((prev) => [
+      ...prev,
+      { position: prev.length + 1, id: c.id, fileName: c.fileName, durationSec: c.durationSec, posterUrl: c.posterUrl, previewUrl: c.previewUrl, category: c.category },
+    ]);
   };
 
   // AI revise chat
@@ -680,48 +731,123 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
             </div>
           )}
 
-          {/* Clip picker */}
+          {/* Clip picker — searchable / filterable, server-side (750+ clips) */}
           {pickerOpen && (
-            <div className="space-y-1.5 rounded-lg border p-2">
-              <div className="flex items-center gap-2">
+            <div className="space-y-2 rounded-lg border p-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <p className="text-xs font-medium">Clip library</p>
-                <Input placeholder="Search clips…" value={libSearch} onChange={(e) => setLibSearch(e.target.value)} className="h-8 flex-1" />
+                <Input
+                  placeholder="Search filename, creator, product…"
+                  value={libSearch}
+                  onChange={(e) => setLibSearch(e.target.value)}
+                  className="h-8 min-w-[180px] flex-1"
+                />
+                <select
+                  value={libCategory}
+                  onChange={(e) => setLibCategory(e.target.value)}
+                  className="h-8 rounded-md border bg-background px-2 text-xs"
+                  title="Video style"
+                >
+                  <option value="">All styles</option>
+                  {libCats.map((c) => (
+                    <option key={c.id} value={c.slug}>{c.name}</option>
+                  ))}
+                </select>
+                <select
+                  value={libTalent}
+                  onChange={(e) => setLibTalent(e.target.value)}
+                  className="h-8 rounded-md border bg-background px-2 text-xs"
+                  title="Creator"
+                >
+                  <option value="">All creators</option>
+                  {libTalents.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
                 <Button variant="ghost" size="sm" onClick={() => setPickerOpen(false)}>
                   <X className="h-4 w-4" />
                 </Button>
               </div>
-              <div className="grid max-h-64 grid-cols-4 gap-1.5 overflow-y-auto sm:grid-cols-6 md:grid-cols-8">
-                {library
-                  .filter((c) => !libSearch.trim() || c.fileName.toLowerCase().includes(libSearch.trim().toLowerCase()))
-                  .map((c) => (
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                <span>
+                  {libLoading ? "Searching…" : `Showing ${library.length}${libTotal > library.length ? ` of ${libTotal}` : ""} — newest first`}
+                </span>
+                {libTotal > library.length && <span>refine to narrow</span>}
+              </div>
+              <div className="grid max-h-72 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4 md:grid-cols-6">
+                {library.map((c) => (
+                  <div key={c.id} className="group/lib relative">
                     <button
-                      key={c.id}
-                      onClick={() =>
-                        setClipSeq((prev) => [
-                          ...prev,
-                          { position: prev.length + 1, id: c.id, fileName: c.fileName, durationSec: c.durationSec, posterUrl: c.posterUrl, category: c.category },
-                        ])
-                      }
-                      className="rounded-lg border p-1 text-left hover:bg-muted"
-                      title={`${c.fileName} (${(c.durationSec ?? 0).toFixed(1)}s) — click to append`}
+                      onClick={() => setPreviewClip(c)}
+                      className="block w-full rounded-lg border p-1 text-left hover:bg-muted"
+                      title={`${c.fileName} — click to preview`}
                     >
-                      <span className="block aspect-[9/16] w-full overflow-hidden rounded bg-muted">
+                      <span className="relative block aspect-[9/16] w-full overflow-hidden rounded bg-muted">
                         {c.posterUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={c.posterUrl} alt="" className="h-full w-full object-cover" />
                         ) : null}
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover/lib:bg-black/25 group-hover/lib:opacity-100">
+                          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-black">▶</span>
+                        </span>
+                        {c.durationSec != null && (
+                          <span className="absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 text-[9px] text-white">{c.durationSec.toFixed(1)}s</span>
+                        )}
                       </span>
-                      <span className="block truncate text-[10px]">{c.fileName}</span>
+                      <span className="mt-0.5 block truncate text-[10px] font-medium">{c.fileName}</span>
+                      <span className="block truncate text-[9px] text-muted-foreground">
+                        {[c.category, c.talent, c.createdAt ? new Date(c.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : null].filter(Boolean).join(" · ")}
+                      </span>
                     </button>
-                  ))}
-                {library.length === 0 && (
-                  <span className="col-span-full p-3 text-center text-xs text-muted-foreground">Loading clips…</span>
+                    <button
+                      onClick={() => addLibClip(c)}
+                      title="Add to video"
+                      className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground opacity-0 shadow transition hover:scale-110 group-hover/lib:opacity-100"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+                {!libLoading && library.length === 0 && (
+                  <span className="col-span-full p-4 text-center text-xs text-muted-foreground">No clips match — try a different search or filter.</span>
                 )}
               </div>
             </div>
           )}
         </CardContent>
       </Card>
+
+      {/* Preview-before-add dialog */}
+      {previewClip && (
+        <Dialog open onOpenChange={(open) => !open && setPreviewClip(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="truncate pr-8 text-sm">{previewClip.fileName}</DialogTitle>
+            </DialogHeader>
+            <VideoPlayer
+              src={previewClip.previewUrl}
+              poster={previewClip.posterUrl}
+              size="md"
+              className="aspect-[9/16] w-full max-w-[240px] mx-auto rounded-lg"
+            />
+            <p className="text-center text-xs text-muted-foreground">
+              {[
+                previewClip.category,
+                previewClip.talent,
+                previewClip.durationSec != null ? `${previewClip.durationSec.toFixed(1)}s` : null,
+                previewClip.createdAt ? new Date(previewClip.createdAt).toLocaleDateString() : null,
+              ].filter(Boolean).join(" · ")}
+              {previewClip.products.length > 0 && <><br />{previewClip.products.join(", ")}</>}
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setPreviewClip(null)}>Close</Button>
+              <Button size="sm" onClick={() => { addLibClip(previewClip); setPreviewClip(null); }}>
+                <Plus className="h-4 w-4 mr-1" /> Add to video
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[300px_minmax(0,1fr)] min-w-0">
         {/* Video */}
