@@ -9,14 +9,14 @@
  * reports funnel stages back to Meta.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { HBars } from "@/components/dashboard/charts";
 import { num, pct } from "@/components/dashboard/format";
 import { seriesColor, STATUS } from "@/components/dashboard/palette";
-import { RefreshCw, Facebook, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { RefreshCw, Facebook, AlertTriangle, CheckCircle2, Upload, ChevronDown, ChevronRight } from "lucide-react";
 
 type Lead = {
   leadgen_id: string; full_name: string | null; email: string | null; phone: string | null;
@@ -103,6 +103,8 @@ export default function FacebookLeadsPage() {
           </div>
         </div>
       )}
+
+      <CsvImport onImported={() => setNonce((n) => n + 1)} />
 
       {data && (
         <>
@@ -203,6 +205,148 @@ export default function FacebookLeadsPage() {
         </>
       )}
     </div>
+  );
+}
+
+type ImportResult = {
+  rows: number; newLeads: number; processed: number; duplicates: number;
+  companiesCreated: number; companiesMatched: number;
+  errors: Array<{ leadgenId: string; reason: string }>;
+  skipped: Array<{ row: number; reason: string }>;
+  columns: string[]; delimiter: string;
+};
+
+/**
+ * Manual CSV import — the daily stand-in for the leadgen webhook while Meta's
+ * `leads_retrieval` permission is in App Review. Preview first (dry run), then
+ * import; the same file can be re-uploaded safely because ingestion is keyed on
+ * Meta's lead id.
+ */
+function CsvImport({ onImported }: { onImported: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState<"" | "preview" | "import">("");
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const [imported, setImported] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function run(dryRun: boolean) {
+    if (!file) return;
+    setBusy(dryRun ? "preview" : "import");
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      if (dryRun) fd.append("dryRun", "1");
+      const res = await fetch("/api/v1/integrations/meta/import-csv", { method: "POST", body: fd });
+      const d = await res.json();
+      if (!d.ok) {
+        setError(d.error || "Import failed");
+        setResult(d.result ?? null);
+      } else {
+        setResult(d.result);
+        setImported(!dryRun);
+        if (!dryRun) onImported();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function pick(f: File | null) {
+    setFile(f);
+    setResult(null);
+    setImported(false);
+    setError(null);
+  }
+
+  return (
+    <section className="rounded-xl border bg-card">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-2 px-4 py-3 text-left"
+      >
+        {open ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+        <Upload className="h-4 w-4 text-muted-foreground" />
+        <span className="flex-1 text-sm font-semibold">Import leads from a Meta CSV export</span>
+        <span className="hidden text-xs text-muted-foreground sm:inline">Daily download → upload</span>
+      </button>
+
+      {open && (
+        <div className="space-y-3 border-t px-4 py-4">
+          <ol className="ml-4 list-decimal space-y-1 text-xs text-muted-foreground">
+            <li>Ads Manager → <strong>All tools</strong> → <strong>Instant Forms</strong> → select the form → <strong>Download leads</strong>.</li>
+            <li>Choose the date range (yesterday onwards is fine — duplicates are ignored) and download the CSV.</li>
+            <li>Upload it below. Don&apos;t open it in Excel first; Meta exports UTF-16 and re-saving can mangle it.</li>
+          </ol>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={inputRef}
+              type="file"
+              accept=".csv,.tsv,.txt,text/csv"
+              onChange={(e) => pick(e.target.files?.[0] ?? null)}
+              className="hidden"
+            />
+            <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()}>
+              {file ? "Choose a different file" : "Choose file"}
+            </Button>
+            {file && <span className="text-xs text-muted-foreground">{file.name}</span>}
+            <div className="flex-1" />
+            <Button variant="ghost" size="sm" disabled={!file || busy !== ""} onClick={() => run(true)}>
+              {busy === "preview" ? "Reading…" : "Preview"}
+            </Button>
+            <Button size="sm" disabled={!file || busy !== ""} onClick={() => run(false)}>
+              {busy === "import" ? "Importing…" : "Import"}
+            </Button>
+          </div>
+
+          {error && (
+            <div className="rounded-lg border p-3 text-xs" style={{ backgroundColor: `${STATUS.critical}0f`, borderColor: `${STATUS.critical}55` }}>
+              {error}
+            </div>
+          )}
+
+          {result && (
+            <div className="rounded-lg border bg-muted/30 p-3 text-xs">
+              <p className="font-medium">
+                {imported
+                  ? `Imported — ${num(result.processed)} processed, ${num(result.duplicates)} already had.`
+                  : `Preview — ${num(result.rows)} rows found, ${num(result.newLeads)} leads readable. Nothing has been imported yet.`}
+              </p>
+              {imported && (
+                <p className="mt-1 text-muted-foreground">
+                  {num(result.companiesCreated)} new {result.companiesCreated === 1 ? "company" : "companies"} created,{" "}
+                  {num(result.companiesMatched)} matched onto existing ones. Each processed lead got a Pipedrive deal,
+                  a Slack alert and a Conversions API event.
+                </p>
+              )}
+              <p className="mt-1 text-muted-foreground">
+                {result.delimiter}-delimited, {result.columns.length} columns: {result.columns.join(", ")}
+              </p>
+              {result.skipped.length > 0 && (
+                <p className="mt-1" style={{ color: STATUS.warn }}>
+                  {num(result.skipped.length)} rows skipped ({result.skipped[0].reason})
+                </p>
+              )}
+              {result.errors.length > 0 && (
+                <div className="mt-1" style={{ color: STATUS.critical }}>
+                  {num(result.errors.length)} failed:
+                  <ul className="ml-4 list-disc">
+                    {result.errors.slice(0, 5).map((e) => (
+                      <li key={e.leadgenId}>{e.leadgenId}: {e.reason}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

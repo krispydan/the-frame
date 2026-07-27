@@ -47,6 +47,45 @@ interface ParsedLead {
   firstName: string | null;
   lastName: string | null;
   companyName: string | null;
+  website: string | null;
+  instagram: string | null;
+}
+
+/**
+ * Reject free-text that clearly isn't a business name. Lead-form "store"
+ * answers are unvalidated, so we get questions, "n/a", and single letters
+ * alongside real names; those would create junk companies that then need
+ * cleaning up by hand.
+ */
+function usableCompanyName(raw: string | null): string | null {
+  const v = (raw || "").trim();
+  if (v.length < 2) return null;
+  if (v.endsWith("?")) return null;
+  if (/^(n\/?a|none|no|nil|test|tbd|-+)$/i.test(v)) return null;
+  // A sentence with a question word in it is a message, not a name.
+  if (/^(where|what|when|how|why|who|can|do|does|is|are|i )\b/i.test(v) && v.split(/\s+/).length > 2) return null;
+  return v;
+}
+
+/**
+ * Our forms ask one question for "website or Instagram", so a single answer can
+ * be either. Route it to the right column: an instagram.com URL or a bare
+ * @handle is Instagram, anything else is treated as a website.
+ */
+function splitWebOrInstagram(raw: string | null): { website: string | null; instagram: string | null } {
+  const v = (raw || "").trim();
+  if (!v) return { website: null, instagram: null };
+  if (/instagram\.com/i.test(v)) {
+    return { website: null, instagram: v.startsWith("http") ? v : `https://${v.replace(/^\/+/, "")}` };
+  }
+  if (/^@[\w.]+$/.test(v)) {
+    return { website: null, instagram: `https://instagram.com/${v.slice(1)}` };
+  }
+  // A bare word with no dot is far more likely a handle than a domain.
+  if (!v.includes(".") && !v.includes(" ")) {
+    return { website: null, instagram: `https://instagram.com/${v}` };
+  }
+  return { website: v.startsWith("http") ? v : `https://${v}`, instagram: null };
 }
 
 function parseLead(detail: MetaLeadDetail): ParsedLead {
@@ -61,8 +100,16 @@ function parseLead(detail: MetaLeadDetail): ParsedLead {
     firstName = parts[0] || null;
     lastName = parts.length > 1 ? parts.slice(1).join(" ") : null;
   }
-  const companyName = fieldValue(f, "company_name", "company", "business_name", "store_name");
-  return { email, phone, fullName: fullName || null, firstName, lastName, companyName };
+  // "store" is what our live Jaxy forms call the business name. People do
+  // sometimes type a question into it ("where do u ship from?") — that must not
+  // become a company name, so fall back to the person's name instead.
+  const companyName = usableCompanyName(
+    fieldValue(f, "company_name", "company", "business_name", "store_name", "store"),
+  );
+  const { website, instagram } = splitWebOrInstagram(
+    fieldValue(f, "store_website_or_instagram", "website", "website_or_instagram", "instagram"),
+  );
+  return { email, phone, fullName: fullName || null, firstName, lastName, companyName, website, instagram };
 }
 
 // ── dedupe / company resolution ──
@@ -135,6 +182,25 @@ function applyContactName(companyId: string, parsed: ParsedLead): void {
       )
       .run(companyId, parsed.firstName, parsed.lastName);
   }
+}
+
+/**
+ * Fill in website / Instagram if we learned them and the company has none.
+ * Never overwrites: an existing value came from enrichment or a human and is
+ * more trustworthy than a hand-typed form answer.
+ */
+function applyCompanyWeb(companyId: string, parsed: ParsedLead): void {
+  if (!parsed.website && !parsed.instagram) return;
+  const cur = sqlite.prepare("SELECT website, instagram_url FROM companies WHERE id = ?").get(companyId) as
+    | { website: string | null; instagram_url: string | null }
+    | undefined;
+  if (!cur) return;
+  const website = (cur.website || "").trim() ? cur.website : parsed.website;
+  const instagram = (cur.instagram_url || "").trim() ? cur.instagram_url : parsed.instagram;
+  if (website === cur.website && instagram === cur.instagram_url) return;
+  sqlite
+    .prepare("UPDATE companies SET website = ?, instagram_url = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(website, instagram, companyId);
 }
 
 // ── ingestion ──
@@ -217,6 +283,7 @@ export async function processMetaLead(leadgenId: string, detailOverride?: MetaLe
     if (parsed.email) addCompanyEmail(companyId, parsed.email, "facebook_leads");
     if (parsed.phone) addCompanyPhone(companyId, parsed.phone, "facebook_leads");
     applyContactName(companyId, parsed);
+    applyCompanyWeb(companyId, parsed);
 
     // Persist parsed fields + attribution onto the meta_leads row.
     sqlite
