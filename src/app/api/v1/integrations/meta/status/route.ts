@@ -91,6 +91,25 @@ export async function GET() {
       verifyToken: !!c.verifyToken,
       pageToken: !!c.pageToken,
       webhookUrl: base ? `${base}/api/v1/integrations/meta/webhooks` : null,
+      // Proof of whether Meta is actually calling us, independent of whether
+      // any lead successfully processed.
+      deliveries: {
+        total: count("SELECT COUNT(*) v FROM meta_webhook_events"),
+        last24h: count("SELECT COUNT(*) v FROM meta_webhook_events WHERE received_at >= datetime('now','-1 day')"),
+        rejected: count("SELECT COUNT(*) v FROM meta_webhook_events WHERE signature_valid = 0"),
+        lastAt: (() => {
+          try {
+            return (sqlite.prepare("SELECT received_at FROM meta_webhook_events ORDER BY received_at DESC LIMIT 1").get() as { received_at: string } | undefined)?.received_at ?? null;
+          } catch { return null; }
+        })(),
+        recent: (() => {
+          try {
+            return sqlite.prepare(
+              "SELECT received_at, signature_valid, object, field, entry_count, error FROM meta_webhook_events ORDER BY received_at DESC LIMIT 5",
+            ).all();
+          } catch { return []; }
+        })(),
+      },
       knownForms: getKnownForms(),
       leadsTotal,
       leads7d,

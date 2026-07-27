@@ -31,6 +31,7 @@ type Status = {
     leadsTotal: number; leads7d: number; lastLeadAt: string | null;
     byStatus: Array<{ status: string; n: number }>;
     pipeline: { pipelineId: number } | null;
+    deliveries?: { total: number; last24h: number; rejected: number; lastAt: string | null };
   };
   outbound: {
     ready: boolean; capiToken: boolean; datasetId: string; graphVersion: string;
@@ -204,11 +205,22 @@ export default function MetaIntegrationPage() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="grid grid-cols-4 gap-2 text-center">
+                  <Mini label="Webhooks in" value={num(data.inbound.deliveries?.total ?? 0)}
+                    tone={(data.inbound.deliveries?.total ?? 0) > 0 ? STATUS.good : STATUS.neutral} />
                   <Mini label="Leads total" value={num(data.inbound.leadsTotal)} />
                   <Mini label="Last 7 days" value={num(data.inbound.leads7d)} />
                   <Mini label="Forms seen" value={num(data.inbound.knownForms.length)} />
                 </div>
+                {/* Is Meta actually calling us? Answered plainly. */}
+                <p className="text-xs text-muted-foreground">
+                  {(data.inbound.deliveries?.total ?? 0) === 0
+                    ? "Meta has never called this webhook. Until the Page is subscribed to leadgen, nothing will arrive."
+                    : `Last delivery ${data.inbound.deliveries!.lastAt?.slice(0, 16).replace("T", " ")}` +
+                      ((data.inbound.deliveries!.rejected ?? 0) > 0
+                        ? ` · ${data.inbound.deliveries!.rejected} rejected on signature — check META_APP_SECRET`
+                        : "")}
+                </p>
                 {data.inbound.lastLeadAt && (
                   <p className="text-xs text-muted-foreground">Most recent lead: {data.inbound.lastLeadAt.slice(0, 16).replace("T", " ")}</p>
                 )}
