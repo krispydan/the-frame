@@ -25,12 +25,40 @@ export async function GET(req: NextRequest) {
   const mode = params.get("hub.mode");
   const token = params.get("hub.verify_token");
   const challenge = params.get("hub.challenge");
-
   const expected = metaVerifyToken();
+
+  // Meta's handshake: echo the challenge back when the token matches.
   if (mode === "subscribe" && expected && token === expected) {
     return new NextResponse(challenge ?? "", { status: 200, headers: { "content-type": "text/plain" } });
   }
-  return new NextResponse("Verification failed", { status: 403 });
+
+  // Opening this URL in a browser sends no hub.* params. Rather than a bare
+  // "Verification failed" (which reads like the endpoint is broken), say what
+  // this is and whether it's ready for Meta to call. No secrets are exposed.
+  if (!mode && !token && !challenge) {
+    return NextResponse.json({
+      endpoint: "Meta Lead Ads webhook",
+      status: "live",
+      verifyTokenConfigured: !!expected,
+      message: expected
+        ? "Ready. Enter this URL and your verify token in the Meta app's Webhooks settings, then subscribe to the 'leadgen' field."
+        : "META_VERIFY_TOKEN is not set yet — add it in Railway before running Meta's webhook verification.",
+      docs: "/settings/integrations/meta",
+    });
+  }
+
+  // A real verification attempt that didn't match.
+  return NextResponse.json(
+    {
+      error: "verification failed",
+      reason: !expected
+        ? "META_VERIFY_TOKEN is not configured on the server"
+        : mode !== "subscribe"
+          ? `expected hub.mode=subscribe, got "${mode ?? "nothing"}"`
+          : "hub.verify_token did not match META_VERIFY_TOKEN",
+    },
+    { status: 403 },
+  );
 }
 
 interface LeadgenChangeValue {

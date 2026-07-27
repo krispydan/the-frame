@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plug, ChevronRight, ShoppingBag, DollarSign, Warehouse, MessageSquare, Store, Package, Sparkles, Users, CheckCircle, AlertCircle, Circle } from "lucide-react";
+import { Plug, ChevronRight, ShoppingBag, DollarSign, Warehouse, MessageSquare, Store, Package, Sparkles, Users, Megaphone, CheckCircle, AlertCircle, Circle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ApiKeyCard } from "./api-key-card";
@@ -38,6 +38,13 @@ type StoreLeadsStatus = {
   enrichedCount: number;
 };
 
+type MetaStatus = {
+  configured: boolean;
+  inbound: { ready: boolean; leadsTotal: number; leads7d: number };
+  outbound: { ready: boolean; sent: number };
+  missing: Array<{ key: string }>;
+};
+
 type PipedriveStatus = {
   configured: boolean;
   connected: boolean;
@@ -69,6 +76,7 @@ export default function IntegrationsIndexPage() {
   const [slack, setSlack] = useState<SlackStatus | null>(null);
   const [storeleads, setStoreleads] = useState<StoreLeadsStatus | null>(null);
   const [pipedrive, setPipedrive] = useState<PipedriveStatus | null>(null);
+  const [meta, setMeta] = useState<MetaStatus | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/integrations/shopify")
@@ -108,6 +116,10 @@ export default function IntegrationsIndexPage() {
       .then((r) => r.json())
       .then((d) => setPipedrive(d))
       .catch(() => setPipedrive({ configured: false, connected: false }));
+    fetch("/api/v1/integrations/meta/status")
+      .then((r) => r.json())
+      .then((d) => setMeta(d.error ? null : d))
+      .catch(() => setMeta(null));
   }, []);
 
   const shopifyActive = shopifyShops?.filter((s) => s.isActive) ?? [];
@@ -145,6 +157,24 @@ export default function IntegrationsIndexPage() {
     !pipedrive.connected ? "Not connected" :
     pipedrive.ping && !pipedrive.ping.ok ? "Auth failed" :
     `Connected: ${pipedrive.companyName || "Pipedrive"}`;
+
+  // Meta has two halves that configure separately, so "partly connected" is a
+  // real and common state worth showing rather than collapsing to on/off.
+  const metaHalves = (meta ? Number(meta.inbound.ready) + Number(meta.outbound.ready) : 0);
+  const metaStatusKind: "ok" | "warn" | "off" =
+    meta === null ? "off" :
+    metaHalves === 2 ? "ok" :
+    metaHalves === 1 ? "warn" :
+    "off";
+  const metaLabel =
+    meta === null ? "Not configured" :
+    metaHalves === 2
+      ? meta.inbound.leadsTotal > 0
+        ? `${meta.inbound.leadsTotal.toLocaleString()} leads`
+        : "Connected"
+      : meta.inbound.ready ? "Lead Ads only — Conversions API off"
+      : meta.outbound.ready ? "Conversions API only — Lead Ads off"
+      : `Setup incomplete — ${meta.missing.length} to add`;
 
   const slackRouted = slack?.routing.filter((r) => r.channelId).length ?? 0;
   const slackStatusKind: "ok" | "warn" | "off" =
@@ -324,6 +354,26 @@ export default function IntegrationsIndexPage() {
             </CardHeader>
             <CardContent>
               <StatusBadge kind={pipedriveStatusKind} label={pipedriveLabel} />
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link href="/settings/integrations/meta" className="block group cursor-pointer">
+          <Card className="transition-all group-hover:shadow-md group-hover:border-primary/40">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center justify-between text-base">
+                <span className="flex items-center gap-2">
+                  <Megaphone className="h-5 w-5" />
+                  Meta (Facebook &amp; Instagram)
+                </span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </CardTitle>
+              <CardDescription>
+                Lead Ads into the frame and Pipedrive, plus CRM funnel stages reported back via the Conversions API.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <StatusBadge kind={metaStatusKind} label={metaLabel} />
             </CardContent>
           </Card>
         </Link>
