@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   clipWeight,
   composeCandidate,
+  eligibleForFocus,
   FALLBACK_RECIPE_ID,
   permutationHash,
   pickRecipe,
@@ -68,6 +69,50 @@ function makeContext(clips: ComposerClip[], recipes: VideoRecipe[], seed = 42): 
     rand: seededRand(seed),
   };
 }
+
+describe("product coherence (focus SKU)", () => {
+  it("eligibleForFocus keeps only focus-product + confirmed-no-product clips", () => {
+    const cannon = makeClip({ skuIds: ["cannon"] });
+    const cannonAndOther = makeClip({ skuIds: ["cannon", "other"] });
+    const other = makeClip({ skuIds: ["other"] });
+    const noProduct = makeClip({ skuIds: [], noProductConfirmed: true });
+    const unknown = makeClip({ skuIds: [] }); // untagged / never identified
+    const all = [cannon, cannonAndOther, other, noProduct, unknown];
+
+    const eligible = eligibleForFocus(all, ["cannon"]);
+    const ids = new Set(eligible.map((c) => c.id));
+    expect(ids.has(cannon.id)).toBe(true);
+    expect(ids.has(noProduct.id)).toBe(true);
+    expect(ids.has(other.id)).toBe(false); // different product
+    expect(ids.has(unknown.id)).toBe(false); // might secretly show a product
+    expect(ids.has(cannonAndOther.id)).toBe(false); // also shows another product
+
+    // No focus → no restriction.
+    expect(eligibleForFocus(all, [])).toHaveLength(all.length);
+  });
+
+  it("a product-focused compose never includes an off-product or untagged clip", () => {
+    const recipe = makeRecipe({ patternJson: JSON.stringify([{ categories: ["flat_lay"], min: 2, max: 5 }]) });
+    const clips = [
+      ...Array.from({ length: 6 }, () => makeClip({ skuIds: ["cannon"] })),
+      ...Array.from({ length: 4 }, () => makeClip({ skuIds: ["other"] })),
+      ...Array.from({ length: 4 }, () => makeClip({ skuIds: [], noProductConfirmed: true })),
+      ...Array.from({ length: 4 }, () => makeClip({ skuIds: [] })), // untagged
+    ];
+    const byId = new Map(clips.map((c) => [c.id, c]));
+
+    for (let seed = 0; seed < 40; seed++) {
+      const result = composeCandidate(makeContext(clips, [recipe], seed));
+      if (!result || result.focusSkuIds.length === 0) continue; // generic video: no claim
+      const focus = new Set(result.focusSkuIds);
+      for (const id of result.clipIds) {
+        const c = byId.get(id)!;
+        const ok = (c.skuIds.length > 0 && c.skuIds.every((s) => focus.has(s))) || c.noProductConfirmed === true;
+        expect(ok, `clip ${id} (skus=${c.skuIds}) leaked into a focused video`).toBe(true);
+      }
+    }
+  });
+});
 
 describe("Video composer", () => {
   it("honors the recipe pattern — an all-flat-lay recipe never picks other categories", () => {
@@ -213,7 +258,9 @@ describe("Video composer", () => {
 
   it("guarantees focus-SKU coverage when the recipe allows it", () => {
     const focusClip = makeClip({ skuIds: ["sku-focus"] });
-    const others = Array.from({ length: 9 }, () => makeClip());
+    // Glue must be CONFIRMED no-product now — untagged clips can't fill a
+    // product-focused video (they might secretly show another product).
+    const others = Array.from({ length: 9 }, () => makeClip({ noProductConfirmed: true }));
     const ctx = makeContext([focusClip, ...others], [makeRecipe()], 3);
     // Heavy signal so the focus SKU always wins the weighted pick.
     ctx.skuSignals = new Map([["sku-focus", { skuId: "sku-focus", momentumScore: 100 }]]);

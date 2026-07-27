@@ -32,6 +32,30 @@ export interface ComposerClip extends Pick<
   categorySlug: string;
   /** SKU ids tagged on the clip. */
   skuIds: string[];
+  /**
+   * True when a human explicitly marked this clip "no product visible" in
+   * the SKU identifier (a confirmed-empty match). Distinct from UNTAGGED
+   * (never identified) — an untagged clip may secretly contain a product,
+   * so it can't be used as safe glue in a product-focused video.
+   */
+  noProductConfirmed?: boolean;
+}
+
+/**
+ * Clips eligible for a video with these focus SKUs. When the video is
+ * ABOUT a product (focus non-empty), only include clips that feature ONLY
+ * focus products, plus clips confirmed to contain no product — so the
+ * caption's product claim can never contradict what's on screen. Untagged
+ * (unknown) clips and other-product clips are excluded. No focus → no
+ * restriction (a generic video can mix anything).
+ */
+export function eligibleForFocus(clips: ComposerClip[], focusSkuIds: string[]): ComposerClip[] {
+  if (focusSkuIds.length === 0) return clips;
+  const focus = new Set(focusSkuIds);
+  return clips.filter((c) => {
+    if (c.skuIds.length > 0) return c.skuIds.every((s) => focus.has(s));
+    return c.noProductConfirmed === true;
+  });
 }
 
 export interface SkuSignal {
@@ -224,9 +248,13 @@ function buildSequence(
   let duration = 0;
   const maxDur = recipe.durationTargetMax;
 
+  // A product-focused video may only draw from focus-product + confirmed
+  // no-product clips (never other-product or untagged/unknown ones).
+  const eligible = eligibleForFocus(ctx.clips, focusSkuIds);
+
   for (const slot of slots) {
     const pool = () =>
-      ctx.clips.filter(
+      eligible.filter(
         (c) => !used.has(c.id) && slot.categories.includes(c.categorySlug),
       );
 
@@ -327,18 +355,27 @@ const FALLBACK_MAX_CLIPS = 8;
 export function composeFallback(ctx: ComposerContext, rand: () => number): ComposedPost | null {
   if (ctx.clips.length < 2) return null;
 
-  const focusSkuIds = pickFocusSkus(ctx, rand);
+  let focusSkuIds = pickFocusSkus(ctx, rand);
+  // Same product-coherence rule as buildSequence: a focused video only
+  // uses focus-product + confirmed no-product clips. If that pool is too
+  // thin to build anything, drop the focus and make a GENERIC video (no
+  // product claim) rather than dead-ending or lying in the caption.
+  let eligible = eligibleForFocus(ctx.clips, focusSkuIds);
+  if (eligible.length < 2) {
+    focusSkuIds = [];
+    eligible = ctx.clips;
+  }
   const used = new Set<string>();
   const seq: ComposerClip[] = [];
   let duration = 0;
 
   while (seq.length < FALLBACK_MAX_CLIPS) {
-    let candidates = ctx.clips.filter(
+    let candidates = eligible.filter(
       (c) => !used.has(c.id) && duration + (c.durationSec ?? 0) <= FALLBACK_MAX_DURATION,
     );
     // Never fail to reach the 2-clip minimum just to honor the duration cap.
     if (candidates.length === 0) {
-      if (seq.length < 2) candidates = ctx.clips.filter((c) => !used.has(c.id));
+      if (seq.length < 2) candidates = eligible.filter((c) => !used.has(c.id));
       if (candidates.length === 0) break;
     }
     const pick = weightedPick(candidates, (c) => clipWeight(c, focusSkuIds, ctx.forDate), rand);
