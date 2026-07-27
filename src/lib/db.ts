@@ -60,6 +60,17 @@ try { sqlite.exec("ALTER TABLE marketing_video_posts ADD COLUMN burn_hook INTEGE
 try { sqlite.exec("ALTER TABLE marketing_video_posts ADD COLUMN burned_path TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE marketing_video_posts ADD COLUMN burned_hook TEXT"); } catch { /* exists */ }
 
+// "Cases & Packaging" video type — cases/packaging shots with NO product
+// (glasses) in frame. Distinct from untagged: known product-free b-roll,
+// so the composer can safely use it as glue in a product-focused video.
+try {
+  sqlite.exec(
+    `INSERT OR IGNORE INTO marketing_video_clip_categories (id, slug, name, description, is_hook, sort_order)
+     VALUES (lower(hex(randomblob(16))), 'packaging', 'Cases & Packaging',
+             'Cases or packaging with no product (glasses) visible — product-free b-roll.', 0, 55)`,
+  );
+} catch { /* table not created yet on a fresh boot; migration seeds it */ }
+
 // ── Retire legacy single-value attribute columns on catalog_products ──
 // These are now derived from catalog_tags (see curated-attributes.ts).
 // SQLite supports DROP COLUMN since 3.35; throws if already gone.
