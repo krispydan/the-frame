@@ -38,6 +38,63 @@ export interface CohortRow {
   website: string | null;
 }
 
+/**
+ * Reduce a stored address to just the street line.
+ *
+ * Google Maps enrichment writes the whole formatted address into
+ * companies.address ("14 1st St W, Dickinson, ND 58601") while ALSO populating
+ * city/state/zip. A mail merge that prints address + city + state + zip then
+ * repeats the tail on every label — wrong on a physical catalog we're paying to
+ * post. Strips the trailing segments only when they duplicate the fields we
+ * already have, so a genuine two-line street ("123 Main St, Suite 4") survives.
+ */
+export function streetOnly(r: { address: string; city: string; state: string; zip: string }): string {
+  const addr = (r.address || "").trim();
+  if (!addr.includes(",")) return addr;
+
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const city = norm(r.city);
+  const zip = (r.zip || "").trim();
+  const state = norm(r.state);
+  // Two-letter postal codes appear in formatted addresses where we store the
+  // full state name, so match on either form.
+  const stateAbbrev = norm(US_STATE_ABBREV[r.state.trim().toLowerCase()] || "");
+
+  const parts = addr.split(",").map((p) => p.trim()).filter(Boolean);
+  // Drop trailing parts that are just the city, the state, the zip, "USA", or
+  // the "ST 12345" tail. Stop at the first part that carries real street info.
+  while (parts.length > 1) {
+    const last = parts[parts.length - 1];
+    const n = norm(last);
+    const isCity = city && n === city;
+    const isCountry = n === "usa" || n === "unitedstates" || n === "us";
+    const isZip = !!zip && last.replace(/[^\d-]/g, "") === zip;
+    const isStateZip =
+      (state && (n === state || n.startsWith(state))) ||
+      (stateAbbrev && (n === stateAbbrev || n.startsWith(stateAbbrev)));
+    if (isCity || isCountry || isZip || (isStateZip && !/\d+\s/.test(last))) {
+      parts.pop();
+      continue;
+    }
+    break;
+  }
+  return parts.join(", ");
+}
+
+/** State name → USPS abbreviation, for matching formatted-address tails. */
+const US_STATE_ABBREV: Record<string, string> = {
+  alabama: "AL", alaska: "AK", arizona: "AZ", arkansas: "AR", california: "CA", colorado: "CO",
+  connecticut: "CT", delaware: "DE", "district of columbia": "DC", florida: "FL", georgia: "GA",
+  hawaii: "HI", idaho: "ID", illinois: "IL", indiana: "IN", iowa: "IA", kansas: "KS", kentucky: "KY",
+  louisiana: "LA", maine: "ME", maryland: "MD", massachusetts: "MA", michigan: "MI", minnesota: "MN",
+  mississippi: "MS", missouri: "MO", montana: "MT", nebraska: "NE", nevada: "NV",
+  "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+  "north carolina": "NC", "north dakota": "ND", ohio: "OH", oklahoma: "OK", oregon: "OR",
+  pennsylvania: "PA", "rhode island": "RI", "south carolina": "SC", "south dakota": "SD",
+  tennessee: "TN", texas: "TX", utah: "UT", vermont: "VT", virginia: "VA", washington: "WA",
+  "west virginia": "WV", wisconsin: "WI", wyoming: "WY", "puerto rico": "PR",
+};
+
 /** Full mailing address = street with a number + city + state + zip. */
 export function isComplete(r: { address: string; city: string; state: string; zip: string }): boolean {
   return !!(r.address.trim() && /\d/.test(r.address) && r.city.trim() && r.state.trim() && r.zip.trim());
@@ -72,7 +129,10 @@ export function loadCatalogCohort(): CohortRow[] {
   }>;
 
   return rows.map((r) => {
-    const base = { address: r.address ?? "", city: r.city ?? "", state: r.state ?? "", zip: r.zip ?? "" };
+    const raw = { address: r.address ?? "", city: r.city ?? "", state: r.state ?? "", zip: r.zip ?? "" };
+    // Street line only — city/state/zip are their own columns, so leaving the
+    // formatted tail in would print it twice on the label.
+    const base = { ...raw, address: streetOnly(raw) };
     const tags = (r.tags || "").toLowerCase();
     return {
       companyId: r.id,
