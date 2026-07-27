@@ -18,6 +18,7 @@ import {
 } from "@/modules/integrations/lib/meta/lead-ingest";
 import { ensureFacebookPipeline, getFacebookPipelineConfig } from "@/modules/integrations/lib/meta/pipedrive-push";
 import { syncCapiStageEvents, drainCapiEvents } from "@/modules/integrations/lib/meta/capi";
+import { migrateFacebookDealsToLeads } from "@/modules/integrations/lib/meta/deals-to-leads";
 
 /**
  * Admin control surface for the Meta Lead Ads integration.
@@ -30,6 +31,8 @@ import { syncCapiStageEvents, drainCapiEvents } from "@/modules/integrations/lib
  *   process           process one leadgen_id: { leadgenId }
  *   capi-sync         derive stage events from DB state + flush the queue
  *   test-event        send a Test Events ping: { testEventCode, email? }
+ *   deals-to-leads    move pre-switch Facebook deals into the Leads Inbox.
+ *                     DRY RUN unless { confirm: true } — it deletes deals.
  *
  * Auth: x-admin-key: jaxy2026.
  */
@@ -100,6 +103,15 @@ export async function POST(req: NextRequest) {
       const { queued } = syncCapiStageEvents();
       const drain = await drainCapiEvents(200, typeof body.testEventCode === "string" ? body.testEventCode : undefined);
       return NextResponse.json({ ok: true, queued, drain });
+    }
+    case "deals-to-leads": {
+      // Deleting deals from a live CRM shouldn't be one accidental request
+      // away, so this reports what it would do unless explicitly confirmed.
+      const dryRun = body.confirm !== true;
+      return NextResponse.json({
+        ok: true,
+        result: await migrateFacebookDealsToLeads({ dryRun, limit: typeof body.limit === "number" ? body.limit : undefined }),
+      });
     }
     case "test-event": {
       // Sends a single Lead event to the Test Events tab. Does not touch real data.

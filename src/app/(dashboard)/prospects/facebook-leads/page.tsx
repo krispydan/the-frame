@@ -23,12 +23,12 @@ type Lead = {
   leadgen_id: string; full_name: string | null; email: string | null; phone: string | null;
   campaign_name: string | null; ad_name: string | null; status: string; error: string | null;
   created_at: string; company_id: string | null; company_name: string | null; company_status: string | null;
-  pipedrive_deal_id: number | null;
+  pipedrive_lead_id: string | null;
 };
 type Payload = {
   days: number;
   integration: { leadsConfigured: boolean; capiConfigured: boolean };
-  totals: { total: number; withCompany: number; withDeal: number };
+  totals: { total: number; withCompany: number; withLead: number };
   byStatus: Array<{ status: string; n: number }>;
   byCampaign: Array<{ campaign: string; leads: number; converted: number }>;
   funnel: Array<{ event_name: string; n: number }>;
@@ -112,7 +112,7 @@ export default function FacebookLeadsPage() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Tile label="Leads" value={num(data.totals.total)} icon={<Facebook className="h-4 w-4" />} accent={seriesColor(5)} />
             <Tile label="Matched to a company" value={num(data.totals.withCompany)} sub={data.totals.total ? pct((data.totals.withCompany / data.totals.total) * 100) : undefined} />
-            <Tile label="Pushed to Pipedrive" value={num(data.totals.withDeal)} sub={data.totals.total ? pct((data.totals.withDeal / data.totals.total) * 100) : undefined} />
+            <Tile label="In Pipedrive" value={num(data.totals.withLead)} sub={data.totals.total ? pct((data.totals.withLead / data.totals.total) * 100) : undefined} />
             <Tile
               label="Reported to Meta"
               value={num((data.capi.find((c) => c.status === "sent")?.n) ?? 0)}
@@ -186,7 +186,7 @@ export default function FacebookLeadsPage() {
                               {l.company_name || "View"}
                             </Link>
                           ) : <span className="text-muted-foreground">—</span>}
-                          {l.pipedrive_deal_id && <Badge variant="outline" className="ml-1 text-[10px]">deal</Badge>}
+                          {l.pipedrive_lead_id && <Badge variant="outline" className="ml-1 text-[10px]">lead</Badge>}
                         </td>
                         <td className="px-2 py-2">
                           <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium capitalize"

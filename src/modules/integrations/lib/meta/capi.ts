@@ -99,12 +99,17 @@ export function syncCapiStageEvents(): { queued: number } {
       queued++;
     }
 
-    // Qualified — company reached interested/catalog_sent, or its FB deal advanced.
+    // Qualified — the company reached interested/catalog_sent, or a rep
+    // converted the Pipedrive lead into a deal. Ad leads now land in the Leads
+    // Inbox, so "a deal exists that was opened after this lead arrived" IS the
+    // conversion event — a rep only does that once the enquiry is real. (The
+    // old signal was "its Facebook-pipeline deal advanced past New Lead", which
+    // no longer applies now that we don't open a deal per submission.)
     const company = sqlite.prepare("SELECT status FROM companies WHERE id = ?").get(lead.company_id) as { status: string | null } | undefined;
-    const advancedDeal = sqlite
-      .prepare("SELECT 1 FROM pipedrive_deals WHERE company_id = ? AND pipeline = 'facebook' AND stage NOT IN ('New Lead') LIMIT 1")
-      .get(lead.company_id);
-    if ((["interested", "catalog_sent", "customer"].includes(company?.status || "") || advancedDeal) && !hasEvent(lead.id, "Qualified")) {
+    const convertedToDeal = sqlite
+      .prepare("SELECT 1 FROM pipedrive_deals WHERE company_id = ? AND COALESCE(created_at, '') >= ? LIMIT 1")
+      .get(lead.company_id, since);
+    if ((["interested", "catalog_sent", "customer"].includes(company?.status || "") || convertedToDeal) && !hasEvent(lead.id, "Qualified")) {
       queueCapiEvent({ ...base, eventName: "Qualified" });
       queued++;
     }

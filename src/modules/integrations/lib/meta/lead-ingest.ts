@@ -22,7 +22,7 @@ import {
   fetchLead, fetchFormLeads, metaLeadsConfigured, diagnoseLeadAccess,
   type MetaLeadDetail, type MetaLeadField,
 } from "./client";
-import { pushFacebookLeadToPipedrive, dealUrl } from "./pipedrive-push";
+import { pushFacebookLeadToPipedrive, leadUrl } from "./pipedrive-push";
 import { queueCapiEvent } from "./capi";
 
 // ── field parsing ──
@@ -259,7 +259,8 @@ export interface ProcessResult {
   status: "processed" | "skipped" | "error" | "already";
   companyId?: string;
   companyCreated?: boolean;
-  dealId?: number | null;
+  /** Pipedrive Leads Inbox id (UUID). */
+  pipedriveLeadId?: string | null;
   reason?: string;
 }
 
@@ -361,14 +362,14 @@ export async function processMetaLead(leadgenId: string, detailOverride?: MetaLe
         formName: detail.form_id ?? null,
         source: "Facebook/Instagram",
         frameUrl: base ? `${base}/prospects/${companyId}` : null,
-        pipedriveDealUrl: push?.dealId ? dealUrl(push.dealId) : null,
+        pipedriveLeadUrl: push?.leadId ? leadUrl(push.leadId) : null,
         matchedExisting: !created,
       });
     } catch (e) {
       console.warn("[meta] slack notify failed (non-fatal):", e instanceof Error ? e.message : e);
     }
 
-    return { leadgenId, status: "processed", companyId, companyCreated: created, dealId: push?.dealId ?? null };
+    return { leadgenId, status: "processed", companyId, companyCreated: created, pipedriveLeadId: push?.leadId ?? null };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     markError(leadgenId, msg);

@@ -1,16 +1,18 @@
 /**
  * Facebook-lead → Pipedrive push.
  *
- * Kept separate from the ajm/catalog `ensureOutreachDeal` engine (which is
- * tightly coupled to those two pipelines' stage configs). Facebook leads are a
- * distinct top-of-funnel source, so they get their own "Facebook Leads"
- * pipeline, provisioned idempotently and cached in settings.
+ * These land in Pipedrive's **Leads Inbox**, not the deal pipeline. An ad
+ * submission is an unqualified enquiry — nobody has spoken to them, there's no
+ * agreed value and no close date. Creating a deal for each one inflates
+ * pipeline value, skews forecast and conversion reporting, and buries the reps'
+ * real opportunities under untouched form fills. A rep qualifies the lead in
+ * the inbox and converts it to a deal when it becomes real; that conversion is
+ * also the honest "Qualified" signal we report back to Meta's CAPI.
  *
- * Reuses the generic, dedup-safe org/person resolvers from pipedrive-sync
- * (they key on the frame company id and stamp companies.pipedrive_org_id /
- * pipedrive_person_id), then creates a deal directly via the client and
- * mirrors it into `pipedrive_deals` so the frame's existing Pipedrive panels
- * render it.
+ * Reuses the generic, dedup-safe org/person resolvers from pipedrive-sync (they
+ * key on the frame company id and stamp companies.pipedrive_org_id /
+ * pipedrive_person_id), then creates the lead with a "Facebook Ads" label and
+ * attaches the ad attribution + raw form answers as a note.
  */
 
 import { sqlite } from "@/lib/db";
@@ -18,7 +20,8 @@ import {
   pdRequest,
   listPipelines,
   listStages,
-  createDeal,
+  createLead,
+  ensureLeadLabel,
   createNote,
   getPipedriveConnectionStatus,
 } from "@/modules/sales/lib/pipedrive-client";
@@ -28,6 +31,8 @@ import { getPipedriveOwner } from "@/modules/sales/lib/pipedrive-setup";
 const PIPELINE_NAME = "Facebook Leads";
 const STAGES = ["New Lead", "Contacted", "Qualified", "Won"];
 const SETTING_KEY = "pipedrive_facebook_pipeline";
+const LABEL_NAME = "Facebook Ads";
+const LABEL_SETTING_KEY = "pipedrive_facebook_lead_label";
 
 interface FacebookPipelineConfig {
   pipelineId: number;
@@ -59,9 +64,9 @@ export function getFacebookPipelineConfig(): FacebookPipelineConfig | null {
 }
 
 /**
- * Create (idempotently) the Facebook Leads pipeline + its stages, matching
- * existing ones by case-insensitive name so a re-run never duplicates. Caches
- * the id map in settings. Safe to re-run.
+ * The deal pipeline reps convert qualified Facebook leads INTO. No longer used
+ * on the inbound path — leads go to the Leads Inbox — but kept so the pipeline
+ * exists as a destination and the settings UI can still report it.
  */
 export async function ensureFacebookPipeline(): Promise<FacebookPipelineConfig> {
   const existingPipelines = await listPipelines();
@@ -96,6 +101,21 @@ export async function ensureFacebookPipeline(): Promise<FacebookPipelineConfig> 
   return config;
 }
 
+/** Find-or-create the "Facebook Ads" lead label, cached so we don't re-list. */
+async function facebookLabelId(): Promise<string | null> {
+  const cached = getSetting(LABEL_SETTING_KEY);
+  if (cached) return cached;
+  try {
+    const label = await ensureLeadLabel(LABEL_NAME, "blue");
+    setSetting(LABEL_SETTING_KEY, label.id);
+    return label.id;
+  } catch (e) {
+    // A missing label is cosmetic — never block the lead itself over it.
+    console.warn("[meta/pipedrive] lead label ensure failed (non-fatal):", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
 export interface FacebookLeadForPush {
   metaLeadId: string;
   companyId: string;
@@ -108,11 +128,12 @@ export interface FacebookLeadForPush {
 }
 
 export interface FacebookPushResult {
-  dealId: number | null;
+  /** Pipedrive lead UUID. */
+  leadId: string | null;
   personId: number | null;
   orgId: number | null;
   action: "created" | "exists" | "skipped";
-  dealUrl: string | null;
+  leadUrl: string | null;
   reason?: string;
 }
 
@@ -137,77 +158,71 @@ function buildNote(lead: FacebookLeadForPush): string {
 }
 
 /**
- * Push a Facebook lead into Pipedrive: resolve org + person (dedup-safe),
- * open a deal in Facebook Leads → New Lead, attach an attribution note, and
- * mirror the deal into pipedrive_deals. Idempotent per meta_lead — if this
- * lead already has a deal stamped, returns exists.
+ * Push a Facebook lead into Pipedrive's Leads Inbox: resolve org + person
+ * (dedup-safe), create the lead with the "Facebook Ads" label, and attach an
+ * attribution note. Idempotent per meta_lead — a lead already stamped with a
+ * Pipedrive lead id returns "exists" without creating a duplicate.
  */
 export async function pushFacebookLeadToPipedrive(lead: FacebookLeadForPush): Promise<FacebookPushResult> {
   if (!getPipedriveConnectionStatus().connected) {
-    return { dealId: null, personId: null, orgId: null, action: "skipped", dealUrl: null, reason: "pipedrive not connected" };
+    return { leadId: null, personId: null, orgId: null, action: "skipped", leadUrl: null, reason: "pipedrive not connected" };
   }
 
   // Idempotency: already pushed?
   const existing = sqlite
-    .prepare("SELECT pipedrive_deal_id, pipedrive_person_id FROM meta_leads WHERE id = ?")
-    .get(lead.metaLeadId) as { pipedrive_deal_id: number | null; pipedrive_person_id: number | null } | undefined;
-  if (existing?.pipedrive_deal_id) {
+    .prepare("SELECT pipedrive_lead_id, pipedrive_person_id FROM meta_leads WHERE id = ?")
+    .get(lead.metaLeadId) as { pipedrive_lead_id: string | null; pipedrive_person_id: number | null } | undefined;
+  if (existing?.pipedrive_lead_id) {
     return {
-      dealId: existing.pipedrive_deal_id,
+      leadId: existing.pipedrive_lead_id,
       personId: existing.pipedrive_person_id ?? null,
       orgId: null,
       action: "exists",
-      dealUrl: dealUrl(existing.pipedrive_deal_id),
+      leadUrl: leadUrl(existing.pipedrive_lead_id),
     };
   }
 
-  const config = getFacebookPipelineConfig() ?? (await ensureFacebookPipeline());
-  const stageId = config.stages["New Lead"];
   const ownerId = getPipedriveOwner()?.id;
-
   const orgId = await resolveOrg(lead.companyId, ownerId);
   const personId = await resolvePerson(lead.companyId, orgId, ownerId);
+
+  // Pipedrive rejects a lead with neither a person nor an organisation.
+  if (!orgId && !personId) {
+    return {
+      leadId: null, personId: null, orgId: null, action: "skipped", leadUrl: null,
+      reason: "could not resolve a Pipedrive org or person for this company",
+    };
+  }
 
   const company = sqlite.prepare("SELECT name FROM companies WHERE id = ?").get(lead.companyId) as { name: string | null } | undefined;
   const title = `${lead.contactName || company?.name || "Facebook lead"} — Facebook lead`;
 
-  const body: Record<string, unknown> = {
-    title,
-    org_id: orgId,
-    pipeline_id: config.pipelineId,
-    stage_id: stageId,
-    status: "open",
-  };
+  const labelId = await facebookLabelId();
+  const body: Record<string, unknown> = { title };
+  if (orgId) body.organization_id = orgId;
   if (personId) body.person_id = personId;
-  if (ownerId) body.user_id = ownerId;
+  if (ownerId) body.owner_id = ownerId;
+  if (labelId) body.label_ids = [labelId];
 
-  const created = await createDeal(body as { title: string });
+  const created = await createLead(body as { title: string });
 
   // Attribution note (best-effort — a note failure shouldn't fail the push).
   try {
-    await createNote({ content: buildNote(lead), deal_id: created.id, org_id: orgId });
+    await createNote({ content: buildNote(lead), lead_id: created.id, org_id: orgId ?? undefined });
   } catch (e) {
     console.warn("[meta/pipedrive] note create failed (non-fatal):", e instanceof Error ? e.message : e);
   }
 
-  // Mirror into pipedrive_deals so the frame's Pipedrive panels render it.
   sqlite
-    .prepare(
-      `INSERT INTO pipedrive_deals (id, pipedrive_deal_id, company_id, pipeline, stage, status, is_open, title, created_at, updated_at)
-       VALUES (lower(hex(randomblob(16))), ?, ?, 'facebook', 'New Lead', 'open', 1, ?, datetime('now'), datetime('now'))
-       ON CONFLICT(pipedrive_deal_id) DO NOTHING`,
-    )
-    .run(created.id, lead.companyId, title);
-
-  sqlite
-    .prepare("UPDATE meta_leads SET pipedrive_deal_id = ?, pipedrive_person_id = ? WHERE id = ?")
+    .prepare("UPDATE meta_leads SET pipedrive_lead_id = ?, pipedrive_person_id = ? WHERE id = ?")
     .run(created.id, personId ?? null, lead.metaLeadId);
 
-  return { dealId: created.id, personId, orgId, action: "created", dealUrl: dealUrl(created.id) };
+  return { leadId: created.id, personId, orgId, action: "created", leadUrl: leadUrl(created.id) };
 }
 
-export function dealUrl(dealId: number | null): string | null {
-  if (!dealId) return null;
+/** Deep link to a lead in the Pipedrive Leads Inbox. */
+export function leadUrl(leadId: string | null): string | null {
+  if (!leadId) return null;
   const apiDomain = (getPipedriveConnectionStatus().apiDomain || "").replace(/\/$/, "");
-  return apiDomain ? `${apiDomain}/deal/${dealId}` : null;
+  return apiDomain ? `${apiDomain}/leads/inbox/${leadId}` : null;
 }
