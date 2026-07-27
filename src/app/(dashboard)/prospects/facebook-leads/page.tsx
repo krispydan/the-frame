@@ -17,6 +17,7 @@ import { HBars } from "@/components/dashboard/charts";
 import { num, pct } from "@/components/dashboard/format";
 import { seriesColor, STATUS } from "@/components/dashboard/palette";
 import { RefreshCw, Facebook, AlertTriangle, CheckCircle2, Upload, ChevronDown, ChevronRight } from "lucide-react";
+import { META_FORMS_LIBRARY_URL } from "@/modules/integrations/lib/meta/links";
 
 type Lead = {
   leadgen_id: string; full_name: string | null; email: string | null; phone: string | null;
@@ -278,10 +279,20 @@ function CsvImport({ onImported }: { onImported: () => void }) {
       {open && (
         <div className="space-y-3 border-t px-4 py-4">
           <ol className="ml-4 list-decimal space-y-1 text-xs text-muted-foreground">
-            <li>Ads Manager → <strong>All tools</strong> → <strong>Instant Forms</strong> → select the form → <strong>Download leads</strong>.</li>
-            <li>Choose the date range (yesterday onwards is fine — duplicates are ignored) and download the CSV.</li>
+            <li>
+              Open the{" "}
+              <a href={META_FORMS_LIBRARY_URL} target="_blank" rel="noopener noreferrer"
+                className="font-medium text-primary hover:underline">
+                Jaxy Instant Forms library
+              </a>{" "}
+              on Meta.
+            </li>
+            <li>Tick the form, then <strong>Download</strong> → choose the date range → download the CSV.</li>
             <li>Upload it below. Don&apos;t open it in Excel first; Meta exports UTF-16 and re-saving can mangle it.</li>
           </ol>
+          <p className="text-xs text-muted-foreground">
+            Overlapping date ranges are safe — leads are keyed on Meta&apos;s lead ID, so anything already imported is skipped.
+          </p>
 
           <div className="flex flex-wrap items-center gap-2">
             <input

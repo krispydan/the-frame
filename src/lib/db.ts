@@ -632,6 +632,10 @@ try {
     created_at TEXT DEFAULT (datetime('now')),
     processed_at TEXT
   )`);
+  // How the lead reached us: 'webhook' (real-time leadgen) or 'csv' (manual
+  // export upload, used while leads_retrieval is in App Review). The daily
+  // reminder email reads this to tell whether the webhook has taken over.
+  try { sqlite.exec("ALTER TABLE meta_leads ADD COLUMN source TEXT DEFAULT 'webhook'"); } catch { /* exists */ }
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_leads_status ON meta_leads (status)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_leads_company ON meta_leads (company_id)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_leads_form ON meta_leads (form_id)");

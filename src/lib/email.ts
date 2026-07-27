@@ -283,6 +283,88 @@ export async function sendFaireCustomerExportEmail(
   return sendEmail(to, subject, html, attachments);
 }
 
+// ── Meta Lead Ads: daily CSV import reminder ──
+
+export interface MetaLeadImportReminderInput {
+  webhookLive: boolean;
+  configured: boolean;
+  uploadUrl: string | null;
+  webhookLeads24h: number;
+  csvLeads24h: number;
+  csvLeads7d: number;
+  deliveries24h: number;
+  daysSinceLastImport: number | null;
+  pending: number;
+  errored: number;
+}
+
+/**
+ * The daily nudge to pull Facebook leads out of Meta and into the frame.
+ *
+ * Leads with a stale answer convert badly, so the email leads with how long
+ * it's been since the last upload rather than with instructions — that's the
+ * number that decides whether today's download matters.
+ */
+export async function sendMetaLeadImportReminderEmail(to: string, o: MetaLeadImportReminderInput) {
+  const formsUrl =
+    "https://business.facebook.com/latest/instant_forms/forms/?asset_id=1066160603243379&ir_qe_exposed=1&business_id=1506080197538120&nav_source=flyout_menu&nav_id=2126994640";
+
+  if (o.webhookLive) {
+    const html = `
+      <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:560px;margin:0 auto;padding:32px 20px;">
+        <h2 style="margin-bottom:8px;">Facebook leads are flowing automatically now</h2>
+        <p style="color:#3f3f46;">Meta delivered <strong>${o.deliveries24h}</strong> webhook ${o.deliveries24h === 1 ? "call" : "calls"} in the last 24 hours and <strong>${o.webhookLeads24h}</strong> ${o.webhookLeads24h === 1 ? "lead" : "leads"} landed in the frame without anyone touching a CSV. App Review must have come through.</p>
+        <p style="color:#3f3f46;">You can stop the daily download. This is the last reminder you'll get — the CSV importer stays available as a fallback if the webhook ever drops a delivery.</p>
+        ${o.uploadUrl ? `<a href="${o.uploadUrl}" style="display:inline-block;background:#18181b;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;margin:16px 0;">See the leads</a>` : ""}
+      </div>`;
+    return sendEmail(to, "✅ Facebook leads are arriving automatically — no more daily CSV", html);
+  }
+
+  const stale = o.daysSinceLastImport;
+  const urgency =
+    stale === null
+      ? { tone: "#b45309", bg: "#fffbeb", border: "#fcd34d", text: "No export has been uploaded yet — any leads submitted so far are still sitting in Meta." }
+      : stale >= 3
+        ? { tone: "#b91c1c", bg: "#fef2f2", border: "#fca5a5", text: `Last upload was <strong>${stale} days ago</strong>. Leads submitted since then haven't been called, emailed, or pushed to Pipedrive.` }
+        : stale >= 1
+          ? { tone: "#b45309", bg: "#fffbeb", border: "#fcd34d", text: `Last upload was <strong>${stale === 1 ? "yesterday" : `${stale} days ago`}</strong>.` }
+          : { tone: "#15803d", bg: "#f0fdf4", border: "#86efac", text: "Last upload was today — you're current. Worth a second pass if the ads have been running." };
+
+  const subject =
+    stale !== null && stale >= 3
+      ? `⚠️ Facebook leads not imported in ${stale} days`
+      : "📥 Download today's Facebook leads";
+
+  const html = `
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:560px;margin:0 auto;padding:32px 20px;">
+      <h2 style="margin-bottom:8px;">Today's Facebook lead import</h2>
+      <p style="color:${urgency.tone};background:${urgency.bg};border:1px solid ${urgency.border};border-radius:8px;padding:10px 12px;font-size:14px;margin:0 0 16px;">${urgency.text}</p>
+
+      <p style="color:#3f3f46;margin-bottom:4px;"><strong>1.</strong> Download the export from Meta:</p>
+      <a href="${formsUrl}" style="display:inline-block;background:#1877f2;color:white;padding:10px 20px;border-radius:6px;text-decoration:none;margin:4px 0 14px;">Open Jaxy Instant Forms</a>
+      <p style="color:#71717a;font-size:13px;margin:0 0 16px;">Tick the form → <strong>Download</strong> → pick the date range. Grabbing the last 7 days every time is fine; duplicates are ignored. Don't open the file in Excel first — Meta exports UTF-16 and re-saving can mangle it.</p>
+
+      <p style="color:#3f3f46;margin-bottom:4px;"><strong>2.</strong> Upload it in the frame:</p>
+      ${o.uploadUrl ? `<a href="${o.uploadUrl}" style="display:inline-block;background:#18181b;color:white;padding:10px 20px;border-radius:6px;text-decoration:none;margin:4px 0 14px;">Upload to the frame</a>` : `<p style="color:#71717a;font-size:13px;">Go to Prospects → Facebook &amp; Instagram leads → Import leads from a Meta CSV export.</p>`}
+      <p style="color:#71717a;font-size:13px;margin:0 0 20px;">Each new lead gets deduped against existing companies, a Pipedrive deal, a Slack alert, and a Conversions API event back to Meta.</p>
+
+      <table style="width:100%;border-collapse:collapse;font-size:13px;color:#3f3f46;border-top:1px solid #e4e4e7;">
+        <tr><td style="padding:8px 0;border-bottom:1px solid #f4f4f5;">Imported in the last 24h</td><td style="padding:8px 0;border-bottom:1px solid #f4f4f5;text-align:right;font-weight:600;">${o.csvLeads24h}</td></tr>
+        <tr><td style="padding:8px 0;border-bottom:1px solid #f4f4f5;">Imported in the last 7 days</td><td style="padding:8px 0;border-bottom:1px solid #f4f4f5;text-align:right;font-weight:600;">${o.csvLeads7d}</td></tr>
+        <tr><td style="padding:8px 0;border-bottom:1px solid #f4f4f5;">Webhook deliveries in the last 24h</td><td style="padding:8px 0;border-bottom:1px solid #f4f4f5;text-align:right;font-weight:600;">${o.deliveries24h}</td></tr>
+        ${o.pending > 0 ? `<tr><td style="padding:8px 0;border-bottom:1px solid #f4f4f5;">Leads still unprocessed</td><td style="padding:8px 0;border-bottom:1px solid #f4f4f5;text-align:right;font-weight:600;">${o.pending}</td></tr>` : ""}
+        ${o.errored > 0 ? `<tr><td style="padding:8px 0;color:#b91c1c;">Leads that errored</td><td style="padding:8px 0;text-align:right;font-weight:600;color:#b91c1c;">${o.errored}</td></tr>` : ""}
+      </table>
+
+      <p style="color:#a1a1aa;font-size:12px;margin-top:20px;">
+        This manual step exists because Meta hasn't approved <code>leads_retrieval</code> yet. Once it's approved the leadgen
+        webhook takes over, these emails stop by themselves, and the importer stays as a fallback.
+      </p>
+    </div>`;
+
+  return sendEmail(to, subject, html);
+}
+
 export async function sendInviteEmail(to: string, name: string, tempPassword: string, loginUrl: string) {
   const subject = "You've been invited to The Frame";
   const html = `
