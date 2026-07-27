@@ -18,7 +18,10 @@
 import { sqlite } from "@/lib/db";
 import { addCompanyEmail } from "@/modules/sales/lib/company-emails";
 import { addCompanyPhone } from "@/modules/sales/lib/company-phones";
-import { fetchLead, fetchFormLeads, metaLeadsConfigured, type MetaLeadDetail, type MetaLeadField } from "./client";
+import {
+  fetchLead, fetchFormLeads, metaLeadsConfigured, diagnoseLeadAccess,
+  type MetaLeadDetail, type MetaLeadField,
+} from "./client";
 import { pushFacebookLeadToPipedrive, dealUrl } from "./pipedrive-push";
 import { queueCapiEvent } from "./capi";
 
@@ -319,6 +322,50 @@ export async function drainMetaLeads(limit = 25): Promise<{ processed: number; e
     else skipped++;
   }
   return { processed, errors, skipped };
+}
+
+/**
+ * Discover every lead form on the Pages this token can reach, remember them,
+ * and import their existing leads.
+ *
+ * This closes a bootstrap gap: the webhook only ever delivers NEW submissions,
+ * and the reconcile cron polls "known forms" — which are only learned FROM
+ * webhooks. Without this, a freshly-connected account sits at zero until
+ * someone happens to submit a form. It also backfills the leads that arrived
+ * while Zapier was the only path.
+ */
+export async function discoverAndImport(perForm = 100): Promise<{
+  forms: number; newLeads: number; processed: number; errors: string[];
+}> {
+  const errors: string[] = [];
+  if (!metaLeadsConfigured()) {
+    return { forms: 0, newLeads: 0, processed: 0, errors: ["Lead Ads not configured (need META_APP_SECRET + META_PAGE_TOKEN)"] };
+  }
+
+  const diag = await diagnoseLeadAccess();
+  if (diag.error) errors.push(diag.error);
+
+  const formIds: string[] = [];
+  for (const page of diag.pages) {
+    if (page.error) errors.push(`${page.name ?? page.id}: ${page.error}`);
+    for (const f of page.forms ?? []) {
+      rememberForm(f.id);
+      formIds.push(f.id);
+    }
+  }
+
+  let newLeads = 0;
+  let processed = 0;
+  for (const formId of formIds) {
+    const leads = await fetchFormLeads(formId, perForm);
+    for (const lead of leads) {
+      if (recordLeadgenEvent({ leadgenId: lead.id, formId, createdTime: lead.created_time ?? null })) newLeads++;
+      const res = await processMetaLead(lead.id, lead);
+      if (res.status === "processed") processed++;
+    }
+  }
+
+  return { forms: formIds.length, newLeads, processed, errors };
 }
 
 /** Cron safety-net: re-poll known forms for leads the webhook may have dropped. */

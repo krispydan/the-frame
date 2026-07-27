@@ -179,6 +179,111 @@ export async function fetchFormLeads(formId: string, limit = 50): Promise<MetaLe
   return out;
 }
 
+// ── Diagnostics / discovery ──
+
+export interface MetaPage {
+  id: string;
+  name?: string;
+  /** Apps subscribed to this page, with the fields they listen to. */
+  subscribedApps?: Array<{ id?: string; name?: string; subscribed_fields?: string[] }>;
+  leadgenSubscribed?: boolean;
+  forms?: Array<{ id: string; name?: string; status?: string; leads_count?: number }>;
+  error?: string;
+}
+
+async function graph<T>(path: string, token: string): Promise<T | { error: string }> {
+  try {
+    const sep = path.includes("?") ? "&" : "?";
+    const res = await fetch(`${GRAPH_BASE}/${metaGraphVersion()}${path}${sep}access_token=${encodeURIComponent(token)}`);
+    const data = (await res.json()) as T & { error?: { message?: string } };
+    if (!res.ok || data.error) return { error: data.error?.message || `HTTP ${res.status}` };
+    return data;
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "request failed" };
+  }
+}
+
+/**
+ * Inspect what the Page token can actually see: which token it is, which Pages
+ * it can access, whether our app is subscribed to each Page's `leadgen` field,
+ * and which lead forms exist. This answers "everything says connected but no
+ * leads are arriving" without guesswork.
+ */
+export async function diagnoseLeadAccess(): Promise<{
+  token: { valid: boolean; type?: string; appId?: string; scopes?: string[]; error?: string };
+  pages: MetaPage[];
+  error?: string;
+}> {
+  const c = metaConfig();
+  if (!c.pageToken) return { token: { valid: false, error: "META_PAGE_TOKEN not set" }, pages: [] };
+
+  // What kind of token is this, and does it carry leads_retrieval?
+  const dbg = await graph<{ data?: { is_valid?: boolean; type?: string; app_id?: string; scopes?: string[] } }>(
+    `/debug_token?input_token=${encodeURIComponent(c.pageToken)}`,
+    c.pageToken,
+  );
+  const token = "error" in dbg
+    ? { valid: false, error: dbg.error }
+    : {
+        valid: Boolean(dbg.data?.is_valid),
+        type: dbg.data?.type,
+        appId: dbg.data?.app_id,
+        scopes: dbg.data?.scopes,
+      };
+
+  // Which pages can this token act for?
+  const accounts = await graph<{ data?: Array<{ id: string; name?: string }> }>("/me/accounts?limit=25", c.pageToken);
+  const pageList = "error" in accounts ? [] : accounts.data ?? [];
+
+  const pages: MetaPage[] = [];
+  for (const p of pageList.slice(0, 10)) {
+    const page: MetaPage = { id: p.id, name: p.name };
+
+    const subs = await graph<{ data?: Array<{ id?: string; name?: string; subscribed_fields?: string[] }> }>(
+      `/${p.id}/subscribed_apps`, c.pageToken,
+    );
+    if (!("error" in subs)) {
+      page.subscribedApps = subs.data ?? [];
+      page.leadgenSubscribed = (subs.data ?? []).some((a) => (a.subscribed_fields ?? []).includes("leadgen"));
+    }
+
+    const forms = await graph<{ data?: Array<{ id: string; name?: string; status?: string; leads_count?: number }> }>(
+      `/${p.id}/leadgen_forms?fields=id,name,status,leads_count&limit=50`, c.pageToken,
+    );
+    if ("error" in forms) page.error = forms.error;
+    else page.forms = forms.data ?? [];
+
+    pages.push(page);
+  }
+
+  return {
+    token,
+    pages,
+    error: "error" in accounts ? accounts.error : undefined,
+  };
+}
+
+/**
+ * Subscribe our app to a Page's `leadgen` field. This is the step people miss:
+ * configuring the webhook in the App dashboard is not the same as subscribing
+ * the Page to the app.
+ */
+export async function subscribePageToLeadgen(pageId: string): Promise<{ ok: boolean; error?: string }> {
+  const c = metaConfig();
+  if (!c.pageToken) return { ok: false, error: "META_PAGE_TOKEN not set" };
+  try {
+    const res = await fetch(
+      `${GRAPH_BASE}/${c.graphVersion}/${pageId}/subscribed_apps?subscribed_fields=leadgen&access_token=${encodeURIComponent(c.pageToken)}`,
+      { method: "POST" },
+    );
+    const data = (await res.json()) as { success?: boolean; error?: { message?: string } };
+    if (!res.ok || data.error) return { ok: false, error: data.error?.message || `HTTP ${res.status}` };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "request failed" };
+  }
+}
+
 // ── Outbound: Conversions API ──
 
 export interface CapiEvent {

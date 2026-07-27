@@ -5,8 +5,11 @@ import { sqlite } from "@/lib/db";
 import { getSessionUser } from "@/lib/get-session";
 import {
   metaConfig, metaLeadsConfigured, metaCapiConfigured, sendCapiEvents, hashEmail,
+  diagnoseLeadAccess, subscribePageToLeadgen,
 } from "@/modules/integrations/lib/meta/client";
-import { getKnownForms, drainMetaLeads, reconcileMetaLeads } from "@/modules/integrations/lib/meta/lead-ingest";
+import {
+  getKnownForms, drainMetaLeads, reconcileMetaLeads, discoverAndImport,
+} from "@/modules/integrations/lib/meta/lead-ingest";
 import { syncCapiStageEvents, drainCapiEvents } from "@/modules/integrations/lib/meta/capi";
 import { ensureFacebookPipeline, getFacebookPipelineConfig } from "@/modules/integrations/lib/meta/pipedrive-push";
 
@@ -157,6 +160,21 @@ export async function POST(req: NextRequest) {
       );
       return NextResponse.json({ ok: result.ok, result });
     }
+    case "diagnose": {
+      // Answers "it says connected but nothing arrives": what the token can
+      // see, whether the Page is actually subscribed to leadgen, what forms
+      // exist and how many leads Meta holds for each.
+      const diag = await diagnoseLeadAccess();
+      return NextResponse.json({ ok: true, ...diag });
+    }
+    case "subscribe-page": {
+      const pageId = String(body.pageId || "");
+      if (!pageId) return NextResponse.json({ error: "pageId required" }, { status: 400 });
+      const r = await subscribePageToLeadgen(pageId);
+      return NextResponse.json({ ok: r.ok, error: r.error ?? null });
+    }
+    case "import-existing":
+      return NextResponse.json({ ok: true, result: await discoverAndImport(100) });
     case "ensure-pipeline":
       return NextResponse.json({ ok: true, pipeline: await ensureFacebookPipeline() });
     case "drain":
