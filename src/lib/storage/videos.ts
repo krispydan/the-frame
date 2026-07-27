@@ -190,6 +190,20 @@ export function videosDirectUpload(): boolean {
   return mediaOnR2();
 }
 
+/**
+ * Cache-bust a served asset URL. Render output paths are DETERMINISTIC
+ * (renders/{month}/{postId}.mp4), so a re-render overwrites the same URL
+ * — without this, the browser/CDN keep serving the stale bytes and an
+ * edited video "doesn't update". `token` is anything that changes when the
+ * content changes (the post's updated_at). Returns null unchanged.
+ */
+export function bustUrl(url: string | null | undefined, token: string | number | null | undefined): string | null {
+  if (!url) return null;
+  const t = String(token ?? "").replace(/[^0-9a-zA-Z]/g, "");
+  if (!t) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}v=${t}`;
+}
+
 /** Presigned PUT URL for a direct browser upload of a video asset.
  *  R2-only — throws if not configured (callers gate on
  *  videosDirectUpload()). */
