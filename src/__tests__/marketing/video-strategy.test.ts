@@ -21,5 +21,8 @@ describe("videoStrategyBlock", () => {
     // content-pillars.md content
     expect(block).toContain("CONTENT PILLARS");
     expect(block).toMatch(/Fit Check|Shape Hero|content pillar/i);
+    // hook-formulas.md content
+    expect(block).toContain("HOOK FORMULAS");
+    expect(block).toMatch(/Identity call-out|POV|gatekeep/i);
   });
 });
