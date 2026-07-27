@@ -19,7 +19,7 @@ import { HEAVY_WIDGETS } from "@/modules/dashboard/lib/metrics";
 import { KpiSkeleton, WidgetSkeleton } from "@/components/dashboard/skeletons";
 import {
   type Bundle,
-  KpisWidget, RevenueTrendWidget, ChannelMixWidget, TopSellersWidget, MoversWidget,
+  KpisWidget, TargetsWidget, RevenueTrendWidget, ChannelMixWidget, TopSellersWidget, MoversWidget,
   InventoryHealthWidget, ReorderAlertsWidget, OutreachWidget, MetaLeadsWidget,
   PipelineWidget, CustomersWidget, FinanceWidget, BusinessHealthWidget, ActivityWidget,
 } from "@/modules/dashboard/components/widgets";
@@ -28,6 +28,7 @@ import { RefreshCw, Settings2, RotateCcw, Plus, Check, ChevronDown, ArrowUpRight
 
 const COMPONENTS: Record<WidgetId, React.FC<{ data: Bundle }>> = {
   kpis: KpisWidget,
+  targets: TargetsWidget,
   "revenue-trend": RevenueTrendWidget,
   "channel-mix": ChannelMixWidget,
   "top-sellers": TopSellersWidget,

@@ -14,7 +14,7 @@ import { money, num, pct, deltaPct } from "@/components/dashboard/format";
 import { seriesColor, channelColor, channelLabel, STATUS } from "@/components/dashboard/palette";
 import {
   DollarSign, ShoppingCart, Receipt, TrendingUp, TrendingDown, PackageX, Megaphone,
-  AlertTriangle, Phone, Mail, Facebook, Sparkles, Activity as ActivityIcon,
+  AlertTriangle, Phone, Mail, Facebook, Sparkles, Target, Activity as ActivityIcon,
 } from "lucide-react";
 
 export type Bundle = {
@@ -49,6 +49,65 @@ export function KpisWidget({ data }: { data: Bundle }) {
   if (can(["warehouse"])) tiles.push(<StatTile key="low" label="Low stock SKUs" value={num(k.lowStock)} icon={PackageX} accent={STATUS.serious} deltaGoodWhenUp={false} sub={`${num(k.inventoryUnits)} units on hand`} href="/inventory" />);
   if (can(["marketing", "sales_manager"])) tiles.push(<StatTile key="leads" label="New leads" value={num(k.newLeads)} icon={Megaphone} accent={seriesColor(1)} sub="Facebook/Instagram" href="/prospects" />);
   return <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">{tiles}</div>;
+}
+
+// ── Targets ──
+type TargetRow = {
+  metric: string; label: string; unit: "currency" | "count" | "percent";
+  target: number; actual: number; attainmentPct: number | null;
+  elapsedPct: number; projectedVsTargetPct: number | null; status: string; periodLabel: string;
+};
+const TARGET_TONE: Record<string, string> = {
+  ahead: STATUS.good, on_track: STATUS.good, hit: STATUS.good,
+  behind: STATUS.warn, at_risk: STATUS.critical, missed: STATUS.critical,
+};
+function fmtTarget(v: number | null, unit: string): string {
+  if (v == null) return "—";
+  if (unit === "currency") return money(v, { compact: Math.abs(v) >= 10000 });
+  if (unit === "percent") return pct(v, 1);
+  return num(Math.round(v));
+}
+export function TargetsWidget({ data }: { data: Bundle }) {
+  const rows = g<TargetRow[]>(data, "targets") ?? [];
+  if (!rows.length) {
+    return (
+      <div className="flex h-28 flex-col items-center justify-center gap-1 text-center">
+        <Target className="h-5 w-5 text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">No targets set for this month.</p>
+        <a href="/targets" className="text-xs text-primary hover:underline">Set the plan →</a>
+      </div>
+    );
+  }
+  return (
+    <ul className="space-y-2.5">
+      {rows.map((r) => {
+        const tone = TARGET_TONE[r.status] ?? STATUS.neutral;
+        const attain = Math.max(0, Math.min(100, r.attainmentPct ?? 0));
+        return (
+          <li key={r.metric} className="space-y-1">
+            <div className="flex items-baseline justify-between gap-2 text-sm">
+              <span className="truncate font-medium">{r.label}</span>
+              <span className="shrink-0 tabular-nums">
+                {fmtTarget(r.actual, r.unit)}
+                <span className="text-muted-foreground"> / {fmtTarget(r.target, r.unit)}</span>
+              </span>
+            </div>
+            {/* Fill = attainment; the tick marks where we should be by now. */}
+            <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div className="h-full rounded-full transition-all" style={{ width: `${attain}%`, backgroundColor: tone }} />
+              <span className="absolute top-0 h-full w-0.5 bg-foreground/50" style={{ left: `${Math.min(100, r.elapsedPct * 100)}%` }} title="Pace — where we should be today" />
+            </div>
+            <div className="flex justify-between text-[11px] text-muted-foreground">
+              <span style={{ color: tone }}>{(r.attainmentPct ?? 0).toFixed(0)}% of target</span>
+              {r.projectedVsTargetPct != null && (
+                <span>projected {r.projectedVsTargetPct >= 0 ? "+" : ""}{r.projectedVsTargetPct.toFixed(0)}%</span>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 // ── Revenue trend ──

@@ -13,6 +13,7 @@ export type Role = "owner" | "sales_manager" | "warehouse" | "finance" | "market
 
 export type WidgetId =
   | "kpis"
+  | "targets"
   | "revenue-trend"
   | "channel-mix"
   | "top-sellers"
@@ -69,6 +70,7 @@ export interface WidgetDef {
 
 export const WIDGETS: Record<WidgetId, WidgetDef> = {
   kpis: { id: "kpis", title: "Key metrics", category: "overview", roles: ["owner", "sales_manager", "warehouse", "finance", "marketing", "support"], size: "full" },
+  targets: { id: "targets", title: "Targets", subtitle: "this month vs plan", category: "overview", roles: ["owner", "sales_manager", "finance", "marketing"], size: "lg", href: "/targets", linkLabel: "All targets" },
 
   "revenue-trend": { id: "revenue-trend", title: "Revenue trend", category: "sales", roles: ["owner", "sales_manager", "finance", "marketing"], size: "lg", href: "/finance", linkLabel: "Finance" },
   "channel-mix": { id: "channel-mix", title: "Sales by channel", category: "sales", roles: ["owner", "sales_manager", "finance"], size: "md", href: "/orders", linkLabel: "Orders" },
@@ -95,11 +97,11 @@ export const ALL_WIDGET_IDS = Object.keys(WIDGETS) as WidgetId[];
 
 /** Default ordered layout per role. Users customize from here. */
 export const ROLE_DEFAULT_LAYOUT: Record<Role, WidgetId[]> = {
-  owner: ["kpis", "revenue-trend", "channel-mix", "pipeline", "top-sellers", "movers", "outreach", "inventory-health", "reorder-alerts", "customers", "finance", "business-health", "meta-leads", "activity"],
-  sales_manager: ["kpis", "revenue-trend", "pipeline", "channel-mix", "top-sellers", "movers", "outreach", "meta-leads", "customers", "activity"],
+  owner: ["kpis", "targets", "revenue-trend", "channel-mix", "pipeline", "top-sellers", "movers", "outreach", "inventory-health", "reorder-alerts", "customers", "finance", "business-health", "meta-leads", "activity"],
+  sales_manager: ["kpis", "targets", "revenue-trend", "pipeline", "channel-mix", "top-sellers", "movers", "outreach", "meta-leads", "customers", "activity"],
   warehouse: ["kpis", "inventory-health", "reorder-alerts", "top-sellers", "movers", "activity"],
-  finance: ["kpis", "finance", "revenue-trend", "channel-mix", "business-health", "customers", "activity"],
-  marketing: ["kpis", "outreach", "meta-leads", "revenue-trend", "top-sellers", "movers", "activity"],
+  finance: ["kpis", "targets", "finance", "revenue-trend", "channel-mix", "business-health", "customers", "activity"],
+  marketing: ["kpis", "targets", "outreach", "meta-leads", "revenue-trend", "top-sellers", "movers", "activity"],
   support: ["kpis", "activity"],
   ai: ["kpis"],
 };

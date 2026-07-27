@@ -21,6 +21,7 @@ import {
   Megaphone,
   Kanban,
   Truck,
+  Target,
   BarChart3,
   Bell,
   User,
@@ -70,6 +71,7 @@ type NavItem = {
 
 const salesNav: NavItem[] = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { title: "Targets", href: "/targets", icon: Target },
   {
     title: "Prospects", href: "/prospects", icon: Users,
     children: [
