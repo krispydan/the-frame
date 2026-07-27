@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, sqlite } from "@/lib/db";
 import { videoPosts } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
-import { deleteVideo, videoUrl } from "@/lib/storage/videos";
+import { deleteVideo, videoUrl, bustUrl } from "@/lib/storage/videos";
 import { SLOTS, type Slot } from "@/modules/marketing/lib/video/scheduler";
 import { permutationHash, FALLBACK_RECIPE_ID } from "@/modules/marketing/lib/video/composer";
 import { jobQueue } from "@/modules/core/lib/job-queue";
@@ -40,14 +40,17 @@ function loadPost(id: string) {
     WHERE c.id = ?
   `);
   const clipIds = JSON.parse(String(row.clip_ids || "[]")) as string[];
+  // Render paths are deterministic, so re-renders reuse the same URL —
+  // version it by updated_at so the browser/CDN never serve a stale edit.
+  const v = row.updated_at as string;
   return {
     ...row,
     // Prefer the hook-burned variant; fall back to the clean render.
-    videoUrl: (row.burned_path || row.file_path) ? videoUrl(String(row.burned_path || row.file_path)) : null,
-    cleanVideoUrl: row.file_path ? videoUrl(String(row.file_path)) : null,
+    videoUrl: bustUrl((row.burned_path || row.file_path) ? videoUrl(String(row.burned_path || row.file_path)) : null, v),
+    cleanVideoUrl: bustUrl(row.file_path ? videoUrl(String(row.file_path)) : null, v),
     burnHook: row.burn_hook == null ? true : row.burn_hook === 1,
     hookBurned: Boolean(row.burned_path),
-    posterUrl: row.poster_path ? videoUrl(String(row.poster_path)) : null,
+    posterUrl: bustUrl(row.poster_path ? videoUrl(String(row.poster_path)) : null, v),
     hashtags: row.hashtags ? JSON.parse(String(row.hashtags)) : [],
     instructions: row.instructions ? JSON.parse(String(row.instructions)) : null,
     aiContext: row.ai_context ? JSON.parse(String(row.ai_context)) : null,

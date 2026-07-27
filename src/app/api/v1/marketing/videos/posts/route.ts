@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
-import { videoUrl } from "@/lib/storage/videos";
+import { videoUrl, bustUrl } from "@/lib/storage/videos";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
@@ -67,8 +67,10 @@ export async function GET(request: NextRequest) {
     return {
       ...row,
       // Prefer the hook-burned variant; fall back to the clean render.
-      videoUrl: (row.burned_path || row.file_path) ? videoUrl(String(row.burned_path || row.file_path)) : null,
-      posterUrl: row.poster_path ? videoUrl(String(row.poster_path)) : null,
+      // Version by updated_at — render paths are deterministic, so without
+      // this a re-render serves the stale cached bytes at the same URL.
+      videoUrl: bustUrl((row.burned_path || row.file_path) ? videoUrl(String(row.burned_path || row.file_path)) : null, row.updated_at as string),
+      posterUrl: bustUrl(row.poster_path ? videoUrl(String(row.poster_path)) : null, row.updated_at as string),
       hashtags: row.hashtags ? JSON.parse(String(row.hashtags)) : [],
       instructions: row.instructions ? JSON.parse(String(row.instructions)) : null,
       clips: clipIds.map((id, i) => {
