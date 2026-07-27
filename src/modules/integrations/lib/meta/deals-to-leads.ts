@@ -140,9 +140,10 @@ export async function migrateFacebookDealsToLeads(
         sqlite.prepare("DELETE FROM pipedrive_deals WHERE pipedrive_deal_id = ?").run(r.pipedrive_deal_id);
         result.dealsDeleted++;
       } catch (e) {
-        // A deal that was already deleted by hand isn't an error worth
-        // surfacing; anything else is.
-        if (!(e instanceof PipedriveError && e.status === 404)) {
+        // 404/410 both mean the deal is gone — Pipedrive answers a successful
+        // delete with 410 and a `{"success":true}` body, which fetch treats as
+        // a failure. Neither is worth surfacing; anything else is.
+        if (!(e instanceof PipedriveError && (e.status === 404 || e.status === 410))) {
           result.errors.push({
             leadgenId: r.leadgen_id,
             reason: `lead created but deal ${r.pipedrive_deal_id} could not be deleted: ${e instanceof Error ? e.message : String(e)}`,
