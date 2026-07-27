@@ -213,7 +213,8 @@ export class PipedriveError extends Error {
  * Returns the parsed `data` field (Pipedrive wraps responses in {success,data}).
  */
 export async function pdRequest<T = unknown>(
-  method: "GET" | "POST" | "PUT" | "DELETE",
+  // PATCH is only used by the Leads API — deals/orgs/persons take PUT.
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
   opts: { version?: "v1" | "v2"; retriesLeft?: number } = {},
@@ -388,6 +389,75 @@ export async function updateDeal(id: number, input: Record<string, unknown>): Pr
   return pdRequest<PdCreated>("PUT", `/deals/${id}`, input);
 }
 
+// ── Leads (the Leads Inbox, not the deal pipeline) ──
+//
+// Pipedrive models an unqualified enquiry as a *Lead*, which sits in the Leads
+// Inbox until someone works it and converts it into a Deal. That's the right
+// home for inbound ad submissions: a deal implies a real sales opportunity and
+// pollutes pipeline value/forecast reporting before anyone has spoken to them.
+//
+// Two things differ from deals and bite if you assume otherwise:
+//   - a lead id is a UUID string, not an integer
+//   - a lead has no pipeline or stage; it's labels + owner until converted
+
+export interface PdLead {
+  id: string;              // UUID
+  title: string;
+  owner_id?: number;
+  person_id?: number | null;
+  organization_id?: number | null;
+  label_ids?: string[];
+  is_archived?: boolean;
+  add_time?: string;
+}
+
+export interface PdLeadLabel {
+  id: string;              // UUID
+  name: string;
+  color: string;
+}
+
+/** Pipedrive only accepts these six label colours. */
+export type PdLeadLabelColor = "green" | "blue" | "red" | "yellow" | "purple" | "gray";
+
+export async function listLeadLabels(): Promise<PdLeadLabel[]> {
+  return (await pdRequest<PdLeadLabel[]>("GET", "/leadLabels")) || [];
+}
+
+/** Find-or-create a lead label by name (case-insensitive). Safe to re-run. */
+export async function ensureLeadLabel(name: string, color: PdLeadLabelColor = "blue"): Promise<PdLeadLabel> {
+  const existing = await listLeadLabels();
+  const match = existing.find((l) => l.name.trim().toLowerCase() === name.trim().toLowerCase());
+  if (match) return match;
+  return pdRequest<PdLeadLabel>("POST", "/leadLabels", { name, color });
+}
+
+export async function createLead(input: {
+  title: string;
+  /** At least one of person_id / organization_id is required by Pipedrive. */
+  person_id?: number;
+  organization_id?: number;
+  owner_id?: number;
+  label_ids?: string[];
+  value?: { amount: number; currency: string };
+  expected_close_date?: string;
+  [k: string]: unknown;
+}): Promise<PdLead> {
+  return pdRequest<PdLead>("POST", "/leads", input);
+}
+
+export async function updateLead(id: string, patch: Record<string, unknown>): Promise<PdLead> {
+  return pdRequest<PdLead>("PATCH", `/leads/${id}`, patch);
+}
+
+export async function getLead(id: string): Promise<PdLead | null> {
+  try {
+    return await pdRequest<PdLead>("GET", `/leads/${id}`);
+  } catch {
+    return null;
+  }
+}
+
 export async function createActivity(input: {
   subject: string;
   type?: string;
@@ -470,6 +540,7 @@ export async function listOpenActivitiesForPerson(personId: number, limit = 50):
 export async function createNote(input: {
   content: string; // supports basic HTML
   deal_id?: number;
+  lead_id?: string; // leads are UUIDs, not integers
   org_id?: number;
   person_id?: number;
   [k: string]: unknown;

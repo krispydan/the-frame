@@ -636,6 +636,11 @@ try {
   // export upload, used while leads_retrieval is in App Review). The daily
   // reminder email reads this to tell whether the webhook has taken over.
   try { sqlite.exec("ALTER TABLE meta_leads ADD COLUMN source TEXT DEFAULT 'webhook'"); } catch { /* exists */ }
+  // Facebook leads land in Pipedrive's Leads Inbox, not the deal pipeline — an
+  // ad submission isn't a sales opportunity yet. Lead ids are UUIDs, so this is
+  // TEXT rather than reusing the INTEGER pipedrive_deal_id column (which stays
+  // for the deals created before the switch).
+  try { sqlite.exec("ALTER TABLE meta_leads ADD COLUMN pipedrive_lead_id TEXT"); } catch { /* exists */ }
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_leads_status ON meta_leads (status)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_leads_company ON meta_leads (company_id)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_leads_form ON meta_leads (form_id)");

@@ -483,7 +483,8 @@ export async function notifyFacebookLead(opts: {
   formName: string | null;
   source: string; // "Facebook" | "Instagram" | "Facebook/Instagram"
   frameUrl?: string | null;
-  pipedriveDealUrl?: string | null;
+  /** Link to the Pipedrive Leads Inbox entry (ad leads aren't deals yet). */
+  pipedriveLeadUrl?: string | null;
   matchedExisting?: boolean;
 }) {
   const who = opts.contactName || opts.companyName || opts.email || "A new lead";
@@ -498,7 +499,7 @@ export async function notifyFacebookLead(opts: {
   ].filter(Boolean).join("  ·  ");
   const links = [
     opts.frameUrl ? `<${opts.frameUrl}|Open in the frame>` : "",
-    opts.pipedriveDealUrl ? `<${opts.pipedriveDealUrl}|View deal in Pipedrive>` : "",
+    opts.pipedriveLeadUrl ? `<${opts.pipedriveLeadUrl}|View lead in Pipedrive>` : "",
   ].filter(Boolean).join("  ·  ");
 
   const blocks: SlackBlock[] = [
