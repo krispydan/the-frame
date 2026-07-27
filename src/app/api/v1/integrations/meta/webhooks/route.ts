@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
+import { sqlite } from "@/lib/db";
 import { verifyMetaSignature, metaVerifyToken } from "@/modules/integrations/lib/meta/client";
 import { recordLeadgenEvent, processMetaLead } from "@/modules/integrations/lib/meta/lead-ingest";
 
@@ -68,13 +69,48 @@ interface LeadgenChangeValue {
   created_time?: number;
 }
 
+/**
+ * Record every inbound delivery, valid or not. Best-effort: a logging failure
+ * must never stop us acknowledging the webhook, or Meta will retry forever.
+ */
+function logDelivery(entry: {
+  signatureValid: boolean; object?: string | null; field?: string | null;
+  entryCount?: number; leadgenIds?: string[]; body: string; error?: string | null;
+}): void {
+  try {
+    sqlite
+      .prepare(
+        `INSERT INTO meta_webhook_events
+           (id, signature_valid, object, field, entry_count, leadgen_ids, body_preview, error)
+         VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        entry.signatureValid ? 1 : 0,
+        entry.object ?? null,
+        entry.field ?? null,
+        entry.entryCount ?? 0,
+        entry.leadgenIds?.length ? JSON.stringify(entry.leadgenIds) : null,
+        entry.body.slice(0, 2000),
+        entry.error ?? null,
+      );
+  } catch (e) {
+    console.error("[meta/webhook] delivery log failed:", e instanceof Error ? e.message : e);
+  }
+}
+
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
   const signature = req.headers.get("x-hub-signature-256");
 
   // Verify the payload is really from Meta. If META_APP_SECRET isn't set yet
-  // we reject rather than trust an unsigned body.
+  // we reject rather than trust an unsigned body — but log the attempt either
+  // way, so a signature mismatch is visible rather than silent.
   if (!verifyMetaSignature(rawBody, signature)) {
+    logDelivery({
+      signatureValid: false,
+      body: rawBody,
+      error: signature ? "signature mismatch (check META_APP_SECRET)" : "no X-Hub-Signature-256 header",
+    });
     return NextResponse.json({ error: "invalid signature" }, { status: 401 });
   }
 
@@ -82,6 +118,7 @@ export async function POST(req: NextRequest) {
   try {
     body = JSON.parse(rawBody);
   } catch {
+    logDelivery({ signatureValid: true, body: rawBody, error: "invalid JSON" });
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
   }
 
@@ -101,6 +138,18 @@ export async function POST(req: NextRequest) {
       leadgenIds.push(v.leadgen_id!);
     }
   }
+
+  // Log what arrived — including a verified delivery that carried no leadgen
+  // change, which is otherwise indistinguishable from Meta not calling at all.
+  logDelivery({
+    signatureValid: true,
+    object: body.object ?? null,
+    field: body.entry?.[0]?.changes?.[0]?.field ?? null,
+    entryCount: body.entry?.length ?? 0,
+    leadgenIds,
+    body: rawBody,
+    error: leadgenIds.length === 0 ? "no leadgen change in payload" : null,
+  });
 
   // Best-effort inline processing. The meta-leads-drain cron re-processes any
   // that fail or that a container restart interrupts (rows stay 'received').

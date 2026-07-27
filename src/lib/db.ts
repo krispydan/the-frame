@@ -662,6 +662,27 @@ try {
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_capi_status ON meta_capi_events (status)");
 } catch (e) { console.error("[db] meta_capi_events table error:", e); }
 
+// Raw Meta webhook deliveries. Logged for EVERY inbound POST — including ones
+// that fail signature verification or carry no leadgen change — so the
+// question "is Meta actually calling us?" is always answerable. Every other
+// integration keeps this; Meta previously recorded nothing unless a lead
+// processed successfully, which made a silent webhook indistinguishable from
+// no webhook at all.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS meta_webhook_events (
+    id TEXT PRIMARY KEY NOT NULL,
+    received_at TEXT DEFAULT (datetime('now')),
+    signature_valid INTEGER,
+    object TEXT,
+    field TEXT,
+    entry_count INTEGER DEFAULT 0,
+    leadgen_ids TEXT,
+    body_preview TEXT,
+    error TEXT
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_webhook_received ON meta_webhook_events (received_at DESC)");
+} catch (e) { console.error("[db] meta_webhook_events table error:", e); }
+
 // Business targets — the plan the actuals get measured against. One row per
 // (metric, scope, period). scope_id is NULL for company-wide targets, else the
 // channel key / user id / whatever the scope_type names. The UNIQUE key makes
