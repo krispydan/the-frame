@@ -18,6 +18,7 @@ import { getHealthSummary } from "@/modules/customers/lib/health-scoring";
 import { calculateBusinessHealth } from "@/modules/intelligence/lib/business-health";
 import { loadPhoneBurnerMetrics } from "@/modules/integrations/lib/slack/digests";
 import { getProductPerformance } from "@/modules/inventory/lib/product-performance";
+import { progressForPeriod, periodStartFor } from "@/modules/planning/lib/targets";
 
 export type Range = "7d" | "30d" | "90d" | "ytd";
 
@@ -268,6 +269,19 @@ export function buildDashboard(role: string, range: Range, part: Part = "all") {
   if (has("customers")) safe("customers", () => getHealthSummary(), { byStatus: [], byTier: [] });
   if (has("finance")) safe("finance", () => calculatePnl("mtd"), { error: "unavailable" });
   if (has("business-health")) safe("businessHealth", () => calculateBusinessHealth(), { error: "unavailable" });
+  if (has("targets")) {
+    safe("targets", () => {
+      const periodStart = periodStartFor(new Date(), "month");
+      return progressForPeriod("month", periodStart)
+        .filter((p) => p.scopeType === "company" && p.target != null)
+        .map((p) => ({
+          metric: p.metric, label: p.label, unit: p.unit,
+          target: p.target, actual: p.actual, attainmentPct: p.attainmentPct,
+          elapsedPct: p.elapsedPct, projectedVsTargetPct: p.projectedVsTargetPct,
+          status: p.status, periodLabel: p.periodLabel,
+        }));
+    }, []);
+  }
   if (has("activity")) safe("activity", () => buildActivity(), []);
 
   return { role, range, part, generatedAt: now, widgets };

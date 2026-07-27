@@ -651,6 +651,29 @@ try {
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_capi_status ON meta_capi_events (status)");
 } catch (e) { console.error("[db] meta_capi_events table error:", e); }
 
+// Business targets — the plan the actuals get measured against. One row per
+// (metric, scope, period). scope_id is NULL for company-wide targets, else the
+// channel key / user id / whatever the scope_type names. The UNIQUE key makes
+// upserts idempotent so editing a cell just overwrites it.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS targets (
+    id TEXT PRIMARY KEY NOT NULL,
+    metric TEXT NOT NULL,
+    scope_type TEXT NOT NULL DEFAULT 'company',
+    scope_id TEXT,
+    period_type TEXT NOT NULL DEFAULT 'month',
+    period_start TEXT NOT NULL,
+    value REAL NOT NULL,
+    notes TEXT,
+    created_by TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE (metric, scope_type, scope_id, period_type, period_start)
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_targets_period ON targets (period_type, period_start)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_targets_metric ON targets (metric, scope_type)");
+} catch (e) { console.error("[db] targets table error:", e); }
+
 // Image upload system: new columns on catalog_images
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN url TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN file_size INTEGER"); } catch { /* exists */ }
