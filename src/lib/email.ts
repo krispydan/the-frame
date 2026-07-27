@@ -272,7 +272,7 @@ export async function sendFaireCustomerExportEmail(
       <h2 style="margin-bottom:8px;">Weekly Faire customer upload</h2>
       ${
         opts.count > 0
-          ? `<p style="color:#3f3f46;">Attached is a CSV of <strong>${opts.count}</strong> interested lead${opts.count === 1 ? "" : "s"} with an email on file. Upload it in the Faire brand portal under <strong>Customers → Add customers (bulk upload)</strong>, then use <strong>Campaigns</strong> to email them. The <em>Source</em> column carries where each lead came from.</p>
+          ? `<p style="color:#3f3f46;">Attached is a CSV of <strong>${opts.count}</strong> interested lead${opts.count === 1 ? "" : "s"} with an email on file. Upload it in the Faire brand portal under <strong>Customers → Add customers (bulk upload)</strong>, then use <strong>Campaigns</strong> to email them. The <em>Custom Tags</em> column carries where each lead came from.</p>
              <p style="color:#71717a;font-size:14px;">These are marked as exported, so next week's email only includes new interested leads.</p>`
           : `<p style="color:#3f3f46;">No new interested leads with an email since last week — nothing to upload. You'll get the next batch when new leads come in.</p>`
       }

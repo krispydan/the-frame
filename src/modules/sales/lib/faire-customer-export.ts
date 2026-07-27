@@ -15,30 +15,42 @@
 import { sqlite } from "@/lib/db";
 import { sendFaireCustomerExportEmail } from "@/lib/email";
 
-// Matches Faire's Customers bulk-upload template exactly:
-//   Contact Name, Store Name, Email Address, Street Address, Custom Tags (comma-sep)
+// Faire's Customers bulk-upload template. We deliberately omit Street Address:
+// it isn't needed to add a customer or email them via Campaigns, and the
+// addresses we hold are enrichment-derived rather than confirmed ship-to data.
+//   Contact Name, Store Name, Email Address, Custom Tags (comma-sep)
 export interface FaireExportRow {
   companyId: string;
   contactName: string;
   storeName: string;
   email: string;
-  streetAddress: string;
   tags: string; // comma-separated tags inside one CSV field
 }
 
 interface CompanyRow {
   id: string;
   name: string | null;
-  address: string | null;
-  city: string | null;
-  state: string | null;
-  zip: string | null;
   source: string | null;
   tags: string | null;
 }
 
-/** Comma-separated Faire tags: always "interested" plus a source tag (no commas
- *  inside a tag, since Faire splits the field on commas). */
+/**
+ * Normalize one tag to plain text: letters, numbers and single spaces only.
+ * Faire splits the field on commas and chokes on punctuation, so anything else
+ * (hyphens, underscores, quotes, accents, emoji) collapses to a space.
+ */
+function cleanTag(raw: string): string {
+  return raw
+    .normalize("NFKD")                  // é → e, so accents don't get stripped to nothing
+    .replace(/[^a-zA-Z0-9 ]+/g, " ")    // every non-alphanumeric becomes a space
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/** Comma-separated Faire tags: always "interested" plus a source tag. Values are
+ *  plain text only — no commas inside a tag (Faire splits on them) and no other
+ *  punctuation. */
 function sourceTags(c: CompanyRow): string {
   const src = (c.source || "").toLowerCase();
   let tags: string[] = [];
@@ -50,11 +62,16 @@ function sourceTags(c: CompanyRow): string {
   const has = (s: string) => src.includes(s) || tags.some((t) => t.includes(s));
   const out = ["interested"];
   if (has("instantly")) out.push("instantly");
-  else if (has("phoneburner")) out.push("cold-call");
+  else if (has("phoneburner")) out.push("cold call");
   else if (has("ajm")) out.push("ajm");
   else if (has("faire")) out.push("faire");
-  else if (c.source) out.push(c.source.replace(/,/g, " ").trim());
-  return out.join(",");
+  else if (c.source) out.push(c.source);
+
+  const seen = new Set<string>();
+  return out
+    .map(cleanTag)
+    .filter((t) => t && !seen.has(t) && (seen.add(t), true))
+    .join(",");
 }
 
 function csvField(v: string | null | undefined): string {
@@ -62,12 +79,12 @@ function csvField(v: string | null | undefined): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-const HEADERS = ["Contact Name", "Store Name", "Email Address", "Street Address", "Custom Tags (separate with commas)"];
+const HEADERS = ["Contact Name", "Store Name", "Email Address", "Custom Tags (separate with commas)"];
 
 function toCsv(rows: FaireExportRow[]): string {
   const lines = [HEADERS.join(",")];
   for (const r of rows) {
-    lines.push([r.contactName, r.storeName, r.email, r.streetAddress, r.tags].map(csvField).join(","));
+    lines.push([r.contactName, r.storeName, r.email, r.tags].map(csvField).join(","));
   }
   return lines.join("\r\n");
 }
@@ -85,7 +102,7 @@ export function buildFaireExport(opts: { limit?: number } = {}): {
 } {
   const companies = sqlite
     .prepare(
-      `SELECT id, name, address, city, state, zip, source, tags
+      `SELECT id, name, source, tags
          FROM companies
         WHERE status IN ('interested', 'catalog_sent')
           AND faire_exported_at IS NULL
@@ -111,17 +128,11 @@ export function buildFaireExport(opts: { limit?: number } = {}): {
       continue;
     }
     const contactName = [contact.first_name, contact.last_name].filter(Boolean).join(" ").trim() || (c.name ?? "");
-    // Faire's Street Address is one field: "street, city, state zip".
-    const streetAddress = [c.address, c.city, [c.state, c.zip].filter(Boolean).join(" ").trim()]
-      .map((s) => (s || "").trim())
-      .filter(Boolean)
-      .join(", ");
     rows.push({
       companyId: c.id,
       contactName,
       storeName: c.name ?? "",
       email: contact.email,
-      streetAddress,
       tags: sourceTags(c),
     });
     companyIds.push(c.id);
