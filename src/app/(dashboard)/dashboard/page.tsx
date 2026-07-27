@@ -14,8 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useUser } from "@/hooks/use-user";
 import { Button } from "@/components/ui/button";
 import { WidgetFrame } from "@/components/dashboard/widget-frame";
-import { WIDGETS, SIZE_CLASS, groupByCategory, type WidgetId } from "@/modules/dashboard/widgets";
-import { HEAVY_WIDGETS } from "@/modules/dashboard/lib/metrics";
+import { WIDGETS, SIZE_CLASS, groupByCategory, HEAVY_WIDGETS, type WidgetId } from "@/modules/dashboard/widgets";
 import { KpiSkeleton, WidgetSkeleton } from "@/components/dashboard/skeletons";
 import {
   type Bundle,

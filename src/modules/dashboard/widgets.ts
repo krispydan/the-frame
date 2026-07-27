@@ -28,6 +28,14 @@ export type WidgetId =
   | "business-health"
   | "activity";
 
+/**
+ * Widgets whose datasets are expensive to compute — the dashboard defers
+ * them to a second "heavy" fetch so the core cards paint immediately. Kept
+ * here (not in metrics.ts) so the CLIENT page can import it without dragging
+ * the server-only DB layer into the browser bundle.
+ */
+export const HEAVY_WIDGETS: WidgetId[] = ["top-sellers", "movers", "finance", "business-health"];
+
 export type WidgetSize = "sm" | "md" | "lg" | "full";
 
 /** Cards are grouped into these sections on the dashboard, in this order. */
