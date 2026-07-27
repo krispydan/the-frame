@@ -21,6 +21,7 @@ export async function GET(request: NextRequest) {
   const talent = searchParams.get("talent") || "";
   const untagged = searchParams.get("untagged") === "1";
   const productsFilter = searchParams.get("products") || ""; // "tagged" | "untagged"
+  const product = searchParams.get("product") || ""; // product NAME contains
   const search = searchParams.get("search") || "";
   const limit = Math.min(500, parseInt(searchParams.get("limit") || "200", 10));
   const offset = parseInt(searchParams.get("offset") || "0", 10);
@@ -54,9 +55,21 @@ export async function GET(request: NextRequest) {
     clauses.push("EXISTS (SELECT 1 FROM marketing_video_clip_products cp WHERE cp.clip_id = c.id AND cp.sku_id = ?)");
     params.push(skuId);
   }
+  // Product NAME filter (dedicated) — clips tagged with a matching product.
+  if (product) {
+    clauses.push(
+      "EXISTS (SELECT 1 FROM marketing_video_clip_products cp JOIN catalog_skus s ON s.id = cp.sku_id JOIN catalog_products p ON p.id = s.product_id WHERE cp.clip_id = c.id AND p.name LIKE ?)",
+    );
+    params.push(`%${product}%`);
+  }
+  // One powerful search box: filename, notes, creator (talent), or a
+  // tagged product's name.
   if (search) {
-    clauses.push("(c.file_name LIKE ? OR c.notes LIKE ?)");
-    params.push(`%${search}%`, `%${search}%`);
+    const like = `%${search}%`;
+    clauses.push(
+      "(c.file_name LIKE ? OR c.notes LIKE ? OR c.talent LIKE ? OR EXISTS (SELECT 1 FROM marketing_video_clip_products cp JOIN catalog_skus s ON s.id = cp.sku_id JOIN catalog_products p ON p.id = s.product_id WHERE cp.clip_id = c.id AND p.name LIKE ?))",
+    );
+    params.push(like, like, like, like);
   }
 
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
