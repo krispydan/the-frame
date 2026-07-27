@@ -46,11 +46,14 @@ export function loadComposerClips(): ComposerClip[] {
   const rows = sqlite.prepare(`
     SELECT c.id, c.category_id AS categoryId, c.audio_mode AS audioMode,
            c.duration_sec AS durationSec, c.boost, c.times_used AS timesUsed,
-           c.last_used_at AS lastUsedAt, cat.slug AS categorySlug
+           c.last_used_at AS lastUsedAt, cat.slug AS categorySlug,
+           (SELECT 1 FROM marketing_media_matches m
+              WHERE m.media_type = 'clip' AND m.media_id = c.id
+                AND m.status = 'no_product' LIMIT 1) AS noProduct
     FROM marketing_video_clips c
     JOIN marketing_video_clip_categories cat ON cat.id = c.category_id AND cat.archived = 0
     WHERE c.status = 'ready' AND c.duration_sec IS NOT NULL
-  `).all() as Array<Omit<ComposerClip, "skuIds">>;
+  `).all() as Array<Omit<ComposerClip, "skuIds"> & { noProduct: number | null }>;
 
   if (rows.length === 0) return [];
 
@@ -64,7 +67,11 @@ export function loadComposerClips(): ComposerClip[] {
     skusByClip.set(p.clipId, list);
   }
 
-  return rows.map((r) => ({ ...r, skuIds: skusByClip.get(r.id) ?? [] }));
+  return rows.map(({ noProduct, ...r }) => ({
+    ...r,
+    skuIds: skusByClip.get(r.id) ?? [],
+    noProductConfirmed: noProduct === 1,
+  }));
 }
 
 function loadSkuSignals(): Map<string, SkuSignal> {

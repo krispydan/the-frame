@@ -65,6 +65,13 @@ CAPTION RULES
   = ignore.
 - If a product is trending up, it's fine to say so in a human way
   ("everyone keeps buying the honey ones") — never quote raw stats.
+- PRODUCT ACCURACY (important): only ever name/reference a product that
+  appears in "Featured products" or "ALL products visible in the video".
+  Every product-bearing clip in this video features a focus product; the
+  rest are product-free b-roll. If a specific frame IS featured, center
+  the caption on THAT pair by name/vibe. NEVER reference a pair of glasses
+  that isn't in those lists — the clips won't show it and the caption will
+  contradict the video.
 - Do NOT stuff hashtags into the caption body.
 
 HASHTAGS: 3-6, mixing 1-2 broad (#sunglasses), 2-3 niche/brand, and
