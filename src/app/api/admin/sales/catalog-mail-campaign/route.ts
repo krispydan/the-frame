@@ -27,7 +27,13 @@ import {
  *   POST ?action=sync-pipedrive&commit=true → write full mailing address to each
  *                                          lead's Pipedrive organization
  *   POST ?action=log-mail&commit=true    → log a done "Direct Mail" activity on
- *                                          each lead's deal (idempotent via tag)
+ *                                          each lead's deal + org + person
+ *                                          (idempotent via the mailed tag).
+ *                                          &mailDate=YYYY-MM-DD  date the drop
+ *                                          actually goes out (default: today)
+ *                                          &limit=N / &store=<substr>  restrict
+ *                                          the run; <=5 targets returns inline
+ *                                          instead of backgrounding
  *
  * Auth: x-admin-key: jaxy2026.
  */
@@ -164,12 +170,36 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "log-mail") {
-    const targets = cohort.filter((r) => !r.alreadyMailed && r.addressComplete);
+    // The activity must carry the date the catalogs actually go in the post,
+    // not the date we happened to run this. Pass ?mailDate=YYYY-MM-DD.
+    const mailDateParam = (url.searchParams.get("mailDate") || "").trim();
+    if (mailDateParam && !/^\d{4}-\d{2}-\d{2}$/.test(mailDateParam)) {
+      return NextResponse.json({ ok: false, error: "mailDate must be YYYY-MM-DD" }, { status: 400 });
+    }
+    const mailDate = mailDateParam || new Date().toISOString().slice(0, 10);
+
+    // ?limit=N logs only the first N, so a run can be sanity-checked on one
+    // real record before committing the whole cohort.
+    const limitParam = parseInt(url.searchParams.get("limit") || "0", 10);
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 0;
+
+    // ?store=<substring> picks a specific lead to test with.
+    const storeFilter = (url.searchParams.get("store") || "").trim().toLowerCase();
+
+    let targets = cohort.filter((r) => !r.alreadyMailed && r.addressComplete);
+    if (storeFilter) targets = targets.filter((r) => r.store.toLowerCase().includes(storeFilter));
+    if (limit) targets = targets.slice(0, limit);
+
     if (!commit) {
       return NextResponse.json({
         ok: true,
         commit: false,
+        mailDate,
         wouldLog: targets.length,
+        preview: targets.slice(0, 5).map((t) => ({
+          store: t.store, dealId: t.pipedriveDealId, orgId: t.pipedriveOrgId, personId: t.pipedrivePersonId,
+          address: `${t.address}, ${t.city}, ${t.state} ${t.zip}`,
+        })),
         skippedAlreadyMailed: cohort.filter((r) => r.alreadyMailed).length,
         skippedNoAddress: cohort.filter((r) => !r.addressComplete && !r.alreadyMailed).length,
       });
@@ -181,7 +211,42 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 400 });
     }
     const owner = getPipelineOwner("catalog")?.id;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = mailDate;
+
+    // A small run returns its result inline — polling a background job to check
+    // one record is pointless, and the caller needs to see the failure.
+    if (targets.length <= 5) {
+      const logged: Array<{ store: string; activityId: number | null; dealId: number | null }> = [];
+      const errs: string[] = [];
+      for (const t of targets) {
+        try {
+          const created = await createActivity({
+            subject: `Catalog mailed — ${t.store}`,
+            type: typeKey,
+            deal_id: t.pipedriveDealId ?? undefined,
+            org_id: t.pipedriveOrgId ?? undefined,
+            person_id: t.pipedrivePersonId ?? undefined,
+            user_id: owner,
+            due_date: today,
+            done: 1,
+            note: `Physical catalog sent via direct mail on ${today} to: ${t.address}, ${t.city}, ${t.state} ${t.zip}`,
+          });
+          tagCompany(t.companyId, MAILED_TAG);
+          logged.push({ store: t.store, activityId: created?.id ?? null, dealId: t.pipedriveDealId });
+        } catch (e) {
+          errs.push(`${t.store}: ${e instanceof Error ? e.message.slice(0, 200) : String(e)}`);
+        }
+      }
+      const base = getSetting("pipedrive_api_domain")?.replace(/\/$/, "") ?? "";
+      return NextResponse.json({
+        ok: errs.length === 0,
+        mailDate,
+        logged: logged.length,
+        errors: errs,
+        activities: logged.map((l) => ({ ...l, dealUrl: base && l.dealId ? `${base}/deal/${l.dealId}` : null })),
+      });
+    }
+
     setSetting(LOG_RUN_KEY, JSON.stringify({ state: "running", total: targets.length, done: 0, startedAt: new Date().toISOString() }));
 
     void (async () => {
@@ -200,7 +265,7 @@ export async function POST(req: NextRequest) {
             user_id: owner,
             due_date: today,
             done: 1,
-            note: `Physical catalog sent via direct mail to: ${t.address}, ${t.city}, ${t.state} ${t.zip}`,
+            note: `Physical catalog sent via direct mail on ${today} to: ${t.address}, ${t.city}, ${t.state} ${t.zip}`,
           });
           tagCompany(t.companyId, MAILED_TAG);
           logged++;
