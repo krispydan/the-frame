@@ -3,7 +3,7 @@ export const maxDuration = 300;
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
-import { updateOrganization, createActivity, pdRequest } from "@/modules/sales/lib/pipedrive-client";
+import { updateOrganization, createActivity, updateActivity, pdRequest } from "@/modules/sales/lib/pipedrive-client";
 import { getPipelineOwner } from "@/modules/sales/lib/pipedrive-setup";
 import {
   loadCatalogCohort,
@@ -34,6 +34,12 @@ import {
  *                                          &limit=N / &store=<substr>  restrict
  *                                          the run; <=5 targets returns inline
  *                                          instead of backgrounding
+ *                                          &piece=<name>  what was mailed, e.g.
+ *                                          "AJM mini catalog" (default "catalog")
+ *   POST ?action=relabel-activity&activityId=N&piece=<name>
+ *                                        → rewrite one already-logged activity's
+ *                                          subject/note, for when the piece name
+ *                                          is decided after the first test log
  *
  * Auth: x-admin-key: jaxy2026.
  */
@@ -169,6 +175,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, synced, errors, errSamples });
   }
 
+  if (action === "relabel-activity") {
+    // The piece name is often settled after the first record is logged as a
+    // test. Rewriting beats delete-and-recreate on a live CRM.
+    const activityId = parseInt(url.searchParams.get("activityId") || "0", 10);
+    const piece = (url.searchParams.get("piece") || "").trim();
+    const store = (url.searchParams.get("store") || "").trim();
+    if (!activityId || !piece) {
+      return NextResponse.json({ ok: false, error: "activityId and piece are required" }, { status: 400 });
+    }
+    const current = await pdRequest<{ id: number; subject: string; note: string | null }>("GET", `/activities/${activityId}`);
+    const patch: Record<string, unknown> = {
+      subject: store ? `${piece} mailed — ${store}` : (current.subject || "").replace(/^.*? mailed —/, `${piece} mailed —`),
+      // Swap only the leading piece description; the address tail stays as-is.
+      note: (current.note || "").replace(/^.*?(?= sent via direct mail on )/, piece),
+    };
+    if (!commit) return NextResponse.json({ ok: true, commit: false, activityId, before: current, after: patch });
+    await updateActivity(activityId, patch);
+    return NextResponse.json({ ok: true, activityId, ...patch });
+  }
+
   if (action === "log-mail") {
     // The activity must carry the date the catalogs actually go in the post,
     // not the date we happened to run this. Pass ?mailDate=YYYY-MM-DD.
@@ -185,6 +211,10 @@ export async function POST(req: NextRequest) {
 
     // ?store=<substring> picks a specific lead to test with.
     const storeFilter = (url.searchParams.get("store") || "").trim().toLowerCase();
+
+    // What actually went in the envelope. Reps reading the timeline in six
+    // months need to know which piece this was, not just "a catalog".
+    const piece = (url.searchParams.get("piece") || "").trim() || "catalog";
 
     let targets = cohort.filter((r) => !r.alreadyMailed && r.addressComplete);
     if (storeFilter) targets = targets.filter((r) => r.store.toLowerCase().includes(storeFilter));
@@ -221,7 +251,7 @@ export async function POST(req: NextRequest) {
       for (const t of targets) {
         try {
           const created = await createActivity({
-            subject: `Catalog mailed — ${t.store}`,
+            subject: `${piece} mailed — ${t.store}`,
             type: typeKey,
             deal_id: t.pipedriveDealId ?? undefined,
             org_id: t.pipedriveOrgId ?? undefined,
@@ -229,7 +259,7 @@ export async function POST(req: NextRequest) {
             user_id: owner,
             due_date: today,
             done: 1,
-            note: `Physical catalog sent via direct mail on ${today} to: ${t.address}, ${t.city}, ${t.state} ${t.zip}`,
+            note: `${piece} sent via direct mail on ${today} to: ${t.address}, ${t.city}, ${t.state} ${t.zip}`,
           });
           tagCompany(t.companyId, MAILED_TAG);
           logged.push({ store: t.store, activityId: created?.id ?? null, dealId: t.pipedriveDealId });
@@ -257,7 +287,7 @@ export async function POST(req: NextRequest) {
       for (const t of targets) {
         try {
           await createActivity({
-            subject: `Catalog mailed — ${t.store}`,
+            subject: `${piece} mailed — ${t.store}`,
             type: typeKey,
             deal_id: t.pipedriveDealId ?? undefined,
             org_id: t.pipedriveOrgId ?? undefined,
@@ -265,7 +295,7 @@ export async function POST(req: NextRequest) {
             user_id: owner,
             due_date: today,
             done: 1,
-            note: `Physical catalog sent via direct mail on ${today} to: ${t.address}, ${t.city}, ${t.state} ${t.zip}`,
+            note: `${piece} sent via direct mail on ${today} to: ${t.address}, ${t.city}, ${t.state} ${t.zip}`,
           });
           tagCompany(t.companyId, MAILED_TAG);
           logged++;
@@ -279,7 +309,7 @@ export async function POST(req: NextRequest) {
       setSetting(LOG_RUN_KEY, JSON.stringify({ state: "done", total: targets.length, done, logged, errors, errSamples, finishedAt: new Date().toISOString() }));
     })();
 
-    return NextResponse.json({ ok: true, started: true, logging: targets.length, note: "Poll GET ?run=log for progress." });
+    return NextResponse.json({ ok: true, started: true, logging: targets.length, piece, mailDate, note: "Poll GET ?run=log for progress." });
   }
 
   return NextResponse.json({ error: `unknown action "${action}" — use enrich-chunk | sync-pipedrive | log-mail` }, { status: 400 });
