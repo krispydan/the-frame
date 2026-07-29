@@ -137,6 +137,7 @@ type TopSeller = {
   sku: string; name: string; color: string; units: number; revenue: number;
   unitsWholesale: number; unitsRetail: number; wholesaleSharePct: number;
   avgOrderQty: number; accounts: number;
+  onHand: number; onOrder: number; daysCover: number | null; daysCoverWithIncoming: number | null;
 };
 type ProductInsight = {
   topSellers: TopSeller[];
@@ -181,15 +182,146 @@ export function TopSellersWidget({ data }: { data: Bundle }) {
                 {r.unitsWholesale > 0 && <div className="h-full rounded-full" style={{ width: `${Math.max(2, wPct)}%`, backgroundColor: WHOLESALE_COLOR }} />}
                 {r.unitsRetail > 0 && <div className="h-full rounded-full" style={{ width: `${Math.max(2, rPct)}%`, backgroundColor: RETAIL_COLOR }} />}
               </div>
-              <div className="flex gap-3 text-[11px] text-muted-foreground">
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
                 <span>{pct(r.wholesaleSharePct)} wholesale</span>
                 <span>{r.avgOrderQty.toFixed(1)} avg qty/order</span>
                 {r.accounts > 0 && <span>{num(r.accounts)} {r.accounts === 1 ? "door" : "doors"}</span>}
+                {/* Stock position. A best seller at zero on hand with nothing
+                    inbound is the one row worth acting on today, so it's called
+                    out in red rather than left to blend in. */}
+                <span
+                  className="tabular-nums"
+                  style={r.onHand === 0 && r.onOrder === 0 ? { color: STATUS.critical, fontWeight: 500 } : undefined}
+                >
+                  {num(r.onHand)} on hand
+                  {r.onOrder > 0 && <> · {num(r.onOrder)} on order</>}
+                  {r.onHand === 0 && r.onOrder === 0 && " — nothing inbound"}
+                </span>
               </div>
             </li>
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+// ── Top colours (share + seasonality) ──
+type ColorRow = {
+  color: string; units: number; unitSharePct: number;
+  trendPct: number | null; trend: string;
+  onHand: number; onOrder: number;
+  peakMonth: string | null; seasonalityIndex: number | null;
+  byMonth: number[];
+};
+type ColorInsight = {
+  windowDays: number;
+  months: string[];
+  totalUnits: number;
+  rows: ColorRow[];
+  stale: Array<{ color: string; onHand: number; onOrder: number }>;
+};
+
+/** "2026-03" → "Mar" — the axis only needs the month. */
+function monthLabel(ym: string | null): string {
+  if (!ym) return "—";
+  const m = parseInt(ym.slice(5, 7), 10);
+  return ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m] ?? ym;
+}
+
+/**
+ * Which colours sell, and when.
+ *
+ * Share alone would just say "black wins" forever. The sparkline is the point:
+ * it shows whether a colour is steady year-round or concentrated in a season,
+ * which is what decides when the buy should land rather than how big it is.
+ */
+export function TopColorsWidget({ data }: { data: Bundle }) {
+  const insight = g<ColorInsight>(data, "colorInsight");
+  const rows = insight?.rows ?? [];
+  if (!rows.length) {
+    return <div className="flex h-24 items-center justify-center text-xs text-muted-foreground">No colour sales yet</div>;
+  }
+  const maxShare = Math.max(...rows.map((r) => r.unitSharePct), 1);
+  const months = insight?.months ?? [];
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>Share of units · last 12 months</span>
+        {months.length >= 2 && <span>{monthLabel(months[0])}–{monthLabel(months[months.length - 1])}</span>}
+      </div>
+
+      <ul className="space-y-2.5">
+        {rows.map((r, i) => {
+          const peak = Math.max(...r.byMonth, 1);
+          // >1.5x the average month means genuinely seasonal, not steady.
+          const seasonal = (r.seasonalityIndex ?? 0) >= 1.5;
+          return (
+            <li key={r.color} className="space-y-1">
+              <div className="flex items-baseline justify-between gap-2 text-sm">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <i className="h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: seriesColor(i) }} />
+                  <span className="truncate font-medium">{r.color}</span>
+                </span>
+                <span className="shrink-0 tabular-nums text-muted-foreground">
+                  {pct(r.unitSharePct)}<span className="ml-1 text-xs">{num(r.units)} u</span>
+                </span>
+              </div>
+
+              <div className="flex items-end gap-2">
+                {/* Share bar */}
+                <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full"
+                    style={{ width: `${Math.max(2, (r.unitSharePct / maxShare) * 100)}%`, backgroundColor: seriesColor(i) }}
+                  />
+                </div>
+                {/* Monthly sparkline — the "when" half of the question */}
+                <div className="flex h-5 shrink-0 items-end gap-[1px]" title={r.byMonth.map((u, idx) => `${monthLabel(months[idx])}: ${u}`).join("  ·  ")}>
+                  {r.byMonth.map((u, idx) => (
+                    <i
+                      key={idx}
+                      className="w-[3px] rounded-sm"
+                      style={{
+                        height: `${Math.max(8, (u / peak) * 100)}%`,
+                        backgroundColor: seriesColor(i),
+                        opacity: months[idx] === r.peakMonth ? 1 : 0.35,
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                {r.peakMonth && (
+                  <span>
+                    peaks {monthLabel(r.peakMonth)}
+                    {seasonal && <span style={{ color: STATUS.serious }}> · seasonal {r.seasonalityIndex?.toFixed(1)}x</span>}
+                  </span>
+                )}
+                <span className="tabular-nums">
+                  {num(r.onHand)} on hand{r.onOrder > 0 && <> · {num(r.onOrder)} on order</>}
+                </span>
+                {r.trendPct != null && <span><Delta value={r.trendPct} /></span>}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+
+      {/* Colours sitting on stock with zero sales in a year. */}
+      {insight?.stale?.length ? (
+        <div className="rounded-lg border p-2 text-[11px]" style={{ backgroundColor: `${STATUS.warn}0f`, borderColor: `${STATUS.warn}55` }}>
+          <span className="font-medium">No sales in 12 months, still holding stock: </span>
+          {insight.stale.map((s, i) => (
+            <span key={s.color}>
+              {i > 0 && ", "}
+              {s.color} ({num(s.onHand + s.onOrder)}u)
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

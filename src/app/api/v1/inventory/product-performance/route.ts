@@ -36,6 +36,7 @@ export async function GET(req: NextRequest) {
         "repeat_accounts", "repeat_rate_pct", "units_recent", "units_prior",
         "trend_pct", "trend", "unit_cost", "gross_profit", "margin_pct",
         "on_hand", "available", "weekly_rate", "days_cover",
+        "on_order", "total_position", "days_cover_with_incoming", "open_pos",
       ].join(",");
       const esc = (v: unknown) => {
         const s = v == null ? "" : String(v);
@@ -50,6 +51,9 @@ export async function GET(req: NextRequest) {
           r.trendPct == null ? "" : r.trendPct.toFixed(1), r.trend,
           r.unitCost ?? "", r.grossProfit ?? "", r.marginPct == null ? "" : r.marginPct.toFixed(1),
           r.onHand, r.available, r.weeklyRate, r.daysCover ?? "",
+          r.onOrder, r.totalPosition, r.daysCoverWithIncoming ?? "",
+          // "JAX101:1200 (2026-09-04)" per PO, so the CSV is self-explanatory.
+          r.onOrderPos.map((p) => `${p.poNumber}:${p.units}${p.expectedArrivalDate ? ` (${p.expectedArrivalDate})` : ""}`).join("; "),
         ].map(esc).join(","),
       );
       return new NextResponse([header, ...body].join("\n"), {

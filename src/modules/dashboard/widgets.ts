@@ -17,6 +17,7 @@ export type WidgetId =
   | "revenue-trend"
   | "channel-mix"
   | "top-sellers"
+  | "top-colors"
   | "movers"
   | "inventory-health"
   | "reorder-alerts"
@@ -34,7 +35,7 @@ export type WidgetId =
  * here (not in metrics.ts) so the CLIENT page can import it without dragging
  * the server-only DB layer into the browser bundle.
  */
-export const HEAVY_WIDGETS: WidgetId[] = ["top-sellers", "movers", "finance", "business-health"];
+export const HEAVY_WIDGETS: WidgetId[] = ["top-sellers", "top-colors", "movers", "finance", "business-health"];
 
 export type WidgetSize = "sm" | "md" | "lg" | "full";
 
@@ -84,6 +85,7 @@ export const WIDGETS: Record<WidgetId, WidgetDef> = {
   "channel-mix": { id: "channel-mix", title: "Sales by channel", category: "sales", roles: ["owner", "sales_manager", "finance"], size: "md", href: "/orders", linkLabel: "Orders" },
 
   "top-sellers": { id: "top-sellers", title: "Top sellers", subtitle: "wholesale vs retail", category: "products", roles: ["owner", "sales_manager", "warehouse", "marketing"], size: "md", href: "/inventory/performance", linkLabel: "All products" },
+  "top-colors": { id: "top-colors", title: "Top colours", subtitle: "share + when they sell", category: "products", roles: ["owner", "sales_manager", "warehouse", "marketing"], size: "md", href: "/inventory/colors", linkLabel: "Colour report" },
   movers: { id: "movers", title: "Rising & falling", subtitle: "vs prior half-period", category: "products", roles: ["owner", "sales_manager", "warehouse", "marketing"], size: "md", href: "/inventory/performance", linkLabel: "All products" },
   "inventory-health": { id: "inventory-health", title: "Inventory health", category: "products", roles: ["owner", "warehouse"], size: "md", href: "/inventory", linkLabel: "Stock" },
   "reorder-alerts": { id: "reorder-alerts", title: "Reorder now", subtitle: "critical & urgent", category: "products", roles: ["owner", "warehouse"], size: "md", href: "/inventory/reorder", linkLabel: "Reorder plan" },
@@ -105,11 +107,11 @@ export const ALL_WIDGET_IDS = Object.keys(WIDGETS) as WidgetId[];
 
 /** Default ordered layout per role. Users customize from here. */
 export const ROLE_DEFAULT_LAYOUT: Record<Role, WidgetId[]> = {
-  owner: ["kpis", "targets", "revenue-trend", "channel-mix", "pipeline", "top-sellers", "movers", "outreach", "inventory-health", "reorder-alerts", "customers", "finance", "business-health", "meta-leads", "activity"],
-  sales_manager: ["kpis", "targets", "revenue-trend", "pipeline", "channel-mix", "top-sellers", "movers", "outreach", "meta-leads", "customers", "activity"],
-  warehouse: ["kpis", "inventory-health", "reorder-alerts", "top-sellers", "movers", "activity"],
+  owner: ["kpis", "targets", "revenue-trend", "channel-mix", "pipeline", "top-sellers", "top-colors", "movers", "outreach", "inventory-health", "reorder-alerts", "customers", "finance", "business-health", "meta-leads", "activity"],
+  sales_manager: ["kpis", "targets", "revenue-trend", "pipeline", "channel-mix", "top-sellers", "top-colors", "movers", "outreach", "meta-leads", "customers", "activity"],
+  warehouse: ["kpis", "inventory-health", "reorder-alerts", "top-sellers", "top-colors", "movers", "activity"],
   finance: ["kpis", "targets", "finance", "revenue-trend", "channel-mix", "business-health", "customers", "activity"],
-  marketing: ["kpis", "targets", "outreach", "meta-leads", "revenue-trend", "top-sellers", "movers", "activity"],
+  marketing: ["kpis", "targets", "outreach", "meta-leads", "revenue-trend", "top-sellers", "top-colors", "movers", "activity"],
   support: ["kpis", "activity"],
   ai: ["kpis"],
 };
