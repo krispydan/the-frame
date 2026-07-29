@@ -25,6 +25,12 @@ import { markFaireShippedIfApplicable } from "@/modules/operations/lib/shiphero/
  * Response: { ok, candidates, processed, results: [{ orderNumber, status, ... }] }
  */
 export async function POST(req: NextRequest) {
+  // Admin-key gate so ops can trigger remediation via curl (path is
+  // whitelisted from session auth in middleware). Auth: x-admin-key.
+  if (req.headers.get("x-admin-key") !== "jaxy2026") {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
   let body: { limit?: number; dryRun?: boolean } = {};
   try {
     body = (await req.json()) as { limit?: number; dryRun?: boolean };

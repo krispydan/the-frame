@@ -21,6 +21,8 @@ const publicPaths = [
   "/api/v1/integrations/xero/sync-payouts",
   "/api/v1/orders/shopify-sync",
   "/api/v1/finance/settlements/sync",
+  // Faire ship-mark remediation (own x-admin-key gate inside the route).
+  "/api/v1/integrations/faire/backfill-ship-marks",
   // Classifier worker endpoints — auth via header X-Classifier-Token
   // checked inside each route (middleware allows the path; route gates
   // the actual access).
