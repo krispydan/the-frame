@@ -417,7 +417,7 @@ export interface PdLeadLabel {
   color: string;
 }
 
-/** Pipedrive only accepts these six label colours. */
+/** Pipedrive only accepts these six label colors. */
 export type PdLeadLabelColor = "green" | "blue" | "red" | "yellow" | "purple" | "gray";
 
 export async function listLeadLabels(): Promise<PdLeadLabel[]> {

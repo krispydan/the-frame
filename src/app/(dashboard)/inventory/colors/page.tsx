@@ -1,15 +1,15 @@
 "use client";
 
 /**
- * Colour performance — which colourways sell, and when.
+ * Color performance — which colorways sell, and when.
  *
- * Style and colour are separate buying decisions: the factory offers a frame in
- * N colours and we choose the split. Product-level reporting can't answer "are
- * we over-buying tortoise", because a hit style hides a dead colour inside it.
+ * Style and color are separate buying decisions: the factory offers a frame in
+ * N colors and we choose the split. Product-level reporting can't answer "are
+ * we over-buying tortoise", because a hit style hides a dead color inside it.
  *
  * The seasonality half is the reason this page exists. A flat annual ranking
- * will cheerfully tell you to buy a colour in the month it stops selling, so
- * the month × colour heatmap sits above the table and every row carries its
+ * will cheerfully tell you to buy a color in the month it stops selling, so
+ * the month × color heatmap sits above the table and every row carries its
  * peak month and a seasonality multiple.
  */
 
@@ -87,16 +87,16 @@ export default function ColorPerformancePage() {
 
   const months = data?.months ?? [];
 
-  // Heatmap covers the colours that matter; a 40-row grid reads as noise.
+  // Heatmap covers the colors that matter; a 40-row grid reads as noise.
   const heatRows = useMemo(() => (data?.rows ?? []).filter((r) => r.units > 0).slice(0, 12), [data]);
 
-  /** Colours holding stock with zero sales in the window — the clearest over-buy. */
+  /** Colors holding stock with zero sales in the window — the clearest over-buy. */
   const stale = useMemo(
     () => (data?.rows ?? []).filter((r) => r.units === 0 && r.onHand + r.onOrder > 0)
       .sort((a, b) => b.onHand + b.onOrder - (a.onHand + a.onOrder)).slice(0, 6),
     [data],
   );
-  /** Genuinely seasonal colours — buy timing matters more than buy size here. */
+  /** Genuinely seasonal colors — buy timing matters more than buy size here. */
   const seasonal = useMemo(
     () => (data?.rows ?? []).filter((r) => r.units >= 20 && (r.seasonalityIndex ?? 0) >= 1.5)
       .sort((a, b) => (b.seasonalityIndex ?? 0) - (a.seasonalityIndex ?? 0)).slice(0, 6),
@@ -118,9 +118,9 @@ export default function ColorPerformancePage() {
     <div className="space-y-5 p-4 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Colour performance</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Color performance</h1>
           <p className="text-sm text-muted-foreground">
-            Which colourways sell, how much stock each is carrying, and which months they peak in.
+            Which colorways sell, how much stock each is carrying, and which months they peak in.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -149,8 +149,8 @@ export default function ColorPerformancePage() {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
           <Tile label="Units sold" value={num(data.totals.units)} />
           <Tile label="Revenue" value={money(data.totals.revenue, { compact: data.totals.revenue >= 100000 })} />
-          <Tile label="Colours sold" value={num(data.totals.colors)} />
-          <Tile label="On hand" value={num(data.totals.onHand)} sub="units, all colours" />
+          <Tile label="Colors sold" value={num(data.totals.colors)} />
+          <Tile label="On hand" value={num(data.totals.onHand)} sub="units, all colors" />
           <Tile label="On order" value={num(data.totals.onOrder)} sub="units on open POs" />
         </div>
       )}
@@ -162,9 +162,9 @@ export default function ColorPerformancePage() {
             <CalendarClock className="h-4 w-4" />
           </span>
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold leading-tight">When each colour sells</h2>
+            <h2 className="text-sm font-semibold leading-tight">When each color sells</h2>
             <p className="text-xs text-muted-foreground">
-              Units per month, shaded against that colour&apos;s own best month — so each row shows its own shape, not just its size.
+              Units per month, shaded against that color&apos;s own best month — so each row shows its own shape, not just its size.
             </p>
           </div>
         </header>
@@ -172,12 +172,12 @@ export default function ColorPerformancePage() {
           {loading && !data ? (
             <div className="h-40 animate-pulse rounded bg-muted" />
           ) : heatRows.length === 0 || months.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">No colour sales in this window</p>
+            <p className="py-8 text-center text-sm text-muted-foreground">No color sales in this window</p>
           ) : (
             <table className="min-w-[640px] border-separate border-spacing-[2px] text-xs">
               <thead>
                 <tr>
-                  <th className="sticky left-0 bg-card pr-2 text-left font-medium text-muted-foreground">Colour</th>
+                  <th className="sticky left-0 bg-card pr-2 text-left font-medium text-muted-foreground">Color</th>
                   {months.map((m) => (
                     <th key={m} className="w-6 pb-1 text-center font-medium text-muted-foreground" title={monthLabel(m)}>
                       {monthShort(m)}
@@ -197,7 +197,7 @@ export default function ColorPerformancePage() {
                       </td>
                       {r.byMonth.map((p) => {
                         // Opacity ramp within the row's own hue: keeps identity
-                        // per colour while showing intensity per month. A zero
+                        // per color while showing intensity per month. A zero
                         // month stays visibly empty rather than faint.
                         const ratio = p.units / peak;
                         return (
@@ -230,7 +230,7 @@ export default function ColorPerformancePage() {
       {/* Decision callouts */}
       <div className="grid gap-3 lg:grid-cols-2">
         <Callout
-          title="Seasonal colours"
+          title="Seasonal colors"
           hint="Peak month is well above their average — time the buy, don't just size it"
           icon={<CalendarClock className="h-4 w-4" />}
           tone={STATUS.warn}
@@ -257,14 +257,14 @@ export default function ColorPerformancePage() {
       <div className="rounded-xl border bg-card">
         <div className="flex items-center gap-2 border-b px-3 py-2">
           <Palette className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-medium">All colours</span>
-          <span className="ml-auto text-xs text-muted-foreground">{rows.length} colours</span>
+          <span className="text-sm font-medium">All colors</span>
+          <span className="ml-auto text-xs text-muted-foreground">{rows.length} colors</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
-                <th className="px-3 py-2 text-left font-medium">Colour</th>
+                <th className="px-3 py-2 text-left font-medium">Color</th>
                 {th("units", "Units")}
                 {th("unitSharePct", "Share")}
                 {th("revenue", "Revenue")}
@@ -283,7 +283,7 @@ export default function ColorPerformancePage() {
                   <tr key={i}><td colSpan={11} className="px-3 py-3"><div className="h-4 animate-pulse rounded bg-muted" /></td></tr>
                 ))
               ) : rows.length === 0 ? (
-                <tr><td colSpan={11} className="px-3 py-10 text-center text-muted-foreground">No colour data in this window</td></tr>
+                <tr><td colSpan={11} className="px-3 py-10 text-center text-muted-foreground">No color data in this window</td></tr>
               ) : (
                 rows.map((r, i) => (
                   <tr key={r.color} className="border-b last:border-0 hover:bg-muted/30">
@@ -332,9 +332,9 @@ export default function ColorPerformancePage() {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Colours are taken from the catalog colour name, normalised for casing so one colour doesn&apos;t split into several rows —
-        qualifiers are kept (&ldquo;Matte Black&rdquo; is its own colour, not &ldquo;Black&rdquo;). Units are pack-expanded and rolled up to the
-        colourway, so they agree with the product report and the demand forecast. On order counts units on POs not yet received.
+        Colors are taken from the catalog color name, normalized for casing so one color doesn&apos;t split into several rows —
+        qualifiers are kept (&ldquo;Matte Black&rdquo; is its own color, not &ldquo;Black&rdquo;). Units are pack-expanded and rolled up to the
+        colorway, so they agree with the product report and the demand forecast. On order counts units on POs not yet received.
         Cover is weeks of on-hand plus inbound at this window&apos;s average rate. Seasonality is the peak month&apos;s units as a
         multiple of the average month — above 1.5x is worth timing a buy around.
       </p>
