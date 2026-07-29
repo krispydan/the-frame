@@ -14,9 +14,11 @@ import { resolveCatalogSku } from "@/modules/catalog/lib/sku-resolve";
  *
  * Body:
  *   {
- *     rows: [{ po, factory, sku, style, color, qty, unitCost, shipDate }],
+ *     rows: [{ po, factory, sku, style, color, qty, unitCost, shipDate,
+ *              shippingMethod? }],
  *     orderDate?: "2026-07-20",   // applied to all POs (default today)
  *     replace?: boolean,           // re-import an existing PO number
+ *     deletePos?: ["JAX101"],      // remove these PO numbers first (see below)
  *     dryRun?: boolean
  *   }
  *
@@ -25,7 +27,18 @@ import { resolveCatalogSku } from "@/modules/catalog/lib/sku-resolve";
  * - shipDate accepts "August 10th" style strings; year defaults to the
  *   current year (next year if the date already passed >60 days ago).
  * - expected_arrival_date = ship date + factory transit lead days.
+ * - shippingMethod ("air" | "ocean") is taken from the PO's first row and
+ *   stored on the header, because it drives the FIFO cost layer's freight
+ *   loading (air carries roughly twice the freight per unit of ocean). It also
+ *   sets transit time: air clears in ~AIR_TRANSIT_DAYS rather than the
+ *   factory's ocean lead, so a split PO's air half shows the earlier arrival
+ *   that was the whole reason for splitting it.
  * - Idempotent by PO number: existing POs are skipped unless replace=true.
+ * - deletePos removes whole POs by number before importing. Needed when a PO is
+ *   superseded by split ones (JAX101 → JAX101-AIR-01 + JAX101-OCEAN-01): the
+ *   new numbers don't collide, so without this the units would be counted
+ *   twice as incoming supply. Refuses to delete a PO that has received stock
+ *   (FIFO cost layers) — that stock is real and its provenance must survive.
  *
  * GET → { version } (deploy marker).
  * Auth: x-admin-key: jaxy2026.
@@ -73,7 +86,16 @@ interface PoRow {
   qty: number;
   unitCost?: number;
   shipDate?: string;
+  shippingMethod?: "air" | "ocean";
 }
+
+/**
+ * Door-to-door transit for air freight, in days. Ocean uses the factory's own
+ * transit_lead_days (typically ~25). Air is a flat estimate rather than a
+ * per-factory field because every factory ships air through the same lanes and
+ * the variance is customs, not origin.
+ */
+const AIR_TRANSIT_DAYS = 7;
 
 export async function GET(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
@@ -110,7 +132,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  let body: { rows?: PoRow[]; orderDate?: string; replace?: boolean; dryRun?: boolean };
+  let body: { rows?: PoRow[]; orderDate?: string; replace?: boolean; dryRun?: boolean; deletePos?: string[] };
   try {
     body = await req.json();
   } catch {
@@ -123,6 +145,35 @@ export async function POST(req: NextRequest) {
   const dryRun = body.dryRun === true;
   const replace = body.replace === true;
   const orderDate = body.orderDate ?? new Date().toISOString().split("T")[0];
+
+  // ── Remove superseded POs ──
+  const deleted: Array<{ po: string; action: string; units?: number }> = [];
+  for (const poNumber of body.deletePos ?? []) {
+    const existing = sqlite.prepare(
+      "SELECT id, status, total_units FROM inventory_purchase_orders WHERE po_number = ?",
+    ).get(poNumber) as { id: string; status: string; total_units: number } | undefined;
+    if (!existing) {
+      deleted.push({ po: poNumber, action: "not found" });
+      continue;
+    }
+    // Received stock is real inventory with a costed provenance; deleting the
+    // PO behind it would orphan the FIFO layers.
+    const layers = sqlite.prepare(
+      "SELECT COUNT(*) n FROM inventory_cost_layers WHERE po_id = ?",
+    ).get(existing.id) as { n: number };
+    if (layers.n > 0) {
+      deleted.push({ po: poNumber, action: `refused — has ${layers.n} FIFO cost layer(s) from received stock` });
+      continue;
+    }
+    deleted.push({ po: poNumber, action: dryRun ? "would delete" : "deleted", units: existing.total_units });
+    if (!dryRun) {
+      const txn = sqlite.transaction(() => {
+        sqlite.prepare("DELETE FROM inventory_po_line_items WHERE po_id = ?").run(existing.id);
+        sqlite.prepare("DELETE FROM inventory_purchase_orders WHERE id = ?").run(existing.id);
+      });
+      txn();
+    }
+  }
 
   // ── Upsert factories ──
   const factoryIds = new Map<string, { id: string; transitLeadDays: number }>();
@@ -168,13 +219,17 @@ export async function POST(req: NextRequest) {
     byPo.set(r.po, list);
   }
 
-  const result: Array<{ po: string; action: string; units: number; cost: number; lines: number; shipDate: string | null; arrivalDate: string | null }> = [];
+  const result: Array<{
+    po: string; action: string; units: number; cost: number; lines: number;
+    shipDate: string | null; arrivalDate: string | null;
+    shippingMethod?: "air" | "ocean" | null; transitDays?: number;
+  }> = [];
 
   const insertPo = sqlite.prepare(`
     INSERT INTO inventory_purchase_orders
       (id, po_number, factory_id, status, total_units, total_cost, order_date,
-       expected_ship_date, expected_arrival_date, notes, created_at)
-    VALUES (?, ?, ?, 'in_production', ?, ?, ?, ?, ?, ?, datetime('now'))
+       expected_ship_date, expected_arrival_date, shipping_method, notes, created_at)
+    VALUES (?, ?, ?, 'in_production', ?, ?, ?, ?, ?, ?, ?, datetime('now'))
   `);
   const insertLine = sqlite.prepare(`
     INSERT INTO inventory_po_line_items (id, po_id, sku_id, quantity, pack_size, unit_cost, total_cost)
@@ -196,14 +251,16 @@ export async function POST(req: NextRequest) {
     const cost = Math.round(usable.reduce((a, l) => a + l.qty * (l.unitCost ?? 0), 0) * 100) / 100;
     const factory = factoryIds.get(lines[0].factory.trim())!;
     const shipDate = parseShipDate(lines[0].shipDate);
+    const shippingMethod = lines[0].shippingMethod ?? null;
+    const transitDays = shippingMethod === "air" ? AIR_TRANSIT_DAYS : factory.transitLeadDays;
     const arrivalDate = shipDate
-      ? new Date(Date.parse(shipDate) + factory.transitLeadDays * 86400000).toISOString().split("T")[0]
+      ? new Date(Date.parse(shipDate) + transitDays * 86400000).toISOString().split("T")[0]
       : null;
 
     result.push({
       po: poNumber,
       action: existing ? "replaced" : dryRun ? "would create" : "created",
-      units, cost, lines: usable.length, shipDate, arrivalDate,
+      units, cost, lines: usable.length, shipDate, arrivalDate, shippingMethod, transitDays,
     });
 
     if (dryRun) continue;
@@ -216,7 +273,8 @@ export async function POST(req: NextRequest) {
       const poId = crypto.randomUUID();
       insertPo.run(
         poId, poNumber, factory.id, units, cost, orderDate,
-        shipDate, arrivalDate, "Imported from current-POs sheet (Jul 2026)",
+        shipDate, arrivalDate, shippingMethod,
+        `Imported from current-POs sheet (Jul 2026)${shippingMethod ? ` — ${shippingMethod} freight` : ""}`,
       );
       for (const l of usable) {
         insertLine.run(crypto.randomUUID(), poId, l.skuId, l.qty, l.unitCost ?? 0, Math.round(l.qty * (l.unitCost ?? 0) * 100) / 100);
@@ -237,6 +295,7 @@ export async function POST(req: NextRequest) {
       newFactories: factoryPlan,
     },
     unmatched,
+    deleted,
     pos: result,
   });
 }
