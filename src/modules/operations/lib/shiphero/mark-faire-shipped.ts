@@ -248,6 +248,22 @@ export async function markFaireShippedIfApplicable(
       });
       return "skipped_no_order";
     }
+    // Genuinely not a Faire order (plain Shopify-wholesale whose number
+    // isn't a Faire display id). Log a row so the backfill's candidate
+    // scan excludes it next time — otherwise these re-scan every run and
+    // starve older orders (the backfill kept timing out at the edge
+    // before draining to Proper #T2HQFAYCK3).
+    logMark({
+      localOrderId: args.localOrderId,
+      faireOrderId: null,
+      orderNumber: args.orderNumber,
+      countryCode: null,
+      carrier: args.carrier,
+      trackingCode: args.trackingNumber,
+      makerCostCents: null,
+      status: "skipped_not_faire",
+      errorMessage: "order_number is not a Faire display id — not a Faire order",
+    });
     return "skipped_not_faire";
   }
 
