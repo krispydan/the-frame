@@ -118,11 +118,18 @@ async function handleShipmentUpdate(
   const row = localId
     ? (sqlite
         .prepare(
-          `SELECT id, status, tracking_number, company_id, total
+          // order_number is REQUIRED here: when the Shipment Update
+          // webhook matches by ShipHero order_id alone (no order_number
+          // in the payload), the Faire ship-mark fallback below reads it
+          // off the local order. Omitting it made that fallback always
+          // undefined → markFaireShippedIfApplicable got orderNumber=null
+          // → skipped_not_faire with no audit row (Flourish by Blues and
+          // Shoes #EYKV3JXBDV).
+          `SELECT id, order_number, status, tracking_number, company_id, total
            FROM orders WHERE id = ? LIMIT 1`,
         )
         .get(localId) as
-        | { id: string; status: string; tracking_number: string | null; company_id: string | null; total: number }
+        | { id: string; order_number: string | null; status: string; tracking_number: string | null; company_id: string | null; total: number }
         | undefined)
     : undefined;
 
@@ -218,8 +225,11 @@ async function handleShipmentUpdate(
   void (async () => {
     const { markFaireShippedIfApplicable } = await import("./mark-faire-shipped");
     await markFaireShippedIfApplicable({
+      // Prefer the payload order_number; fall back to the local order's
+      // (the matcher strips the leading "#" either way). This is what
+      // lets ShipHero-order-id-only shipment events still mark Faire.
       localOrderId: row.id,
-      orderNumber: orderNumber || (row as unknown as { order_number: string }).order_number || null,
+      orderNumber: orderNumber || row.order_number || null,
       trackingNumber,
       carrier,
     });
