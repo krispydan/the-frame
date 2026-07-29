@@ -116,6 +116,35 @@ function logMark(opts: {
   }
 }
 
+/** Best-effort "someone must mark this in Faire by hand" Slack alert.
+ *  Fired whenever a genuine Faire order ships but we could NOT auto-mark
+ *  it (match failure or API error), so a shipped order never sits
+ *  silently un-marked in Faire again. */
+async function alertManualShip(opts: {
+  orderNumber: string;
+  faireDisplayId: string | null;
+  countryCode: string | null;
+  trackingNumber: string | null;
+  carrier: string | null;
+  reason: string;
+}) {
+  try {
+    const { notifyFaireManualShipRequired, faireOrderUrlFromName } = await import(
+      "@/modules/integrations/lib/slack/notifications"
+    );
+    await notifyFaireManualShipRequired({
+      orderNumber: opts.orderNumber,
+      faireDisplayId: opts.faireDisplayId || opts.orderNumber,
+      countryCode: opts.countryCode ?? opts.reason,
+      trackingNumber: opts.trackingNumber,
+      trackingCarrier: opts.carrier,
+      faireUrl: faireOrderUrlFromName(opts.orderNumber),
+    });
+  } catch (e) {
+    console.error("[mark-faire-shipped] manual-ship Slack alert failed:", e);
+  }
+}
+
 interface MarkFaireShippedArgs {
   /** Local orders.id. */
   localOrderId: string;
@@ -179,9 +208,46 @@ export async function markFaireShippedIfApplicable(
       status: "error",
       errorMessage: `Faire match failed: ${msg}`,
     });
+    await alertManualShip({
+      orderNumber: args.orderNumber,
+      faireDisplayId: null,
+      countryCode: null,
+      trackingNumber: args.trackingNumber,
+      carrier: args.carrier,
+      reason: "match error",
+    });
     return "error";
   }
   if (!match) {
+    // Distinguish a genuine Faire-marketplace order we couldn't resolve
+    // (real failure → alert) from a plain Shopify-wholesale order whose
+    // number simply isn't a Faire display id (correct silent skip).
+    const isFaireSourced =
+      local.sourceName === "faire" ||
+      (local.notes ?? "").toLowerCase().includes("placed on faire");
+    if (isFaireSourced) {
+      logMark({
+        localOrderId: args.localOrderId,
+        faireOrderId: null,
+        orderNumber: args.orderNumber,
+        countryCode: null,
+        carrier: args.carrier,
+        trackingCode: args.trackingNumber,
+        makerCostCents: null,
+        status: "skipped_no_order",
+        errorMessage:
+          "Faire order not found by order_number — could not auto-mark; manual mark required",
+      });
+      await alertManualShip({
+        orderNumber: args.orderNumber,
+        faireDisplayId: null,
+        countryCode: null,
+        trackingNumber: args.trackingNumber,
+        carrier: args.carrier,
+        reason: "order not found in Faire",
+      });
+      return "skipped_no_order";
+    }
     return "skipped_not_faire";
   }
 
@@ -313,6 +379,16 @@ export async function markFaireShippedIfApplicable(
               : JSON.stringify(result.body).slice(0, 200)
           }`,
     });
+    if (!result.ok) {
+      await alertManualShip({
+        orderNumber: args.orderNumber,
+        faireDisplayId: match.displayId,
+        countryCode: country,
+        trackingNumber: args.trackingNumber,
+        carrier: faireCarrier,
+        reason: `Faire API rejected (HTTP ${result.status})`,
+      });
+    }
     return result.ok ? "success" : "error";
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -326,6 +402,14 @@ export async function markFaireShippedIfApplicable(
       makerCostCents,
       status: "error",
       errorMessage: msg,
+    });
+    await alertManualShip({
+      orderNumber: args.orderNumber,
+      faireDisplayId: match.displayId,
+      countryCode: country,
+      trackingNumber: args.trackingNumber,
+      carrier: faireCarrier,
+      reason: "Faire API error",
     });
     return "error";
   }
