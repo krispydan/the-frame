@@ -1202,6 +1202,11 @@ try {
 // pack size on each line so packs normalize to units). Idempotent.
 try { sqlite.exec("ALTER TABLE inventory_purchase_orders ADD COLUMN shipping_method TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE inventory_po_line_items ADD COLUMN pack_size INTEGER NOT NULL DEFAULT 1"); } catch { /* exists */ }
+// Air transit is a separate lane from ocean (days, not weeks), so a factory
+// needs both. transit_lead_days stays the ocean figure — it's what the reorder
+// forecaster plans against, since a normal replenishment ships ocean.
+try { sqlite.exec("ALTER TABLE inventory_factories ADD COLUMN air_transit_lead_days INTEGER DEFAULT 7"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE inventory_factories ADD COLUMN notes TEXT"); } catch { /* exists */ }
 
 // Shopify OAuth: shops table (multi-store, channel-driven)
 try {
