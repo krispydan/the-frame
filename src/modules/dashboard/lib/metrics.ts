@@ -95,9 +95,9 @@ function buildChannelMix(start: string) {
 }
 
 /**
- * Colour demand for the dashboard.
+ * Color demand for the dashboard.
  *
- * Runs on a 365-day window regardless of the dashboard's date filter: colour
+ * Runs on a 365-day window regardless of the dashboard's date filter: color
  * seasonality is the whole point, and a 30-day view would report "black is
  * 40%" every month without ever showing that brights spike in spring. The
  * window is stated in the widget so the number isn't mistaken for the period.
@@ -122,7 +122,7 @@ function buildColorInsight() {
       byMonth: r.byMonth.map((m) => m.units),
     })),
     /**
-     * Colours holding stock that didn't sell at all in a year — the clearest
+     * Colors holding stock that didn't sell at all in a year — the clearest
      * over-buy signal there is, and invisible in any product-level view.
      */
     stale: res.rows

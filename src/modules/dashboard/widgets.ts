@@ -85,7 +85,7 @@ export const WIDGETS: Record<WidgetId, WidgetDef> = {
   "channel-mix": { id: "channel-mix", title: "Sales by channel", category: "sales", roles: ["owner", "sales_manager", "finance"], size: "md", href: "/orders", linkLabel: "Orders" },
 
   "top-sellers": { id: "top-sellers", title: "Top sellers", subtitle: "wholesale vs retail", category: "products", roles: ["owner", "sales_manager", "warehouse", "marketing"], size: "md", href: "/inventory/performance", linkLabel: "All products" },
-  "top-colors": { id: "top-colors", title: "Top colours", subtitle: "share + when they sell", category: "products", roles: ["owner", "sales_manager", "warehouse", "marketing"], size: "md", href: "/inventory/colors", linkLabel: "Colour report" },
+  "top-colors": { id: "top-colors", title: "Top colors", subtitle: "share + when they sell", category: "products", roles: ["owner", "sales_manager", "warehouse", "marketing"], size: "md", href: "/inventory/colors", linkLabel: "Color report" },
   movers: { id: "movers", title: "Rising & falling", subtitle: "vs prior half-period", category: "products", roles: ["owner", "sales_manager", "warehouse", "marketing"], size: "md", href: "/inventory/performance", linkLabel: "All products" },
   "inventory-health": { id: "inventory-health", title: "Inventory health", category: "products", roles: ["owner", "warehouse"], size: "md", href: "/inventory", linkLabel: "Stock" },
   "reorder-alerts": { id: "reorder-alerts", title: "Reorder now", subtitle: "critical & urgent", category: "products", roles: ["owner", "warehouse"], size: "md", href: "/inventory/reorder", linkLabel: "Reorder plan" },

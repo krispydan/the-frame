@@ -416,20 +416,20 @@ export function getMovers(opts: { windowDays?: number; limit?: number } = {}) {
   return { rising, falling, breakout };
 }
 
-// ── Colour performance ──
+// ── Color performance ──
 
 /**
- * Which colourways actually sell, and when.
+ * Which colorways actually sell, and when.
  *
- * Style and colour are separate buying decisions: the factory makes a frame in
- * N colours and we choose the split. Product-level numbers can't answer "are we
- * over-buying tortoise", because a hit style masks a dead colour inside it and
- * vice versa. This rolls every order line up to the colour instead of the SKU.
+ * Style and color are separate buying decisions: the factory makes a frame in
+ * N colors and we choose the split. Product-level numbers can't answer "are we
+ * over-buying tortoise", because a hit style masks a dead color inside it and
+ * vice versa. This rolls every order line up to the color instead of the SKU.
  *
- * The "when" half matters more than the totals. Eyewear colour demand is
+ * The "when" half matters more than the totals. Eyewear color demand is
  * seasonal — brights lift in spring, tortoise and warm tones in autumn — so a
- * flat annual ranking will happily tell you to buy a colour in the month it
- * stops selling. Each colour therefore carries a month-by-month unit series and
+ * flat annual ranking will happily tell you to buy a color in the month it
+ * stops selling. Each color therefore carries a month-by-month unit series and
  * its single peak month, computed over the same window as the totals.
  */
 
@@ -447,11 +447,11 @@ export interface ColorPerformanceRow {
   unitsWholesale: number;
   unitsRetail: number;
   wholesaleSharePct: number;
-  /** Share of all units in the window that were this colour (0–100). */
+  /** Share of all units in the window that were this color (0–100). */
   unitSharePct: number;
-  /** Distinct root SKUs (style × colour) sold in this colour. */
+  /** Distinct root SKUs (style × color) sold in this color. */
   products: number;
-  /** Distinct accounts that bought this colour. */
+  /** Distinct accounts that bought this color. */
   accounts: number;
   avgOrderQty: number;
   orderLines: number;
@@ -460,7 +460,7 @@ export interface ColorPerformanceRow {
   unitsPrior: number;
   trendPct: number | null;
   trend: TrendDirection;
-  // Stock position across every style in this colour
+  // Stock position across every style in this color
   onHand: number;
   onOrder: number;
   /** Weeks of cover at the window's average rate — is the buy in proportion? */
@@ -471,7 +471,7 @@ export interface ColorPerformanceRow {
   peakMonth: string | null;
   /**
    * Peak month's units as a multiple of the average month. >1.5 means the
-   * colour is genuinely seasonal rather than steady, which changes when you
+   * color is genuinely seasonal rather than steady, which changes when you
    * want the container to land.
    */
   seasonalityIndex: number | null;
@@ -486,11 +486,11 @@ export interface ColorPerformanceResult {
 }
 
 /**
- * Normalize a raw colour_name into a comparable label.
+ * Normalize a raw color_name into a comparable label.
  *
- * Catalog colour names carry qualifiers ("Crystal Blue", "Matte Black") that we
+ * Catalog color names carry qualifiers ("Crystal Blue", "Matte Black") that we
  * keep — they're real buying choices, not noise — but casing and punctuation
- * drift between imports, which would otherwise split one colour into three rows.
+ * drift between imports, which would otherwise split one color into three rows.
  */
 function normalizeColor(raw: string | null | undefined): string | null {
   const v = (raw || "").trim().replace(/\s+/g, " ");
@@ -502,7 +502,7 @@ function normalizeColor(raw: string | null | undefined): string | null {
     .join(" ");
 }
 
-/** Root SKU → normalized colour, from the catalog. */
+/** Root SKU → normalized color, from the catalog. */
 function loadColorBySku(): Map<string, string> {
   const rows = sqlite
     .prepare("SELECT sku, color_name FROM catalog_skus WHERE TRIM(COALESCE(color_name,'')) <> ''")
@@ -520,8 +520,8 @@ function loadColorBySku(): Map<string, string> {
 
 export function getColorPerformance(opts: { windowDays?: number } = {}): ColorPerformanceResult {
   const windowDays = opts.windowDays ?? 365;
-  // Colour seasonality needs a year by default — a 90-day window can't show you
-  // that a colour peaks in March.
+  // Color seasonality needs a year by default — a 90-day window can't show you
+  // that a color peaks in March.
   const perf = getProductPerformance({ windowDays });
   const colorBySku = loadColorBySku();
 
@@ -591,7 +591,7 @@ export function getColorPerformance(opts: { windowDays?: number } = {}): ColorPe
     acc.set(color, a);
   }
 
-  // Stock position per colour, from the already-computed product rows.
+  // Stock position per color, from the already-computed product rows.
   const stockByColor = new Map<string, { onHand: number; onOrder: number }>();
   for (const r of perf.rows) {
     const color = colorBySku.get(r.rootSku);
@@ -601,7 +601,7 @@ export function getColorPerformance(opts: { windowDays?: number } = {}): ColorPe
     cur.onOrder += r.onOrder;
     stockByColor.set(color, cur);
   }
-  // A colour can hold stock without having sold in the window — that's exactly
+  // A color can hold stock without having sold in the window — that's exactly
   // the over-buy we want visible, so seed a row for it.
   for (const [color, s] of stockByColor) {
     if (!acc.has(color) && (s.onHand > 0 || s.onOrder > 0)) acc.set(color, blank());
@@ -624,7 +624,7 @@ export function getColorPerformance(opts: { windowDays?: number } = {}): ColorPe
     }
 
     // Zero-fill every month in the window so the sparkline reads as a real
-    // timeline — a colour that stopped selling in April should show a flat
+    // timeline — a color that stopped selling in April should show a flat
     // tail, not a shorter line.
     const byMonth: ColorMonthPoint[] = months.map((m) => ({
       month: m,

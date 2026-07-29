@@ -7,9 +7,9 @@ import { getColorPerformance } from "@/modules/inventory/lib/product-performance
 
 /**
  * GET /api/v1/inventory/color-performance
- *   ?days=365       analysis window (defaults to a year — colour seasonality
+ *   ?days=365       analysis window (defaults to a year — color seasonality
  *                   can't be read off a quarter)
- *   &format=csv     CSV download, one row per colour with the monthly series
+ *   &format=csv     CSV download, one row per color with the monthly series
  *                   flattened into columns
  *
  * Session-gated (any authenticated role).

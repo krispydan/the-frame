@@ -95,7 +95,7 @@ const operationsNav: NavItem[] = [
   { title: "Media Center", href: "/media", icon: ImageIcon },
   { title: "Inventory", href: "/inventory", icon: Warehouse },
   { title: "Product Performance", href: "/inventory/performance", icon: BarChart3 },
-  { title: "Colour Performance", href: "/inventory/colors", icon: Palette },
+  { title: "Color Performance", href: "/inventory/colors", icon: Palette },
   { title: "Reorder Plan", href: "/inventory/reorder", icon: Truck },
   { title: "Purchase Orders", href: "/inventory/purchase-orders", icon: Package },
   { title: "Warehouse Exports", href: "/inventory/exports", icon: Database },

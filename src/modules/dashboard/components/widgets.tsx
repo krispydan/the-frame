@@ -206,7 +206,7 @@ export function TopSellersWidget({ data }: { data: Bundle }) {
   );
 }
 
-// ── Top colours (share + seasonality) ──
+// ── Top colors (share + seasonality) ──
 type ColorRow = {
   color: string; units: number; unitSharePct: number;
   trendPct: number | null; trend: string;
@@ -230,17 +230,17 @@ function monthLabel(ym: string | null): string {
 }
 
 /**
- * Which colours sell, and when.
+ * Which colors sell, and when.
  *
  * Share alone would just say "black wins" forever. The sparkline is the point:
- * it shows whether a colour is steady year-round or concentrated in a season,
+ * it shows whether a color is steady year-round or concentrated in a season,
  * which is what decides when the buy should land rather than how big it is.
  */
 export function TopColorsWidget({ data }: { data: Bundle }) {
   const insight = g<ColorInsight>(data, "colorInsight");
   const rows = insight?.rows ?? [];
   if (!rows.length) {
-    return <div className="flex h-24 items-center justify-center text-xs text-muted-foreground">No colour sales yet</div>;
+    return <div className="flex h-24 items-center justify-center text-xs text-muted-foreground">No color sales yet</div>;
   }
   const maxShare = Math.max(...rows.map((r) => r.unitSharePct), 1);
   const months = insight?.months ?? [];
@@ -310,7 +310,7 @@ export function TopColorsWidget({ data }: { data: Bundle }) {
         })}
       </ul>
 
-      {/* Colours sitting on stock with zero sales in a year. */}
+      {/* Colors sitting on stock with zero sales in a year. */}
       {insight?.stale?.length ? (
         <div className="rounded-lg border p-2 text-[11px]" style={{ backgroundColor: `${STATUS.warn}0f`, borderColor: `${STATUS.warn}55` }}>
           <span className="font-medium">No sales in 12 months, still holding stock: </span>
