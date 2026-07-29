@@ -58,6 +58,25 @@ export function eligibleForFocus(clips: ComposerClip[], focusSkuIds: string[]): 
   });
 }
 
+/**
+ * Categories that actually SHOW the product on screen — as opposed to
+ * unboxing the box, cases/packaging, atmosphere b-roll, or text
+ * openers/closers. A video with none of these shows everything BUT the
+ * product (the "unboxing over and over, no actual product" failure), so
+ * every composed video must contain at least one.
+ */
+export const PRODUCT_SHOWING_CATEGORIES = new Set([
+  "flat_lay", "on_model", "detail", "lifestyle", "in_car",
+]);
+
+export function showsProduct(clip: ComposerClip): boolean {
+  return PRODUCT_SHOWING_CATEGORIES.has(clip.categorySlug);
+}
+
+export function hasProductPresence(seq: ComposerClip[]): boolean {
+  return seq.some(showsProduct);
+}
+
 export interface SkuSignal {
   skuId: string;
   /** -100..100 from the trend detector (0 when unknown). */
@@ -292,6 +311,15 @@ function buildSequence(
         if (focusClips.length > 0) candidates = focusClips;
       }
 
+      // Product coverage: on the LAST chance to include one, if the video
+      // still shows no product and this slot can supply one, force it —
+      // so we never ship a video that never shows the frames.
+      const isLastPick = slot === slots[slots.length - 1] && taken === target - 1;
+      if (isLastPick && !hasProductPresence(seq)) {
+        const showing = candidates.filter(showsProduct);
+        if (showing.length > 0) candidates = showing;
+      }
+
       const pick = weightedPick(candidates, (c) => clipWeight(c, focusSkuIds, ctx.forDate), rand);
       if (!pick) break;
       seq.push(pick);
@@ -304,6 +332,10 @@ function buildSequence(
   }
 
   if (duration < recipe.durationTargetMin || seq.length < 2) return null;
+  // Reject a product-less edit (all unboxing / packaging / b-roll) — the
+  // caller falls back to freestyle (which guarantees a product shot) or
+  // recomposes. Better no video than one that never shows the product.
+  if (!hasProductPresence(seq)) return null;
   return { clipIds: seq.map((c) => c.id), durationSec: duration };
 }
 
@@ -365,29 +397,61 @@ export function composeFallback(ctx: ComposerContext, rand: () => number): Compo
     focusSkuIds = [];
     eligible = ctx.clips;
   }
+  // A freestyle mix must still show the product — if nothing in the pool
+  // does, there's no good video to make here.
+  if (!eligible.some(showsProduct)) return null;
+
   const used = new Set<string>();
   const seq: ComposerClip[] = [];
+  const catCounts = new Map<string, number>();
   let duration = 0;
+  // No single category may dominate — this is what stops "unboxing over
+  // and over". At most half the clips (min 2) from any one category.
+  const catCap = Math.max(2, Math.ceil(FALLBACK_MAX_CLIPS / 2));
 
   while (seq.length < FALLBACK_MAX_CLIPS) {
-    let candidates = eligible.filter(
+    const withinBudget = eligible.filter(
       (c) => !used.has(c.id) && duration + (c.durationSec ?? 0) <= FALLBACK_MAX_DURATION,
     );
     // Never fail to reach the 2-clip minimum just to honor the duration cap.
-    if (candidates.length === 0) {
-      if (seq.length < 2) candidates = eligible.filter((c) => !used.has(c.id));
-      if (candidates.length === 0) break;
+    let candidates = withinBudget.length > 0 || seq.length >= 2
+      ? withinBudget
+      : eligible.filter((c) => !used.has(c.id));
+    if (candidates.length === 0) break;
+
+    // Anti-monotony: drop categories already at the cap (unless nothing
+    // else is left).
+    const notCapped = candidates.filter((c) => (catCounts.get(c.categorySlug) ?? 0) < catCap);
+    if (notCapped.length > 0) candidates = notCapped;
+
+    // Variety: avoid repeating the previous clip's category when we can.
+    const prev = seq[seq.length - 1];
+    if (prev) {
+      const varied = candidates.filter((c) => c.categorySlug !== prev.categorySlug);
+      if (varied.length > 0) candidates = varied;
     }
+
+    // Guarantee a product shot: seed the first pick with a product-showing
+    // clip, and force one on the last pick if we still have none.
+    const needProduct =
+      !hasProductPresence(seq) && (seq.length === 0 || seq.length === FALLBACK_MAX_CLIPS - 1);
+    if (needProduct) {
+      const showing = candidates.filter(showsProduct);
+      if (showing.length > 0) candidates = showing;
+    }
+
     const pick = weightedPick(candidates, (c) => clipWeight(c, focusSkuIds, ctx.forDate), rand);
     if (!pick) break;
     seq.push(pick);
     used.add(pick.id);
+    catCounts.set(pick.categorySlug, (catCounts.get(pick.categorySlug) ?? 0) + 1);
     duration += pick.durationSec ?? 0;
-    // Once it's a reasonable length, sometimes stop for variety across posts.
-    if (seq.length >= 3 && duration >= 12 && rand() < 0.4) break;
+    // Once it's a reasonable length, sometimes stop for variety across posts
+    // — but only once the product is actually on screen.
+    if (seq.length >= 3 && duration >= 12 && hasProductPresence(seq) && rand() < 0.4) break;
   }
 
-  if (seq.length < 2) return null;
+  if (seq.length < 2 || !hasProductPresence(seq)) return null;
 
   const clipIds = seq.map((c) => c.id);
   const clipsById = new Map(ctx.clips.map((c) => [c.id, c]));
