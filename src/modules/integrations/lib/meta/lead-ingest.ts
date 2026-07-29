@@ -18,8 +18,11 @@
 import { sqlite } from "@/lib/db";
 import { addCompanyEmail } from "@/modules/sales/lib/company-emails";
 import { addCompanyPhone } from "@/modules/sales/lib/company-phones";
-import { fetchLead, fetchFormLeads, metaLeadsConfigured, type MetaLeadDetail, type MetaLeadField } from "./client";
-import { pushFacebookLeadToPipedrive, dealUrl } from "./pipedrive-push";
+import {
+  fetchLead, fetchFormLeads, metaLeadsConfigured, diagnoseLeadAccess,
+  type MetaLeadDetail, type MetaLeadField,
+} from "./client";
+import { pushFacebookLeadToPipedrive, leadUrl } from "./pipedrive-push";
 import { queueCapiEvent } from "./capi";
 
 // ── field parsing ──
@@ -44,6 +47,45 @@ interface ParsedLead {
   firstName: string | null;
   lastName: string | null;
   companyName: string | null;
+  website: string | null;
+  instagram: string | null;
+}
+
+/**
+ * Reject free-text that clearly isn't a business name. Lead-form "store"
+ * answers are unvalidated, so we get questions, "n/a", and single letters
+ * alongside real names; those would create junk companies that then need
+ * cleaning up by hand.
+ */
+function usableCompanyName(raw: string | null): string | null {
+  const v = (raw || "").trim();
+  if (v.length < 2) return null;
+  if (v.endsWith("?")) return null;
+  if (/^(n\/?a|none|no|nil|test|tbd|-+)$/i.test(v)) return null;
+  // A sentence with a question word in it is a message, not a name.
+  if (/^(where|what|when|how|why|who|can|do|does|is|are|i )\b/i.test(v) && v.split(/\s+/).length > 2) return null;
+  return v;
+}
+
+/**
+ * Our forms ask one question for "website or Instagram", so a single answer can
+ * be either. Route it to the right column: an instagram.com URL or a bare
+ * @handle is Instagram, anything else is treated as a website.
+ */
+function splitWebOrInstagram(raw: string | null): { website: string | null; instagram: string | null } {
+  const v = (raw || "").trim();
+  if (!v) return { website: null, instagram: null };
+  if (/instagram\.com/i.test(v)) {
+    return { website: null, instagram: v.startsWith("http") ? v : `https://${v.replace(/^\/+/, "")}` };
+  }
+  if (/^@[\w.]+$/.test(v)) {
+    return { website: null, instagram: `https://instagram.com/${v.slice(1)}` };
+  }
+  // A bare word with no dot is far more likely a handle than a domain.
+  if (!v.includes(".") && !v.includes(" ")) {
+    return { website: null, instagram: `https://instagram.com/${v}` };
+  }
+  return { website: v.startsWith("http") ? v : `https://${v}`, instagram: null };
 }
 
 function parseLead(detail: MetaLeadDetail): ParsedLead {
@@ -58,8 +100,16 @@ function parseLead(detail: MetaLeadDetail): ParsedLead {
     firstName = parts[0] || null;
     lastName = parts.length > 1 ? parts.slice(1).join(" ") : null;
   }
-  const companyName = fieldValue(f, "company_name", "company", "business_name", "store_name");
-  return { email, phone, fullName: fullName || null, firstName, lastName, companyName };
+  // "store" is what our live Jaxy forms call the business name. People do
+  // sometimes type a question into it ("where do u ship from?") — that must not
+  // become a company name, so fall back to the person's name instead.
+  const companyName = usableCompanyName(
+    fieldValue(f, "company_name", "company", "business_name", "store_name", "store"),
+  );
+  const { website, instagram } = splitWebOrInstagram(
+    fieldValue(f, "store_website_or_instagram", "website", "website_or_instagram", "instagram"),
+  );
+  return { email, phone, fullName: fullName || null, firstName, lastName, companyName, website, instagram };
 }
 
 // ── dedupe / company resolution ──
@@ -134,6 +184,25 @@ function applyContactName(companyId: string, parsed: ParsedLead): void {
   }
 }
 
+/**
+ * Fill in website / Instagram if we learned them and the company has none.
+ * Never overwrites: an existing value came from enrichment or a human and is
+ * more trustworthy than a hand-typed form answer.
+ */
+function applyCompanyWeb(companyId: string, parsed: ParsedLead): void {
+  if (!parsed.website && !parsed.instagram) return;
+  const cur = sqlite.prepare("SELECT website, instagram_url FROM companies WHERE id = ?").get(companyId) as
+    | { website: string | null; instagram_url: string | null }
+    | undefined;
+  if (!cur) return;
+  const website = (cur.website || "").trim() ? cur.website : parsed.website;
+  const instagram = (cur.instagram_url || "").trim() ? cur.instagram_url : parsed.instagram;
+  if (website === cur.website && instagram === cur.instagram_url) return;
+  sqlite
+    .prepare("UPDATE companies SET website = ?, instagram_url = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(website, instagram, companyId);
+}
+
 // ── ingestion ──
 
 export interface LeadgenEntry {
@@ -141,6 +210,8 @@ export interface LeadgenEntry {
   formId?: string | null;
   pageId?: string | null;
   createdTime?: string | null;
+  /** How the lead reached us. Defaults to the real-time webhook path. */
+  source?: "webhook" | "csv";
 }
 
 /**
@@ -151,10 +222,13 @@ export interface LeadgenEntry {
 export function recordLeadgenEvent(entry: LeadgenEntry): boolean {
   const inserted = sqlite
     .prepare(
-      `INSERT OR IGNORE INTO meta_leads (id, leadgen_id, form_id, page_id, created_time, status)
-       VALUES (?, ?, ?, ?, ?, 'received')`,
+      `INSERT OR IGNORE INTO meta_leads (id, leadgen_id, form_id, page_id, created_time, status, source)
+       VALUES (?, ?, ?, ?, ?, 'received', ?)`,
     )
-    .run(crypto.randomUUID(), entry.leadgenId, entry.formId ?? null, entry.pageId ?? null, entry.createdTime ?? null).changes;
+    .run(
+      crypto.randomUUID(), entry.leadgenId, entry.formId ?? null, entry.pageId ?? null,
+      entry.createdTime ?? null, entry.source ?? "webhook",
+    ).changes;
   if (entry.formId) rememberForm(entry.formId);
   return inserted > 0;
 }
@@ -185,7 +259,8 @@ export interface ProcessResult {
   status: "processed" | "skipped" | "error" | "already";
   companyId?: string;
   companyCreated?: boolean;
-  dealId?: number | null;
+  /** Pipedrive Leads Inbox id (UUID). */
+  pipedriveLeadId?: string | null;
   reason?: string;
 }
 
@@ -214,6 +289,7 @@ export async function processMetaLead(leadgenId: string, detailOverride?: MetaLe
     if (parsed.email) addCompanyEmail(companyId, parsed.email, "facebook_leads");
     if (parsed.phone) addCompanyPhone(companyId, parsed.phone, "facebook_leads");
     applyContactName(companyId, parsed);
+    applyCompanyWeb(companyId, parsed);
 
     // Persist parsed fields + attribution onto the meta_leads row.
     sqlite
@@ -286,14 +362,14 @@ export async function processMetaLead(leadgenId: string, detailOverride?: MetaLe
         formName: detail.form_id ?? null,
         source: "Facebook/Instagram",
         frameUrl: base ? `${base}/prospects/${companyId}` : null,
-        pipedriveDealUrl: push?.dealId ? dealUrl(push.dealId) : null,
+        pipedriveLeadUrl: push?.leadId ? leadUrl(push.leadId) : null,
         matchedExisting: !created,
       });
     } catch (e) {
       console.warn("[meta] slack notify failed (non-fatal):", e instanceof Error ? e.message : e);
     }
 
-    return { leadgenId, status: "processed", companyId, companyCreated: created, dealId: push?.dealId ?? null };
+    return { leadgenId, status: "processed", companyId, companyCreated: created, pipedriveLeadId: push?.leadId ?? null };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     markError(leadgenId, msg);
@@ -319,6 +395,50 @@ export async function drainMetaLeads(limit = 25): Promise<{ processed: number; e
     else skipped++;
   }
   return { processed, errors, skipped };
+}
+
+/**
+ * Discover every lead form on the Pages this token can reach, remember them,
+ * and import their existing leads.
+ *
+ * This closes a bootstrap gap: the webhook only ever delivers NEW submissions,
+ * and the reconcile cron polls "known forms" — which are only learned FROM
+ * webhooks. Without this, a freshly-connected account sits at zero until
+ * someone happens to submit a form. It also backfills the leads that arrived
+ * while Zapier was the only path.
+ */
+export async function discoverAndImport(perForm = 100): Promise<{
+  forms: number; newLeads: number; processed: number; errors: string[];
+}> {
+  const errors: string[] = [];
+  if (!metaLeadsConfigured()) {
+    return { forms: 0, newLeads: 0, processed: 0, errors: ["Lead Ads not configured (need META_APP_SECRET + META_PAGE_TOKEN)"] };
+  }
+
+  const diag = await diagnoseLeadAccess();
+  if (diag.error) errors.push(diag.error);
+
+  const formIds: string[] = [];
+  for (const page of diag.pages) {
+    if (page.error) errors.push(`${page.name ?? page.id}: ${page.error}`);
+    for (const f of page.forms ?? []) {
+      rememberForm(f.id);
+      formIds.push(f.id);
+    }
+  }
+
+  let newLeads = 0;
+  let processed = 0;
+  for (const formId of formIds) {
+    const leads = await fetchFormLeads(formId, perForm);
+    for (const lead of leads) {
+      if (recordLeadgenEvent({ leadgenId: lead.id, formId, createdTime: lead.created_time ?? null })) newLeads++;
+      const res = await processMetaLead(lead.id, lead);
+      if (res.status === "processed") processed++;
+    }
+  }
+
+  return { forms: formIds.length, newLeads, processed, errors };
 }
 
 /** Cron safety-net: re-poll known forms for leads the webhook may have dropped. */

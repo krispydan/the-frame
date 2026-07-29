@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
 
   const leads = many<Record<string, unknown>>(
     `SELECT ml.leadgen_id, ml.full_name, ml.email, ml.phone, ml.campaign_name, ml.ad_name,
-            ml.status, ml.error, ml.created_at, ml.company_id, ml.pipedrive_deal_id,
+            ml.status, ml.error, ml.created_at, ml.company_id, ml.pipedrive_lead_id,
             c.name AS company_name, c.status AS company_status
        FROM meta_leads ml LEFT JOIN companies c ON c.id = ml.company_id
       WHERE ml.created_at >= ? ${where}
@@ -55,17 +55,19 @@ export async function GET(req: NextRequest) {
   const capi = many<{ status: string; n: number }>(
     `SELECT status, COUNT(*) n FROM meta_capi_events GROUP BY status`);
 
-  const totals = one<{ total: number; withCompany: number; withDeal: number }>(
+  // withLead counts the pre-switch deals too, so the tile doesn't appear to
+  // collapse for leads that were pushed before ad leads moved to the inbox.
+  const totals = one<{ total: number; withCompany: number; withLead: number }>(
     `SELECT COUNT(*) total,
             SUM(CASE WHEN company_id IS NOT NULL THEN 1 ELSE 0 END) withCompany,
-            SUM(CASE WHEN pipedrive_deal_id IS NOT NULL THEN 1 ELSE 0 END) withDeal
+            SUM(CASE WHEN pipedrive_lead_id IS NOT NULL OR pipedrive_deal_id IS NOT NULL THEN 1 ELSE 0 END) withLead
        FROM meta_leads WHERE created_at >= ?`, start);
 
   return NextResponse.json({
     ok: true,
     days,
     integration: { leadsConfigured: metaLeadsConfigured(), capiConfigured: metaCapiConfigured() },
-    totals: totals ?? { total: 0, withCompany: 0, withDeal: 0 },
+    totals: totals ?? { total: 0, withCompany: 0, withLead: 0 },
     byStatus,
     byCampaign,
     funnel,

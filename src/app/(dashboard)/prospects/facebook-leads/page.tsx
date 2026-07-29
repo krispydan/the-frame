@@ -9,25 +9,26 @@
  * reports funnel stages back to Meta.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { HBars } from "@/components/dashboard/charts";
 import { num, pct } from "@/components/dashboard/format";
 import { seriesColor, STATUS } from "@/components/dashboard/palette";
-import { RefreshCw, Facebook, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { RefreshCw, Facebook, AlertTriangle, CheckCircle2, Upload, ChevronDown, ChevronRight } from "lucide-react";
+import { META_FORMS_LIBRARY_URL } from "@/modules/integrations/lib/meta/links";
 
 type Lead = {
   leadgen_id: string; full_name: string | null; email: string | null; phone: string | null;
   campaign_name: string | null; ad_name: string | null; status: string; error: string | null;
   created_at: string; company_id: string | null; company_name: string | null; company_status: string | null;
-  pipedrive_deal_id: number | null;
+  pipedrive_lead_id: string | null;
 };
 type Payload = {
   days: number;
   integration: { leadsConfigured: boolean; capiConfigured: boolean };
-  totals: { total: number; withCompany: number; withDeal: number };
+  totals: { total: number; withCompany: number; withLead: number };
   byStatus: Array<{ status: string; n: number }>;
   byCampaign: Array<{ campaign: string; leads: number; converted: number }>;
   funnel: Array<{ event_name: string; n: number }>;
@@ -104,12 +105,14 @@ export default function FacebookLeadsPage() {
         </div>
       )}
 
+      <CsvImport onImported={() => setNonce((n) => n + 1)} />
+
       {data && (
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Tile label="Leads" value={num(data.totals.total)} icon={<Facebook className="h-4 w-4" />} accent={seriesColor(5)} />
             <Tile label="Matched to a company" value={num(data.totals.withCompany)} sub={data.totals.total ? pct((data.totals.withCompany / data.totals.total) * 100) : undefined} />
-            <Tile label="Pushed to Pipedrive" value={num(data.totals.withDeal)} sub={data.totals.total ? pct((data.totals.withDeal / data.totals.total) * 100) : undefined} />
+            <Tile label="In Pipedrive" value={num(data.totals.withLead)} sub={data.totals.total ? pct((data.totals.withLead / data.totals.total) * 100) : undefined} />
             <Tile
               label="Reported to Meta"
               value={num((data.capi.find((c) => c.status === "sent")?.n) ?? 0)}
@@ -183,7 +186,7 @@ export default function FacebookLeadsPage() {
                               {l.company_name || "View"}
                             </Link>
                           ) : <span className="text-muted-foreground">—</span>}
-                          {l.pipedrive_deal_id && <Badge variant="outline" className="ml-1 text-[10px]">deal</Badge>}
+                          {l.pipedrive_lead_id && <Badge variant="outline" className="ml-1 text-[10px]">lead</Badge>}
                         </td>
                         <td className="px-2 py-2">
                           <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium capitalize"
@@ -203,6 +206,158 @@ export default function FacebookLeadsPage() {
         </>
       )}
     </div>
+  );
+}
+
+type ImportResult = {
+  rows: number; newLeads: number; processed: number; duplicates: number;
+  companiesCreated: number; companiesMatched: number;
+  errors: Array<{ leadgenId: string; reason: string }>;
+  skipped: Array<{ row: number; reason: string }>;
+  columns: string[]; delimiter: string;
+};
+
+/**
+ * Manual CSV import — the daily stand-in for the leadgen webhook while Meta's
+ * `leads_retrieval` permission is in App Review. Preview first (dry run), then
+ * import; the same file can be re-uploaded safely because ingestion is keyed on
+ * Meta's lead id.
+ */
+function CsvImport({ onImported }: { onImported: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState<"" | "preview" | "import">("");
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const [imported, setImported] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function run(dryRun: boolean) {
+    if (!file) return;
+    setBusy(dryRun ? "preview" : "import");
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      if (dryRun) fd.append("dryRun", "1");
+      const res = await fetch("/api/v1/integrations/meta/import-csv", { method: "POST", body: fd });
+      const d = await res.json();
+      if (!d.ok) {
+        setError(d.error || "Import failed");
+        setResult(d.result ?? null);
+      } else {
+        setResult(d.result);
+        setImported(!dryRun);
+        if (!dryRun) onImported();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function pick(f: File | null) {
+    setFile(f);
+    setResult(null);
+    setImported(false);
+    setError(null);
+  }
+
+  return (
+    <section className="rounded-xl border bg-card">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-2 px-4 py-3 text-left"
+      >
+        {open ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+        <Upload className="h-4 w-4 text-muted-foreground" />
+        <span className="flex-1 text-sm font-semibold">Import leads from a Meta CSV export</span>
+        <span className="hidden text-xs text-muted-foreground sm:inline">Daily download → upload</span>
+      </button>
+
+      {open && (
+        <div className="space-y-3 border-t px-4 py-4">
+          <ol className="ml-4 list-decimal space-y-1 text-xs text-muted-foreground">
+            <li>
+              Open the{" "}
+              <a href={META_FORMS_LIBRARY_URL} target="_blank" rel="noopener noreferrer"
+                className="font-medium text-primary hover:underline">
+                Jaxy Instant Forms library
+              </a>{" "}
+              on Meta.
+            </li>
+            <li>Tick the form, then <strong>Download</strong> → choose the date range → download the CSV.</li>
+            <li>Upload it below. Don&apos;t open it in Excel first; Meta exports UTF-16 and re-saving can mangle it.</li>
+          </ol>
+          <p className="text-xs text-muted-foreground">
+            Overlapping date ranges are safe — leads are keyed on Meta&apos;s lead ID, so anything already imported is skipped.
+          </p>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={inputRef}
+              type="file"
+              accept=".csv,.tsv,.txt,text/csv"
+              onChange={(e) => pick(e.target.files?.[0] ?? null)}
+              className="hidden"
+            />
+            <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()}>
+              {file ? "Choose a different file" : "Choose file"}
+            </Button>
+            {file && <span className="text-xs text-muted-foreground">{file.name}</span>}
+            <div className="flex-1" />
+            <Button variant="ghost" size="sm" disabled={!file || busy !== ""} onClick={() => run(true)}>
+              {busy === "preview" ? "Reading…" : "Preview"}
+            </Button>
+            <Button size="sm" disabled={!file || busy !== ""} onClick={() => run(false)}>
+              {busy === "import" ? "Importing…" : "Import"}
+            </Button>
+          </div>
+
+          {error && (
+            <div className="rounded-lg border p-3 text-xs" style={{ backgroundColor: `${STATUS.critical}0f`, borderColor: `${STATUS.critical}55` }}>
+              {error}
+            </div>
+          )}
+
+          {result && (
+            <div className="rounded-lg border bg-muted/30 p-3 text-xs">
+              <p className="font-medium">
+                {imported
+                  ? `Imported — ${num(result.processed)} processed, ${num(result.duplicates)} already had.`
+                  : `Preview — ${num(result.rows)} rows found, ${num(result.newLeads)} leads readable. Nothing has been imported yet.`}
+              </p>
+              {imported && (
+                <p className="mt-1 text-muted-foreground">
+                  {num(result.companiesCreated)} new {result.companiesCreated === 1 ? "company" : "companies"} created,{" "}
+                  {num(result.companiesMatched)} matched onto existing ones. Each processed lead got a Pipedrive deal,
+                  a Slack alert and a Conversions API event.
+                </p>
+              )}
+              <p className="mt-1 text-muted-foreground">
+                {result.delimiter}-delimited, {result.columns.length} columns: {result.columns.join(", ")}
+              </p>
+              {result.skipped.length > 0 && (
+                <p className="mt-1" style={{ color: STATUS.warn }}>
+                  {num(result.skipped.length)} rows skipped ({result.skipped[0].reason})
+                </p>
+              )}
+              {result.errors.length > 0 && (
+                <div className="mt-1" style={{ color: STATUS.critical }}>
+                  {num(result.errors.length)} failed:
+                  <ul className="ml-4 list-disc">
+                    {result.errors.slice(0, 5).map((e) => (
+                      <li key={e.leadgenId}>{e.leadgenId}: {e.reason}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

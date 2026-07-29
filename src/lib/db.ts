@@ -60,6 +60,17 @@ try { sqlite.exec("ALTER TABLE marketing_video_posts ADD COLUMN burn_hook INTEGE
 try { sqlite.exec("ALTER TABLE marketing_video_posts ADD COLUMN burned_path TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE marketing_video_posts ADD COLUMN burned_hook TEXT"); } catch { /* exists */ }
 
+// "Cases & Packaging" video type — cases/packaging shots with NO product
+// (glasses) in frame. Distinct from untagged: known product-free b-roll,
+// so the composer can safely use it as glue in a product-focused video.
+try {
+  sqlite.exec(
+    `INSERT OR IGNORE INTO marketing_video_clip_categories (id, slug, name, description, is_hook, sort_order)
+     VALUES (lower(hex(randomblob(16))), 'packaging', 'Cases & Packaging',
+             'Cases or packaging with no product (glasses) visible — product-free b-roll.', 0, 55)`,
+  );
+} catch { /* table not created yet on a fresh boot; migration seeds it */ }
+
 // ── Retire legacy single-value attribute columns on catalog_products ──
 // These are now derived from catalog_tags (see curated-attributes.ts).
 // SQLite supports DROP COLUMN since 3.35; throws if already gone.
@@ -621,6 +632,15 @@ try {
     created_at TEXT DEFAULT (datetime('now')),
     processed_at TEXT
   )`);
+  // How the lead reached us: 'webhook' (real-time leadgen) or 'csv' (manual
+  // export upload, used while leads_retrieval is in App Review). The daily
+  // reminder email reads this to tell whether the webhook has taken over.
+  try { sqlite.exec("ALTER TABLE meta_leads ADD COLUMN source TEXT DEFAULT 'webhook'"); } catch { /* exists */ }
+  // Facebook leads land in Pipedrive's Leads Inbox, not the deal pipeline — an
+  // ad submission isn't a sales opportunity yet. Lead ids are UUIDs, so this is
+  // TEXT rather than reusing the INTEGER pipedrive_deal_id column (which stays
+  // for the deals created before the switch).
+  try { sqlite.exec("ALTER TABLE meta_leads ADD COLUMN pipedrive_lead_id TEXT"); } catch { /* exists */ }
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_leads_status ON meta_leads (status)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_leads_company ON meta_leads (company_id)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_leads_form ON meta_leads (form_id)");
@@ -650,6 +670,27 @@ try {
   )`);
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_capi_status ON meta_capi_events (status)");
 } catch (e) { console.error("[db] meta_capi_events table error:", e); }
+
+// Raw Meta webhook deliveries. Logged for EVERY inbound POST — including ones
+// that fail signature verification or carry no leadgen change — so the
+// question "is Meta actually calling us?" is always answerable. Every other
+// integration keeps this; Meta previously recorded nothing unless a lead
+// processed successfully, which made a silent webhook indistinguishable from
+// no webhook at all.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS meta_webhook_events (
+    id TEXT PRIMARY KEY NOT NULL,
+    received_at TEXT DEFAULT (datetime('now')),
+    signature_valid INTEGER,
+    object TEXT,
+    field TEXT,
+    entry_count INTEGER DEFAULT 0,
+    leadgen_ids TEXT,
+    body_preview TEXT,
+    error TEXT
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_meta_webhook_received ON meta_webhook_events (received_at DESC)");
+} catch (e) { console.error("[db] meta_webhook_events table error:", e); }
 
 // Business targets — the plan the actuals get measured against. One row per
 // (metric, scope, period). scope_id is NULL for company-wide targets, else the

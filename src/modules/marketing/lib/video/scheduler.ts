@@ -70,7 +70,9 @@ export function loadComposerClips(): ComposerClip[] {
   return rows.map(({ noProduct, ...r }) => ({
     ...r,
     skuIds: skusByClip.get(r.id) ?? [],
-    noProductConfirmed: noProduct === 1,
+    // Product-free glue = explicitly marked "no product visible", OR the
+    // clip's video type is Cases & Packaging (which never shows a product).
+    noProductConfirmed: noProduct === 1 || r.categorySlug === "packaging",
   }));
 }
 

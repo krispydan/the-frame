@@ -5,8 +5,11 @@ import { sqlite } from "@/lib/db";
 import { getSessionUser } from "@/lib/get-session";
 import {
   metaConfig, metaLeadsConfigured, metaCapiConfigured, sendCapiEvents, hashEmail,
+  diagnoseLeadAccess, subscribePageToLeadgen,
 } from "@/modules/integrations/lib/meta/client";
-import { getKnownForms, drainMetaLeads, reconcileMetaLeads } from "@/modules/integrations/lib/meta/lead-ingest";
+import {
+  getKnownForms, drainMetaLeads, reconcileMetaLeads, discoverAndImport,
+} from "@/modules/integrations/lib/meta/lead-ingest";
 import { syncCapiStageEvents, drainCapiEvents } from "@/modules/integrations/lib/meta/capi";
 import { ensureFacebookPipeline, getFacebookPipelineConfig } from "@/modules/integrations/lib/meta/pipedrive-push";
 
@@ -88,6 +91,25 @@ export async function GET() {
       verifyToken: !!c.verifyToken,
       pageToken: !!c.pageToken,
       webhookUrl: base ? `${base}/api/v1/integrations/meta/webhooks` : null,
+      // Proof of whether Meta is actually calling us, independent of whether
+      // any lead successfully processed.
+      deliveries: {
+        total: count("SELECT COUNT(*) v FROM meta_webhook_events"),
+        last24h: count("SELECT COUNT(*) v FROM meta_webhook_events WHERE received_at >= datetime('now','-1 day')"),
+        rejected: count("SELECT COUNT(*) v FROM meta_webhook_events WHERE signature_valid = 0"),
+        lastAt: (() => {
+          try {
+            return (sqlite.prepare("SELECT received_at FROM meta_webhook_events ORDER BY received_at DESC LIMIT 1").get() as { received_at: string } | undefined)?.received_at ?? null;
+          } catch { return null; }
+        })(),
+        recent: (() => {
+          try {
+            return sqlite.prepare(
+              "SELECT received_at, signature_valid, object, field, entry_count, error FROM meta_webhook_events ORDER BY received_at DESC LIMIT 5",
+            ).all();
+          } catch { return []; }
+        })(),
+      },
       knownForms: getKnownForms(),
       leadsTotal,
       leads7d,
@@ -157,6 +179,21 @@ export async function POST(req: NextRequest) {
       );
       return NextResponse.json({ ok: result.ok, result });
     }
+    case "diagnose": {
+      // Answers "it says connected but nothing arrives": what the token can
+      // see, whether the Page is actually subscribed to leadgen, what forms
+      // exist and how many leads Meta holds for each.
+      const diag = await diagnoseLeadAccess();
+      return NextResponse.json({ ok: true, ...diag });
+    }
+    case "subscribe-page": {
+      const pageId = String(body.pageId || "");
+      if (!pageId) return NextResponse.json({ error: "pageId required" }, { status: 400 });
+      const r = await subscribePageToLeadgen(pageId);
+      return NextResponse.json({ ok: r.ok, error: r.error ?? null });
+    }
+    case "import-existing":
+      return NextResponse.json({ ok: true, result: await discoverAndImport(100) });
     case "ensure-pipeline":
       return NextResponse.json({ ok: true, pipeline: await ensureFacebookPipeline() });
     case "drain":

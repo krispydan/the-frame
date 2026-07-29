@@ -45,6 +45,7 @@ import { runVideoStorageHygiene } from "@/modules/marketing/lib/video/cleanup";
 import { enqueueSoundsSync } from "@/modules/marketing/lib/video/tiktok-sounds";
 import { drainMetaLeads, reconcileMetaLeads } from "@/modules/integrations/lib/meta/lead-ingest";
 import { runCapiSyncAndDrain } from "@/modules/integrations/lib/meta/capi";
+import { runMetaLeadCsvReminder } from "@/modules/integrations/lib/meta/daily-reminder";
 
 export type CronJob = {
   id: string;                         // stable, kebab-case
@@ -135,6 +136,17 @@ export const CRON_JOBS: CronJob[] = [
     description: "Re-poll known Facebook lead forms for any submissions the webhook dropped (safety net)",
     handler: () => reconcileMetaLeads(50),
     fireAndForget: true,
+  },
+  // Daily nudge to download the Meta lead export and upload it, because the
+  // leadgen webhook can't run until Meta approves leads_retrieval. Reports what
+  // actually happened yesterday and escalates its subject line when nothing has
+  // been uploaded for days. Self-retiring: once real webhook deliveries start
+  // landing it sends one "you can stop" note and then goes quiet.
+  {
+    id: "meta-leads-csv-reminder",
+    schedule: "0 15 * * *",  // 15:00 UTC ≈ 8am PT — start of the sales day
+    description: "Email the daily reminder to download Facebook leads from Meta and upload the CSV (stops itself once the leadgen webhook is live)",
+    handler: runMetaLeadCsvReminder,
   },
   {
     id: "faire-interested-export",
