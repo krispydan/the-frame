@@ -114,6 +114,44 @@ describe("product coherence (focus SKU)", () => {
   });
 });
 
+describe("product presence + variety", () => {
+  const brollRecipe = () =>
+    makeRecipe({ patternJson: JSON.stringify([{ categories: ["ugc_unboxing", "broll", "packaging"], min: 3, max: 6 }]) });
+
+  it("never ships a product-less video (all unboxing / b-roll / packaging)", () => {
+    const clips = [
+      ...Array.from({ length: 6 }, () => makeClip({ categorySlug: "ugc_unboxing" })),
+      ...Array.from({ length: 6 }, () => makeClip({ categorySlug: "broll" })),
+      ...Array.from({ length: 4 }, () => makeClip({ categorySlug: "packaging", noProductConfirmed: true })),
+    ];
+    for (let seed = 0; seed < 30; seed++) {
+      const result = composeCandidate(makeContext(clips, [brollRecipe()], seed));
+      // With no product-showing clip available, refuse to build (null) —
+      // never a video that never shows the product.
+      expect(result).toBeNull();
+    }
+  });
+
+  it("always includes a product shot when one exists, and no category dominates", () => {
+    const clips = [
+      ...Array.from({ length: 8 }, () => makeClip({ categorySlug: "ugc_unboxing", durationSec: 4 })),
+      ...Array.from({ length: 2 }, () => makeClip({ categorySlug: "on_model", durationSec: 4 })),
+      ...Array.from({ length: 4 }, () => makeClip({ categorySlug: "broll", durationSec: 4 })),
+    ];
+    const byId = new Map(clips.map((c) => [c.id, c]));
+    for (let seed = 0; seed < 30; seed++) {
+      const result = composeCandidate(makeContext(clips, [brollRecipe()], seed));
+      if (!result) continue;
+      const cats = result.clipIds.map((id) => byId.get(id)!.categorySlug);
+      // Shows the product…
+      expect(cats.some((c) => ["on_model", "flat_lay", "detail", "lifestyle", "in_car"].includes(c))).toBe(true);
+      // …and isn't "unboxing over and over".
+      const unboxing = cats.filter((c) => c === "ugc_unboxing").length;
+      expect(unboxing).toBeLessThanOrEqual(Math.max(2, Math.ceil(8 / 2)));
+    }
+  });
+});
+
 describe("Video composer", () => {
   it("honors the recipe pattern — an all-flat-lay recipe never picks other categories", () => {
     const clips = [
@@ -148,19 +186,21 @@ describe("Video composer", () => {
 
   it("walks multi-slot patterns in order (unboxing first, then b-roll)", () => {
     const unboxing = Array.from({ length: 3 }, () => makeClip({ categorySlug: "ugc_unboxing", durationSec: 8 }));
-    const broll = Array.from({ length: 6 }, () => makeClip({ categorySlug: "broll", durationSec: 5 }));
-    const byId = new Map([...unboxing, ...broll].map((c) => [c.id, c]));
+    // Second slot is a product-showing category so the edit is valid (a
+    // video must show the product, not just unbox + b-roll).
+    const onModel = Array.from({ length: 6 }, () => makeClip({ categorySlug: "on_model", durationSec: 5 }));
+    const byId = new Map([...unboxing, ...onModel].map((c) => [c.id, c]));
     const recipe = makeRecipe({
       patternJson: JSON.stringify([
         { categories: ["ugc_unboxing"], min: 1, max: 1 },
-        { categories: ["broll"], min: 2, max: 3 },
+        { categories: ["on_model"], min: 2, max: 3 },
       ]),
     });
-    const result = composeCandidate(makeContext([...unboxing, ...broll], [recipe], 7));
+    const result = composeCandidate(makeContext([...unboxing, ...onModel], [recipe], 7));
     expect(result).not.toBeNull();
     expect(byId.get(result!.clipIds[0])!.categorySlug).toBe("ugc_unboxing");
     for (const id of result!.clipIds.slice(1)) {
-      expect(byId.get(id)!.categorySlug).toBe("broll");
+      expect(byId.get(id)!.categorySlug).toBe("on_model");
     }
   });
 
