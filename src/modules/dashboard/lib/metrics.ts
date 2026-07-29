@@ -17,7 +17,7 @@ import { calculatePnl } from "@/modules/finance/lib/pnl";
 import { getHealthSummary } from "@/modules/customers/lib/health-scoring";
 import { calculateBusinessHealth } from "@/modules/intelligence/lib/business-health";
 import { loadPhoneBurnerMetrics } from "@/modules/integrations/lib/slack/digests";
-import { getProductPerformance } from "@/modules/inventory/lib/product-performance";
+import { getProductPerformance, getColorPerformance } from "@/modules/inventory/lib/product-performance";
 import { progressForPeriod, periodStartFor } from "@/modules/planning/lib/targets";
 
 export type Range = "7d" | "30d" | "90d" | "ytd";
@@ -95,6 +95,45 @@ function buildChannelMix(start: string) {
 }
 
 /**
+ * Colour demand for the dashboard.
+ *
+ * Runs on a 365-day window regardless of the dashboard's date filter: colour
+ * seasonality is the whole point, and a 30-day view would report "black is
+ * 40%" every month without ever showing that brights spike in spring. The
+ * window is stated in the widget so the number isn't mistaken for the period.
+ */
+function buildColorInsight() {
+  const res = getColorPerformance({ windowDays: 365 });
+  const top = res.rows.filter((r) => r.units > 0).slice(0, 6);
+  return {
+    windowDays: res.windowDays,
+    months: res.months,
+    totalUnits: res.totals.units,
+    rows: top.map((r) => ({
+      color: r.color,
+      units: r.units,
+      unitSharePct: r.unitSharePct,
+      trendPct: r.trendPct,
+      trend: r.trend,
+      onHand: r.onHand,
+      onOrder: r.onOrder,
+      peakMonth: r.peakMonth,
+      seasonalityIndex: r.seasonalityIndex,
+      byMonth: r.byMonth.map((m) => m.units),
+    })),
+    /**
+     * Colours holding stock that didn't sell at all in a year — the clearest
+     * over-buy signal there is, and invisible in any product-level view.
+     */
+    stale: res.rows
+      .filter((r) => r.units === 0 && r.onHand + r.onOrder > 0)
+      .sort((a, b) => b.onHand + b.onOrder - (a.onHand + a.onOrder))
+      .slice(0, 3)
+      .map((r) => ({ color: r.color, onHand: r.onHand, onOrder: r.onOrder })),
+  };
+}
+
+/**
  * Top sellers + movers share one pass of the product-performance engine (it
  * resolves every order line through the pack/alias-aware root resolver, so it's
  * the expensive part — computing it twice would double the work).
@@ -115,6 +154,13 @@ function buildProductInsight(days: number) {
       wholesaleSharePct: r.wholesaleSharePct,
       avgOrderQty: r.avgOrderQty,
       accounts: r.accounts,
+      // Stock position alongside the sales figure — a top seller with nothing
+      // on hand and nothing inbound is the most urgent row on the dashboard,
+      // and without these two numbers it looks identical to a healthy one.
+      onHand: r.onHand,
+      onOrder: r.onOrder,
+      daysCover: r.daysCover,
+      daysCoverWithIncoming: r.daysCoverWithIncoming,
     })),
     movers: {
       rising: [...scored].sort((a, b) => (b.trendPct ?? 0) - (a.trendPct ?? 0)).slice(0, 4)
@@ -259,6 +305,7 @@ export function buildDashboard(role: string, range: Range, part: Part = "all") {
   if (has("top-sellers") || has("movers")) {
     safe("productInsight", () => buildProductInsight(days), null);
   }
+  if (has("top-colors")) safe("colorInsight", () => buildColorInsight(), null);
   if (has("inventory-health")) safe("inventoryHealth", () => buildInventoryHealth(), null);
   if (has("reorder-alerts")) safe("reorderAlerts", () => buildReorderAlerts(), []);
   if (has("outreach")) safe("outreach", () => buildOutreach(start, now, priorStart, priorEnd), null);

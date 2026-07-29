@@ -17,7 +17,8 @@ import { Badge } from "@/components/ui/badge";
 import { Delta } from "@/components/dashboard/delta";
 import { money, num, pct } from "@/components/dashboard/format";
 import { seriesColor, STATUS } from "@/components/dashboard/palette";
-import { ArrowUpDown, Download, RefreshCw, Search, Trophy, AlertTriangle, Snowflake } from "lucide-react";
+import { ArrowUpDown, Download, RefreshCw, Search, Trophy, AlertTriangle, Snowflake, X, Package, Truck } from "lucide-react";
+import Link from "next/link";
 
 type Row = {
   rootSku: string; productName: string; colorName: string; factoryCode: string | null;
@@ -29,14 +30,19 @@ type Row = {
   unitsRecent: number; unitsPrior: number; trendPct: number | null; trend: string;
   unitCost: number | null; grossProfit: number | null; marginPct: number | null;
   onHand: number; available: number; weeklyRate: number; daysCover: number | null;
+  onOrder: number; onOrderPos: OnOrderPo[]; totalPosition: number; daysCoverWithIncoming: number | null;
+};
+type OnOrderPo = {
+  poId: string; poNumber: string; factory: string | null; status: string;
+  units: number; expectedArrivalDate: string | null; expectedShipDate: string | null;
 };
 type Payload = {
   windowDays: number;
-  totals: { units: number; revenue: number; unitsWholesale: number; unitsRetail: number; wholesaleSharePct: number; products: number };
+  totals: { units: number; revenue: number; unitsWholesale: number; unitsRetail: number; wholesaleSharePct: number; products: number; onHand: number; onOrder: number };
   rows: Row[];
 };
 
-type SortKey = "revenue" | "units" | "avgOrderQty" | "accounts" | "repeatRatePct" | "trendPct" | "marginPct" | "daysCover" | "wholesaleSharePct";
+type SortKey = "revenue" | "units" | "avgOrderQty" | "accounts" | "repeatRatePct" | "trendPct" | "marginPct" | "daysCover" | "wholesaleSharePct" | "onHand" | "onOrder" | "totalPosition";
 
 const WHOLESALE_COLOR = seriesColor(0);
 const RETAIL_COLOR = seriesColor(1);
@@ -49,6 +55,8 @@ export default function ProductPerformancePage() {
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<SortKey>("revenue");
   const [asc, setAsc] = useState(false);
+  /** Row whose incoming-PO breakdown is open, if any. */
+  const [poDetail, setPoDetail] = useState<Row | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -80,11 +88,13 @@ export default function ProductPerformancePage() {
     [data],
   );
   const atRisk = useMemo(
-    () => (data?.rows ?? []).filter((r) => (r.trendPct ?? 0) > 15 && r.daysCover != null && r.daysCover < 45).sort((a, b) => (a.daysCover ?? 0) - (b.daysCover ?? 0)).slice(0, 5),
+    // Thin cover is only a risk if nothing is inbound to fix it — judge on
+    // cover-with-incoming so a product with a container landing isn't flagged.
+    () => (data?.rows ?? []).filter((r) => (r.trendPct ?? 0) > 15 && r.daysCoverWithIncoming != null && r.daysCoverWithIncoming < 45).sort((a, b) => (a.daysCoverWithIncoming ?? 0) - (b.daysCoverWithIncoming ?? 0)).slice(0, 5),
     [data],
   );
   const deadWeight = useMemo(
-    () => (data?.rows ?? []).filter((r) => r.onHand > 100 && r.weeklyRate < 3).sort((a, b) => b.onHand - a.onHand).slice(0, 5),
+    () => (data?.rows ?? []).filter((r) => r.totalPosition > 100 && r.weeklyRate < 3).sort((a, b) => b.totalPosition - a.totalPosition).slice(0, 5),
     [data],
   );
 
@@ -100,6 +110,7 @@ export default function ProductPerformancePage() {
   );
 
   return (
+    <>
     <div className="space-y-5 p-4 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -131,11 +142,13 @@ export default function ProductPerformancePage() {
 
       {/* Summary */}
       {data && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <Tile label="Units sold" value={num(data.totals.units)} />
           <Tile label="Revenue" value={money(data.totals.revenue, { compact: data.totals.revenue >= 100000 })} />
           <Tile label="Wholesale share" value={pct(data.totals.wholesaleSharePct)} sub={`${num(data.totals.unitsRetail)} units retail`} />
           <Tile label="Products sold" value={num(data.totals.products)} />
+          <Tile label="On hand" value={num(data.totals.onHand)} sub="units in the warehouse" />
+          <Tile label="On order" value={num(data.totals.onOrder)} sub="units on open POs" />
         </div>
       )}
 
@@ -146,7 +159,7 @@ export default function ProductPerformancePage() {
         <Callout title="Rising, thin cover" hint="Demand climbing but stock runs out soon" icon={<AlertTriangle className="h-4 w-4" />} tone={STATUS.serious}
           rows={atRisk.map((r) => ({ key: r.rootSku, main: `${r.productName} · ${r.colorName}`, meta: `${r.daysCover}d cover · ${r.trendPct != null ? `+${r.trendPct.toFixed(0)}%` : ""}` }))} />
         <Callout title="Dead weight" hint="Deep stock, slow movement — cash tied up" icon={<Snowflake className="h-4 w-4" />} tone={STATUS.neutral}
-          rows={deadWeight.map((r) => ({ key: r.rootSku, main: `${r.productName} · ${r.colorName}`, meta: `${num(r.onHand)} on hand · ${r.weeklyRate.toFixed(1)}/wk` }))} />
+          rows={deadWeight.map((r) => ({ key: r.rootSku, main: `${r.productName} · ${r.colorName}`, meta: `${num(r.onHand)} on hand${r.onOrder > 0 ? ` + ${num(r.onOrder)} inbound` : ""} · ${r.weeklyRate.toFixed(1)}/wk` }))} />
       </div>
 
       {/* Table */}
@@ -169,16 +182,18 @@ export default function ProductPerformancePage() {
                 {th("repeatRatePct", "Reorder")}
                 {th("trendPct", "Trend")}
                 {th("marginPct", "Margin")}
+                {th("onHand", "On hand")}
+                {th("onOrder", "On order")}
                 {th("daysCover", "Cover")}
               </tr>
             </thead>
             <tbody>
               {loading && !data ? (
                 Array.from({ length: 8 }).map((_, i) => (
-                  <tr key={i}><td colSpan={10} className="px-3 py-3"><div className="h-4 animate-pulse rounded bg-muted" /></td></tr>
+                  <tr key={i}><td colSpan={12} className="px-3 py-3"><div className="h-4 animate-pulse rounded bg-muted" /></td></tr>
                 ))
               ) : rows.length === 0 ? (
-                <tr><td colSpan={10} className="px-3 py-10 text-center text-muted-foreground">No products sold in this window</td></tr>
+                <tr><td colSpan={12} className="px-3 py-10 text-center text-muted-foreground">No products sold in this window</td></tr>
               ) : (
                 rows.map((r) => {
                   const wShare = r.wholesaleSharePct;
@@ -207,8 +222,30 @@ export default function ProductPerformancePage() {
                       </td>
                       <td className="px-2 py-2 text-right tabular-nums">{r.marginPct != null ? pct(r.marginPct) : "—"}</td>
                       <td className="px-2 py-2 text-right tabular-nums">
+                        <span style={r.onHand === 0 ? { color: STATUS.serious, fontWeight: 500 } : undefined}>{num(r.onHand)}</span>
+                      </td>
+                      <td className="px-2 py-2 text-right tabular-nums">
+                        {r.onOrder > 0 ? (
+                          <button
+                            onClick={() => setPoDetail(r)}
+                            className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                            title={`${r.onOrderPos.length} open PO${r.onOrderPos.length === 1 ? "" : "s"} — click for detail`}
+                          >
+                            {num(r.onOrder)}
+                            <Truck className="h-3 w-3" />
+                          </button>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-2 text-right tabular-nums">
                         {r.daysCover == null ? "—" : (
                           <span style={r.daysCover < 30 ? { color: STATUS.serious, fontWeight: 500 } : undefined}>{r.daysCover}d</span>
+                        )}
+                        {/* Cover including inbound stock — the number that says
+                            whether thin cover is actually a problem. */}
+                        {r.onOrder > 0 && r.daysCoverWithIncoming != null && r.daysCoverWithIncoming !== r.daysCover && (
+                          <div className="text-[11px] text-muted-foreground">{r.daysCoverWithIncoming}d w/ inbound</div>
                         )}
                       </td>
                     </tr>
@@ -222,8 +259,11 @@ export default function ProductPerformancePage() {
       <p className="text-xs text-muted-foreground">
         Wholesale = Faire, Shopify Wholesale, direct &amp; phone orders. Retail = Shopify DTC. Units are pack-expanded
         (a 12-pack counts as 12) and rolled up to the colorway, so they match the demand forecast. Margin uses catalog cost price.
+        On order counts units on POs that haven&apos;t been received yet — click a figure to see which POs and when they land.
       </p>
     </div>
+    {poDetail && <IncomingPoDrawer row={poDetail} onClose={() => setPoDetail(null)} />}
+    </>
   );
 }
 
@@ -267,5 +307,112 @@ function Callout({
         )}
       </div>
     </section>
+  );
+}
+
+/** Status labels that read like a shipment, not a DB enum. */
+const PO_STATUS_LABEL: Record<string, string> = {
+  draft: "Draft",
+  submitted: "Submitted",
+  confirmed: "Confirmed",
+  in_production: "In production",
+  shipped: "Shipped",
+  in_transit: "In transit",
+  received: "Received",
+  complete: "Complete",
+};
+
+/**
+ * The units-on-order breakdown for one product.
+ *
+ * Clicking a bare "on order" total answers the wrong question — a planner needs
+ * to know *when* it lands and *which* PO to chase, so each row links straight
+ * through to the purchase order.
+ */
+function IncomingPoDrawer({ row, onClose }: { row: Row; onClose: () => void }) {
+  const today = new Date().toISOString().slice(0, 10);
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-end bg-black/30"
+      onClick={onClose}
+      role="presentation"
+    >
+      <aside
+        className="h-full w-full max-w-md overflow-y-auto border-l bg-background shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="flex items-start gap-3 border-b px-4 py-3">
+          <span className="mt-0.5 rounded-md bg-muted p-1.5"><Truck className="h-4 w-4" /></span>
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-sm font-semibold">{row.productName}</h3>
+            <p className="truncate text-xs text-muted-foreground">{row.colorName} · {row.rootSku}</p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close"><X className="h-4 w-4" /></Button>
+        </header>
+
+        <div className="grid grid-cols-3 gap-2 border-b px-4 py-3 text-center">
+          <div>
+            <div className="text-lg font-semibold tabular-nums">{num(row.onHand)}</div>
+            <div className="text-[11px] text-muted-foreground">On hand</div>
+          </div>
+          <div>
+            <div className="text-lg font-semibold tabular-nums">{num(row.onOrder)}</div>
+            <div className="text-[11px] text-muted-foreground">On order</div>
+          </div>
+          <div>
+            <div className="text-lg font-semibold tabular-nums">{num(row.totalPosition)}</div>
+            <div className="text-[11px] text-muted-foreground">Total position</div>
+          </div>
+        </div>
+
+        <div className="border-b px-4 py-2.5 text-xs text-muted-foreground">
+          Selling {row.weeklyRate.toFixed(1)}/wk ·{" "}
+          {row.daysCover == null ? "no cover estimate" : `${row.daysCover}d cover`}
+          {row.onOrder > 0 && row.daysCoverWithIncoming != null && (
+            <> · <span className="text-foreground">{row.daysCoverWithIncoming}d including inbound</span></>
+          )}
+        </div>
+
+        <ul className="divide-y">
+          {row.onOrderPos.map((po) => {
+            // A promised arrival that's already in the past is the single most
+            // useful thing to surface here — it means the PO needs chasing.
+            const late = !!po.expectedArrivalDate && po.expectedArrivalDate < today;
+            return (
+              <li key={po.poId} className="px-4 py-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <Link href={`/inventory/purchase-orders?po=${encodeURIComponent(po.poNumber)}`} className="font-medium text-primary hover:underline">
+                    {po.poNumber}
+                  </Link>
+                  <span className="shrink-0 tabular-nums font-semibold">{num(po.units)} units</span>
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                  {po.factory && <span>{po.factory}</span>}
+                  <Badge variant="secondary" className="text-[10px]">{PO_STATUS_LABEL[po.status] ?? po.status}</Badge>
+                </div>
+                <div className="mt-1 text-xs">
+                  {po.expectedArrivalDate ? (
+                    <span style={late ? { color: STATUS.serious, fontWeight: 500 } : undefined}>
+                      {late ? "Overdue — expected" : "Arrives"} {po.expectedArrivalDate}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">No arrival date on the PO</span>
+                  )}
+                  {po.expectedShipDate && (
+                    <span className="text-muted-foreground"> · ships {po.expectedShipDate}</span>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+
+        <div className="px-4 py-3">
+          <Button variant="outline" size="sm" render={<Link href="/inventory/purchase-orders" />}>
+            <Package className="mr-1.5 h-3.5 w-3.5" /> All purchase orders
+          </Button>
+        </div>
+      </aside>
+    </div>
   );
 }

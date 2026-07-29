@@ -18,7 +18,7 @@ import { WIDGETS, SIZE_CLASS, groupByCategory, HEAVY_WIDGETS, type WidgetId } fr
 import { KpiSkeleton, WidgetSkeleton } from "@/components/dashboard/skeletons";
 import {
   type Bundle,
-  KpisWidget, TargetsWidget, RevenueTrendWidget, ChannelMixWidget, TopSellersWidget, MoversWidget,
+  KpisWidget, TargetsWidget, RevenueTrendWidget, ChannelMixWidget, TopSellersWidget, TopColorsWidget, MoversWidget,
   InventoryHealthWidget, ReorderAlertsWidget, OutreachWidget, MetaLeadsWidget,
   PipelineWidget, CustomersWidget, FinanceWidget, BusinessHealthWidget, ActivityWidget,
 } from "@/modules/dashboard/components/widgets";
@@ -31,6 +31,7 @@ const COMPONENTS: Record<WidgetId, React.FC<{ data: Bundle }>> = {
   "revenue-trend": RevenueTrendWidget,
   "channel-mix": ChannelMixWidget,
   "top-sellers": TopSellersWidget,
+  "top-colors": TopColorsWidget,
   movers: MoversWidget,
   "inventory-health": InventoryHealthWidget,
   "reorder-alerts": ReorderAlertsWidget,

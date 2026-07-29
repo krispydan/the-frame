@@ -29,6 +29,9 @@ type InventoryItem = {
   category: string;
   quantity: number;
   reserved_quantity: number;
+  on_order: number;
+  open_po_count: number;
+  next_arrival: string | null;
   reorder_point: number;
   sell_through_weekly: number;
   days_of_stock: number;
@@ -617,9 +620,10 @@ export default function InventoryPage() {
                   <TableHead>Color</TableHead>
                   <TableHead>Factory</TableHead>
                   <TableHead className="text-right cursor-pointer" onClick={() => toggleSort("quantity")}>
-                    <span className="flex items-center justify-end">In Stock <SortIcon column="quantity" /></span>
+                    <span className="flex items-center justify-end">On Hand <SortIcon column="quantity" /></span>
                   </TableHead>
                   <TableHead className="text-right">Reserved</TableHead>
+                  <TableHead className="text-right">On Order</TableHead>
                   <TableHead className="text-right">Reorder Pt</TableHead>
                   <TableHead className="text-right cursor-pointer" onClick={() => toggleSort("sell_through")}>
                     <span className="flex items-center justify-end">Sell/Week <SortIcon column="sell_through" /></span>
@@ -676,6 +680,25 @@ export default function InventoryPage() {
                           {item.quantity}
                         </TableCell>
                         <TableCell className="text-right text-muted-foreground">{item.reserved_quantity}</TableCell>
+                        {/* Units on open POs. Links to the purchase orders page
+                            so a stockout can be chased to the shipment that
+                            fixes it, rather than being a dead number. */}
+                        <TableCell className="text-right tabular-nums">
+                          {item.on_order > 0 ? (
+                            <Link
+                              href={`/inventory/purchase-orders?sku=${encodeURIComponent(item.sku)}`}
+                              className="font-medium text-primary hover:underline"
+                              title={`${item.open_po_count} open PO${item.open_po_count === 1 ? "" : "s"}${item.next_arrival ? ` · next arrives ${item.next_arrival}` : ""}`}
+                            >
+                              {item.on_order}
+                            </Link>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                          {item.next_arrival && item.on_order > 0 && (
+                            <div className="text-[11px] text-muted-foreground">{item.next_arrival.slice(5)}</div>
+                          )}
+                        </TableCell>
                         <TableCell className="text-right">
                           <ReorderPointCell item={item} onSave={handleReorderPointSave} />
                         </TableCell>

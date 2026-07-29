@@ -23,6 +23,7 @@ import {
   Truck,
   Target,
   BarChart3,
+  Palette,
   Bell,
   User,
   Database,
@@ -94,6 +95,7 @@ const operationsNav: NavItem[] = [
   { title: "Media Center", href: "/media", icon: ImageIcon },
   { title: "Inventory", href: "/inventory", icon: Warehouse },
   { title: "Product Performance", href: "/inventory/performance", icon: BarChart3 },
+  { title: "Colour Performance", href: "/inventory/colors", icon: Palette },
   { title: "Reorder Plan", href: "/inventory/reorder", icon: Truck },
   { title: "Purchase Orders", href: "/inventory/purchase-orders", icon: Package },
   { title: "Warehouse Exports", href: "/inventory/exports", icon: Database },
@@ -125,10 +127,10 @@ const bottomNav = [
 
 const ROLE_ALLOWED_HREFS: Record<string, string[]> = {
   owner: ["*"],
-  sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/prospects/facebook-leads", "/segments", "/campaigns", "/marketing/outreach", "/pipeline", "/customers", "/brands", "/catalog", "/inventory/performance"],
-  warehouse: ["/dashboard", "/orders", "/orders/international", "/catalog", "/media", "/inventory", "/inventory/performance", "/inventory/reorder", "/inventory/purchase-orders", "/inventory/exports"],
-  finance: ["/dashboard", "/orders", "/finance", "/finance/cogs", "/inventory/performance"],
-  marketing: ["/dashboard", "/marketing", "/marketing/outreach", "/catalog", "/media", "/campaigns", "/prospects/facebook-leads", "/inventory/performance"],
+  sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/prospects/facebook-leads", "/segments", "/campaigns", "/marketing/outreach", "/pipeline", "/customers", "/brands", "/catalog", "/inventory/performance", "/inventory/colors"],
+  warehouse: ["/dashboard", "/orders", "/orders/international", "/catalog", "/media", "/inventory", "/inventory/performance", "/inventory/colors", "/inventory/reorder", "/inventory/purchase-orders", "/inventory/exports"],
+  finance: ["/dashboard", "/orders", "/finance", "/finance/cogs", "/inventory/performance", "/inventory/colors"],
+  marketing: ["/dashboard", "/marketing", "/marketing/outreach", "/catalog", "/media", "/campaigns", "/prospects/facebook-leads", "/inventory/performance", "/inventory/colors"],
   support: ["/dashboard", "/orders", "/customers"],
   ai: ["/dashboard", "/ai"],
 };
