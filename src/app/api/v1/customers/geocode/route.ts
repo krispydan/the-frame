@@ -16,12 +16,15 @@ export async function GET() {
  * Call repeatedly until `remaining` hits 0.
  */
 export async function POST(request: NextRequest) {
-  let body: { limit?: number; force?: boolean; customersOnly?: boolean } = {};
+  let body: { limit?: number; force?: boolean; customersOnly?: boolean; retryFailed?: boolean } = {};
   try { body = await request.json(); } catch { /* empty body ok */ }
+  // Keep batches small (15 × ~1.1s ≈ 17s) so a single request finishes well
+  // under the serverless timeout — the client loops until done.
   const result = await geocodeCompanies({
-    limit: body.limit ?? 100,
+    limit: body.limit ?? 15,
     force: body.force ?? false,
     customersOnly: body.customersOnly ?? true,
+    retryFailed: body.retryFailed ?? false,
   });
   return NextResponse.json({ ...result, remaining: countUngeocodedCustomers() });
 }

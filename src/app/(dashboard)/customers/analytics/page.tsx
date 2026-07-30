@@ -20,6 +20,10 @@ const CustomerMap = dynamic(() => import("@/modules/customers/components/custome
   ssr: false,
   loading: () => <div className="h-[480px] flex items-center justify-center bg-muted/40 rounded-lg text-muted-foreground">Loading map…</div>,
 });
+const StateChoropleth = dynamic(() => import("@/modules/customers/components/state-choropleth"), {
+  ssr: false,
+  loading: () => <div className="h-[420px] flex items-center justify-center bg-muted/40 rounded-lg text-muted-foreground">Loading map…</div>,
+});
 
 interface Analytics {
   kpi: { customerCount: number; totalLtv: number; avgLtv: number; totalOrders: number; atRiskCount: number; churnedCount: number; newThisMonth: number };
@@ -71,23 +75,25 @@ export default function CustomerAnalyticsPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Geocode in batches until none remain, refreshing the map as we go.
-  const runGeocode = useCallback(async () => {
+  // Geocode in small batches until none remain, refreshing the map as we go.
+  // retryFailed=true re-attempts companies that were tried before but still
+  // have no coordinates (transient Nominatim failures / improved fallback).
+  const runGeocode = useCallback(async (retryFailed = false) => {
     setGeocoding(true);
     try {
-      let remaining = Infinity;
       let rounds = 0;
-      while (remaining > 0 && rounds < 30) {
+      const maxRounds = 60;
+      while (rounds < maxRounds) {
         const res = await fetch("/api/v1/customers/geocode", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ limit: 40 }),
+          body: JSON.stringify({ limit: 15, retryFailed }),
         });
         const d = await res.json();
-        remaining = d.remaining ?? 0;
         rounds++;
-        toast.message(`Geocoded ${d.geocoded ?? 0} · ${remaining} remaining`);
+        toast.message(`Geocoded ${d.geocoded ?? 0} this batch · ${d.remaining ?? 0} pending`);
         await load();
+        // Stop when a batch processes nothing (queue drained for this mode).
         if ((d.processed ?? 0) === 0) break;
       }
       toast.success("Geocoding complete");
@@ -153,15 +159,27 @@ export default function CustomerAnalyticsPage() {
             <MapPin className="h-4 w-4" /> Customer Map
             <span className="text-xs font-normal text-muted-foreground">
               {geocode.mapped} of {geocode.total} mapped
-              {geocode.pending > 0 ? ` · ${geocode.pending} not yet geocoded` : ""}
+              {geocode.pending > 0 ? ` · ${geocode.pending} pending` : ""}
+              {(() => {
+                const failed = Math.max(0, geocode.total - geocode.mapped - geocode.pending);
+                return failed > 0 ? ` · ${failed} couldn't be located` : "";
+              })()}
             </span>
           </CardTitle>
-          {geocode.pending > 0 && (
-            <Button size="sm" variant="outline" onClick={runGeocode} disabled={geocoding}>
-              {geocoding ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <MapPin className="h-4 w-4 mr-1" />}
-              {geocoding ? "Geocoding…" : `Geocode ${geocode.pending} customers`}
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {geocode.pending > 0 && (
+              <Button size="sm" variant="outline" onClick={() => runGeocode(false)} disabled={geocoding}>
+                {geocoding ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <MapPin className="h-4 w-4 mr-1" />}
+                {geocoding ? "Geocoding…" : `Geocode ${geocode.pending}`}
+              </Button>
+            )}
+            {geocode.pending === 0 && (geocode.total - geocode.mapped) > 0 && (
+              <Button size="sm" variant="outline" onClick={() => runGeocode(true)} disabled={geocoding}>
+                {geocoding ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <MapPin className="h-4 w-4 mr-1" />}
+                {geocoding ? "Retrying…" : `Retry ${geocode.total - geocode.mapped} failed`}
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {data.geoPoints.length === 0 ? (
@@ -248,18 +266,39 @@ export default function CustomerAnalyticsPage() {
         </Card>
       </div>
 
-      {/* By state */}
+      {/* By state — choropleth + ranked list */}
       <Card>
         <CardHeader><CardTitle className="text-base flex items-center gap-2"><MapPin className="h-4 w-4" /> Revenue by State</CardTitle></CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-            {data.byState.slice(0, 18).map((s) => (
-              <div key={s.state} className="border rounded-lg p-3">
-                <div className="text-lg font-bold">{s.state}</div>
-                <div className="text-sm text-muted-foreground">{money(s.revenue)}</div>
-                <div className="text-xs text-muted-foreground">{s.customers} customer{s.customers === 1 ? "" : "s"}</div>
-              </div>
-            ))}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2">
+              <StateChoropleth data={data.byState.filter((s) => s.state && s.state !== "—")} />
+            </div>
+            {/* Ranked list beside the map */}
+            <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-1">
+              {(() => {
+                const rows = data.byState.filter((s) => s.state && s.state !== "—");
+                const max = Math.max(1, ...rows.map((r) => r.revenue));
+                return rows.map((s) => (
+                  <div key={s.state} className="relative rounded-md border px-2.5 py-1.5 overflow-hidden">
+                    <div
+                      className="absolute inset-y-0 left-0 bg-green-100/70"
+                      style={{ width: `${Math.max(4, (s.revenue / max) * 100)}%` }}
+                    />
+                    <div className="relative flex items-center justify-between text-sm">
+                      <span className="font-semibold">{s.state}</span>
+                      <span className="tabular-nums">{money(s.revenue)}</span>
+                    </div>
+                    <div className="relative text-xs text-muted-foreground">{s.customers} customer{s.customers === 1 ? "" : "s"}</div>
+                  </div>
+                ));
+              })()}
+              {data.byState.some((s) => !s.state || s.state === "—") && (
+                <p className="text-xs text-muted-foreground pt-1">
+                  International / no-state customers appear on the pin map above.
+                </p>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
