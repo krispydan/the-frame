@@ -18,8 +18,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { VideoPlayer } from "@/components/ui/video-player";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
+import { ClipPreviewDialog } from "@/modules/marketing/components/videos/clip-preview-dialog";
 import {
-  ArrowLeft, ArrowRight, Boxes, Check, Loader2, Plus, RefreshCw, Sparkles, Upload, X,
+  ArrowLeft, ArrowRight, Boxes, Check, Loader2, Play, Plus, RefreshCw, Sparkles, Upload, X,
 } from "lucide-react";
 
 type Clip = {
@@ -54,6 +55,8 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
   const [saving, setSaving] = useState(false);
   const [seq, setSeq] = useState<Clip[]>([]);
   const [caption, setCaption] = useState("");
+  /** Clip being watched, and whether it's already in the sequence. */
+  const [watching, setWatching] = useState<{ clip: Clip; inVideo: boolean; index?: number } | null>(null);
   const { setOverride } = useBreadcrumbOverride();
 
   const load = useCallback(async () => {
@@ -236,22 +239,35 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
                 {seq.map((c, i) => (
                   <div key={`${c.id}-${i}`} className="group/clip w-28 shrink-0">
                     <div className="relative aspect-[9/16] overflow-hidden rounded-lg border bg-muted">
-                      {c.posterUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={c.posterUrl} alt="" className="h-full w-full object-cover" />
-                      ) : null}
-                      <span className="absolute left-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/70 px-1 text-[10px] font-semibold text-white">
+                      {/* The poster is the play surface — click to watch it. */}
+                      <button
+                        type="button"
+                        onClick={() => setWatching({ clip: c, inVideo: true, index: i })}
+                        title="Watch this clip"
+                        className="absolute inset-0 h-full w-full"
+                      >
+                        {c.posterUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={c.posterUrl} alt="" className="h-full w-full object-cover" />
+                        ) : null}
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover/clip:bg-black/25 group-hover/clip:opacity-100">
+                          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-black">
+                            <Play className="h-4 w-4 translate-x-px fill-current" />
+                          </span>
+                        </span>
+                      </button>
+                      <span className="pointer-events-none absolute left-1 top-1 z-10 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/70 px-1 text-[10px] font-semibold text-white">
                         {i + 1}
                       </span>
                       {c.durationSec != null && (
-                        <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[10px] text-white">
+                        <span className="pointer-events-none absolute bottom-1 right-1 z-10 rounded bg-black/70 px-1 text-[10px] text-white">
                           {c.durationSec.toFixed(1)}s
                         </span>
                       )}
                       <button
                         onClick={() => setSeq((prev) => prev.filter((_, j) => j !== i))}
                         title="Remove"
-                        className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition hover:bg-red-600 group-hover/clip:opacity-100"
+                        className="absolute right-1 top-1 z-20 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition hover:bg-red-600 group-hover/clip:opacity-100"
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -259,7 +275,7 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
                         onClick={() => move(i, -1)}
                         disabled={i === 0}
                         title="Move earlier"
-                        className="absolute left-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition hover:bg-black/70 group-hover/clip:opacity-100 disabled:hidden"
+                        className="absolute left-1 top-1/2 z-20 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition hover:bg-black/70 group-hover/clip:opacity-100 disabled:hidden"
                       >
                         <ArrowLeft className="h-3.5 w-3.5" />
                       </button>
@@ -267,7 +283,7 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
                         onClick={() => move(i, 1)}
                         disabled={i === seq.length - 1}
                         title="Move later"
-                        className="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition hover:bg-black/70 group-hover/clip:opacity-100 disabled:hidden"
+                        className="absolute right-1 top-1/2 z-20 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition hover:bg-black/70 group-hover/clip:opacity-100 disabled:hidden"
                       >
                         <ArrowRight className="h-3.5 w-3.5" />
                       </button>
@@ -308,33 +324,44 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
               ) : (
                 <div className="grid max-h-72 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4 md:grid-cols-6">
                   {unused.map((c) => (
-                    <button
-                      key={c.id}
-                      onClick={() => setSeq((prev) => [...prev, c])}
-                      className="group/add rounded-lg border p-1 text-left hover:bg-muted"
-                      title={`${c.fileName} — click to add`}
-                    >
-                      <span className="relative block aspect-[9/16] w-full overflow-hidden rounded bg-muted">
-                        {c.posterUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={c.posterUrl} alt="" className="h-full w-full object-cover" />
-                        ) : null}
-                        <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover/add:bg-black/25 group-hover/add:opacity-100">
-                          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                            <Plus className="h-4 w-4" />
+                    <div key={c.id} className="group/add relative">
+                      {/* Click to WATCH it — you shouldn't have to add a clip
+                          blind just to find out what's in it. */}
+                      <button
+                        onClick={() => setWatching({ clip: c, inVideo: false })}
+                        className="block w-full rounded-lg border p-1 text-left hover:bg-muted"
+                        title={`${c.fileName} — click to watch`}
+                      >
+                        <span className="relative block aspect-[9/16] w-full overflow-hidden rounded bg-muted">
+                          {c.posterUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={c.posterUrl} alt="" className="h-full w-full object-cover" />
+                          ) : null}
+                          <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover/add:bg-black/25 group-hover/add:opacity-100">
+                            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-black">
+                              <Play className="h-3.5 w-3.5 translate-x-px fill-current" />
+                            </span>
                           </span>
+                          {c.isProductShot && (
+                            <span className="absolute left-0.5 top-0.5 rounded bg-emerald-600/90 px-1 text-[9px] text-white">product</span>
+                          )}
+                          {c.durationSec != null && (
+                            <span className="absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 text-[9px] text-white">
+                              {c.durationSec.toFixed(1)}s
+                            </span>
+                          )}
                         </span>
-                        {c.isProductShot && (
-                          <span className="absolute left-0.5 top-0.5 rounded bg-emerald-600/90 px-1 text-[9px] text-white">product</span>
-                        )}
-                        {c.durationSec != null && (
-                          <span className="absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 text-[9px] text-white">
-                            {c.durationSec.toFixed(1)}s
-                          </span>
-                        )}
-                      </span>
-                      <span className="block truncate text-[10px] font-medium">{c.categoryName ?? "—"}</span>
-                    </button>
+                        <span className="block truncate text-[10px] font-medium">{c.categoryName ?? "—"}</span>
+                      </button>
+                      {/* …and add it straight away if you already know. */}
+                      <button
+                        onClick={() => setSeq((prev) => [...prev, c])}
+                        title="Add to video"
+                        className="absolute right-1.5 top-1.5 z-20 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground opacity-0 shadow transition hover:scale-110 group-hover/add:opacity-100"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -365,6 +392,19 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
           </Card>
         </div>
       </div>
+
+      {watching && (
+        <ClipPreviewDialog
+          clip={watching.clip}
+          onClose={() => setWatching(null)}
+          onAdd={watching.inVideo ? undefined : () => setSeq((prev) => [...prev, watching.clip])}
+          onRemove={
+            watching.inVideo && watching.index !== undefined
+              ? () => setSeq((prev) => prev.filter((_, j) => j !== watching.index))
+              : undefined
+          }
+        />
+      )}
     </div>
   );
 }
