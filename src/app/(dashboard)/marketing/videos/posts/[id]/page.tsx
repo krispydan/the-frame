@@ -21,11 +21,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { VideoPlayer } from "@/components/ui/video-player";
+import { ClipPreviewDialog } from "@/modules/marketing/components/videos/clip-preview-dialog";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import { lintRetention, RETENTION_OPTIMIZER_FEEDBACK } from "@/modules/marketing/lib/video/retention-lint";
 import {
   ArrowLeft, ArrowRight, Clapperboard, Crop, FastForward, Focus, Gauge, Loader2,
-  MessageSquare, Plus, RefreshCw, Rewind, Scissors, Send, X,
+  MessageSquare, Play, Plus, RefreshCw, Rewind, Scissors, Send, X,
 } from "lucide-react";
 
 type OnScreenText = { text: string; timing: string; placement: string };
@@ -121,6 +122,8 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
   const [libTotal, setLibTotal] = useState(0);
   const [libLoading, setLibLoading] = useState(false);
   const [previewClip, setPreviewClip] = useState<LibClip | null>(null);
+  /** A clip from the sequence being watched. */
+  const [watching, setWatching] = useState<{ clip: PostClip; index: number } | null>(null);
   const LIB_LIMIT = 60;
   // Trim dialog: which sequence index is being trimmed + the in/out points.
   const [trimIdx, setTrimIdx] = useState<number | null>(null);
@@ -514,21 +517,34 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
               return (
                 <div key={`${c.id}-${i}`} className="group/clip w-32 shrink-0">
                   <div className="relative aspect-[9/16] overflow-hidden rounded-lg border bg-muted">
-                    {c.posterUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={c.posterUrl} alt="" className="h-full w-full object-cover" />
-                    ) : null}
-                    <span className="absolute left-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/70 px-1 text-[10px] font-semibold text-white">
+                    {/* The poster is the play surface — click to watch it. */}
+                    <button
+                      type="button"
+                      onClick={() => setWatching({ clip: c, index: i })}
+                      title="Watch this clip"
+                      className="absolute inset-0 h-full w-full"
+                    >
+                      {c.posterUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={c.posterUrl} alt="" className="h-full w-full object-cover" />
+                      ) : null}
+                      <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover/clip:bg-black/25 group-hover/clip:opacity-100">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-black">
+                          <Play className="h-4 w-4 translate-x-px fill-current" />
+                        </span>
+                      </span>
+                    </button>
+                    <span className="pointer-events-none absolute left-1 top-1 z-10 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/70 px-1 text-[10px] font-semibold text-white">
                       {i + 1}
                     </span>
-                    <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[10px] font-medium text-white">
+                    <span className="pointer-events-none absolute bottom-1 right-1 z-10 rounded bg-black/70 px-1 text-[10px] font-medium text-white">
                       {(c.durationSec ?? 0).toFixed(1)}s
                     </span>
                     <button
                       onClick={() => setClipSeq((prev) => prev.filter((_, j) => j !== i))}
                       disabled={clipSeq.length <= 1}
                       title={clipSeq.length <= 1 ? "A video needs at least one clip" : "Remove clip"}
-                      className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition hover:bg-red-600 group-hover/clip:opacity-100 disabled:hidden"
+                      className="absolute z-20 right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition hover:bg-red-600 group-hover/clip:opacity-100 disabled:hidden"
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -536,7 +552,7 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
                       onClick={() => moveClip(i, -1)}
                       disabled={i === 0}
                       title="Move earlier"
-                      className="absolute left-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition hover:bg-black/70 group-hover/clip:opacity-100 disabled:hidden"
+                      className="absolute z-20 left-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition hover:bg-black/70 group-hover/clip:opacity-100 disabled:hidden"
                     >
                       <ArrowLeft className="h-3.5 w-3.5" />
                     </button>
@@ -544,7 +560,7 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
                       onClick={() => moveClip(i, 1)}
                       disabled={i === clipSeq.length - 1}
                       title="Move later"
-                      className="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition hover:bg-black/70 group-hover/clip:opacity-100 disabled:hidden"
+                      className="absolute z-20 right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition hover:bg-black/70 group-hover/clip:opacity-100 disabled:hidden"
                     >
                       <ArrowRight className="h-3.5 w-3.5" />
                     </button>
@@ -816,6 +832,26 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
           )}
         </CardContent>
       </Card>
+
+      {/* Watch a clip that's already in the video */}
+      {watching && (
+        <ClipPreviewDialog
+          clip={{
+            id: watching.clip.id,
+            fileName: watching.clip.fileName,
+            durationSec: watching.clip.durationSec,
+            categoryName: watching.clip.category,
+            posterUrl: watching.clip.posterUrl,
+            previewUrl: watching.clip.previewUrl,
+          }}
+          onClose={() => setWatching(null)}
+          onRemove={
+            clipSeq.length > 1
+              ? () => setClipSeq((prev) => prev.filter((_, j) => j !== watching.index))
+              : undefined
+          }
+        />
+      )}
 
       {/* Preview-before-add dialog */}
       {previewClip && (
