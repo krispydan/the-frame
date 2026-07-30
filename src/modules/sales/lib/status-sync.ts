@@ -78,7 +78,22 @@ export function fanOutStatusChange(
   // Scheduled ~30s out so the Pipedrive deal-creation job has landed.
   if (status === "interested") {
     enqueueInterestedEnrichment(companyId);
+    // Push the lead onto the wholesale Shopify store, which is what enrols
+    // them in Omnisend nurture and the PostPilot direct-mail list. Delayed a
+    // little so the enrichment job's website/address writebacks land first —
+    // otherwise we'd create the customer, then immediately Slack for an
+    // address we were about to learn anyway.
+    enqueueShopifyWholesaleSync(companyId);
   }
+}
+
+function enqueueShopifyWholesaleSync(companyId: string): void {
+  void jobQueue.enqueue(
+    "sales.sync_lead_to_shopify_wholesale",
+    "sales",
+    { companyId },
+    { priority: 4, scheduledFor: new Date(Date.now() + 120_000).toISOString() },
+  );
 }
 
 function enqueueInterestedEnrichment(companyId: string): void {
@@ -215,6 +230,15 @@ registerJobHandler(
     const status = String(input.status) as CompanyStatus;
     const { syncStatusToPipedrive } = await import("./pipedrive-sync");
     return syncStatusToPipedrive(companyId, status);
+  },
+);
+
+registerJobHandler(
+  "sales.sync_lead_to_shopify_wholesale",
+  async (input): Promise<Record<string, unknown>> => {
+    const companyId = String(input.companyId);
+    const { syncInterestedLeadToShopify } = await import("./shopify-wholesale-customer");
+    return syncInterestedLeadToShopify(companyId, { force: input.force === true }) as unknown as Record<string, unknown>;
   },
 );
 

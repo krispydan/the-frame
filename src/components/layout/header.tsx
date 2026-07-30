@@ -60,7 +60,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   exports: "Warehouse exports",
   cogs: "COGS & costing",
   xero: "Xero",
-  media: "Media center",
+  media: "Product images",
   targets: "Targets",
   segments: "Segments",
   brands: "Brand accounts",

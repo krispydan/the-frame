@@ -60,6 +60,7 @@ export type SlackTopic =
   // Sales
   | "sales.phoneburner_interested"
   | "sales.facebook_lead"
+  | "sales.wholesale_address_needed"
   // Digests
   | "digest.daily"
   | "digest.weekly"
@@ -106,6 +107,7 @@ export const SLACK_TOPICS: { topic: SlackTopic; label: string; defaultChannel: s
 
   // Sales
   { topic: "sales.phoneburner_interested", label: "PhoneBurner interested lead", defaultChannel: "sales-leads", group: "Sales", description: "Fires the moment an agent sets a 'Set Appointment' disposition in PhoneBurner. Includes company, phone, ICP, agent, recording link, and a one-click jump into The Frame." },
+  { topic: "sales.wholesale_address_needed", label: "Lead needs a mailing address", defaultChannel: "sales-leads", group: "Sales", description: "An appointment-set lead reached the wholesale Shopify store but has no full mailing address, so PostPilot direct mail can't go out. Names exactly which parts are missing and links to the prospect — adding it there syncs to Shopify on the next run." },
   { topic: "sales.facebook_lead", label: "Facebook/Instagram lead", defaultChannel: "sales-leads", group: "Sales", description: "Fires when a new Facebook/Instagram Lead Ad submission lands in the frame. Includes name, email, phone, the ad/campaign it came from, and links into the frame + Pipedrive." },
 
   // Digests
