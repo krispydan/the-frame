@@ -12,6 +12,8 @@ export interface StateRevenue {
   revenue: number;
 }
 
+export type StateMetric = "revenue" | "customers";
+
 // 2-letter code → full state name (GeoJSON uses full names)
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
@@ -49,7 +51,7 @@ interface GeoFeatureProps { name: string }
  * shades each state by its share of the max state's revenue. Hover shows
  * the state's revenue + customer count. Client-only (Leaflet).
  */
-export default function StateChoropleth({ data }: { data: StateRevenue[] }) {
+export default function StateChoropleth({ data, metric = "revenue" }: { data: StateRevenue[]; metric?: StateMetric }) {
   const [geo, setGeo] = useState<GeoJSON.FeatureCollection | null>(null);
 
   useEffect(() => {
@@ -65,16 +67,17 @@ export default function StateChoropleth({ data }: { data: StateRevenue[] }) {
     const name = STATE_NAMES[d.state];
     if (name) byName.set(name, d);
   }
-  const maxRevenue = Math.max(1, ...data.map((d) => d.revenue));
+  const valueOf = (d: StateRevenue | undefined) => (d ? (metric === "revenue" ? d.revenue : d.customers) : 0);
+  const maxValue = Math.max(1, ...data.map((d) => valueOf(d)));
 
   if (!geo) {
     return <div className="h-[420px] flex items-center justify-center bg-muted/40 rounded-lg text-muted-foreground">Loading map…</div>;
   }
 
   const styleFn = (feature?: Feature<Geometry, GeoFeatureProps>): PathOptions => {
-    const rev = feature ? byName.get(feature.properties.name)?.revenue ?? 0 : 0;
+    const d = feature ? byName.get(feature.properties.name) : undefined;
     return {
-      fillColor: colorForFraction(rev / maxRevenue),
+      fillColor: colorForFraction(valueOf(d) / maxValue),
       weight: 1,
       color: "#ffffff",
       fillOpacity: 0.85,
@@ -100,7 +103,8 @@ export default function StateChoropleth({ data }: { data: StateRevenue[] }) {
       attributionControl={false}
       style={{ height: "420px", width: "100%", borderRadius: "0.5rem", background: "transparent", zIndex: 0 }}
     >
-      <GeoJSON data={geo} style={styleFn} onEachFeature={onEachFeature} />
+      {/* key on metric forces a remount so the fill recolors when toggled */}
+      <GeoJSON key={metric} data={geo} style={styleFn} onEachFeature={onEachFeature} />
     </MapContainer>
   );
 }

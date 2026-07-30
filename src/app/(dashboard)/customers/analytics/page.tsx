@@ -61,6 +61,7 @@ export default function CustomerAnalyticsPage() {
   const [data, setData] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [geocoding, setGeocoding] = useState(false);
+  const [stateMetric, setStateMetric] = useState<"revenue" | "customers">("revenue");
 
   const load = useCallback(async () => {
     try {
@@ -266,32 +267,60 @@ export default function CustomerAnalyticsPage() {
         </Card>
       </div>
 
-      {/* By state — choropleth + ranked list */}
+      {/* By state — choropleth + ranked list, toggle revenue ↔ customers */}
       <Card>
-        <CardHeader><CardTitle className="text-base flex items-center gap-2"><MapPin className="h-4 w-4" /> Revenue by State</CardTitle></CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <MapPin className="h-4 w-4" /> {stateMetric === "revenue" ? "Revenue" : "Customers"} by State
+          </CardTitle>
+          <div className="inline-flex rounded-md border p-0.5 text-xs">
+            <button
+              onClick={() => setStateMetric("revenue")}
+              className={`px-2.5 py-1 rounded ${stateMetric === "revenue" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              Revenue
+            </button>
+            <button
+              onClick={() => setStateMetric("customers")}
+              className={`px-2.5 py-1 rounded ${stateMetric === "customers" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              Customers
+            </button>
+          </div>
+        </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2">
-              <StateChoropleth data={data.byState.filter((s) => s.state && s.state !== "—")} />
+              <StateChoropleth data={data.byState.filter((s) => s.state && s.state !== "—")} metric={stateMetric} />
             </div>
-            {/* Ranked list beside the map */}
+            {/* Ranked list beside the map — sorted + filled by the active metric */}
             <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-1">
               {(() => {
-                const rows = data.byState.filter((s) => s.state && s.state !== "—");
-                const max = Math.max(1, ...rows.map((r) => r.revenue));
-                return rows.map((s) => (
-                  <div key={s.state} className="relative rounded-md border px-2.5 py-1.5 overflow-hidden">
-                    <div
-                      className="absolute inset-y-0 left-0 bg-green-100/70"
-                      style={{ width: `${Math.max(4, (s.revenue / max) * 100)}%` }}
-                    />
-                    <div className="relative flex items-center justify-between text-sm">
-                      <span className="font-semibold">{s.state}</span>
-                      <span className="tabular-nums">{money(s.revenue)}</span>
+                const rows = [...data.byState.filter((s) => s.state && s.state !== "—")]
+                  .sort((a, b) => (stateMetric === "revenue" ? b.revenue - a.revenue : b.customers - a.customers));
+                const max = Math.max(1, ...rows.map((r) => (stateMetric === "revenue" ? r.revenue : r.customers)));
+                return rows.map((s) => {
+                  const val = stateMetric === "revenue" ? s.revenue : s.customers;
+                  return (
+                    <div key={s.state} className="relative rounded-md border px-2.5 py-1.5 overflow-hidden">
+                      <div
+                        className="absolute inset-y-0 left-0 bg-green-100/70"
+                        style={{ width: `${Math.max(4, (val / max) * 100)}%` }}
+                      />
+                      <div className="relative flex items-center justify-between text-sm">
+                        <span className="font-semibold">{s.state}</span>
+                        <span className="tabular-nums">
+                          {stateMetric === "revenue" ? money(s.revenue) : `${s.customers} cust`}
+                        </span>
+                      </div>
+                      <div className="relative text-xs text-muted-foreground">
+                        {stateMetric === "revenue"
+                          ? `${s.customers} customer${s.customers === 1 ? "" : "s"}`
+                          : money(s.revenue)}
+                      </div>
                     </div>
-                    <div className="relative text-xs text-muted-foreground">{s.customers} customer{s.customers === 1 ? "" : "s"}</div>
-                  </div>
-                ));
+                  );
+                });
               })()}
               {data.byState.some((s) => !s.state || s.state === "—") && (
                 <p className="text-xs text-muted-foreground pt-1">

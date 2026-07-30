@@ -76,6 +76,12 @@ interface ShopifyOrder {
     first_name?: string;
     last_name?: string;
     company?: string;
+    address1?: string;
+    address2?: string;
+    city?: string;
+    province?: string;       // state/province full name
+    province_code?: string;  // 2-letter state code
+    zip?: string;
     country?: string;
     country_code?: string; // ISO-2, e.g. "US", "CA"
   };
@@ -150,6 +156,36 @@ const FREE_EMAIL_DOMAINS = new Set([
 /** Faire's per-retailer anonymized relay address — never an identity key. */
 function isRelayEmail(email: string | null | undefined): boolean {
   return !!email && email.toLowerCase().includes("@relay.faire.com");
+}
+
+/**
+ * Fill a company's mailing address from the order's shipping address, but only
+ * for fields that are currently blank — never overwrite manually-entered data.
+ * This is what feeds the customer map: companies auto-created from orders had
+ * no address before, so they couldn't be geocoded.
+ */
+function applyShippingAddressToCompany(companyId: string, order: ShopifyOrder): void {
+  const sa = order.shipping_address;
+  if (!sa) return;
+  const addr = sa.address1?.trim() || null;
+  const city = sa.city?.trim() || null;
+  const state = sa.province_code?.trim() || sa.province?.trim() || null;
+  const zip = sa.zip?.trim() || null;
+  const country = sa.country_code?.trim() || sa.country?.trim() || null;
+  if (!addr && !city && !state && !zip && !country) return;
+  try {
+    sqlite.prepare(`
+      UPDATE companies SET
+        address = COALESCE(NULLIF(address, ''), ?),
+        city    = COALESCE(NULLIF(city, ''), ?),
+        state   = COALESCE(NULLIF(state, ''), ?),
+        zip     = COALESCE(NULLIF(zip, ''), ?),
+        country = COALESCE(NULLIF(country, ''), ?)
+      WHERE id = ?
+    `).run(addr, city, state, zip, country, companyId);
+  } catch (e) {
+    console.error("[shopify-webhook] applyShippingAddressToCompany failed:", e);
+  }
 }
 
 async function findOrCreateCompany(order: ShopifyOrder, shopDomain?: string): Promise<string | null> {
@@ -381,6 +417,10 @@ export async function handleOrderCreate(order: ShopifyOrder, shopDomain?: string
 
   // Auto-create customer account for the company
   if (companyId) {
+    // Fill the company's address from this order's shipping address (blanks
+    // only) so the customer map can geocode it.
+    applyShippingAddressToCompany(companyId, order);
+
     try {
       ensureCustomerAccount(companyId);
     } catch (e) {
