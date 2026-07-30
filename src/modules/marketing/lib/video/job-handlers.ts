@@ -147,6 +147,40 @@ registerJobHandler("marketing.video.render-post", async (input) => {
   return { ...render, copy, burn } as unknown as Record<string, unknown>;
 });
 
+/**
+ * Batch-build product videos (one canonical video per parent frame).
+ * Sequential — each build is an ffmpeg concat, and a 100-product run
+ * shouldn't saturate the box. Individual failures are recorded on the
+ * product's row and never abort the batch.
+ */
+registerJobHandler("marketing.video.build-product-videos", async (input) => {
+  const ids = Array.isArray(input.productIds) ? (input.productIds as string[]) : [];
+  const { buildProductVideo, generateProductCaption } = await import("./product-video");
+  let built = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const productId of ids) {
+    try {
+      const res = await buildProductVideo(productId);
+      if (!res.ok) {
+        skipped++;
+        continue;
+      }
+      built++;
+      await generateProductCaption(productId).catch(() => {});
+    } catch (e) {
+      failed++;
+      console.error(`[product-video] ${productId} failed:`, e instanceof Error ? e.message : e);
+    }
+    if ((built + skipped + failed) % 10 === 0) {
+      console.info(`[product-video] ${built + skipped + failed}/${ids.length} processed`);
+    }
+  }
+  console.info(`[product-video] batch done — ${built} built, ${skipped} skipped, ${failed} failed`);
+  return { total: ids.length, built, skipped, failed };
+});
+
 // Re-bake the on-screen hook after a hook edit or burn-toggle (no full
 // re-render needed — derives from the existing clean render).
 registerJobHandler("marketing.video.burn-hook", async (input) => {
