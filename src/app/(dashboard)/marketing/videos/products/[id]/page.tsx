@@ -44,7 +44,6 @@ type Video = {
   shopifyPublishedAt: string | null;
   shopifyRetailAt: string | null;
   shopifyWholesaleAt: string | null;
-  faireExportedAt: string | null;
   error: string | null;
 };
 type Detail = { video: Video | null; productName: string; clips: Clip[]; available: Clip[] };
@@ -157,32 +156,6 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
     } else toast.error(d.error ?? "Publish failed");
   };
 
-  /** Faire has no video API — prepare the file + mark it handed off. */
-  const exportFaire = async () => {
-    setSaving(true);
-    const res = await fetch("/api/v1/marketing/videos/product-videos/faire", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productId: id }),
-    });
-    const d = await res.json();
-    setSaving(false);
-    if (!res.ok) {
-      toast.error(d.error ?? "Export failed");
-      return;
-    }
-    // Download it so the only thing left is the drop in Faire's portal.
-    const a = document.createElement("a");
-    a.href = d.downloadUrl;
-    a.download = d.fileName ?? "product-video.mp4";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    toast.success("Downloaded for Faire — upload it on the product's Videos section", { duration: 8000 });
-    if (d.warnings?.length) toast.message(d.warnings.join(" · "), { duration: 8000 });
-    load();
-  };
-
   if (loading) return <div className="h-96 animate-pulse rounded-lg bg-muted" />;
   if (!detail) {
     return (
@@ -242,8 +215,15 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
                   <Button size="sm" onClick={publish} disabled={saving}>
                     <Upload className="h-4 w-4 mr-1" /> Publish to Shopify
                   </Button>
-                  <Button size="sm" variant="outline" onClick={exportFaire} disabled={saving}>
-                    <Download className="h-4 w-4 mr-1" /> Get Faire file
+                  {/* Anywhere Shopify can't reach (Faire, socials) is a
+                      manual upload — hand over the file. */}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    nativeButton={false}
+                    render={<a href={`/api/v1/marketing/videos/product-videos/download?productId=${id}`} />}
+                  >
+                    <Download className="h-4 w-4 mr-1" /> Download video
                   </Button>
                 </>
               ) : (
@@ -257,7 +237,6 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
             <ul className="space-y-0.5 pt-1 text-[11px] text-muted-foreground">
               <li>Shopify retail — {v.shopifyRetailAt ? `published ${v.shopifyRetailAt.slice(0, 10)}` : "not published"}</li>
               <li>Shopify wholesale — {v.shopifyWholesaleAt ? `published ${v.shopifyWholesaleAt.slice(0, 10)}` : "not published"}</li>
-              <li>Faire — {v.faireExportedAt ? `exported ${v.faireExportedAt.slice(0, 10)}` : "not exported"} <span className="opacity-70">(upload in the brand portal)</span></li>
             </ul>
           )}
         </div>

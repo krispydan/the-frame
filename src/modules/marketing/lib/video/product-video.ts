@@ -46,10 +46,9 @@ export interface ProductVideoRow {
   caption: string | null;
   approvedAt: string | null;
   shopifyPublishedAt: string | null;
-  /** When it was pushed to each Shopify store, and exported for Faire. */
+  /** When it was pushed to each Shopify store. */
   shopifyRetailAt: string | null;
   shopifyWholesaleAt: string | null;
-  faireExportedAt: string | null;
   error: string | null;
   updatedAt: string | null;
 }
@@ -76,7 +75,7 @@ function ensureTable(): void {
   `);
   // Per-destination publish state. shopify_published_at (above) predates
   // multi-channel and now means "last pushed to any Shopify store".
-  for (const col of ["shopify_retail_at", "shopify_wholesale_at", "faire_exported_at"]) {
+  for (const col of ["shopify_retail_at", "shopify_wholesale_at"]) {
     try {
       sqlite.exec(`ALTER TABLE marketing_product_videos ADD COLUMN ${col} TEXT`);
     } catch { /* already there */ }
@@ -534,7 +533,6 @@ export function listProductVideos(): ProductVideoRow[] {
     shopifyPublishedAt: (r.shopify_published_at as string) ?? null,
     shopifyRetailAt: (r.shopify_retail_at as string) ?? null,
     shopifyWholesaleAt: (r.shopify_wholesale_at as string) ?? null,
-    faireExportedAt: (r.faire_exported_at as string) ?? null,
     error: (r.error as string) ?? null,
     updatedAt: (r.updated_at as string) ?? null,
   }));
