@@ -419,15 +419,21 @@ export async function syncInterestedLeadToShopify(
     // move here that turns a marketing decision into a legal problem, and on a
     // store with 6k existing customers it would happen silently.
     const previouslyUnsubscribed = existing?.emailMarketingConsent?.marketingState === "UNSUBSCRIBED";
-    if (!previouslyUnsubscribed) {
-      input.emailMarketingConsent = {
-        marketingState: "SUBSCRIBED",
-        // Honest level: nobody double-opted in. Overstating it in Shopify's
-        // consent record is what turns a deliverability question into a
-        // compliance one.
-        marketingOptInLevel: "SINGLE_OPT_IN",
-        consentUpdatedAt: new Date().toISOString(),
-      };
+
+    // Shopify accepts emailMarketingConsent inside customerCreate but REJECTS
+    // it on customerUpdate ("please use the customerEmailMarketingConsentUpdate
+    // Mutation instead"). So it goes inline on create and as a second call on
+    // update — otherwise every existing customer errors out.
+    const consent = {
+      marketingState: "SUBSCRIBED",
+      // Honest level: nobody double-opted in. Overstating it in Shopify's
+      // consent record is what turns a deliverability question into a
+      // compliance one.
+      marketingOptInLevel: "SINGLE_OPT_IN",
+      consentUpdatedAt: new Date().toISOString(),
+    };
+    if (!previouslyUnsubscribed && !customerId) {
+      input.emailMarketingConsent = consent;
     }
 
     let resultId: string | null = null;
@@ -446,6 +452,28 @@ export async function syncInterestedLeadToShopify(
         return { companyId, status: "error", reason: errs.map((e) => e.message).join("; ") };
       }
       resultId = data.customerUpdate.customer?.id ?? customerId;
+
+      // Consent as its own call on the update path.
+      if (!previouslyUnsubscribed && resultId) {
+        try {
+          const cs = await client.graphql<{ customerEmailMarketingConsentUpdate: { userErrors: Array<{ message: string }> } }>(
+            `mutation Consent($input: CustomerEmailMarketingConsentUpdateInput!) {
+               customerEmailMarketingConsentUpdate(input: $input) {
+                 userErrors { message }
+               }
+             }`,
+            { input: { customerId: resultId, emailMarketingConsent: consent } },
+          );
+          const cErrs = cs.customerEmailMarketingConsentUpdate.userErrors;
+          if (cErrs?.length) {
+            console.warn("[shopify-wholesale] consent update:", cErrs.map((e) => e.message).join("; "));
+          }
+        } catch (e) {
+          // The customer record itself is written and correct; a consent
+          // failure shouldn't discard that work and force a full retry.
+          console.warn("[shopify-wholesale] consent update failed (non-fatal):", e instanceof Error ? e.message : e);
+        }
+      }
     } else {
       const data = await client.graphql<{ customerCreate: { customer: GqlCustomer | null; userErrors: Array<{ field: string[]; message: string }> } }>(
         `mutation CreateCustomer($input: CustomerInput!) {
