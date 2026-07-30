@@ -10,6 +10,7 @@ import {
   buildAddress,
   isAddressComplete,
   sourceTagFor,
+  buildNote,
   COMPANY_SELECT,
   type CompanyRow,
 } from "@/modules/sales/lib/shopify-wholesale-customer";
@@ -61,6 +62,7 @@ export async function GET(req: NextRequest) {
       "address1", "city", "state", "zip", "country",
       "address_complete", "would_slack_for_address", "tags",
       "status", "raw_source", "had_phoneburner_appointment", "already_in_shopify",
+      "marketing_consent", "note",
     ].join(",");
     const body = withEmail.map((r) => {
       const a = buildAddress(r);
@@ -73,6 +75,8 @@ export async function GET(req: NextRequest) {
         buildTags(r).join(" | "),
         r.status, r.source, r.had_appointment > 0 ? "yes" : "no",
         r.shopify_customer_id ? "yes" : "no",
+        "SUBSCRIBED (single opt-in)",
+        buildNote(r),
       ].map(esc).join(",");
     });
     return new NextResponse([header, ...body].join("\n"), {
@@ -112,6 +116,8 @@ export async function GET(req: NextRequest) {
         tags: buildTags(r),
         rawSource: r.source,
         hadPhoneBurnerAppointment: r.had_appointment > 0,
+        marketingConsent: "SUBSCRIBED (single opt-in)",
+        note: buildNote(r),
         address: addr,
         addressComplete: isAddressComplete(addr),
         alreadySynced: !!r.shopify_customer_id,
