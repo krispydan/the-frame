@@ -42,6 +42,15 @@ import {
   FileSpreadsheet,
   Landmark,
   TrendingUp,
+  Send,
+  Sparkles,
+  LayoutList,
+  CalendarDays,
+  Paintbrush,
+  MessageSquare,
+  Clapperboard,
+  Film,
+  PackageSearch,
 } from "lucide-react";
 import {
   Sidebar,
@@ -101,8 +110,6 @@ const salesNav: NavItem[] = [
       { title: "Brand accounts", href: "/brands", icon: Building },
     ],
   },
-  { title: "Campaigns", href: "/campaigns", icon: Mail },
-  { title: "Outreach", href: "/marketing/outreach", icon: Megaphone },
   { title: "Pipeline", href: "/pipeline", icon: Kanban },
   { title: "Customers", href: "/customers", icon: HeartHandshake },
 ];
@@ -165,8 +172,54 @@ const operationsNav: NavItem[] = [
   },
 ];
 
+
+/**
+ * Marketing, which was scattered across three sidebar groups: Campaigns and
+ * Outreach sat under Sales, the Marketing hub under Insights, and everything
+ * below them — the whole email assistant, the entire video studio, both
+ * calendars, the reply inbox — appeared nowhere at all. Eleven real pages were
+ * unreachable except by typing the URL.
+ *
+ * Grouped by channel now, because that's how the work actually divides: cold
+ * outreach to strangers, email marketing to people who know us, video for
+ * social. The events calendar sits on its own — it feeds AI copy across all
+ * three rather than belonging to any one.
+ */
+const marketingNav: NavItem[] = [
+  { title: "Overview", href: "/marketing", icon: Megaphone },
+  {
+    title: "Cold outreach", href: "/campaigns", icon: Send,
+    owns: ["/marketing/outreach"],
+    children: [
+      { title: "Campaigns", href: "/campaigns", icon: Send },
+      { title: "Reply inbox", href: "/campaigns/inbox", icon: Inbox },
+      { title: "Outreach analytics", href: "/marketing/outreach", icon: BarChart3 },
+    ],
+  },
+  {
+    title: "Email marketing", href: "/marketing/email", icon: Mail,
+    children: [
+      { title: "Email assistant", href: "/marketing/email", icon: Sparkles },
+      { title: "Campaign plan", href: "/marketing/email/plan", icon: LayoutList },
+      { title: "Send schedule", href: "/marketing/email/calendar", icon: CalendarDays },
+      { title: "Designer queue", href: "/marketing/email/designer-queue", icon: Paintbrush },
+      { title: "AI prompts", href: "/marketing/email/prompts", icon: MessageSquare },
+    ],
+  },
+  {
+    title: "Video studio", href: "/marketing/videos", icon: Clapperboard,
+    children: [
+      { title: "Post queue", href: "/marketing/videos", icon: Clapperboard },
+      { title: "Clip library", href: "/marketing/videos/clips", icon: Film },
+      { title: "Recipes", href: "/marketing/videos/recipes", icon: LayoutList },
+      { title: "Identify products", href: "/marketing/videos/identify", icon: Search },
+      { title: "Product coverage", href: "/marketing/videos/products", icon: PackageSearch },
+    ],
+  },
+  { title: "Events calendar", href: "/marketing/calendar", icon: CalendarDays },
+];
+
 const insightsNav: NavItem[] = [
-  { title: "Marketing", href: "/marketing", icon: Megaphone },
   { title: "Intelligence", href: "/intelligence", icon: BarChart3 },
   { title: "AI Center", href: "/ai", icon: Brain },
   { title: "Notifications", href: "/notifications", icon: Bell },
@@ -189,10 +242,10 @@ const bottomNav = [
 
 const ROLE_ALLOWED_HREFS: Record<string, string[]> = {
   owner: ["*"],
-  sales_manager: ["/dashboard", "/targets", "/prospects", "/prospects/review", "/prospects/sources", "/prospects/facebook-leads", "/segments", "/campaigns", "/marketing/outreach", "/pipeline", "/customers", "/brands", "/catalog", "/inventory/performance", "/inventory/colors"],
+  sales_manager: ["/dashboard", "/targets", "/prospects", "/prospects/review", "/prospects/sources", "/prospects/facebook-leads", "/segments", "/campaigns", "/campaigns/inbox", "/marketing/outreach", "/pipeline", "/customers", "/brands", "/catalog", "/inventory/performance", "/inventory/colors"],
   warehouse: ["/dashboard", "/orders", "/orders/international", "/catalog", "/catalog/intake", "/media", "/inventory", "/inventory/performance", "/inventory/colors", "/inventory/factories", "/inventory/reorder", "/inventory/purchase-orders", "/inventory/exports"],
   finance: ["/dashboard", "/orders", "/finance", "/finance/cogs", "/finance/xero", "/inventory/performance", "/inventory/colors", "/inventory/factories"],
-  marketing: ["/dashboard", "/marketing", "/marketing/outreach", "/catalog", "/catalog/export", "/media", "/campaigns", "/prospects/facebook-leads", "/inventory/performance", "/inventory/colors"],
+  marketing: ["/dashboard", "/marketing", "/marketing/outreach", "/marketing/email", "/marketing/email/plan", "/marketing/email/calendar", "/marketing/email/designer-queue", "/marketing/email/prompts", "/marketing/videos", "/marketing/videos/clips", "/marketing/videos/recipes", "/marketing/videos/identify", "/marketing/videos/products", "/marketing/calendar", "/catalog", "/catalog/export", "/media", "/campaigns", "/campaigns/inbox", "/prospects/facebook-leads", "/inventory/performance", "/inventory/colors"],
   support: ["/dashboard", "/orders", "/customers"],
   ai: ["/dashboard", "/ai"],
 };
@@ -259,6 +312,7 @@ export function AppSidebar() {
 
   const filteredSales = filterNavByRole(salesNav, role);
   const filteredOps = filterNavByRole(operationsNav, role);
+  const filteredMarketing = filterNavByRole(marketingNav, role);
   const filteredInsights = filterNavByRole(insightsNav, role);
 
   // Sections auto-expand when you're inside them; a manual toggle overrides
@@ -364,6 +418,15 @@ export function AppSidebar() {
             <SidebarMenu>{renderItems(filteredOps)}</SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {filteredMarketing.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Marketing</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>{renderItems(filteredMarketing)}</SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
 
         <SidebarGroup>
           <SidebarGroupLabel>Insights</SidebarGroupLabel>
