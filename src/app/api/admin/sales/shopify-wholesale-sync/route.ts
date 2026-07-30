@@ -27,7 +27,9 @@ import {
  *      exactly as it would be created. Every lead, not a sample.
  *
  * POST { companyId }              → sync one lead (the test path)
- * POST { backfill: true, limit }  → sync the existing interested backlog
+ * POST { backfill: true, limit }  → sync the existing interested backlog.
+ *      Skips anything already stamped, so repeated calls walk the queue down.
+ *      Returns only problem rows plus a `remaining` count.
  * POST { suppressBuyers: true }   → run the stop-mailing sweep now
  *
  * Auth: x-admin-key: jaxy2026.
@@ -172,7 +174,18 @@ export async function POST(req: NextRequest) {
 
   if (body.backfill === true) {
     const limit = Math.min(500, Math.max(1, Number(body.limit) || 25));
-    const rows = sqlite.prepare(`${COHORT_SQL} LIMIT ?`).all(limit) as CompanyRow[];
+    // Skip anything already stamped. Syncing sets companies.updated_at, and the
+    // cohort is ordered by it DESC — so without this filter each batch pulls
+    // back the rows the previous batch just finished and the backfill spins
+    // forever on the same 50 leads.
+    const sql = body.includeSynced === true
+      ? `${COHORT_SQL} LIMIT ?`
+      : `${COMPANY_SELECT}
+           WHERE c.status IN ('interested','catalog_sent')
+             AND c.shopify_customer_id IS NULL
+           ORDER BY c.updated_at DESC
+           LIMIT ?`;
+    const rows = sqlite.prepare(sql).all(limit) as CompanyRow[];
     const results: Awaited<ReturnType<typeof syncInterestedLeadToShopify>>[] = [];
     for (const r of rows) {
       results.push(await syncInterestedLeadToShopify(r.id, { force: body.force === true }));
@@ -180,8 +193,20 @@ export async function POST(req: NextRequest) {
     const by = (s: string) => results.filter((x) => x.status === s).length;
     return NextResponse.json({
       ok: true,
-      counts: { created: by("created"), updated: by("updated"), skipped: by("skipped"), errors: by("error") },
-      results,
+      counts: {
+        attempted: rows.length,
+        created: by("created"), updated: by("updated"),
+        skipped: by("skipped"), errors: by("error"),
+        remaining: (sqlite.prepare(
+          `SELECT COUNT(*) n FROM companies c
+            WHERE c.status IN ('interested','catalog_sent')
+              AND c.shopify_customer_id IS NULL
+              AND EXISTS (SELECT 1 FROM contacts ct WHERE ct.company_id = c.id
+                            AND TRIM(COALESCE(ct.email,'')) <> ''
+                            AND LOWER(ct.email) NOT LIKE '%@relay.faire.com%')`,
+        ).get() as { n: number }).n,
+      },
+      results: results.filter((r) => r.status === "error" || r.status === "skipped"),
     });
   }
 
