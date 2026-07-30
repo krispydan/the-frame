@@ -26,6 +26,14 @@ export const videoClipCategories = sqliteTable("marketing_video_clip_categories"
   /** Can a clip of this category open a video? Recipes may still
    *  override by putting any category in slot 0. */
   isHook: integer("is_hook").notNull().default(0),
+  /**
+   * Does a clip of this type actually SHOW the product on screen (as
+   * opposed to unboxing the box, packaging, atmosphere b-roll, or a
+   * text outro)? Every composed video must contain at least one — this
+   * is operator-owned rather than a hardcoded slug list so new/renamed
+   * categories are classified correctly without a deploy.
+   */
+  isProductShot: integer("is_product_shot").notNull().default(0),
   sortOrder: integer("sort_order").notNull().default(0),
   /** Archive instead of delete once clips reference it. */
   archived: integer("archived").notNull().default(0),

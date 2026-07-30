@@ -39,6 +39,12 @@ export interface ComposerClip extends Pick<
    * so it can't be used as safe glue in a product-focused video.
    */
   noProductConfirmed?: boolean;
+  /**
+   * Whether this clip's video type shows the product on screen (from the
+   * category's operator-owned flag). Undefined falls back to the legacy
+   * slug list — see showsProduct().
+   */
+  isProductShot?: boolean;
 }
 
 /**
@@ -59,17 +65,25 @@ export function eligibleForFocus(clips: ComposerClip[], focusSkuIds: string[]): 
 }
 
 /**
- * Categories that actually SHOW the product on screen — as opposed to
- * unboxing the box, cases/packaging, atmosphere b-roll, or text
- * openers/closers. A video with none of these shows everything BUT the
- * product (the "unboxing over and over, no actual product" failure), so
- * every composed video must contain at least one.
+ * Fallback list of categories that show the product, used ONLY when a
+ * clip carries no `isProductShot` flag (unseeded data, or a fixture).
+ * The real source of truth is the per-category flag operators own — a
+ * hardcoded list can't know about categories the team invents later
+ * (product-showcase, try-on-haul, …).
  */
 export const PRODUCT_SHOWING_CATEGORIES = new Set([
   "flat_lay", "on_model", "detail", "lifestyle", "in_car",
 ]);
 
+/**
+ * Does this clip actually show the product on screen — as opposed to
+ * unboxing the box, packaging, atmosphere b-roll, or a text outro? A
+ * video with none of these shows everything BUT the product (the
+ * "unboxing over and over, no actual product" failure), so every
+ * composed video must contain at least one.
+ */
 export function showsProduct(clip: ComposerClip): boolean {
+  if (typeof clip.isProductShot === "boolean") return clip.isProductShot;
   return PRODUCT_SHOWING_CATEGORIES.has(clip.categorySlug);
 }
 

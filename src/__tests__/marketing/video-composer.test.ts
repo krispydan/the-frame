@@ -3,6 +3,7 @@ import {
   clipWeight,
   composeCandidate,
   eligibleForFocus,
+  showsProduct,
   FALLBACK_RECIPE_ID,
   permutationHash,
   pickRecipe,
@@ -111,6 +112,41 @@ describe("product coherence (focus SKU)", () => {
         expect(ok, `clip ${id} (skus=${c.skuIds}) leaked into a focused video`).toBe(true);
       }
     }
+  });
+});
+
+describe("'shows the product' flag", () => {
+  it("uses the per-category flag over the legacy slug list", () => {
+    // A team-invented category the hardcoded list has never heard of.
+    const showcase = makeClip({ categorySlug: "product-showcase", isProductShot: true });
+    expect(showsProduct(showcase)).toBe(true);
+    // …and a legacy "product" slug the operator has explicitly unticked.
+    const notReally = makeClip({ categorySlug: "on_model", isProductShot: false });
+    expect(showsProduct(notReally)).toBe(false);
+  });
+
+  it("falls back to the legacy list when the flag is absent", () => {
+    expect(showsProduct(makeClip({ categorySlug: "on_model" }))).toBe(true);
+    expect(showsProduct(makeClip({ categorySlug: "ugc_unboxing" }))).toBe(false);
+  });
+
+  it("composes a valid video from flagged custom categories", () => {
+    const recipe = makeRecipe({
+      patternJson: JSON.stringify([{ categories: ["unboxing", "product-showcase"], min: 3, max: 5 }]),
+    });
+    const clips = [
+      ...Array.from({ length: 5 }, () => makeClip({ categorySlug: "unboxing", isProductShot: false })),
+      ...Array.from({ length: 5 }, () => makeClip({ categorySlug: "product-showcase", isProductShot: true })),
+    ];
+    const byId = new Map(clips.map((c) => [c.id, c]));
+    let built = 0;
+    for (let seed = 0; seed < 20; seed++) {
+      const result = composeCandidate(makeContext(clips, [recipe], seed));
+      if (!result) continue;
+      built++;
+      expect(result.clipIds.some((id) => byId.get(id)!.isProductShot === true)).toBe(true);
+    }
+    expect(built).toBeGreaterThan(0); // custom categories must not be rejected wholesale
   });
 });
 

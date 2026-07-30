@@ -60,6 +60,23 @@ try { sqlite.exec("ALTER TABLE marketing_video_posts ADD COLUMN burn_hook INTEGE
 try { sqlite.exec("ALTER TABLE marketing_video_posts ADD COLUMN burned_path TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE marketing_video_posts ADD COLUMN burned_hook TEXT"); } catch { /* exists */ }
 
+// "Shows the product" flag per video type — replaces a hardcoded slug list
+// so the composer's product-presence rule understands the team's OWN
+// categories (product-showcase, try-on-haul, …). Seeded once from the known
+// product-showing types; operators own it from the category manager after.
+try {
+  sqlite.exec("ALTER TABLE marketing_video_clip_categories ADD COLUMN is_product_shot INTEGER NOT NULL DEFAULT 0");
+  // Fresh column → seed it. Inside the try so an existing column (i.e. an
+  // operator has already curated these) is never overwritten.
+  sqlite.exec(`
+    UPDATE marketing_video_clip_categories SET is_product_shot = 1
+    WHERE slug IN (
+      'flat_lay','on_model','detail','lifestyle','in_car',
+      'product-showcase','try-on-haul','talking-head'
+    )
+  `);
+} catch { /* column already exists — operator-owned from here */ }
+
 // "Cases & Packaging" video type — cases/packaging shots with NO product
 // (glasses) in frame. Distinct from untagged: known product-free b-roll,
 // so the composer can safely use it as glue in a product-focused video.

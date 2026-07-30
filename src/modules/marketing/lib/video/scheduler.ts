@@ -47,15 +47,29 @@ export function loadComposerClips(): ComposerClip[] {
     SELECT c.id, c.category_id AS categoryId, c.audio_mode AS audioMode,
            c.duration_sec AS durationSec, c.boost, c.times_used AS timesUsed,
            c.last_used_at AS lastUsedAt, cat.slug AS categorySlug,
+           cat.is_product_shot AS isProductShot,
            (SELECT 1 FROM marketing_media_matches m
               WHERE m.media_type = 'clip' AND m.media_id = c.id
                 AND m.status = 'no_product' LIMIT 1) AS noProduct
     FROM marketing_video_clips c
     JOIN marketing_video_clip_categories cat ON cat.id = c.category_id AND cat.archived = 0
     WHERE c.status = 'ready' AND c.duration_sec IS NOT NULL
-  `).all() as Array<Omit<ComposerClip, "skuIds"> & { noProduct: number | null }>;
+  `).all() as Array<
+    Omit<ComposerClip, "skuIds" | "isProductShot" | "noProductConfirmed"> & {
+      noProduct: number | null;
+      isProductShot: number | null;
+    }
+  >;
 
   if (rows.length === 0) return [];
+
+  // Safety: if NOTHING is flagged as a product shot, the flag hasn't been
+  // curated yet — fall back to the legacy slug list rather than blocking
+  // every video (the presence rule would otherwise reject them all).
+  const anyFlagged = rows.some((r) => r.isProductShot === 1);
+  if (!anyFlagged) {
+    console.warn("[video] no category is marked 'shows the product' — using the legacy default list");
+  }
 
   const products = sqlite.prepare(`
     SELECT clip_id AS clipId, sku_id AS skuId FROM marketing_video_clip_products
@@ -67,12 +81,14 @@ export function loadComposerClips(): ComposerClip[] {
     skusByClip.set(p.clipId, list);
   }
 
-  return rows.map(({ noProduct, ...r }) => ({
+  return rows.map(({ noProduct, isProductShot, ...r }) => ({
     ...r,
     skuIds: skusByClip.get(r.id) ?? [],
     // Product-free glue = explicitly marked "no product visible", OR the
     // clip's video type is Cases & Packaging (which never shows a product).
     noProductConfirmed: noProduct === 1 || r.categorySlug === "packaging",
+    // undefined → showsProduct() falls back to the legacy slug list.
+    isProductShot: anyFlagged ? isProductShot === 1 : undefined,
   }));
 }
 
