@@ -73,6 +73,30 @@ export async function syncShipHeroInventory(): Promise<SyncResult> {
         updated_at = excluded.updated_at
     `);
 
+    // getInventoryLevels() is a FULL paginated pull of every ShipHero
+    // warehouse product (including on_hand: 0). So any catalog SKU that is
+    // NOT in this response genuinely has zero warehouse stock. Previously we
+    // only upserted the SKUs we saw and left everything else at its last
+    // value — meaning a SKU that sold out (or whose ShipHero record was
+    // removed / never matched) kept a stale non-zero quantity forever
+    // (e.g. Phoenix · Black stuck at 495). We now reconcile: zero out any
+    // warehouse row whose SKU wasn't seen in this pull.
+    //
+    // SAFETY GUARD: only reconcile when the pull looks complete. A glitchy
+    // partial pull (API hiccup returning a handful of rows) must never zero
+    // the whole catalog. Jaxy's warehouse has well over this floor of SKUs.
+    const MIN_SYNC_ROWS_FOR_RECONCILE = 50;
+    const pullLooksComplete = inventory.length >= MIN_SYNC_ROWS_FOR_RECONCILE;
+
+    // Collect the catalog sku_ids ShipHero actually returned this run.
+    const seenSkuIds = new Set<string>();
+    for (const sku of skuTotals.keys()) {
+      if (sku.includes("-12PK")) continue;
+      const skuId = skuToId.get(sku);
+      if (skuId) seenSkuIds.add(skuId);
+    }
+
+    let zeroedCount = 0;
     const batch = sqlite.transaction(() => {
       for (const item of inventory) {
         upsert.run(item.sku, item.warehouse_id, item.on_hand, item.allocated, item.available, syncedAt);
@@ -86,9 +110,33 @@ export async function syncShipHeroInventory(): Promise<SyncResult> {
         if (!skuId) continue;
         upsertMainInventory.run(skuId, totals.onHand, totals.allocated, syncedAt);
       }
+
+      // Reconcile: zero warehouse rows for SKUs ShipHero didn't return.
+      if (pullLooksComplete) {
+        const staleRows = sqlite.prepare(
+          "SELECT sku_id, quantity FROM inventory WHERE location = 'warehouse' AND quantity > 0",
+        ).all() as Array<{ sku_id: string; quantity: number }>;
+        const zeroStmt = sqlite.prepare(
+          "UPDATE inventory SET quantity = 0, reserved_quantity = 0, updated_at = ? WHERE sku_id = ? AND location = 'warehouse'",
+        );
+        for (const row of staleRows) {
+          if (!seenSkuIds.has(row.sku_id)) {
+            zeroStmt.run(syncedAt, row.sku_id);
+            zeroedCount++;
+          }
+        }
+      }
     });
 
     batch();
+
+    if (!pullLooksComplete) {
+      console.warn(
+        `[shiphero-inventory-sync] Pull returned only ${inventory.length} rows (< ${MIN_SYNC_ROWS_FOR_RECONCILE}); skipped stale-SKU reconciliation to avoid zeroing real stock.`,
+      );
+    } else if (zeroedCount > 0) {
+      console.log(`[shiphero-inventory-sync] Reconciled ${zeroedCount} SKU(s) to 0 (not present in ShipHero full pull).`);
+    }
 
     return { success: true, skuCount: inventory.length, syncedAt };
   } catch (err) {
