@@ -16,7 +16,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { VideoPlayer } from "@/components/ui/video-player";
-import { ArrowLeft, Boxes, Check, Loader2, Play, RefreshCw, Sparkles } from "lucide-react";
+import { ArrowLeft, Boxes, Check, Loader2, Play, RefreshCw, Sparkles, Upload } from "lucide-react";
 
 type Type = { slug: string; name: string; count: number; isProductShot: boolean };
 type Product = {
@@ -119,6 +119,28 @@ export default function ProductCoveragePage() {
       toast.success(`Building ${d.total} product videos in the background — refresh to follow along.`, { duration: 8000 });
     } else {
       toast.message(d.message ?? d.error ?? "Nothing to build");
+    }
+  };
+
+  /** Push an approved video to its Shopify product page. */
+  const publish = async (v: ProductVideo) => {
+    setBusy(v.productId);
+    try {
+      const res = await fetch("/api/v1/marketing/videos/product-videos/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productId: v.productId }),
+      });
+      const d = await res.json();
+      if (res.ok) {
+        toast.success("Published to the Shopify product page");
+        load();
+        setPreview(null);
+      } else {
+        toast.error(d.error ?? "Publish failed");
+      }
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -306,9 +328,15 @@ export default function ProductCoveragePage() {
                 Rebuild
               </Button>
               {preview.approvedAt ? (
-                <Button variant="outline" size="sm" onClick={() => approve(preview, false)}>
-                  Approved ✓ — undo
-                </Button>
+                <>
+                  <Button variant="outline" size="sm" onClick={() => approve(preview, false)}>
+                    Approved ✓ — undo
+                  </Button>
+                  <Button size="sm" onClick={() => publish(preview)} disabled={busy === preview.productId}>
+                    {busy === preview.productId ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
+                    Publish to Shopify
+                  </Button>
+                </>
               ) : (
                 <Button size="sm" onClick={() => approve(preview, true)}>
                   <Check className="h-4 w-4 mr-1" /> Approve for publishing
