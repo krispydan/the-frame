@@ -3,6 +3,7 @@ export const maxDuration = 300;
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
+import { getShopifyClientByChannel, listAllShops } from "@/modules/integrations/lib/shopify/admin-api";
 import {
   syncInterestedLeadToShopify,
   suppressBuyersFromMail,
@@ -43,6 +44,39 @@ export async function GET(req: NextRequest) {
   }
   const params = new URL(req.url).searchParams;
   const limit = Math.min(200, Math.max(1, parseInt(params.get("limit") || "20", 10)));
+
+  // Which store the "wholesale" channel actually resolves to, proven by a live
+  // API call rather than by what a config row claims. Writing hundreds of
+  // customers into the DTC store by mistake is expensive to unpick, so this
+  // check exists to be run before any bulk write.
+  if (params.get("checkStore") === "1") {
+    const shops = (await listAllShops()).map((s2) => ({
+      domain: s2.shopDomain, channel: s2.channel, active: s2.isActive,
+    }));
+    try {
+      const client = await getShopifyClientByChannel("wholesale");
+      const probe = await client.graphql<{ shop: { name: string; myshopifyDomain: string; email: string | null } }>(
+        `query { shop { name myshopifyDomain email } }`,
+      );
+      const existing = await client.graphql<{ customersCount: { count: number } }>(
+        `query { customersCount { count } }`,
+      ).catch(() => null);
+      return NextResponse.json({
+        ok: true,
+        resolvesTo: client.shopDomain,
+        liveShop: probe.shop,
+        matches: probe.shop.myshopifyDomain === client.shopDomain,
+        existingCustomers: existing?.customersCount?.count ?? null,
+        allShops: shops,
+      });
+    } catch (e) {
+      return NextResponse.json({
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+        allShops: shops,
+      }, { status: 500 });
+    }
+  }
 
   const rows = sqlite.prepare(`${COHORT_SQL} LIMIT ?`).all(limit) as CompanyRow[];
   const all = sqlite.prepare(COHORT_SQL).all() as CompanyRow[];
