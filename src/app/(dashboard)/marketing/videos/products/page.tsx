@@ -10,10 +10,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Boxes, RefreshCw } from "lucide-react";
+import { VideoPlayer } from "@/components/ui/video-player";
+import { ArrowLeft, Boxes, Check, Loader2, Play, RefreshCw, Sparkles } from "lucide-react";
 
 type Type = { slug: string; name: string; count: number; isProductShot: boolean };
 type Product = {
@@ -36,6 +39,18 @@ type Report = {
   products: Product[];
 };
 
+type ProductVideo = {
+  productId: string;
+  productName: string;
+  status: "pending" | "rendering" | "ready" | "failed";
+  videoUrl: string | null;
+  posterUrl: string | null;
+  durationSec: number | null;
+  caption: string | null;
+  approvedAt: string | null;
+  error: string | null;
+};
+
 const STATUS: Record<Product["status"], { label: string; cls: string }> = {
   ready: { label: "Ready", cls: "bg-emerald-100 text-emerald-800 border-emerald-300" },
   thin: { label: "Thin", cls: "bg-amber-100 text-amber-800 border-amber-300" },
@@ -48,17 +63,78 @@ export default function ProductCoveragePage() {
   const [filter, setFilter] = useState<"all" | Product["status"]>("all");
   const [search, setSearch] = useState("");
 
+  const [videos, setVideos] = useState<Record<string, ProductVideo>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [batching, setBatching] = useState(false);
+  const [preview, setPreview] = useState<ProductVideo | null>(null);
+
   const load = useCallback(() => {
     setLoading(true);
-    fetch("/api/v1/marketing/videos/product-coverage")
-      .then((r) => r.json())
-      .then((d) => {
-        setReport(d);
+    Promise.all([
+      fetch("/api/v1/marketing/videos/product-coverage").then((r) => r.json()),
+      fetch("/api/v1/marketing/videos/product-videos").then((r) => r.json()),
+    ])
+      .then(([cov, vid]) => {
+        setReport(cov);
+        const map: Record<string, ProductVideo> = {};
+        for (const v of (vid.videos ?? []) as ProductVideo[]) map[v.productId] = v;
+        setVideos(map);
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, []);
   useEffect(() => load(), [load]);
+
+  /** Build (or rebuild) one product's video. */
+  const generate = async (productId: string) => {
+    setBusy(productId);
+    try {
+      const res = await fetch("/api/v1/marketing/videos/product-videos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productId }),
+      });
+      const d = await res.json();
+      if (res.ok) {
+        setVideos((prev) => ({ ...prev, [productId]: d.video }));
+        toast.success("Product video ready");
+      } else {
+        toast.error(d.error ?? "Build failed");
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const generateAll = async () => {
+    setBatching(true);
+    const res = await fetch("/api/v1/marketing/videos/product-videos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ all: true }),
+    });
+    const d = await res.json();
+    setBatching(false);
+    if (res.ok && d.queued) {
+      toast.success(`Building ${d.total} product videos in the background — refresh to follow along.`, { duration: 8000 });
+    } else {
+      toast.message(d.message ?? d.error ?? "Nothing to build");
+    }
+  };
+
+  const approve = async (v: ProductVideo, approved: boolean) => {
+    const res = await fetch("/api/v1/marketing/videos/product-videos", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId: v.productId, approved }),
+    });
+    const d = await res.json();
+    if (res.ok) {
+      setVideos((prev) => ({ ...prev, [v.productId]: d.video }));
+      setPreview(d.video);
+      toast.success(approved ? "Approved for publishing" : "Approval removed");
+    } else toast.error(d.error ?? "Failed");
+  };
 
   const rows = useMemo(() => {
     if (!report) return [];
@@ -80,6 +156,10 @@ export default function ProductCoveragePage() {
           <Boxes className="h-5 w-5" /> Product video coverage
         </h1>
         <div className="flex-1" />
+        <Button onClick={generateAll} disabled={batching || !report?.ready}>
+          <Sparkles className="h-4 w-4 mr-1" />
+          {batching ? "Queuing…" : `Generate all ready${report?.ready ? ` (${report.ready})` : ""}`}
+        </Button>
         <Button variant="ghost" size="sm" onClick={load}>
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </Button>
@@ -139,6 +219,7 @@ export default function ProductCoveragePage() {
                 <th className="p-2.5 text-right">Footage</th>
                 <th className="p-2.5">Video types</th>
                 <th className="p-2.5">Gap</th>
+                <th className="p-2.5 text-right">Video</th>
               </tr>
             </thead>
             <tbody>
@@ -170,11 +251,72 @@ export default function ProductCoveragePage() {
                     </span>
                   </td>
                   <td className="p-2.5 text-xs text-muted-foreground">{p.gap ?? "—"}</td>
+                  <td className="p-2.5 text-right">
+                    {(() => {
+                      const v = videos[p.productId];
+                      if (v?.status === "ready") {
+                        return (
+                          <span className="flex items-center justify-end gap-1">
+                            {v.approvedAt && (
+                              <span title="Approved for publishing" className="text-emerald-600">
+                                <Check className="h-4 w-4" />
+                              </span>
+                            )}
+                            <Button size="sm" variant="outline" onClick={() => setPreview(v)}>
+                              <Play className="h-3.5 w-3.5 mr-1" /> View
+                            </Button>
+                          </span>
+                        );
+                      }
+                      if (p.status !== "ready") return <span className="text-xs text-muted-foreground">—</span>;
+                      return (
+                        <Button size="sm" variant="secondary" disabled={busy === p.productId} onClick={() => generate(p.productId)}>
+                          {busy === p.productId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Generate"}
+                        </Button>
+                      );
+                    })()}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Review + approve — the gate before anything reaches the storefront */}
+      {preview && (
+        <Dialog open onOpenChange={(open) => !open && setPreview(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="pr-8 text-base">{preview.productName}</DialogTitle>
+            </DialogHeader>
+            <VideoPlayer
+              src={preview.videoUrl}
+              poster={preview.posterUrl}
+              size="md"
+              className="aspect-[9/16] w-full max-w-[240px] mx-auto rounded-lg"
+            />
+            <p className="text-center text-xs text-muted-foreground">
+              {preview.durationSec ? `${preview.durationSec.toFixed(1)}s` : ""} · silent master (no on-screen hook)
+            </p>
+            {preview.caption && <p className="rounded-md border bg-muted/30 p-2 text-center text-sm">{preview.caption}</p>}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => generate(preview.productId)} disabled={busy === preview.productId}>
+                {busy === preview.productId ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+                Rebuild
+              </Button>
+              {preview.approvedAt ? (
+                <Button variant="outline" size="sm" onClick={() => approve(preview, false)}>
+                  Approved ✓ — undo
+                </Button>
+              ) : (
+                <Button size="sm" onClick={() => approve(preview, true)}>
+                  <Check className="h-4 w-4 mr-1" /> Approve for publishing
+                </Button>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );
