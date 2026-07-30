@@ -20,7 +20,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const existing = db.select().from(videoClipCategories).where(eq(videoClipCategories.id, id)).get();
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  let body: { name?: string; description?: string | null; isHook?: boolean; sortOrder?: number; archived?: boolean };
+  let body: { name?: string; description?: string | null; isHook?: boolean; isProductShot?: boolean; sortOrder?: number; archived?: boolean };
   try {
     body = await request.json();
   } catch {
@@ -34,6 +34,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
   if (body.description !== undefined) updates.description = body.description?.trim() || null;
   if (body.isHook !== undefined) updates.isHook = body.isHook ? 1 : 0;
+  if (body.isProductShot !== undefined) updates.isProductShot = body.isProductShot ? 1 : 0;
   if (body.sortOrder !== undefined) updates.sortOrder = Number(body.sortOrder) || 0;
   if (body.archived !== undefined) updates.archived = body.archived ? 1 : 0;
 

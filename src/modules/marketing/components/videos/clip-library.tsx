@@ -22,6 +22,8 @@ import { SourceAutoClipper } from "./source-auto-clipper";
 type Category = UploaderCategory & {
   description: string | null;
   is_hook: number;
+  /** 1 = clips of this type show the product on screen (see composer). */
+  is_product_shot: number;
   archived: number;
   ready_clips: number;
   total_clips: number;
@@ -739,6 +741,10 @@ function CategoryManager({
         <DialogHeader>
           <DialogTitle>Clip categories</DialogTitle>
         </DialogHeader>
+        <p className="text-xs text-muted-foreground">
+          Tick <b>shows product</b> for types where the glasses are actually on screen. Every generated
+          video must include at least one — it&apos;s what stops &ldquo;all unboxing, no product&rdquo;.
+        </p>
         <div className="space-y-2 max-h-80 overflow-y-auto">
           {categories.map((c) => (
             <div key={c.id} className={`flex items-center gap-2 rounded border p-2 text-sm ${c.archived ? "opacity-50" : ""}`}>
@@ -750,6 +756,17 @@ function CategoryManager({
                   {c.slug} · {c.ready_clips} ready / {c.total_clips} clips
                 </div>
               </div>
+              <label
+                className="flex shrink-0 items-center gap-1 text-xs whitespace-nowrap"
+                title="Does this video type show the product on screen?"
+              >
+                <input
+                  type="checkbox"
+                  checked={c.is_product_shot === 1}
+                  onChange={(e) => patch(c.id, { isProductShot: e.target.checked })}
+                />
+                shows product
+              </label>
               <Button
                 size="sm"
                 variant="ghost"

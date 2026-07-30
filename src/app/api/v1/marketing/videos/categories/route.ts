@@ -27,7 +27,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  let body: { name?: string; slug?: string; description?: string; isHook?: boolean; sortOrder?: number };
+  let body: { name?: string; slug?: string; description?: string; isHook?: boolean; isProductShot?: boolean; sortOrder?: number };
   try {
     body = await request.json();
   } catch {
@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
         name: body.name.trim(),
         description: body.description?.trim() || null,
         isHook: body.isHook ? 1 : 0,
+        isProductShot: body.isProductShot ? 1 : 0,
         sortOrder: body.sortOrder ?? 100,
       })
       .run();
