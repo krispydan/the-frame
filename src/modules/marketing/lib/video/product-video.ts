@@ -89,7 +89,7 @@ const LEGACY_PRODUCT_SHOT = ["flat_lay", "on_model", "detail", "lifestyle", "in_
  * order), then supporting clips; longer takes win ties; id breaks the
  * rest so the result never wobbles between runs.
  */
-export function selectClipsForProduct(productId: string): CandidateClip[] {
+export function selectableClips(productId: string): CandidateClip[] {
   const anyFlagged = (sqlite
     .prepare(`SELECT COUNT(*) AS n FROM marketing_video_clip_categories WHERE is_product_shot = 1`)
     .get() as { n: number }).n > 0;
@@ -127,25 +127,73 @@ export function selectClipsForProduct(productId: string): CandidateClip[] {
     sortOrder: r.sortOrder,
   }));
 
-  candidates.sort(
-    (a, b) =>
-      Number(b.isProductShot) - Number(a.isProductShot) ||
-      a.sortOrder - b.sortOrder ||
-      b.durationSec - a.durationSec ||
-      a.id.localeCompare(b.id),
-  );
+  return candidates;
+}
 
-  // Take up to MAX_CLIPS while respecting the duration ceiling — but never
-  // drop the opening product shot to satisfy it.
+/**
+ * The clips that make up this product's video, in cut order.
+ */
+export function selectClipsForProduct(productId: string): CandidateClip[] {
+  const candidates = selectableClips(productId);
+
+  // ROUND-ROBIN ACROSS VIDEO TYPES, not "best category first".
+  //
+  // A product with 11 lifestyle clips and 7 on-model shots would otherwise
+  // produce five near-identical lifestyle clips in a row. Grouping by type
+  // and taking one from each in rotation guarantees the cut moves between
+  // shot types — the same anti-monotony rule the social composer follows.
+  const groups = new Map<string, CandidateClip[]>();
+  for (const c of candidates) {
+    const key = c.categorySlug ?? "uncategorized";
+    const list = groups.get(key) ?? [];
+    list.push(c);
+    groups.set(key, list);
+  }
+  // Longest take first within a type (a longer clip is usually the better
+  // shot), id to keep it stable.
+  for (const list of groups.values()) {
+    list.sort((a, b) => b.durationSec - a.durationSec || a.id.localeCompare(b.id));
+  }
+  // Product-showing types lead, then the operator's category order.
+  const ordered = [...groups.entries()].sort((a, b) => {
+    const A = a[1][0];
+    const B = b[1][0];
+    return (
+      Number(B.isProductShot) - Number(A.isProductShot) ||
+      A.sortOrder - B.sortOrder ||
+      a[0].localeCompare(b[0])
+    );
+  });
+
   const picked: CandidateClip[] = [];
   let total = 0;
-  for (const c of candidates) {
-    if (picked.length >= MAX_CLIPS) break;
-    if (picked.length > 0 && total + c.durationSec > MAX_DURATION_SEC) continue;
-    picked.push(c);
-    total += c.durationSec;
+  let round = 0;
+  let addedThisRound = true;
+  while (picked.length < MAX_CLIPS && addedThisRound) {
+    addedThisRound = false;
+    for (const [, list] of ordered) {
+      if (picked.length >= MAX_CLIPS) break;
+      const c = list[round];
+      if (!c) continue;
+      // Never drop the opening product shot to satisfy the duration cap.
+      if (picked.length > 0 && total + c.durationSec > MAX_DURATION_SEC) continue;
+      picked.push(c);
+      total += c.durationSec;
+      addedThisRound = true;
+    }
+    round++;
   }
   return picked;
+}
+
+/**
+ * Turn a hand-picked clip id list into candidates, preserving the
+ * operator's ORDER and silently dropping anything that isn't a valid clip
+ * for this product (a stale id, or one that also shows another product).
+ */
+function resolveOverride(productId: string, clipIds: string[]): CandidateClip[] {
+  const valid = new Map(selectableClips(productId).map((c) => [c.id, c]));
+  return clipIds.map((id) => valid.get(id)).filter((c): c is CandidateClip => Boolean(c));
 }
 
 /** Where a product's master + poster live (deterministic, overwritten). */
@@ -161,19 +209,103 @@ export interface BuildResult {
   reason?: string;
 }
 
+export interface ClipDetail {
+  id: string;
+  fileName: string;
+  durationSec: number | null;
+  categorySlug: string | null;
+  categoryName: string | null;
+  isProductShot: boolean;
+  posterUrl: string | null;
+  previewUrl: string | null;
+}
+
+/**
+ * Every ready clip tagged to this product — the palette the edit page
+ * offers. Same coherence rule as the builder (nothing that also shows
+ * another product), ordered so product shots surface first.
+ */
+export function availableClipsForProduct(productId: string): ClipDetail[] {
+  const anyFlagged = (sqlite
+    .prepare(`SELECT COUNT(*) AS n FROM marketing_video_clip_categories WHERE is_product_shot = 1`)
+    .get() as { n: number }).n > 0;
+
+  const rows = sqlite.prepare(`
+    SELECT DISTINCT c.id, c.file_name AS fileName, c.duration_sec AS durationSec,
+           c.poster_path AS posterPath, c.normalized_path AS normalizedPath,
+           cat.slug AS categorySlug, cat.name AS categoryName,
+           cat.is_product_shot AS isProductShot, COALESCE(cat.sort_order, 999) AS sortOrder
+      FROM marketing_video_clips c
+      JOIN marketing_video_clip_products cp ON cp.clip_id = c.id
+      JOIN catalog_skus s ON s.id = cp.sku_id
+      LEFT JOIN marketing_video_clip_categories cat ON cat.id = c.category_id
+     WHERE s.product_id = ? AND c.status = 'ready' AND c.duration_sec IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM marketing_video_clip_products cp2
+           JOIN catalog_skus s2 ON s2.id = cp2.sku_id
+          WHERE cp2.clip_id = c.id AND s2.product_id != ?
+       )
+     ORDER BY cat.is_product_shot DESC, sortOrder ASC, c.duration_sec DESC, c.id ASC
+  `).all(productId, productId) as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    fileName: String(r.fileName),
+    durationSec: (r.durationSec as number) ?? null,
+    categorySlug: (r.categorySlug as string) ?? null,
+    categoryName: (r.categoryName as string) ?? null,
+    isProductShot: anyFlagged
+      ? r.isProductShot === 1
+      : LEGACY_PRODUCT_SHOT.includes(String(r.categorySlug ?? "")),
+    posterUrl: r.posterPath ? videoUrl(String(r.posterPath)) : null,
+    previewUrl: r.normalizedPath ? videoUrl(String(r.normalizedPath)) : null,
+  }));
+}
+
+/** One product's video plus the clips in it and the clips it could use. */
+export function getProductVideo(productId: string): {
+  video: ProductVideoRow | null;
+  productName: string;
+  clips: ClipDetail[];
+  available: ClipDetail[];
+} | null {
+  ensureTable();
+  const product = sqlite
+    .prepare(`SELECT id, name FROM catalog_products WHERE id = ?`)
+    .get(productId) as { id: string; name: string } | undefined;
+  if (!product) return null;
+
+  const video = listProductVideos().find((v) => v.productId === productId) ?? null;
+  const available = availableClipsForProduct(productId);
+  const byId = new Map(available.map((c) => [c.id, c]));
+  // The sequence as saved — order matters, it IS the edit.
+  const inVideo = (video?.clipIds ?? []).map((id) => byId.get(id)).filter((c): c is ClipDetail => Boolean(c));
+  // Suggest a sequence for a product that hasn't been built yet.
+  const clips = inVideo.length > 0
+    ? inVideo
+    : selectClipsForProduct(productId).map((c) => byId.get(c.id)).filter((c): c is ClipDetail => Boolean(c));
+
+  return { video, productName: product.name, clips, available };
+}
+
 /**
  * Build (or rebuild) the product's video. Concats the selected clips
  * SILENT — a PDP video autoplays muted — writes the master + poster to a
  * deterministic path, and upserts the product's row.
+ *
+ * `clipIdsOverride` builds a hand-edited sequence exactly as given (the
+ * edit page); omitted, the deterministic selector chooses.
  */
-export async function buildProductVideo(productId: string): Promise<BuildResult> {
+export async function buildProductVideo(productId: string, clipIdsOverride?: string[]): Promise<BuildResult> {
   ensureTable();
   const product = sqlite
     .prepare(`SELECT id, name FROM catalog_products WHERE id = ?`)
     .get(productId) as { id: string; name: string } | undefined;
   if (!product) throw new Error(`Product not found: ${productId}`);
 
-  const picked = selectClipsForProduct(productId);
+  const picked = clipIdsOverride?.length
+    ? resolveOverride(productId, clipIdsOverride)
+    : selectClipsForProduct(productId);
   if (picked.length === 0) {
     upsert(productId, { clipIds: [], status: "failed", error: "No clips tagged to this product" });
     return { ok: false, productId, reason: "no clips" };
