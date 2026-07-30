@@ -46,7 +46,7 @@ export interface WholesaleSyncResult {
   reason?: string;
 }
 
-interface CompanyRow {
+export interface CompanyRow {
   id: string;
   name: string | null;
   status: string;
@@ -67,30 +67,46 @@ interface CompanyRow {
   owner_name: string | null;
   /** 1 when a PhoneBurner call on this company was dispositioned Set Appointment. */
   had_appointment: number;
+  instagram_url: string | null;
+  icp_reasoning: string | null;
+  google_rating: number | null;
+  google_review_count: number | null;
+  pipedrive_org_id: number | null;
+  pipedrive_person_id: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+  city_state: string | null;
 }
 
+/**
+ * The column list every consumer needs. Shared as a constant because the admin
+ * preview previously repeated it by hand and silently drifted from the real
+ * sync — a preview that doesn't match what gets written is worse than none.
+ */
+export const COMPANY_SELECT = `
+  SELECT c.id, c.name, c.status, c.source, c.tags, c.address, c.city, c.state, c.zip,
+         c.country, c.website, c.icp_tier, c.shopify_customer_id,
+         c.instagram_url, c.icp_reasoning, c.google_rating, c.google_review_count,
+         c.pipedrive_org_id, c.pipedrive_person_id, c.created_at, c.updated_at,
+         TRIM(COALESCE(c.city,'') || CASE WHEN COALESCE(c.state,'') <> '' THEN ', ' || c.state ELSE '' END) AS city_state,
+         (SELECT ct.first_name FROM contacts ct WHERE ct.company_id = c.id
+           ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS first_name,
+         (SELECT ct.last_name FROM contacts ct WHERE ct.company_id = c.id
+           ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS last_name,
+         (SELECT ct.email FROM contacts ct WHERE ct.company_id = c.id
+           AND TRIM(COALESCE(ct.email,'')) <> ''
+           AND LOWER(ct.email) NOT LIKE '%@relay.faire.com%'
+           ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
+         (SELECT cp.phone FROM company_phones cp WHERE cp.company_id = c.id
+           ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
+         (SELECT u.name FROM users u WHERE u.id = c.owner_id) AS owner_name,
+         (SELECT COUNT(*) FROM phoneburner_call_log pb
+           WHERE pb.company_id = c.id
+             AND REPLACE(LOWER(COALESCE(pb.disposition_label,'')), '.', '') LIKE 'set app%') AS had_appointment
+    FROM companies c`;
+
 function loadCompany(companyId: string): CompanyRow | undefined {
-  return sqlite
-    .prepare(
-      `SELECT c.id, c.name, c.status, c.source, c.tags, c.address, c.city, c.state, c.zip,
-              c.country, c.website, c.icp_tier, c.shopify_customer_id,
-              (SELECT ct.first_name FROM contacts ct WHERE ct.company_id = c.id
-                ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS first_name,
-              (SELECT ct.last_name FROM contacts ct WHERE ct.company_id = c.id
-                ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS last_name,
-              (SELECT ct.email FROM contacts ct WHERE ct.company_id = c.id
-                AND TRIM(COALESCE(ct.email,'')) <> ''
-                AND LOWER(ct.email) NOT LIKE '%@relay.faire.com%'
-                ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
-              (SELECT cp.phone FROM company_phones cp WHERE cp.company_id = c.id
-                ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
-              (SELECT u.name FROM users u WHERE u.id = c.owner_id) AS owner_name,
-              (SELECT COUNT(*) FROM phoneburner_call_log pb
-                WHERE pb.company_id = c.id
-                  AND REPLACE(LOWER(COALESCE(pb.disposition_label,'')), '.', '') LIKE 'set app%') AS had_appointment
-         FROM companies c WHERE c.id = ?`,
-    )
-    .get(companyId) as CompanyRow | undefined;
+  return sqlite.prepare(`${COMPANY_SELECT} WHERE c.id = ?`).get(companyId) as CompanyRow | undefined;
 }
 
 /**
@@ -156,6 +172,119 @@ export function buildTags(c: CompanyRow): string[] {
   tags.add("postpilot-mail");
 
   return [...tags];
+}
+
+
+/** One line of call history for the note. */
+interface CallSummary {
+  called_at: string | null;
+  disposition_label: string | null;
+  agent_email: string | null;
+  duration_seconds: number | null;
+  connected: number | null;
+  notes: string | null;
+}
+
+/**
+ * Build the customer note: everything a rep opening this record in Shopify
+ * would otherwise have to go to three other systems to find.
+ *
+ * Shopify notes are plain text (no markup), so structure comes from labels and
+ * line breaks. Deep links matter more than prose — the point is that whoever
+ * picks this customer up can get back to the full history in one click rather
+ * than searching for them by name.
+ */
+function buildNote(c: CompanyRow): string {
+  const base = (process.env.SHOPIFY_APP_URL || process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
+  const pdDomain = pipedriveDomain();
+  const lines: string[] = [];
+
+  lines.push("── Jaxy lead record (synced from The Frame) ──");
+  if (c.name) lines.push(`Store: ${c.name}`);
+  if (c.city_state) lines.push(`Location: ${c.city_state}`);
+  lines.push(`Pipeline status: ${c.status}`);
+  if (c.owner_name) lines.push(`Rep: ${c.owner_name}`);
+  if (c.created_at) lines.push(`First added: ${c.created_at.slice(0, 10)}`);
+
+  // How they got here, in the terms a human would use.
+  const src = sourceTagFor(c).replace("source-", "").replace(/-/g, " ");
+  lines.push(`Lead source: ${src}${c.source ? ` (${c.source})` : ""}`);
+  if (c.had_appointment > 0) lines.push("Appointment set by phone — they asked to see the catalog.");
+
+  if (c.icp_tier) {
+    lines.push("");
+    lines.push(`ICP tier: ${c.icp_tier}`);
+    if (c.icp_reasoning) lines.push(`Why: ${c.icp_reasoning.slice(0, 400)}`);
+  }
+
+  if (c.google_rating != null || c.website || c.instagram_url) {
+    lines.push("");
+    if (c.website) lines.push(`Website: ${c.website}`);
+    if (c.instagram_url) lines.push(`Instagram: ${c.instagram_url}`);
+    if (c.google_rating != null) {
+      lines.push(`Google: ${c.google_rating}★${c.google_review_count ? ` (${c.google_review_count} reviews)` : ""}`);
+    }
+  }
+
+  // Call history — the single most useful thing when someone replies to a
+  // campaign and a rep needs to know what was already said.
+  const calls = sqlite
+    .prepare(
+      `SELECT called_at, disposition_label, agent_email, duration_seconds, connected, notes
+         FROM phoneburner_call_log WHERE company_id = ?
+        ORDER BY called_at DESC LIMIT 5`,
+    )
+    .all(c.id) as CallSummary[];
+  const totalCalls = (sqlite
+    .prepare("SELECT COUNT(*) n FROM phoneburner_call_log WHERE company_id = ?")
+    .get(c.id) as { n: number }).n;
+
+  if (calls.length) {
+    lines.push("");
+    lines.push(`Call history (${totalCalls} total, latest ${calls.length}):`);
+    for (const call of calls) {
+      const when = call.called_at ? call.called_at.slice(0, 10) : "?";
+      const mins = call.duration_seconds ? ` ${Math.round(call.duration_seconds / 60)}m` : "";
+      const who = call.agent_email ? ` by ${call.agent_email.split("@")[0]}` : "";
+      lines.push(`  • ${when} — ${call.disposition_label || "no disposition"}${call.connected ? " (connected)" : ""}${mins}${who}`);
+      if (call.notes) lines.push(`      "${call.notes.replace(/\s+/g, " ").slice(0, 200)}"`);
+    }
+  }
+
+  // Recent non-call touches (email sends, replies, form fills).
+  const events = sqlite
+    .prepare(
+      `SELECT event_type, created_at FROM activity_feed
+        WHERE entity_type = 'company' AND entity_id = ?
+        ORDER BY created_at DESC LIMIT 5`,
+    )
+    .all(c.id) as Array<{ event_type: string; created_at: string | null }>;
+  if (events.length) {
+    lines.push("");
+    lines.push("Recent activity:");
+    for (const e of events) {
+      lines.push(`  • ${(e.created_at || "").slice(0, 10)} — ${e.event_type.replace(/[._]/g, " ")}`);
+    }
+  }
+
+  lines.push("");
+  lines.push("Links:");
+  if (base) lines.push(`  The Frame: ${base}/prospects/${c.id}`);
+  if (pdDomain && c.pipedrive_org_id) lines.push(`  Pipedrive org: ${pdDomain}/organization/${c.pipedrive_org_id}`);
+  if (pdDomain && c.pipedrive_person_id) lines.push(`  Pipedrive person: ${pdDomain}/person/${c.pipedrive_person_id}`);
+  lines.push(`  Synced: ${new Date().toISOString().slice(0, 10)}`);
+
+  return lines.join("\n");
+}
+
+/** Pipedrive base URL from the stored OAuth api_domain, for deep links. */
+function pipedriveDomain(): string | null {
+  try {
+    const r = sqlite.prepare("SELECT value FROM settings WHERE key = 'pipedrive_api_domain'").get() as { value: string } | undefined;
+    return r?.value ? r.value.replace(/\/$/, "") : null;
+  } catch {
+    return null;
+  }
 }
 
 export function buildAddress(c: CompanyRow): LeadAddress {
@@ -233,13 +362,18 @@ export async function syncInterestedLeadToShopify(
       firstName: c.first_name || undefined,
       lastName: c.last_name || undefined,
       phone: c.phone || undefined,
-      note: [
-        `Imported from the frame — appointment set.`,
-        c.name ? `Store: ${c.name}` : "",
-        c.website ? `Website: ${c.website}` : "",
-        c.owner_name ? `Rep: ${c.owner_name}` : "",
-      ].filter(Boolean).join("\n"),
+      note: buildNote(c),
       tags,
+      // Subscribe to email marketing, per Daniel 2026-07-30. Recorded honestly
+      // as SINGLE_OPT_IN rather than CONFIRMED_OPT_IN — nobody double-opted in,
+      // and overstating the level in Shopify's consent record is what turns a
+      // deliverability problem into a compliance one. consentUpdatedAt stamps
+      // when we asserted it, so the provenance is auditable later.
+      emailMarketingConsent: {
+        marketingState: "SUBSCRIBED",
+        marketingOptInLevel: "SINGLE_OPT_IN",
+        consentUpdatedAt: new Date().toISOString(),
+      },
     };
 
     // Only send an address when it's actually mailable. A half-filled address

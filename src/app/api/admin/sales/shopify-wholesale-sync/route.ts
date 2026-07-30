@@ -10,6 +10,8 @@ import {
   buildAddress,
   isAddressComplete,
   sourceTagFor,
+  COMPANY_SELECT,
+  type CompanyRow,
 } from "@/modules/sales/lib/shopify-wholesale-customer";
 
 /**
@@ -29,33 +31,8 @@ import {
  * Auth: x-admin-key: jaxy2026.
  */
 
-interface Row {
-  id: string; name: string | null; status: string; source: string | null; tags: string | null;
-  address: string | null; city: string | null; state: string | null; zip: string | null;
-  country: string | null; website: string | null; icp_tier: string | null;
-  shopify_customer_id: string | null; first_name: string | null; last_name: string | null;
-  email: string | null; phone: string | null; owner_name: string | null;
-  had_appointment: number;
-}
 
-const COHORT_SQL = `
-  SELECT c.id, c.name, c.status, c.source, c.tags, c.address, c.city, c.state, c.zip,
-         c.country, c.website, c.icp_tier, c.shopify_customer_id,
-         (SELECT ct.first_name FROM contacts ct WHERE ct.company_id = c.id
-           ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS first_name,
-         (SELECT ct.last_name FROM contacts ct WHERE ct.company_id = c.id
-           ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS last_name,
-         (SELECT ct.email FROM contacts ct WHERE ct.company_id = c.id
-           AND TRIM(COALESCE(ct.email,'')) <> ''
-           AND LOWER(ct.email) NOT LIKE '%@relay.faire.com%'
-           ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
-         (SELECT cp.phone FROM company_phones cp WHERE cp.company_id = c.id
-           ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
-         (SELECT u.name FROM users u WHERE u.id = c.owner_id) AS owner_name,
-         (SELECT COUNT(*) FROM phoneburner_call_log pb
-           WHERE pb.company_id = c.id
-             AND REPLACE(LOWER(COALESCE(pb.disposition_label,'')), '.', '') LIKE 'set app%') AS had_appointment
-    FROM companies c
+const COHORT_SQL = `${COMPANY_SELECT}
    WHERE c.status IN ('interested','catalog_sent')
    ORDER BY c.updated_at DESC`;
 
@@ -66,8 +43,8 @@ export async function GET(req: NextRequest) {
   const params = new URL(req.url).searchParams;
   const limit = Math.min(200, Math.max(1, parseInt(params.get("limit") || "20", 10)));
 
-  const rows = sqlite.prepare(`${COHORT_SQL} LIMIT ?`).all(limit) as Row[];
-  const all = sqlite.prepare(COHORT_SQL).all() as Row[];
+  const rows = sqlite.prepare(`${COHORT_SQL} LIMIT ?`).all(limit) as CompanyRow[];
+  const all = sqlite.prepare(COHORT_SQL).all() as CompanyRow[];
 
   const withEmail = all.filter((r) => r.email);
   const mailable = withEmail.filter((r) => isAddressComplete(buildAddress(r)));
@@ -155,7 +132,7 @@ export async function POST(req: NextRequest) {
 
   if (body.backfill === true) {
     const limit = Math.min(500, Math.max(1, Number(body.limit) || 25));
-    const rows = sqlite.prepare(`${COHORT_SQL} LIMIT ?`).all(limit) as Row[];
+    const rows = sqlite.prepare(`${COHORT_SQL} LIMIT ?`).all(limit) as CompanyRow[];
     const results: Awaited<ReturnType<typeof syncInterestedLeadToShopify>>[] = [];
     for (const r of rows) {
       results.push(await syncInterestedLeadToShopify(r.id, { force: body.force === true }));
