@@ -34,6 +34,14 @@ import {
   Layers,
   Plug,
   ShoppingBag,
+  Globe,
+  Inbox,
+  FileDown,
+  Boxes,
+  ClipboardList,
+  FileSpreadsheet,
+  Landmark,
+  TrendingUp,
 } from "lucide-react";
 import {
   Sidebar,
@@ -63,12 +71,20 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useUser } from "@/hooks/use-user";
 
+type NavChild = { title: string; href: string; icon: typeof LayoutDashboard };
 type NavItem = {
   title: string;
   href: string;
   icon: typeof LayoutDashboard;
   badge?: string;
-  children?: Array<{ title: string; href: string; icon: typeof LayoutDashboard }>;
+  children?: NavChild[];
+  /**
+   * Extra path prefixes that belong to this item but don't start with its href
+   * (e.g. Segments and Brand Accounts live under Prospects). Used for
+   * active-state and auto-expansion so navigating to a child still highlights
+   * and opens its parent.
+   */
+  owns?: string[];
 };
 
 const salesNav: NavItem[] = [
@@ -76,12 +92,13 @@ const salesNav: NavItem[] = [
   { title: "Targets", href: "/targets", icon: Target },
   {
     title: "Prospects", href: "/prospects", icon: Users,
+    owns: ["/segments", "/brands"],
     children: [
-      { title: "Review Queue", href: "/prospects/review", icon: Search },
-      { title: "Facebook Leads", href: "/prospects/facebook-leads", icon: Megaphone },
-      { title: "Lead Sources", href: "/prospects/sources", icon: Database },
+      { title: "Review queue", href: "/prospects/review", icon: Search },
+      { title: "Facebook leads", href: "/prospects/facebook-leads", icon: Megaphone },
+      { title: "Lead sources", href: "/prospects/sources", icon: Database },
       { title: "Segments", href: "/segments", icon: Layers3 },
-      { title: "Brand Accounts", href: "/brands", icon: Building },
+      { title: "Brand accounts", href: "/brands", icon: Building },
     ],
   },
   { title: "Campaigns", href: "/campaigns", icon: Mail },
@@ -90,19 +107,55 @@ const salesNav: NavItem[] = [
   { title: "Customers", href: "/customers", icon: HeartHandshake },
 ];
 
+/**
+ * Operations, grouped by the thing being managed rather than as a flat list.
+ *
+ * It used to be twelve siblings with no hierarchy — six of them children of
+ * /inventory shown alongside their own parent — which made the section
+ * unscannable and gave no sense of where you were. Now each area is one entry
+ * that expands to its own pages, so the list is five items at rest and the
+ * current section is self-evident.
+ *
+ * Every child is a real route. Three pages that existed but were unreachable
+ * from the sidebar (catalog intake, catalog export, Xero) are now linked.
+ */
 const operationsNav: NavItem[] = [
-  { title: "Orders", href: "/orders", icon: ShoppingCart },
-  { title: "Catalog", href: "/catalog", icon: Package },
-  { title: "Media Center", href: "/media", icon: ImageIcon },
-  { title: "Inventory", href: "/inventory", icon: Warehouse },
-  { title: "Product Performance", href: "/inventory/performance", icon: BarChart3 },
-  { title: "Color Performance", href: "/inventory/colors", icon: Palette },
-  { title: "Factories & Lead Times", href: "/inventory/factories", icon: Factory },
-  { title: "Reorder Plan", href: "/inventory/reorder", icon: Truck },
-  { title: "Purchase Orders", href: "/inventory/purchase-orders", icon: Package },
-  { title: "Warehouse Exports", href: "/inventory/exports", icon: Database },
-  { title: "Finance", href: "/finance", icon: DollarSign },
-  { title: "COGS & Costing", href: "/finance/cogs", icon: Layers },
+  {
+    title: "Orders", href: "/orders", icon: ShoppingCart,
+    children: [
+      { title: "All orders", href: "/orders", icon: ShoppingCart },
+      { title: "International", href: "/orders/international", icon: Globe },
+    ],
+  },
+  {
+    title: "Catalog", href: "/catalog", icon: Package,
+    children: [
+      { title: "All products", href: "/catalog", icon: Package },
+      { title: "Product intake", href: "/catalog/intake", icon: Inbox },
+      { title: "Catalog export", href: "/catalog/export", icon: FileDown },
+    ],
+  },
+  { title: "Media center", href: "/media", icon: ImageIcon },
+  {
+    title: "Inventory", href: "/inventory", icon: Warehouse,
+    children: [
+      { title: "Stock on hand", href: "/inventory", icon: Boxes },
+      { title: "Reorder plan", href: "/inventory/reorder", icon: Truck },
+      { title: "Purchase orders", href: "/inventory/purchase-orders", icon: ClipboardList },
+      { title: "Factories & lead times", href: "/inventory/factories", icon: Factory },
+      { title: "Product performance", href: "/inventory/performance", icon: BarChart3 },
+      { title: "Color performance", href: "/inventory/colors", icon: Palette },
+      { title: "Warehouse exports", href: "/inventory/exports", icon: FileSpreadsheet },
+    ],
+  },
+  {
+    title: "Finance", href: "/finance", icon: DollarSign,
+    children: [
+      { title: "P&L", href: "/finance", icon: TrendingUp },
+      { title: "COGS & costing", href: "/finance/cogs", icon: Layers },
+      { title: "Xero", href: "/finance/xero", icon: Landmark },
+    ],
+  },
 ];
 
 const insightsNav: NavItem[] = [
@@ -129,27 +182,61 @@ const bottomNav = [
 
 const ROLE_ALLOWED_HREFS: Record<string, string[]> = {
   owner: ["*"],
-  sales_manager: ["/dashboard", "/prospects", "/prospects/review", "/prospects/sources", "/prospects/facebook-leads", "/segments", "/campaigns", "/marketing/outreach", "/pipeline", "/customers", "/brands", "/catalog", "/inventory/performance", "/inventory/colors"],
-  warehouse: ["/dashboard", "/orders", "/orders/international", "/catalog", "/media", "/inventory", "/inventory/performance", "/inventory/colors", "/inventory/factories", "/inventory/reorder", "/inventory/purchase-orders", "/inventory/exports"],
-  finance: ["/dashboard", "/orders", "/finance", "/finance/cogs", "/inventory/performance", "/inventory/colors", "/inventory/factories"],
-  marketing: ["/dashboard", "/marketing", "/marketing/outreach", "/catalog", "/media", "/campaigns", "/prospects/facebook-leads", "/inventory/performance", "/inventory/colors"],
+  sales_manager: ["/dashboard", "/targets", "/prospects", "/prospects/review", "/prospects/sources", "/prospects/facebook-leads", "/segments", "/campaigns", "/marketing/outreach", "/pipeline", "/customers", "/brands", "/catalog", "/inventory/performance", "/inventory/colors"],
+  warehouse: ["/dashboard", "/orders", "/orders/international", "/catalog", "/catalog/intake", "/media", "/inventory", "/inventory/performance", "/inventory/colors", "/inventory/factories", "/inventory/reorder", "/inventory/purchase-orders", "/inventory/exports"],
+  finance: ["/dashboard", "/orders", "/finance", "/finance/cogs", "/finance/xero", "/inventory/performance", "/inventory/colors", "/inventory/factories"],
+  marketing: ["/dashboard", "/marketing", "/marketing/outreach", "/catalog", "/catalog/export", "/media", "/campaigns", "/prospects/facebook-leads", "/inventory/performance", "/inventory/colors"],
   support: ["/dashboard", "/orders", "/customers"],
   ai: ["/dashboard", "/ai"],
 };
 
-function filterNavByRole(
-  items: NavItem[],
-  role: string
-): NavItem[] {
+/**
+ * Drop anything a role can't reach, and repoint a parent whose own index page
+ * is off-limits at its first allowed child.
+ *
+ * Without that last step a role like finance — allowed /inventory/performance
+ * but not /inventory itself — would get an "Inventory" entry linking to a page
+ * that bounces them, which reads as a broken app rather than a permission.
+ */
+function filterNavByRole(items: NavItem[], role: string): NavItem[] {
   const allowed = ROLE_ALLOWED_HREFS[role];
   if (!allowed) return [];
   if (allowed.includes("*")) return items;
-  return items
-    .filter((item) => allowed.includes(item.href) || item.children?.some((c) => allowed.includes(c.href)))
-    .map((item) => ({
+
+  const out: NavItem[] = [];
+  for (const item of items) {
+    const parentAllowed = allowed.includes(item.href);
+    const children = item.children?.filter((c) => allowed.includes(c.href));
+    if (!parentAllowed && !children?.length) continue;
+    out.push({
       ...item,
-      children: item.children?.filter((c) => allowed.includes(c.href)),
-    }));
+      href: parentAllowed ? item.href : children![0].href,
+      children,
+    });
+  }
+  return out;
+}
+
+/** Does the current path belong to this item (its href, a child, or an owned prefix)? */
+function isInSection(pathname: string, item: NavItem): boolean {
+  const under = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  if (item.href !== "/dashboard" && under(item.href)) return true;
+  if (item.owns?.some(under)) return true;
+  return !!item.children?.some((c) => under(c.href));
+}
+
+/**
+ * A child is active on an exact match, or on a deeper path that no *other*
+ * sibling claims more specifically. That keeps "Stock on hand" (/inventory)
+ * from lighting up while you're on /inventory/reorder, without needing the
+ * per-route exclusion list this used to carry.
+ */
+function isChildActive(pathname: string, child: NavChild, siblings: NavChild[]): boolean {
+  if (pathname === child.href) return true;
+  if (!pathname.startsWith(`${child.href}/`)) return false;
+  return !siblings.some(
+    (s) => s.href !== child.href && s.href.length > child.href.length && pathname.startsWith(s.href),
+  );
 }
 
 export function AppSidebar() {
@@ -167,8 +254,70 @@ export function AppSidebar() {
   const filteredOps = filterNavByRole(operationsNav, role);
   const filteredInsights = filterNavByRole(insightsNav, role);
 
-  const prospectsExpanded = pathname.startsWith("/prospects") || pathname.startsWith("/brands");
-  const [prospectsOpen, setProspectsOpen] = useState(prospectsExpanded);
+  // Sections auto-expand when you're inside them; a manual toggle overrides
+  // that for the rest of the session. Derived rather than synced in an effect,
+  // so navigation opens the right section without a render-then-correct flash.
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
+  const isOpen = (item: NavItem) => toggled[item.href] ?? isInSection(pathname, item);
+  const toggle = (item: NavItem) =>
+    setToggled((prev) => ({ ...prev, [item.href]: !(prev[item.href] ?? isInSection(pathname, item)) }));
+
+  /** One renderer for every group — the hierarchy used to exist only in Sales. */
+  const renderItems = (items: NavItem[]) =>
+    items.map((item) => {
+      const inSection = isInSection(pathname, item);
+      const open = isOpen(item);
+      const hasChildren = !!item.children?.length;
+      return (
+        <SidebarMenuItem key={item.href}>
+          <SidebarMenuButton
+            render={<Link href={item.href} onClick={() => setOpenMobile(false)} />}
+            // A parent stays highlighted anywhere in its subtree, so you can
+            // always see which area you're in — even on a detail page that
+            // matches no menu entry.
+            isActive={pathname === item.href || inSection}
+            tooltip={item.title}
+          >
+            <item.icon />
+            <span>{item.title}</span>
+          </SidebarMenuButton>
+
+          {hasChildren && (
+            <button
+              onClick={() => toggle(item)}
+              aria-label={`${open ? "Collapse" : "Expand"} ${item.title}`}
+              aria-expanded={open}
+              className="absolute right-1 top-1.5 flex h-5 w-5 items-center justify-center rounded-md hover:bg-sidebar-accent group-data-[collapsible=icon]:hidden"
+            >
+              <ChevronRight className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-90" : ""}`} />
+            </button>
+          )}
+
+          {item.badge && (
+            <SidebarMenuBadge>
+              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{item.badge}</Badge>
+            </SidebarMenuBadge>
+          )}
+
+          {hasChildren && open && (
+            <SidebarMenuSub>
+              {item.children!.map((child) => (
+                <SidebarMenuSubItem key={child.href}>
+                  <SidebarMenuSubButton
+                    render={<Link href={child.href} onClick={() => setOpenMobile(false)} />}
+                    isActive={isChildActive(pathname, child, item.children!)}
+                    size="sm"
+                  >
+                    <child.icon className="h-3.5 w-3.5" />
+                    <span>{child.title}</span>
+                  </SidebarMenuSubButton>
+                </SidebarMenuSubItem>
+              ))}
+            </SidebarMenuSub>
+          )}
+        </SidebarMenuItem>
+      );
+    });
 
 
   return (
@@ -198,102 +347,21 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupLabel>Sales</SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
-              {filteredSales.map((item) =>
-                item.children && item.children.length > 0 ? (
-                  <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton
-                      render={<Link href={item.href} onClick={() => setOpenMobile(false)} />}
-                      isActive={pathname === item.href}
-                      tooltip={item.title}
-                    >
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </SidebarMenuButton>
-                    <button
-                      onClick={() => setProspectsOpen(!prospectsOpen)}
-                      className="absolute right-1 top-1.5 flex h-5 w-5 items-center justify-center rounded-md hover:bg-sidebar-accent"
-                    >
-                      <ChevronRight className={`h-3.5 w-3.5 transition-transform ${prospectsOpen ? "rotate-90" : ""}`} />
-                    </button>
-                    {prospectsOpen && (
-                      <SidebarMenuSub>
-                        {item.children.map((child) => (
-                          <SidebarMenuSubItem key={child.href}>
-                            <SidebarMenuSubButton
-                              render={<Link href={child.href} onClick={() => setOpenMobile(false)} />}
-                              isActive={pathname === child.href || pathname.startsWith(child.href)}
-                              size="sm"
-                            >
-                              <child.icon className="h-3.5 w-3.5" />
-                              <span>{child.title}</span>
-                            </SidebarMenuSubButton>
-                          </SidebarMenuSubItem>
-                        ))}
-                      </SidebarMenuSub>
-                    )}
-                  </SidebarMenuItem>
-                ) : (
-                  <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton
-                      render={<Link href={item.href} onClick={() => setOpenMobile(false)} />}
-                      isActive={pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href))}
-                      tooltip={item.title}
-                    >
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </SidebarMenuButton>
-                    {item.badge && (
-                      <SidebarMenuBadge>
-                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                          {item.badge}
-                        </Badge>
-                      </SidebarMenuBadge>
-                    )}
-                  </SidebarMenuItem>
-                )
-              )}
-            </SidebarMenu>
+            <SidebarMenu>{renderItems(filteredSales)}</SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
         <SidebarGroup>
           <SidebarGroupLabel>Operations</SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
-              {filteredOps.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    render={<Link href={item.href} onClick={() => setOpenMobile(false)} />}
-                    isActive={pathname === item.href || (pathname.startsWith(item.href) && item.href !== "/inventory" && item.href !== "/finance")}
-                    tooltip={item.title}
-                  >
-                    <item.icon />
-                    <span>{item.title}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
+            <SidebarMenu>{renderItems(filteredOps)}</SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
         <SidebarGroup>
           <SidebarGroupLabel>Insights</SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
-              {filteredInsights.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    render={<Link href={item.href} onClick={() => setOpenMobile(false)} />}
-                    isActive={pathname.startsWith(item.href)}
-                    tooltip={item.title}
-                  >
-                    <item.icon />
-                    <span>{item.title}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
+            <SidebarMenu>{renderItems(filteredInsights)}</SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
