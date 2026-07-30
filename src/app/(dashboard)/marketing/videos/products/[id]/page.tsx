@@ -20,7 +20,7 @@ import { VideoPlayer } from "@/components/ui/video-player";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import { ClipPreviewDialog } from "@/modules/marketing/components/videos/clip-preview-dialog";
 import {
-  ArrowLeft, ArrowRight, Boxes, Check, Loader2, Play, Plus, RefreshCw, Sparkles, Upload, X,
+  ArrowLeft, ArrowRight, Boxes, Check, Download, Loader2, Play, Plus, RefreshCw, Sparkles, Upload, X,
 } from "lucide-react";
 
 type Clip = {
@@ -42,6 +42,9 @@ type Video = {
   caption: string | null;
   approvedAt: string | null;
   shopifyPublishedAt: string | null;
+  shopifyRetailAt: string | null;
+  shopifyWholesaleAt: string | null;
+  faireExportedAt: string | null;
   error: string | null;
 };
 type Detail = { video: Video | null; productName: string; clips: Clip[]; available: Clip[] };
@@ -133,6 +136,7 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
       return next;
     });
 
+  /** Push to both Shopify stores; each reports independently. */
   const publish = async () => {
     setSaving(true);
     const res = await fetch("/api/v1/marketing/videos/product-videos/publish", {
@@ -142,10 +146,41 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
     });
     const d = await res.json();
     setSaving(false);
+    const done = (d.channels ?? []).filter((c: { ok: boolean }) => c.ok).map((c: { channel: string }) => c.channel);
+    const failed = (d.channels ?? []).filter((c: { ok: boolean }) => !c.ok);
     if (res.ok) {
-      toast.success("Published to the Shopify product page");
+      toast.success(`Published to ${done.join(" + ")}`);
+      if (failed.length > 0) {
+        toast.message(failed.map((c: { channel: string; error?: string }) => `${c.channel}: ${c.error}`).join(" · "), { duration: 8000 });
+      }
       load();
     } else toast.error(d.error ?? "Publish failed");
+  };
+
+  /** Faire has no video API — prepare the file + mark it handed off. */
+  const exportFaire = async () => {
+    setSaving(true);
+    const res = await fetch("/api/v1/marketing/videos/product-videos/faire", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId: id }),
+    });
+    const d = await res.json();
+    setSaving(false);
+    if (!res.ok) {
+      toast.error(d.error ?? "Export failed");
+      return;
+    }
+    // Download it so the only thing left is the drop in Faire's portal.
+    const a = document.createElement("a");
+    a.href = d.downloadUrl;
+    a.download = d.fileName ?? "product-video.mp4";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    toast.success("Downloaded for Faire — upload it on the product's Videos section", { duration: 8000 });
+    if (d.warnings?.length) toast.message(d.warnings.join(" · "), { duration: 8000 });
+    load();
   };
 
   if (loading) return <div className="h-96 animate-pulse rounded-lg bg-muted" />;
@@ -207,6 +242,9 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
                   <Button size="sm" onClick={publish} disabled={saving}>
                     <Upload className="h-4 w-4 mr-1" /> Publish to Shopify
                   </Button>
+                  <Button size="sm" variant="outline" onClick={exportFaire} disabled={saving}>
+                    <Download className="h-4 w-4 mr-1" /> Get Faire file
+                  </Button>
                 </>
               ) : (
                 <Button size="sm" onClick={() => patch({ approved: true }, "Approved for publishing")} disabled={saving || dirty}>
@@ -215,6 +253,13 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
               ))}
           </div>
           {dirty && <p className="text-xs text-amber-600">Unsaved clip changes — save to rebuild before approving.</p>}
+          {v?.status === "ready" && (
+            <ul className="space-y-0.5 pt-1 text-[11px] text-muted-foreground">
+              <li>Shopify retail — {v.shopifyRetailAt ? `published ${v.shopifyRetailAt.slice(0, 10)}` : "not published"}</li>
+              <li>Shopify wholesale — {v.shopifyWholesaleAt ? `published ${v.shopifyWholesaleAt.slice(0, 10)}` : "not published"}</li>
+              <li>Faire — {v.faireExportedAt ? `exported ${v.faireExportedAt.slice(0, 10)}` : "not exported"} <span className="opacity-70">(upload in the brand portal)</span></li>
+            </ul>
+          )}
         </div>
 
         <div className="space-y-3 min-w-0">
