@@ -45,6 +45,58 @@ const SEGMENT_LABELS: Record<string, string> = {
   "designer-queue": "Designer queue",
   plan: "Plan",
   sounds: "Trending audio",
+  // Operations sub-pages. Without these, titleize() produced things like
+  // "Cogs" and "Purchase Orders" that didn't match the sidebar labels — the
+  // breadcrumb and the menu naming the same page differently is exactly what
+  // makes navigation feel untrustworthy.
+  international: "International",
+  intake: "Product intake",
+  export: "Catalog export",
+  reorder: "Reorder plan",
+  "purchase-orders": "Purchase orders",
+  factories: "Factories & lead times",
+  performance: "Product performance",
+  colors: "Color performance",
+  exports: "Warehouse exports",
+  cogs: "COGS & costing",
+  xero: "Xero",
+  media: "Media center",
+  targets: "Targets",
+  segments: "Segments",
+  brands: "Brand accounts",
+  review: "Review queue",
+  sources: "Lead sources",
+  "facebook-leads": "Facebook leads",
+  outreach: "Outreach",
+  cron: "Scheduled jobs",
+  integrations: "Integrations",
+};
+
+/**
+ * The section each top-level route belongs to, mirroring the sidebar groups.
+ *
+ * Sidebar groups aren't route segments, so there's no path to link to — but
+ * showing the group name orients you ("Inventory" alone doesn't say whether
+ * you're in Sales or Operations). Rendered as plain text, not a link, because
+ * inventing a /operations URL that 404s would be worse than no crumb.
+ */
+const SEGMENT_SECTION: Record<string, string> = {
+  orders: "Operations",
+  catalog: "Operations",
+  inventory: "Operations",
+  media: "Operations",
+  finance: "Operations",
+  prospects: "Sales",
+  segments: "Sales",
+  brands: "Sales",
+  campaigns: "Sales",
+  pipeline: "Sales",
+  customers: "Sales",
+  targets: "Sales",
+  marketing: "Insights",
+  intelligence: "Insights",
+  ai: "Insights",
+  notifications: "Insights",
 };
 
 /**
@@ -68,6 +120,7 @@ export function AppHeader() {
   const [unreadCount, setUnreadCount] = useState(0);
   const { override } = useBreadcrumbOverride();
   const segments = pathname.split("/").filter(Boolean);
+  const section = segments.length > 0 ? SEGMENT_SECTION[segments[0]] : undefined;
 
   useEffect(() => {
     const fetchCount = () => {
@@ -91,6 +144,14 @@ export function AppHeader() {
           <BreadcrumbItem>
             <BreadcrumbLink href="/dashboard">Home</BreadcrumbLink>
           </BreadcrumbItem>
+          {section && (
+            <Fragment>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem className="hidden sm:block">
+                <span className="text-muted-foreground">{section}</span>
+              </BreadcrumbItem>
+            </Fragment>
+          )}
           {segments.map((seg, i) => {
             const isLast = i === segments.length - 1;
             const path = `/${segments.slice(0, i + 1).join("/")}`;
