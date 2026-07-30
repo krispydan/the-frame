@@ -194,7 +194,7 @@ interface CallSummary {
  * picks this customer up can get back to the full history in one click rather
  * than searching for them by name.
  */
-function buildNote(c: CompanyRow): string {
+export function buildNote(c: CompanyRow): string {
   const base = (process.env.SHOPIFY_APP_URL || process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
   const pdDomain = pipedriveDomain();
   const lines: string[] = [];
