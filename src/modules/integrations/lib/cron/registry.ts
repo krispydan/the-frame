@@ -46,6 +46,7 @@ import { enqueueSoundsSync } from "@/modules/marketing/lib/video/tiktok-sounds";
 import { drainMetaLeads, reconcileMetaLeads } from "@/modules/integrations/lib/meta/lead-ingest";
 import { runCapiSyncAndDrain } from "@/modules/integrations/lib/meta/capi";
 import { runMetaLeadCsvReminder } from "@/modules/integrations/lib/meta/daily-reminder";
+import { suppressBuyersFromMail } from "@/modules/sales/lib/shopify-wholesale-customer";
 
 export type CronJob = {
   id: string;                         // stable, kebab-case
@@ -147,6 +148,17 @@ export const CRON_JOBS: CronJob[] = [
     schedule: "0 15 * * *",  // 15:00 UTC ≈ 8am PT — start of the sales day
     description: "Email the daily reminder to download Facebook leads from Meta and upload the CSV (stops itself once the leadgen webhook is live)",
     handler: runMetaLeadCsvReminder,
+  },
+  // "Mail them until they buy" only works if something stops the mail.
+  // PostPilot segments on the postpilot-mail tag, so removing it once an order
+  // lands is the off switch. Runs as a sweep rather than on the order webhook
+  // because an order can arrive through any channel (Faire, phone, either
+  // Shopify store), and only the frame sees all of them.
+  {
+    id: "shopify-suppress-mailed-buyers",
+    schedule: "40 14 * * *",  // 14:40 UTC ~ 7:40am PT, after the orders sync
+    description: "Remove the postpilot-mail tag from wholesale customers who have now ordered, so direct mail stops",
+    handler: () => suppressBuyersFromMail(200),
   },
   {
     id: "faire-interested-export",

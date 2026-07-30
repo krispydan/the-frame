@@ -213,6 +213,9 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN owner_name TEXT"); } catch {
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN business_hours TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN facebook_url TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN instagram_url TEXT"); } catch { /* exists */ }
+// Shopify wholesale customer gid for leads pushed at appointment-set. Stamped
+// so a re-run updates the same customer instead of creating a duplicate.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN shopify_customer_id TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN twitter_url TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN linkedin_url TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN yelp_url TEXT"); } catch { /* exists */ }

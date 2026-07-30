@@ -128,14 +128,21 @@ const operationsNav: NavItem[] = [
     ],
   },
   {
+    // "Media Center" sat as its own top-level Operations entry and read as a
+    // sibling of the Video Remix Studio, which it isn't: it edits
+    // catalog/images — product photography — while the video studio produces
+    // social content from clips. Naming it "Product images" and nesting it
+    // under Catalog puts it with the data it actually manages and removes the
+    // overlap.
     title: "Catalog", href: "/catalog", icon: Package,
+    owns: ["/media"],
     children: [
       { title: "All products", href: "/catalog", icon: Package },
+      { title: "Product images", href: "/media", icon: ImageIcon },
       { title: "Product intake", href: "/catalog/intake", icon: Inbox },
       { title: "Catalog export", href: "/catalog/export", icon: FileDown },
     ],
   },
-  { title: "Media center", href: "/media", icon: ImageIcon },
   {
     title: "Inventory", href: "/inventory", icon: Warehouse,
     children: [

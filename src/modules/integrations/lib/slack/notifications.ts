@@ -378,6 +378,48 @@ export async function notifyFaireMappingNeeded(opts: {
  * A worked prospect just placed their first wholesale order — celebrate the
  * conversion. Mirrors the Overjoy "you converted a lead" alert.
  */
+/**
+ * An appointment-set lead reached the wholesale store but we have nowhere to
+ * mail them. Asks for the missing pieces by name — "add an address" without
+ * saying which parts are missing just makes someone go and look.
+ */
+export async function notifyWholesaleAddressNeeded(opts: {
+  companyName: string | null;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  website: string | null;
+  missing: string[];
+  have: string | null;
+  frameUrl?: string | null;
+  shopifyCustomerId?: string | null;
+}) {
+  const who = opts.companyName || opts.contactName || opts.email || "A new lead";
+  const contactBits = [
+    opts.email ? `📧 ${opts.email}` : "",
+    opts.phone ? `📞 ${opts.phone}` : "",
+    opts.website ? `🔗 ${opts.website}` : "",
+  ].filter(Boolean).join("  ·  ");
+  await postSlack({
+    topic: "sales.wholesale_address_needed",
+    text: `📭 ${who} has no mailing address — direct mail can't go out`,
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `📭 *${who}* booked an appointment and is now in the wholesale store, but we can't mail them — missing *${opts.missing.join(", ")}*.`,
+        },
+      },
+      ...(contactBits ? ([{ type: "context", elements: [{ type: "mrkdwn", text: contactBits }] }] as SlackBlock[]) : []),
+      ...(opts.have ? ([{ type: "context", elements: [{ type: "mrkdwn", text: `Have so far: ${opts.have}` }] }] as SlackBlock[]) : []),
+      ...(opts.frameUrl
+        ? ([{ type: "context", elements: [{ type: "mrkdwn", text: `Add it: <${opts.frameUrl}|open the prospect> — it syncs to Shopify on the next run.` }] }] as SlackBlock[])
+        : []),
+    ],
+  });
+}
+
 export async function notifyLeadConverted(opts: {
   companyName: string | null;
   prospectUrl?: string | null;
