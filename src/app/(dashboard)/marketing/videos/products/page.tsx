@@ -13,10 +13,8 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { VideoPlayer } from "@/components/ui/video-player";
-import { ArrowLeft, Boxes, Check, Loader2, Play, RefreshCw, Sparkles, Upload } from "lucide-react";
+import { ArrowLeft, Boxes, Check, Loader2, Pencil, RefreshCw, Sparkles } from "lucide-react";
 
 type Type = { slug: string; name: string; count: number; isProductShot: boolean };
 type Product = {
@@ -66,7 +64,6 @@ export default function ProductCoveragePage() {
   const [videos, setVideos] = useState<Record<string, ProductVideo>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [batching, setBatching] = useState(false);
-  const [preview, setPreview] = useState<ProductVideo | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -120,42 +117,6 @@ export default function ProductCoveragePage() {
     } else {
       toast.message(d.message ?? d.error ?? "Nothing to build");
     }
-  };
-
-  /** Push an approved video to its Shopify product page. */
-  const publish = async (v: ProductVideo) => {
-    setBusy(v.productId);
-    try {
-      const res = await fetch("/api/v1/marketing/videos/product-videos/publish", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productId: v.productId }),
-      });
-      const d = await res.json();
-      if (res.ok) {
-        toast.success("Published to the Shopify product page");
-        load();
-        setPreview(null);
-      } else {
-        toast.error(d.error ?? "Publish failed");
-      }
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const approve = async (v: ProductVideo, approved: boolean) => {
-    const res = await fetch("/api/v1/marketing/videos/product-videos", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productId: v.productId, approved }),
-    });
-    const d = await res.json();
-    if (res.ok) {
-      setVideos((prev) => ({ ...prev, [v.productId]: d.video }));
-      setPreview(d.video);
-      toast.success(approved ? "Approved for publishing" : "Approval removed");
-    } else toast.error(d.error ?? "Failed");
   };
 
   const rows = useMemo(() => {
@@ -284,8 +245,8 @@ export default function ProductCoveragePage() {
                                 <Check className="h-4 w-4" />
                               </span>
                             )}
-                            <Button size="sm" variant="outline" onClick={() => setPreview(v)}>
-                              <Play className="h-3.5 w-3.5 mr-1" /> View
+                            <Button size="sm" variant="outline" render={<Link href={`/marketing/videos/products/${p.productId}`} />}>
+                              <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
                             </Button>
                           </span>
                         );
@@ -303,48 +264,6 @@ export default function ProductCoveragePage() {
             </tbody>
           </table>
         </div>
-      )}
-
-      {/* Review + approve — the gate before anything reaches the storefront */}
-      {preview && (
-        <Dialog open onOpenChange={(open) => !open && setPreview(null)}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="pr-8 text-base">{preview.productName}</DialogTitle>
-            </DialogHeader>
-            <VideoPlayer
-              src={preview.videoUrl}
-              poster={preview.posterUrl}
-              size="md"
-              className="aspect-[9/16] w-full max-w-[240px] mx-auto rounded-lg"
-            />
-            <p className="text-center text-xs text-muted-foreground">
-              {preview.durationSec ? `${preview.durationSec.toFixed(1)}s` : ""} · silent master (no on-screen hook)
-            </p>
-            {preview.caption && <p className="rounded-md border bg-muted/30 p-2 text-center text-sm">{preview.caption}</p>}
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => generate(preview.productId)} disabled={busy === preview.productId}>
-                {busy === preview.productId ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
-                Rebuild
-              </Button>
-              {preview.approvedAt ? (
-                <>
-                  <Button variant="outline" size="sm" onClick={() => approve(preview, false)}>
-                    Approved ✓ — undo
-                  </Button>
-                  <Button size="sm" onClick={() => publish(preview)} disabled={busy === preview.productId}>
-                    {busy === preview.productId ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
-                    Publish to Shopify
-                  </Button>
-                </>
-              ) : (
-                <Button size="sm" onClick={() => approve(preview, true)}>
-                  <Check className="h-4 w-4 mr-1" /> Approve for publishing
-                </Button>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
       )}
     </div>
   );

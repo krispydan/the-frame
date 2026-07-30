@@ -97,6 +97,28 @@ describe("selectClipsForProduct", () => {
     expect(selectClipsForProduct("p1").map((c) => c.id)).toEqual(["dual"]);
   });
 
+  it("varies shot types instead of stacking one (the 'Deco' case)", () => {
+    const d = getTestDb();
+    d.prepare(`INSERT INTO marketing_video_clip_categories (id, slug, name, is_product_shot, sort_order) VALUES ('c-life','lifestyle','Lifestyle',1,5)`).run();
+    d.prepare(`INSERT INTO marketing_video_clip_categories (id, slug, name, is_product_shot, sort_order) VALUES ('c-model','on_model','On Model',1,15)`).run();
+    // Deco's real mix: lots of lifestyle, some on-model, a couple flat-lay.
+    for (let i = 0; i < 11; i++) addClip(`life${i}`, "c-life", 3, ["s1"]);
+    for (let i = 0; i < 7; i++) addClip(`model${i}`, "c-model", 3, ["s1"]);
+    for (let i = 0; i < 2; i++) addClip(`flat${i}`, "c-show", 3, ["s1"]);
+    addClip("box0", "c-box", 3, ["s1"]);
+
+    const picked = selectClipsForProduct("p1");
+    const cats = picked.map((c) => c.categorySlug);
+    // At least three different shot types in a 5-clip cut…
+    expect(new Set(cats).size).toBeGreaterThanOrEqual(3);
+    // …and no type used more than twice.
+    for (const slug of new Set(cats)) {
+      expect(cats.filter((c) => c === slug).length).toBeLessThanOrEqual(2);
+    }
+    // Never the same type twice in a row.
+    for (let i = 1; i < cats.length; i++) expect(cats[i]).not.toBe(cats[i - 1]);
+  });
+
   it("caps the edit length", () => {
     for (let i = 0; i < 10; i++) addClip(`c${i}`, "c-show", 4, ["s1"]);
     const picked = selectClipsForProduct("p1");
