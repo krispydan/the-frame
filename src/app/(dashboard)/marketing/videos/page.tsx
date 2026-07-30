@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Clapperboard, Film, LayoutList } from "lucide-react";
+import { Boxes, Clapperboard, Film, LayoutList } from "lucide-react";
 import { PostQueue } from "@/modules/marketing/components/videos/post-queue";
 
 /**
@@ -23,6 +23,9 @@ export default function VideoStudioPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" render={<Link href="/marketing/videos/products" />}>
+            <Boxes className="h-4 w-4 mr-1" /> Product videos
+          </Button>
           <Button variant="outline" render={<Link href="/marketing/videos/clips" />}>
             <Film className="h-4 w-4 mr-1" /> Clip Library
           </Button>
