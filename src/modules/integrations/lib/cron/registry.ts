@@ -23,6 +23,7 @@ import { syncShopifyPayouts } from "@/modules/integrations/lib/xero/payout-sync"
 import { postDailyDigest, postWeeklyDigest } from "@/modules/integrations/lib/slack/digests";
 import { syncShipHeroOrders } from "@/modules/operations/lib/shiphero/sync-orders";
 import { syncShipHeroInventory, isDuringBusinessHours } from "@/modules/operations/lib/shiphero/sync-inventory";
+import { geocodeCompanies } from "@/modules/customers/lib/geocoding";
 import { refreshIfExpiringSoon as refreshShipHeroToken } from "@/modules/operations/lib/shiphero/auth";
 import { pullPhoneBurnerCallResults } from "@/modules/sales/lib/phoneburner-sync";
 import { ensureFreshPhoneBurnerToken } from "@/modules/sales/lib/phoneburner-oauth";
@@ -291,6 +292,14 @@ export const CRON_JOBS: CronJob[] = [
     description: "Pull current inventory levels from ShipHero into local inventory table",
     handler: syncShipHeroInventory,
     guard: () => isDuringBusinessHours(),
+  },
+  {
+    id: "geocode-customers",
+    schedule: "0 4 * * *",  // daily at 4am UTC — off-peak for Nominatim
+    description: "Geocode customer company addresses for the customer map (Nominatim, rate-limited)",
+    // Small nightly batch: newly-added customers get pinned within a day.
+    // Bounded to 60/run so a daily tick stays well under Nominatim limits.
+    handler: () => geocodeCompanies({ limit: 60, customersOnly: true }),
   },
   {
     // Drains the phone-less qualified-in-Instantly cohort overnight

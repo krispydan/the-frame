@@ -43,6 +43,12 @@ export const companies = sqliteTable("companies", {
   googlePlaceId: text("google_place_id"),
   googleRating: real("google_rating"),
   googleReviewCount: integer("google_review_count"),
+  // Geocoded coordinates for the customer map (address → lat/lng via
+  // Nominatim). geocodedAt null = not yet attempted; set even on failure
+  // so we don't re-hammer the geocoder. See src/modules/customers/lib/geocoding.ts
+  latitude: real("latitude"),
+  longitude: real("longitude"),
+  geocodedAt: text("geocoded_at"),
   // Lead-gen pipeline status — see src/modules/sales/lib/status-progression.ts
   // for the transition rules. Pre-pipeline-migration values ("new",
   // "qualified", "rejected", "contacted") are migrated by

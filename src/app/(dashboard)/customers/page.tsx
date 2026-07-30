@@ -38,9 +38,18 @@ export default async function CustomersPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">Customer Success</h1>
-        <p className="text-gray-500">Track account health, predict reorders, and prevent churn</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Customer Success</h1>
+          <p className="text-gray-500">Track account health, predict reorders, and prevent churn</p>
+        </div>
+        <a
+          href="/customers/analytics"
+          className="inline-flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium hover:bg-muted"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" /></svg>
+          Analytics &amp; Map
+        </a>
       </div>
       <CustomerList customers={customers} />
     </div>

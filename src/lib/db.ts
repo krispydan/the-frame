@@ -531,6 +531,11 @@ try { sqlite.exec("CREATE INDEX idx_companies_shopify_customer ON companies (sho
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN pipedrive_org_id INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN pipedrive_person_id INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN pipedrive_synced_at TEXT"); } catch { /* exists */ }
+
+// Customer map: geocoded coordinates on companies
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN latitude REAL"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN longitude REAL"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN geocoded_at TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_pipedrive_org ON companies (pipedrive_org_id)"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE orders ADD COLUMN pipedrive_deal_id INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_orders_pipedrive_deal ON orders (pipedrive_deal_id)"); } catch { /* exists */ }
