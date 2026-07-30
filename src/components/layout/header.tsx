@@ -39,6 +39,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   recipes: "Recipes",
   posts: "Posts",
   identify: "Identify products",
+  products: "Product videos",
   calendar: "Calendar",
   email: "Email",
   prompts: "Prompts",
