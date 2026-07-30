@@ -301,6 +301,38 @@ export function buildAddress(c: CompanyRow): LeadAddress {
   };
 }
 
+/**
+ * US state / territory name → USPS code.
+ *
+ * Shopify validates province against its own list and rejects a free-text
+ * value, which is what "Province is invalid" was: companies.state holds
+ * whatever enrichment wrote, including full names and, on a couple of Puerto
+ * Rico rows, a city name in the state field.
+ */
+const STATE_CODES: Record<string, string> = {
+  alabama: "AL", alaska: "AK", arizona: "AZ", arkansas: "AR", california: "CA", colorado: "CO",
+  connecticut: "CT", delaware: "DE", "district of columbia": "DC", florida: "FL", georgia: "GA",
+  hawaii: "HI", idaho: "ID", illinois: "IL", indiana: "IN", iowa: "IA", kansas: "KS", kentucky: "KY",
+  louisiana: "LA", maine: "ME", maryland: "MD", massachusetts: "MA", michigan: "MI", minnesota: "MN",
+  mississippi: "MS", missouri: "MO", montana: "MT", nebraska: "NE", nevada: "NV",
+  "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+  "north carolina": "NC", "north dakota": "ND", ohio: "OH", oklahoma: "OK", oregon: "OR",
+  pennsylvania: "PA", "rhode island": "RI", "south carolina": "SC", "south dakota": "SD",
+  tennessee: "TN", texas: "TX", utah: "UT", vermont: "VT", virginia: "VA", washington: "WA",
+  "west virginia": "WV", wisconsin: "WI", wyoming: "WY", "puerto rico": "PR",
+  "virgin islands": "VI", guam: "GU", "american samoa": "AS",
+};
+
+/** Two-letter province code, or null when the value isn't a US state at all. */
+export function provinceCodeFor(raw: string | null): string | null {
+  const v = (raw || "").trim();
+  if (!v) return null;
+  if (/^[A-Za-z]{2}$/.test(v) && Object.values(STATE_CODES).includes(v.toUpperCase())) {
+    return v.toUpperCase();
+  }
+  return STATE_CODES[v.toLowerCase()] ?? null;
+}
+
 /** Mailable = a street line with a number, plus city, state and zip. */
 export function isAddressComplete(a: LeadAddress): boolean {
   return !!(a.address1 && /\d/.test(a.address1) && a.city && a.province && a.zip);
@@ -402,12 +434,18 @@ export async function syncInterestedLeadToShopify(
     // Only send an address when it's actually mailable. A half-filled address
     // in Shopify looks complete to PostPilot and produces a wasted mailing.
     if (complete) {
+      // Shopify wants ISO codes, not free text. Passing country: "US" and
+      // province: "Florida" is what produced "Country is invalid" and
+      // "Province is invalid" — it validates both against its own lists.
+      const provinceCode = provinceCodeFor(address.province);
       input.addresses = [{
         address1: address.address1,
         city: address.city,
-        province: address.province,
         zip: address.zip,
-        country: address.country,
+        countryCode: "US",
+        // Omit rather than send something Shopify will reject: an address with
+        // city + zip still delivers, an errored customer doesn't exist at all.
+        ...(provinceCode ? { provinceCode } : {}),
         company: c.name || undefined,
         firstName: c.first_name || undefined,
         lastName: c.last_name || undefined,
@@ -436,6 +474,14 @@ export async function syncInterestedLeadToShopify(
       input.emailMarketingConsent = consent;
     }
 
+    /**
+     * Shopify enforces a unique phone across customers. Ours come from
+     * enrichment, so a shared storefront number legitimately appears on several
+     * leads — losing the whole customer over a duplicate phone would be absurd,
+     * so we drop the phone and retry once.
+     */
+    const isPhoneClash = (msg: string) => /phone has already been taken/i.test(msg);
+
     let resultId: string | null = null;
     if (customerId) {
       const data = await client.graphql<{ customerUpdate: { customer: GqlCustomer | null; userErrors: Array<{ field: string[]; message: string }> } }>(
@@ -447,11 +493,21 @@ export async function syncInterestedLeadToShopify(
          }`,
         { input: { ...input, id: customerId } },
       );
-      const errs = data.customerUpdate.userErrors;
+      let errs = data.customerUpdate.userErrors;
+      if (errs?.length && errs.every((e) => isPhoneClash(e.message))) {
+        const retry = await client.graphql<{ customerUpdate: { customer: GqlCustomer | null; userErrors: Array<{ field: string[]; message: string }> } }>(
+          `mutation UpdateCustomer($input: CustomerInput!) {
+             customerUpdate(input: $input) { customer { id email tags } userErrors { field message } }
+           }`,
+          { input: { ...input, phone: undefined, id: customerId } },
+        );
+        errs = retry.customerUpdate.userErrors;
+        if (!errs?.length) resultId = retry.customerUpdate.customer?.id ?? customerId;
+      }
       if (errs?.length) {
         return { companyId, status: "error", reason: errs.map((e) => e.message).join("; ") };
       }
-      resultId = data.customerUpdate.customer?.id ?? customerId;
+      resultId = resultId ?? data.customerUpdate.customer?.id ?? customerId;
 
       // Consent as its own call on the update path.
       if (!previouslyUnsubscribed && resultId) {
@@ -484,11 +540,21 @@ export async function syncInterestedLeadToShopify(
          }`,
         { input },
       );
-      const errs = data.customerCreate.userErrors;
+      let errs = data.customerCreate.userErrors;
+      if (errs?.length && errs.every((e) => isPhoneClash(e.message))) {
+        const retry = await client.graphql<{ customerCreate: { customer: GqlCustomer | null; userErrors: Array<{ field: string[]; message: string }> } }>(
+          `mutation CreateCustomer($input: CustomerInput!) {
+             customerCreate(input: $input) { customer { id email tags } userErrors { field message } }
+           }`,
+          { input: { ...input, phone: undefined } },
+        );
+        errs = retry.customerCreate.userErrors;
+        if (!errs?.length) resultId = retry.customerCreate.customer?.id ?? null;
+      }
       if (errs?.length) {
         return { companyId, status: "error", reason: errs.map((e) => e.message).join("; ") };
       }
-      resultId = data.customerCreate.customer?.id ?? null;
+      resultId = resultId ?? data.customerCreate.customer?.id ?? null;
     }
 
     if (resultId) {
