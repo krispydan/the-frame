@@ -175,11 +175,12 @@ export default function CustomerAnalyticsPage() {
           ) : (
             <>
               <CustomerMap points={data.geoPoints} />
-              <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-4 mt-3 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-full bg-green-600" /> Healthy</span>
                 <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-full bg-amber-600" /> At risk</span>
                 <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded-full bg-red-600" /> Churning</span>
                 <span className="ml-2">Circle size = lifetime value</span>
+                <span className="ml-auto italic">Zoom in to see individual stores; zoom out for the heatmap</span>
               </div>
             </>
           )}
