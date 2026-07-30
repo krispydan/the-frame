@@ -183,6 +183,9 @@ export async function POST(req: NextRequest) {
       : `${COMPANY_SELECT}
            WHERE c.status IN ('interested','catalog_sent')
              AND c.shopify_customer_id IS NULL
+             AND EXISTS (SELECT 1 FROM contacts ct WHERE ct.company_id = c.id
+                           AND TRIM(COALESCE(ct.email,'')) <> ''
+                           AND LOWER(ct.email) NOT LIKE '%@relay.faire.com%')
            ORDER BY c.updated_at DESC
            LIMIT ?`;
     const rows = sqlite.prepare(sql).all(limit) as CompanyRow[];
