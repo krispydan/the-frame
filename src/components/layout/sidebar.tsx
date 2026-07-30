@@ -97,6 +97,35 @@ type NavItem = {
   owns?: string[];
 };
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * MENU LAYOUT CONVENTION — follow this for every new nav section
+ * ─────────────────────────────────────────────────────────────────────────
+ * A top-level item is either:
+ *   (a) a LEAF — a single route, no `children`:
+ *         { title: "Pipeline", href: "/pipeline", icon: Kanban }
+ *   (b) a SECTION — a parent with a `children` dropdown.
+ *
+ * Rules for a SECTION (keep every section consistent):
+ *   1. The FIRST child MUST be the parent's own landing route (same `href`
+ *      as the parent), given a DESCRIPTIVE label — not "Overview". Examples:
+ *        Orders    → "All orders"     (/orders)
+ *        Catalog   → "All products"   (/catalog)
+ *        Inventory → "Stock on hand"  (/inventory)
+ *        Finance   → "P&L"            (/finance)
+ *        Customers → "All customers"  (/customers)
+ *      This guarantees the section index is always reachable from the
+ *      dropdown and never hidden behind the expand toggle.
+ *   2. Remaining children are the section's sub-pages, ordered most-used first.
+ *   3. Every child.href must be a REAL route (a page.tsx exists for it).
+ *   4. If a child's route doesn't start with the parent's href (e.g. Segments
+ *      under Prospects), add that prefix to the parent's `owns` array so
+ *      active-state highlighting and auto-expand still work.
+ *   5. Add every child.href to ROLE_ALLOWED_HREFS for each role allowed to see
+ *      it (the parent href alone is not enough to reveal children).
+ *   6. Prefer a distinct lucide icon per child; the "All X" first child may
+ *      reuse the parent's icon.
+ * ───────────────────────────────────────────────────────────────────────── */
+
 const salesNav: NavItem[] = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { title: "Targets", href: "/targets", icon: Target },
@@ -104,6 +133,7 @@ const salesNav: NavItem[] = [
     title: "Prospects", href: "/prospects", icon: Users,
     owns: ["/segments", "/brands"],
     children: [
+      { title: "All prospects", href: "/prospects", icon: Users },
       { title: "Review queue", href: "/prospects/review", icon: Search },
       { title: "Facebook leads", href: "/prospects/facebook-leads", icon: Megaphone },
       { title: "Lead sources", href: "/prospects/sources", icon: Database },
@@ -116,6 +146,7 @@ const salesNav: NavItem[] = [
     title: "Customers", href: "/customers", icon: HeartHandshake,
     owns: ["/customers/analytics"],
     children: [
+      { title: "All customers", href: "/customers", icon: HeartHandshake },
       { title: "Analytics & Map", href: "/customers/analytics", icon: MapPin },
     ],
   },
