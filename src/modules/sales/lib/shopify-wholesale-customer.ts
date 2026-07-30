@@ -65,6 +65,8 @@ interface CompanyRow {
   email: string | null;
   phone: string | null;
   owner_name: string | null;
+  /** 1 when a PhoneBurner call on this company was dispositioned Set Appointment. */
+  had_appointment: number;
 }
 
 function loadCompany(companyId: string): CompanyRow | undefined {
@@ -82,10 +84,49 @@ function loadCompany(companyId: string): CompanyRow | undefined {
                 ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
               (SELECT cp.phone FROM company_phones cp WHERE cp.company_id = c.id
                 ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
-              (SELECT u.name FROM users u WHERE u.id = c.owner_id) AS owner_name
+              (SELECT u.name FROM users u WHERE u.id = c.owner_id) AS owner_name,
+              (SELECT COUNT(*) FROM phoneburner_call_log pb
+                WHERE pb.company_id = c.id
+                  AND REPLACE(LOWER(COALESCE(pb.disposition_label,'')), '.', '') LIKE 'set app%') AS had_appointment
          FROM companies c WHERE c.id = ?`,
     )
     .get(companyId) as CompanyRow | undefined;
+}
+
+/**
+ * The closed set of source tags. Deliberately fixed rather than derived from
+ * companies.source, which holds import filenames — slugifying it produced
+ * segment names like "source-storeleads-csv-updated-boqtuies-csv", typo and
+ * all. A Shopify segment built on a filename is worse than useless: it looks
+ * meaningful and silently rots when the next import is named differently.
+ */
+export type SourceTag =
+  | "source-cold-call"
+  | "source-email"
+  | "source-facebook-ads"
+  | "source-faire"
+  | "source-ajm"
+  | "source-imported-list"
+  | "source-other";
+
+export function sourceTagFor(c: Pick<CompanyRow, "source" | "tags">): SourceTag {
+  const src = (c.source || "").toLowerCase();
+  let existing: string[] = [];
+  try {
+    existing = c.tags ? (JSON.parse(c.tags) as string[]).map((t) => String(t).toLowerCase()) : [];
+  } catch { /* tags column may be legacy CSV */ }
+  const has = (s: string) => src.includes(s) || existing.some((t) => t.includes(s));
+
+  if (has("phoneburner") || has("cold")) return "source-cold-call";
+  if (has("instantly")) return "source-email";
+  if (has("facebook") || has("meta")) return "source-facebook-ads";
+  if (has("faire")) return "source-faire";
+  if (has("ajm")) return "source-ajm";
+  // Bought/scraped lists — storeleads exports, CSV drops, eyewear crawls.
+  if (has("storeleads") || has("csv") || has("import") || has("crawl") || has("boutique")) {
+    return "source-imported-list";
+  }
+  return "source-other";
 }
 
 /**
@@ -94,22 +135,14 @@ function loadCompany(companyId: string): CompanyRow | undefined {
  * and a stray casing difference silently splits an audience in half.
  */
 export function buildTags(c: CompanyRow): string[] {
-  const tags = new Set<string>(["the-frame", "wholesale-lead", "appointment-set"]);
+  const tags = new Set<string>(["the-frame", "wholesale-lead"]);
 
-  const src = (c.source || "").toLowerCase();
-  let existing: string[] = [];
-  try {
-    existing = c.tags ? (JSON.parse(c.tags) as string[]).map((t) => String(t).toLowerCase()) : [];
-  } catch { /* tags column may be legacy CSV */ }
-  const has = (s: string) => src.includes(s) || existing.some((t) => t.includes(s));
+  // Only leads a rep actually booked. Applying this to the whole interested
+  // backlog — which arrives via email replies, ad forms and list imports —
+  // would make any segment built on it a lie.
+  if (c.had_appointment > 0) tags.add("appointment-set");
 
-  // Where the lead came from — the single most useful segmentation axis.
-  if (has("phoneburner") || has("cold")) tags.add("source-cold-call");
-  else if (has("instantly")) tags.add("source-email");
-  else if (has("facebook") || has("meta")) tags.add("source-facebook-ads");
-  else if (has("faire")) tags.add("source-faire");
-  else if (has("ajm")) tags.add("source-ajm");
-  else if (c.source) tags.add(`source-${c.source.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`);
+  tags.add(sourceTagFor(c));
 
   if (c.icp_tier) tags.add(`icp-${c.icp_tier.toLowerCase()}`);
   if (c.owner_name) tags.add(`rep-${c.owner_name.toLowerCase().split(/\s+/)[0].replace(/[^a-z0-9]/g, "")}`);
@@ -119,7 +152,7 @@ export function buildTags(c: CompanyRow): string[] {
   tags.add(`interested-${new Date().toISOString().slice(0, 7)}`);
 
   // The direct-mail flag PostPilot pulls on. Removed once they order — see
-  // suppressBuyers() below.
+  // suppressBuyersFromMail() below.
   tags.add("postpilot-mail");
 
   return [...tags];
