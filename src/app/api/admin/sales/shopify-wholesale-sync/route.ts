@@ -47,7 +47,7 @@ const COHORT_SQL = `
            ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
          (SELECT cp.phone FROM company_phones cp WHERE cp.company_id = c.id
            ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
-         (SELECT u.name FROM users u WHERE u.id = c.assigned_to) AS owner_name
+         (SELECT u.name FROM users u WHERE u.id = c.owner_id) AS owner_name
     FROM companies c
    WHERE c.status IN ('interested','catalog_sent')
    ORDER BY c.updated_at DESC`;
