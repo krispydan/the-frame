@@ -499,16 +499,33 @@ export function CustomersWidget({ data }: { data: Bundle }) {
   const d = g<Customers>(data, "customers");
   if (!d) return null;
   const totalLtv = d.byStatus.reduce((a, s) => a + (s.total_ltv || 0), 0);
+  // At-risk = at_risk + churning statuses — the actionable slice.
+  const atRisk = d.byStatus
+    .filter((s) => s.health_status === "at_risk" || s.health_status === "churning")
+    .reduce((a, s) => ({ count: a.count + s.count, ltv: a.ltv + (s.total_ltv || 0) }), { count: 0, ltv: 0 });
   return (
     <div className="space-y-3">
       <div className="flex items-baseline gap-2">
         <span className="text-xl font-semibold tabular-nums">{money(totalLtv, { compact: true })}</span>
         <span className="text-xs text-muted-foreground">total lifetime value</span>
       </div>
+      {atRisk.count > 0 && (
+        <a
+          href="/customers/analytics"
+          className="flex items-center justify-between rounded-md px-2.5 py-1.5 text-xs"
+          style={{ background: "rgba(217,119,6,0.10)", color: "#b45309" }}
+        >
+          <span className="font-medium">⚠️ {num(atRisk.count)} customers at risk</span>
+          <span>{money(atRisk.ltv, { compact: true })} at stake →</span>
+        </a>
+      )}
       <HBars
         rows={d.byStatus.map((s) => ({ label: (s.health_status || "unknown").replace("_", " "), value: s.count, sub: money(s.total_ltv, { compact: true }), color: HEALTH_TONE[s.health_status] ?? STATUS.neutral }))}
         format={(v) => num(v)}
       />
+      <a href="/customers/analytics" className="block text-xs text-muted-foreground hover:text-foreground">
+        View map &amp; analytics →
+      </a>
     </div>
   );
 }

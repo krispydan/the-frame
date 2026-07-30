@@ -17,6 +17,7 @@ import {
   LogOut,
   ChevronsUpDown,
   HeartHandshake,
+  MapPin,
   Building,
   Megaphone,
   Kanban,
@@ -111,7 +112,13 @@ const salesNav: NavItem[] = [
     ],
   },
   { title: "Pipeline", href: "/pipeline", icon: Kanban },
-  { title: "Customers", href: "/customers", icon: HeartHandshake },
+  {
+    title: "Customers", href: "/customers", icon: HeartHandshake,
+    owns: ["/customers/analytics"],
+    children: [
+      { title: "Analytics & Map", href: "/customers/analytics", icon: MapPin },
+    ],
+  },
 ];
 
 /**
@@ -242,11 +249,11 @@ const bottomNav = [
 
 const ROLE_ALLOWED_HREFS: Record<string, string[]> = {
   owner: ["*"],
-  sales_manager: ["/dashboard", "/targets", "/prospects", "/prospects/review", "/prospects/sources", "/prospects/facebook-leads", "/segments", "/campaigns", "/campaigns/inbox", "/marketing/outreach", "/pipeline", "/customers", "/brands", "/catalog", "/inventory/performance", "/inventory/colors"],
+  sales_manager: ["/dashboard", "/targets", "/prospects", "/prospects/review", "/prospects/sources", "/prospects/facebook-leads", "/segments", "/campaigns", "/campaigns/inbox", "/marketing/outreach", "/pipeline", "/customers", "/customers/analytics", "/brands", "/catalog", "/inventory/performance", "/inventory/colors"],
   warehouse: ["/dashboard", "/orders", "/orders/international", "/catalog", "/catalog/intake", "/media", "/inventory", "/inventory/performance", "/inventory/colors", "/inventory/factories", "/inventory/reorder", "/inventory/purchase-orders", "/inventory/exports"],
   finance: ["/dashboard", "/orders", "/finance", "/finance/cogs", "/finance/xero", "/inventory/performance", "/inventory/colors", "/inventory/factories"],
   marketing: ["/dashboard", "/marketing", "/marketing/outreach", "/marketing/email", "/marketing/email/plan", "/marketing/email/calendar", "/marketing/email/designer-queue", "/marketing/email/prompts", "/marketing/videos", "/marketing/videos/clips", "/marketing/videos/recipes", "/marketing/videos/identify", "/marketing/videos/products", "/marketing/calendar", "/catalog", "/catalog/export", "/media", "/campaigns", "/campaigns/inbox", "/prospects/facebook-leads", "/inventory/performance", "/inventory/colors"],
-  support: ["/dashboard", "/orders", "/customers"],
+  support: ["/dashboard", "/orders", "/customers", "/customers/analytics"],
   ai: ["/dashboard", "/ai"],
 };
 

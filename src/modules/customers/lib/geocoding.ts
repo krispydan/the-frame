@@ -121,6 +121,36 @@ export async function geocodeCompanies(opts?: {
   return result;
 }
 
+/**
+ * Geocode a single company by id (fire-and-forget friendly). Skips if the
+ * company already has coordinates unless `force`. No rate-limit sleep — this
+ * is a single lookup triggered by an order, not a batch. Best-effort: returns
+ * false on any failure and never throws.
+ */
+export async function geocodeCompanyById(companyId: string, opts?: { force?: boolean }): Promise<boolean> {
+  try {
+    const c = sqlite.prepare(
+      "SELECT id, name, address, city, state, zip, country, latitude, geocoded_at FROM companies WHERE id = ?",
+    ).get(companyId) as (CompanyRow & { latitude: number | null; geocoded_at: string | null }) | undefined;
+    if (!c) return false;
+    if (!opts?.force && c.latitude != null) return true; // already mapped
+
+    const query = buildQuery(c);
+    const mark = sqlite.prepare(
+      "UPDATE companies SET latitude = ?, longitude = ?, geocoded_at = ? WHERE id = ?",
+    );
+    if (!query) {
+      mark.run(null, null, new Date().toISOString(), c.id);
+      return false;
+    }
+    const geo = await geocodeOne(query);
+    mark.run(geo?.lat ?? null, geo?.lng ?? null, new Date().toISOString(), c.id);
+    return !!geo;
+  } catch {
+    return false;
+  }
+}
+
 /** Count of customer companies still needing geocoding (for progress UI). */
 export function countUngeocodedCustomers(): number {
   return (sqlite.prepare(`

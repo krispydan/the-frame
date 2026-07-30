@@ -386,6 +386,16 @@ export async function handleOrderCreate(order: ShopifyOrder, shopDomain?: string
     } catch (e) {
       console.error("[Shopify Webhook] ensureCustomerAccount error:", e);
     }
+
+    // Geocode the customer for the map on first order — best-effort, never blocks.
+    void (async () => {
+      try {
+        const { geocodeCompanyById } = await import("@/modules/customers/lib/geocoding");
+        await geocodeCompanyById(companyId);
+      } catch (e) {
+        console.error("[Shopify Webhook] geocode on order failed:", e);
+      }
+    })();
   }
 
   // Push the order to Pipedrive now (wins an open outreach deal or creates a
