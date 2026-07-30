@@ -19,11 +19,23 @@ import { getShopifyClientByChannel } from "@/modules/integrations/lib/shopify/ad
 import { materializeVideo } from "@/lib/storage/videos";
 import { readFile } from "fs/promises";
 
+/** Jaxy runs two Shopify stores — the video belongs on both. */
+export type ShopifyChannel = "retail" | "wholesale";
+export const SHOPIFY_CHANNELS: ShopifyChannel[] = ["retail", "wholesale"];
+
+export interface ChannelResult {
+  channel: ShopifyChannel;
+  ok: boolean;
+  shopifyProductId?: string;
+  mediaId?: string;
+  error?: string;
+}
+
 export interface PublishResult {
   ok: boolean;
   productId: string;
-  shopifyProductId?: string;
-  mediaId?: string;
+  /** One entry per store attempted. */
+  channels: ChannelResult[];
   error?: string;
 }
 
@@ -60,10 +72,15 @@ export async function resolveShopifyProductId(
 }
 
 /**
- * Push an approved product video to Shopify as product media.
- * Records shopify_published_at on success so the UI can show state.
+ * Push an approved product video to Shopify — to EVERY store by default
+ * (retail and wholesale), since the same frame is sold on both. Each
+ * store is independent: one failing (or not stocking that SKU) never
+ * blocks the other, and each records its own timestamp.
  */
-export async function publishProductVideo(productId: string): Promise<PublishResult> {
+export async function publishProductVideo(
+  productId: string,
+  channels: ShopifyChannel[] = SHOPIFY_CHANNELS,
+): Promise<PublishResult> {
   const row = sqlite
     .prepare(
       `SELECT pv.file_path AS filePath, pv.status, pv.approved_at AS approvedAt, p.name AS productName
@@ -75,21 +92,82 @@ export async function publishProductVideo(productId: string): Promise<PublishRes
     | { filePath: string | null; status: string; approvedAt: string | null; productName: string }
     | undefined;
 
-  if (!row) return { ok: false, productId, error: "No product video built yet" };
-  if (row.status !== "ready" || !row.filePath) return { ok: false, productId, error: "Video isn't rendered" };
+  if (!row) return { ok: false, productId, channels: [], error: "No product video built yet" };
+  if (row.status !== "ready" || !row.filePath) {
+    return { ok: false, productId, channels: [], error: "Video isn't rendered" };
+  }
   // The human gate. Never publish on a batch job's authority alone.
-  if (!row.approvedAt) return { ok: false, productId, error: "Not approved — approve it before publishing" };
-
-  const client = await getShopifyClientByChannel("retail");
-  const shopifyProductId = await resolveShopifyProductId(client, productId);
-  if (!shopifyProductId) {
-    return { ok: false, productId, error: `No Shopify product matches this product's SKUs (${row.productName})` };
+  if (!row.approvedAt) {
+    return { ok: false, productId, channels: [], error: "Not approved — approve it before publishing" };
   }
 
-  const media = await materializeVideo(row.filePath);
+  // Materialize once; the same bytes go to every store. A missing master
+  // is a clean error, not an unhandled throw.
+  let media: { path: string; cleanup: () => Promise<void> };
+  try {
+    media = await materializeVideo(row.filePath);
+  } catch (e) {
+    return {
+      ok: false,
+      productId,
+      channels: [],
+      error: `Can't read the rendered video (${e instanceof Error ? e.message : e}) — rebuild it first`,
+    };
+  }
+
+  const results: ChannelResult[] = [];
   try {
     const bytes = await readFile(media.path);
     const filename = `${slugify(row.productName)}.mp4`;
+
+    for (const channel of channels) {
+      try {
+        const r = await publishToChannel(channel, productId, row.productName, bytes, filename);
+        results.push(r);
+        if (r.ok) {
+          const col = channel === "retail" ? "shopify_retail_at" : "shopify_wholesale_at";
+          sqlite
+            .prepare(
+              `UPDATE marketing_product_videos
+                  SET ${col} = datetime('now'), shopify_published_at = datetime('now'),
+                      error = NULL, updated_at = datetime('now')
+                WHERE product_id = ?`,
+            )
+            .run(productId);
+        }
+      } catch (e) {
+        // A store that isn't connected shouldn't sink the other one.
+        results.push({ channel, ok: false, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+  } finally {
+    await media.cleanup();
+  }
+
+  const anyOk = results.some((r) => r.ok);
+  return {
+    ok: anyOk,
+    productId,
+    channels: results,
+    error: anyOk ? undefined : results.map((r) => `${r.channel}: ${r.error}`).join(" · "),
+  };
+}
+
+/** Upload + attach the video on ONE store. */
+async function publishToChannel(
+  channel: ShopifyChannel,
+  productId: string,
+  productName: string,
+  bytes: Buffer,
+  filename: string,
+): Promise<ChannelResult> {
+  const client = await getShopifyClientByChannel(channel);
+  const shopifyProductId = await resolveShopifyProductId(client, productId);
+  if (!shopifyProductId) {
+    return { channel, ok: false, error: `No product on the ${channel} store matches these SKUs` };
+  }
+
+  {
 
     // 1. Ask Shopify where to put the bytes.
     const staged = await client.graphql<{
@@ -117,9 +195,9 @@ export async function publishProductVideo(productId: string): Promise<PublishRes
       },
     );
     const errs = staged.stagedUploadsCreate.userErrors;
-    if (errs?.length) return { ok: false, productId, error: errs.map((e) => e.message).join("; ") };
+    if (errs?.length) return { channel, ok: false, error: errs.map((e) => e.message).join("; ") };
     const target = staged.stagedUploadsCreate.stagedTargets[0];
-    if (!target) return { ok: false, productId, error: "Shopify returned no upload target" };
+    if (!target) return { channel, ok: false, error: "Shopify returned no upload target" };
 
     // 2. Upload the bytes. Parameters MUST precede the file part.
     const form = new FormData();
@@ -127,7 +205,7 @@ export async function publishProductVideo(productId: string): Promise<PublishRes
     form.append("file", new Blob([new Uint8Array(bytes)], { type: "video/mp4" }), filename);
     const upload = await fetch(target.url, { method: "POST", body: form });
     if (!upload.ok) {
-      return { ok: false, productId, error: `Upload to Shopify failed (${upload.status})` };
+      return { channel, ok: false, error: `Upload to Shopify failed (${upload.status})` };
     }
 
     // 3. Attach it to the product.
@@ -145,28 +223,18 @@ export async function publishProductVideo(productId: string): Promise<PublishRes
        }`,
       {
         productId: shopifyProductId,
-        media: [{ originalSource: target.resourceUrl, mediaContentType: "VIDEO", alt: row.productName }],
+        media: [{ originalSource: target.resourceUrl, mediaContentType: "VIDEO", alt: productName }],
       },
     );
     const mErrs = attach.productCreateMedia.mediaUserErrors;
-    if (mErrs?.length) return { ok: false, productId, error: mErrs.map((e) => e.message).join("; ") };
-
-    sqlite
-      .prepare(
-        `UPDATE marketing_product_videos
-            SET shopify_published_at = datetime('now'), error = NULL, updated_at = datetime('now')
-          WHERE product_id = ?`,
-      )
-      .run(productId);
+    if (mErrs?.length) return { channel, ok: false, error: mErrs.map((e) => e.message).join("; ") };
 
     return {
+      channel,
       ok: true,
-      productId,
       shopifyProductId,
       mediaId: attach.productCreateMedia.media?.[0]?.id,
     };
-  } finally {
-    await media.cleanup();
   }
 }
 

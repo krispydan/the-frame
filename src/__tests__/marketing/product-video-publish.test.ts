@@ -3,10 +3,22 @@
  * without touching Shopify. The live round-trip (staged upload →
  * productCreateMedia) needs real credentials and is verified on deploy.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { mkdtempSync, writeFileSync, mkdirSync } from "fs";
+import { tmpdir } from "os";
+import path from "path";
 import { getTestDb, resetTestDb } from "../setup";
 import { publishProductVideo, resolveShopifyProductId } from "@/modules/marketing/lib/video/product-video-publish";
+import { exportProductVideoForFaire } from "@/modules/marketing/lib/video/product-video-faire";
 import { listProductVideos } from "@/modules/marketing/lib/video/product-video";
+
+// A real (tiny) master on disk so the publish path gets past materialize.
+beforeAll(() => {
+  const root = mkdtempSync(path.join(tmpdir(), "pv-pub-"));
+  process.env.VIDEOS_PATH = root;
+  mkdirSync(path.join(root, "products"), { recursive: true });
+  writeFileSync(path.join(root, "products/p1.mp4"), Buffer.from("not-a-real-mp4"));
+});
 
 function seedVideo(opts: { status?: string; approved?: boolean; filePath?: string | null } = {}) {
   const d = getTestDb();
@@ -47,9 +59,63 @@ describe("publishProductVideo guards", () => {
     const r = await publishProductVideo("p1");
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/not approved/i);
-    // and nothing was recorded as published
-    const row = getTestDb().prepare(`SELECT shopify_published_at AS at FROM marketing_product_videos WHERE product_id='p1'`).get() as { at: string | null };
+    // and nothing was recorded as published, on either store
+    const row = getTestDb().prepare(
+      `SELECT shopify_published_at AS at, shopify_retail_at AS retail, shopify_wholesale_at AS wholesale
+         FROM marketing_product_videos WHERE product_id='p1'`,
+    ).get() as { at: string | null; retail: string | null; wholesale: string | null };
     expect(row.at).toBeNull();
+    expect(row.retail).toBeNull();
+    expect(row.wholesale).toBeNull();
+  });
+
+  it("attempts BOTH Shopify stores and reports each one", async () => {
+    seedVideo({ status: "ready", approved: true });
+    // No store is connected in tests, so both fail — the point is that both
+    // are attempted and neither failure hides the other.
+    const r = await publishProductVideo("p1");
+    expect(r.ok).toBe(false);
+    expect(r.channels.map((c) => c.channel)).toEqual(["retail", "wholesale"]);
+    expect(r.channels.every((c) => !c.ok && c.error)).toBe(true);
+  });
+
+  it("can target a single store", async () => {
+    seedVideo({ status: "ready", approved: true });
+    const r = await publishProductVideo("p1", ["wholesale"]);
+    expect(r.channels.map((c) => c.channel)).toEqual(["wholesale"]);
+  });
+});
+
+describe("exportProductVideoForFaire", () => {
+  beforeEach(() => {
+    resetTestDb();
+    listProductVideos();
+    getTestDb().exec("DELETE FROM marketing_product_videos");
+  });
+
+  it("refuses an unapproved video (same gate as Shopify)", () => {
+    seedVideo({ status: "ready", approved: false });
+    const r = exportProductVideoForFaire("p1");
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/not approved/i);
+  });
+
+  it("returns the file to upload and stamps it exported", () => {
+    seedVideo({ status: "ready", approved: true });
+    const r = exportProductVideoForFaire("p1");
+    expect(r.ok).toBe(true);
+    expect(r.downloadUrl).toContain("products/p1.mp4");
+    expect(r.fileName).toBe("cannon-faire.mp4");
+    const row = getTestDb().prepare(`SELECT faire_exported_at AS at FROM marketing_product_videos WHERE product_id='p1'`).get() as { at: string | null };
+    expect(row.at).not.toBeNull();
+  });
+
+  it("warns when the file exceeds Faire's 2 GB limit", () => {
+    seedVideo({ status: "ready", approved: true });
+    getTestDb().prepare(`UPDATE marketing_product_videos SET size_bytes = ? WHERE product_id='p1'`).run(3e9);
+    const r = exportProductVideoForFaire("p1");
+    expect(r.ok).toBe(true);
+    expect(r.warnings?.join(" ")).toMatch(/2 GB/);
   });
 });
 
