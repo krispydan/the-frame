@@ -519,6 +519,12 @@ try { sqlite.exec("CREATE INDEX idx_orders_pipedrive_deal ON orders (pipedrive_d
 // and track the non-US Faire label workflow.
 try { sqlite.exec("ALTER TABLE orders ADD COLUMN ship_to_country TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE orders ADD COLUMN source_name TEXT"); } catch { /* exists */ }
+// Exactly-once guard for the "📦 order fulfilled" Slack alert. Both the
+// ShipHero shipment-update and Shopify fulfillments/create handlers call
+// notifyOrderShippedById; each self-gated on its own status read, so a
+// race / retry / multi-package shipment could fire the alert 2-3×. The
+// helper now atomically claims this column before sending.
+try { sqlite.exec("ALTER TABLE orders ADD COLUMN shipped_alert_sent_at TEXT"); } catch { /* exists */ }
 try {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS international_shipping_requests (
     id TEXT PRIMARY KEY NOT NULL,

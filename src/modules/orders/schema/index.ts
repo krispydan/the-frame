@@ -44,6 +44,9 @@ export const orders = sqliteTable("orders", {
   placedAt: text("placed_at"),
   shippedAt: text("shipped_at"),
   deliveredAt: text("delivered_at"),
+  /** Set once when the "order fulfilled" Slack alert is sent — atomic
+   *  claim so the two shipment handlers can't double-fire it. */
+  shippedAlertSentAt: text("shipped_alert_sent_at"),
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
 }, (table) => [

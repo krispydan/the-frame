@@ -5,14 +5,22 @@
  * handler (modules/operations/lib/shiphero/shipment-update.ts) so both
  * channels send the same alert with the same shape.
  *
- * Idempotency: callers must only invoke this on the non-shipped → shipped
- * transition. We don't re-check inside this helper.
+ * Idempotency: this helper atomically claims orders.shipped_alert_sent_at
+ * before sending. The SAME physical shipment reaches us via BOTH the
+ * ShipHero Shipment Update webhook AND the Shopify fulfillments/create
+ * webhook, and each self-gated on its own status read — so a race (both
+ * read status != 'shipped' before either commits), a webhook re-delivery,
+ * or a multi-package shipment could fire this alert 2-3× (observed:
+ * #KWM5XZCAH4 ×3, #MRC3ZEJB8R ×2). The conditional UPDATE below is the
+ * single serialization point: only the first caller to flip the column
+ * from NULL sends; every other caller no-ops. Callers' non-shipped →
+ * shipped gates remain as a cheap first filter but are no longer relied on.
  *
  * Never throws — Slack failures are logged and swallowed. The order itself
  * is already updated; we don't want a Slack outage to wedge the webhook.
  */
 
-import { db } from "@/lib/db";
+import { db, sqlite } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { orders, orderItems } from "@/modules/orders/schema";
 import { companies } from "@/modules/sales/schema";
@@ -54,6 +62,24 @@ export async function notifyOrderShippedById(opts: {
   shipheroOrderId?: string | null;
 }): Promise<void> {
   try {
+    // Exactly-once claim. This conditional UPDATE is atomic under SQLite's
+    // single-writer model: of all the concurrent/retried callers for this
+    // order, exactly one flips shipped_alert_sent_at from NULL and gets
+    // changes === 1; the rest get 0 and return without sending. This is
+    // what actually prevents the duplicate Slack alerts — the callers'
+    // own status gates race, this does not. A missing order id also yields
+    // changes === 0 (correct: don't alert for an order we don't have).
+    const claim = sqlite
+      .prepare(
+        `UPDATE orders SET shipped_alert_sent_at = datetime('now')
+         WHERE id = ? AND shipped_alert_sent_at IS NULL`,
+      )
+      .run(opts.orderId);
+    if (claim.changes === 0) {
+      // Another handler / delivery already sent (or is sending) the alert.
+      return;
+    }
+
     const order = db.select().from(orders).where(eq(orders.id, opts.orderId)).get();
     if (!order) {
       console.warn(`[notify-fulfilled] order not found: ${opts.orderId}`);
@@ -94,19 +120,29 @@ export async function notifyOrderShippedById(opts: {
     const shopDomain = opts.shopDomain ?? shopDomainForOrderChannel(order.channel);
     const shopifyUrl = shopifyAdminOrderUrl(shopDomain, order.externalId);
 
-    await notifyOrderFulfilled({
-      orderNumber: order.orderNumber,
-      channel: order.channel,
-      total: order.total,
-      currency: order.currency || "USD",
-      itemCount,
-      companyName,
-      trackingNumber: opts.trackingNumber ?? order.trackingNumber ?? null,
-      trackingCarrier: opts.trackingCarrier ?? order.trackingCarrier ?? null,
-      trackingUrl: opts.trackingUrl ?? null,
-      shopifyAdminUrl: shopifyUrl,
-      faireUrl,
-    });
+    try {
+      await notifyOrderFulfilled({
+        orderNumber: order.orderNumber,
+        channel: order.channel,
+        total: order.total,
+        currency: order.currency || "USD",
+        itemCount,
+        companyName,
+        trackingNumber: opts.trackingNumber ?? order.trackingNumber ?? null,
+        trackingCarrier: opts.trackingCarrier ?? order.trackingCarrier ?? null,
+        trackingUrl: opts.trackingUrl ?? null,
+        shopifyAdminUrl: shopifyUrl,
+        faireUrl,
+      });
+    } catch (sendErr) {
+      // The claim succeeded but the Slack post failed — release it so a
+      // later re-delivery of the webhook can re-attempt the alert instead
+      // of silently swallowing it forever.
+      sqlite
+        .prepare(`UPDATE orders SET shipped_alert_sent_at = NULL WHERE id = ?`)
+        .run(opts.orderId);
+      throw sendErr;
+    }
   } catch (e) {
     console.error("[notify-fulfilled] failed:", e);
   }
