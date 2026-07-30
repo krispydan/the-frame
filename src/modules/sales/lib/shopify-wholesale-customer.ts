@@ -14,10 +14,10 @@
  *     drives both channels and "stop mailing once they buy" is a single
  *     condition (they have orders) rather than a per-tool suppression list.
  *
- * Marketing consent is NOT set here. Shopify's `emailMarketingConsent` is a
- * legal record of what the customer agreed to, and a rep booking an
- * appointment isn't opt-in. They're created with consent left alone; the
- * tagging is what drives segmentation.
+ * Marketing consent IS set (SUBSCRIBED, single opt-in), per Daniel 2026-07-30
+ * — with one hard exception: a customer who has already unsubscribed is left
+ * alone. The store holds thousands of existing customers, so re-subscribing an
+ * opt-out would otherwise happen silently and often.
  *
  * Idempotent: the Shopify customer id is stamped on the company, and we search
  * by email before creating so a lead already in the store is updated, never
@@ -43,6 +43,10 @@ export interface WholesaleSyncResult {
   tags?: string[];
   addressComplete?: boolean;
   missingAddress?: boolean;
+  /** They already have orders — postpilot-mail is withheld. */
+  alreadyOrdered?: boolean;
+  /** They had opted out; we left their consent alone. */
+  keptExistingUnsubscribe?: boolean;
   reason?: string;
 }
 
@@ -302,7 +306,13 @@ export function isAddressComplete(a: LeadAddress): boolean {
   return !!(a.address1 && /\d/.test(a.address1) && a.city && a.province && a.zip);
 }
 
-interface GqlCustomer { id: string; email: string | null; tags: string[] }
+interface GqlCustomer {
+  id: string;
+  email: string | null;
+  tags: string[];
+  numberOfOrders?: string;
+  emailMarketingConsent?: { marketingState: string; marketingOptInLevel: string | null } | null;
+}
 
 /** Find an existing customer by email so a re-run updates rather than duplicates. */
 async function findByEmail(
@@ -311,7 +321,12 @@ async function findByEmail(
 ): Promise<GqlCustomer | null> {
   const data = await client.graphql<{ customers: { edges: Array<{ node: GqlCustomer }> } }>(
     `query FindCustomer($q: String!) {
-       customers(first: 1, query: $q) { edges { node { id email tags } } }
+       customers(first: 1, query: $q) {
+         edges { node {
+           id email tags numberOfOrders
+           emailMarketingConsent { marketingState marketingOptInLevel }
+         } }
+       }
      }`,
     // Quote the email: an address with a "+" or "-" is otherwise parsed as
     // search syntax and silently matches the wrong customer (or none).
@@ -350,11 +365,29 @@ export async function syncInterestedLeadToShopify(
   try {
     const client = await getShopifyClientByChannel("wholesale");
 
-    // Reuse the stamped id, else look the customer up by email.
+    // Reuse the stamped id, else look the customer up by email. The store has
+    // thousands of existing customers, so a lead is quite likely already there.
     let customerId = c.shopify_customer_id;
+    let existing: GqlCustomer | null = null;
     if (!customerId) {
-      const found = await findByEmail(client, c.email);
-      if (found) customerId = found.id;
+      existing = await findByEmail(client, c.email);
+      if (existing) customerId = existing.id;
+    } else {
+      existing = await findByEmail(client, c.email);
+    }
+
+    const alreadyOrdered = Number(existing?.numberOfOrders ?? "0") > 0;
+    let finalTags = tags;
+    if (alreadyOrdered) {
+      // They've bought. Direct mail is supposed to stop at exactly that point,
+      // so don't hand PostPilot a fresh reason to mail them.
+      finalTags = finalTags.filter((t) => t !== "postpilot-mail");
+    }
+    if (existing?.tags?.length) {
+      // CustomerInput.tags REPLACES the whole list. On a store with existing
+      // customers that would silently wipe tags set by Omnisend, PostPilot or a
+      // human — merge instead.
+      finalTags = [...new Set([...existing.tags, ...finalTags])];
     }
 
     const input: Record<string, unknown> = {
@@ -363,17 +396,7 @@ export async function syncInterestedLeadToShopify(
       lastName: c.last_name || undefined,
       phone: c.phone || undefined,
       note: buildNote(c),
-      tags,
-      // Subscribe to email marketing, per Daniel 2026-07-30. Recorded honestly
-      // as SINGLE_OPT_IN rather than CONFIRMED_OPT_IN — nobody double-opted in,
-      // and overstating the level in Shopify's consent record is what turns a
-      // deliverability problem into a compliance one. consentUpdatedAt stamps
-      // when we asserted it, so the provenance is auditable later.
-      emailMarketingConsent: {
-        marketingState: "SUBSCRIBED",
-        marketingOptInLevel: "SINGLE_OPT_IN",
-        consentUpdatedAt: new Date().toISOString(),
-      },
+      tags: finalTags,
     };
 
     // Only send an address when it's actually mailable. A half-filled address
@@ -389,6 +412,22 @@ export async function syncInterestedLeadToShopify(
         firstName: c.first_name || undefined,
         lastName: c.last_name || undefined,
       }];
+    }
+
+    // Subscribe to email marketing, per Daniel 2026-07-30 — but never overwrite
+    // someone who already opted OUT. Re-subscribing an unsubscribe is the one
+    // move here that turns a marketing decision into a legal problem, and on a
+    // store with 6k existing customers it would happen silently.
+    const previouslyUnsubscribed = existing?.emailMarketingConsent?.marketingState === "UNSUBSCRIBED";
+    if (!previouslyUnsubscribed) {
+      input.emailMarketingConsent = {
+        marketingState: "SUBSCRIBED",
+        // Honest level: nobody double-opted in. Overstating it in Shopify's
+        // consent record is what turns a deliverability question into a
+        // compliance one.
+        marketingOptInLevel: "SINGLE_OPT_IN",
+        consentUpdatedAt: new Date().toISOString(),
+      };
     }
 
     let resultId: string | null = null;
@@ -440,9 +479,11 @@ export async function syncInterestedLeadToShopify(
       companyId,
       status: customerId ? "updated" : "created",
       shopifyCustomerId: resultId,
-      tags,
+      tags: finalTags,
       addressComplete: complete,
       missingAddress: !complete,
+      alreadyOrdered,
+      keptExistingUnsubscribe: previouslyUnsubscribed,
     };
   } catch (e) {
     return { companyId, status: "error", reason: e instanceof Error ? e.message : String(e) };
