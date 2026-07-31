@@ -17,7 +17,8 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   repairUploads,
   adoptOrphans,
-  buildUploadHealthReport,
+  repairableTargets,
+  findOrphanObjects,
   type RepairTarget,
   type UploadKind,
 } from "@/modules/marketing/lib/video/upload-preflight";
@@ -36,9 +37,10 @@ export async function POST(request: NextRequest) {
   let adoptPaths: string[] = [];
 
   if (body.all === true) {
-    const report = await buildUploadHealthReport();
-    targets = report.broken.filter((b) => b.repairable).map((b) => ({ kind: b.kind, id: b.id }));
-    adoptPaths = report.orphans.map((o) => o.path);
+    // Queried, not read off the report's capped detail list — a 400-row
+    // backlog must be fully repaired, not truncated to the first 200.
+    targets = repairableTargets();
+    adoptPaths = (await findOrphanObjects()).orphans.map((o) => o.path);
   } else {
     if (Array.isArray(body.targets)) {
       targets = body.targets
@@ -60,6 +62,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       requeued: repaired.requeued,
       skipped: repaired.skipped + claimed.skipped,
+      alreadyQueued: repaired.alreadyQueued,
       adopted: claimed.adopted,
       errors: [...repaired.errors, ...claimed.errors],
     });

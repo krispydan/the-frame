@@ -207,6 +207,8 @@ export interface RepairTarget {
 export interface RepairResult {
   requeued: number;
   skipped: number;
+  /** Already had a live job — left alone rather than double-queued. */
+  alreadyQueued: number;
   errors: string[];
 }
 
@@ -221,10 +223,19 @@ export interface RepairResult {
 export async function repairUploads(targets: RepairTarget[]): Promise<RepairResult> {
   let requeued = 0;
   let skipped = 0;
+  let alreadyQueued = 0;
   const errors: string[] = [];
+
+  // Re-queueing a row that already has a pending job just doubles the
+  // work for a queue that is, by definition, already behind.
+  const live = liveJobTargetIds();
 
   for (const t of targets) {
     try {
+      if (live.has(t.id)) {
+        alreadyQueued++;
+        continue;
+      }
       if (t.kind === "clip") {
         const clip = db.select().from(videoClips).where(eq(videoClips.id, t.id)).get();
         if (!clip) {
@@ -263,7 +274,33 @@ export async function repairUploads(targets: RepairTarget[]): Promise<RepairResu
     }
   }
 
-  return { requeued, skipped, errors };
+  return { requeued, skipped, alreadyQueued, errors };
+}
+
+/**
+ * Every row Fix should act on: failed, or abandoned with its bytes still
+ * present. Queried directly rather than read off the capped detail list,
+ * so a big backlog is fully repaired instead of silently truncated.
+ */
+export function repairableTargets(): RepairTarget[] {
+  const live = liveJobTargetIds();
+  const out: RepairTarget[] = [];
+
+  const clips = sqlite
+    .prepare(`SELECT id FROM marketing_video_clips WHERE status = 'failed' OR ${STUCK_CLIP}`)
+    .all() as Array<{ id: string }>;
+  for (const c of clips) if (!live.has(c.id)) out.push({ kind: "clip", id: c.id });
+
+  const sources = sqlite
+    .prepare(
+      `SELECT id FROM marketing_video_sources
+        WHERE (status = 'failed' OR ${STUCK_SOURCE} OR (status = 'done' AND clip_count = 0))
+          AND raw_deleted = 0`,
+    )
+    .all() as Array<{ id: string }>;
+  for (const s of sources) if (!live.has(s.id)) out.push({ kind: "source", id: s.id });
+
+  return out;
 }
 
 // ── Orphan adoption ─────────────────────────────────────────────────────
@@ -352,15 +389,107 @@ export async function adoptOrphans(paths: string[]): Promise<AdoptResult> {
 
 // ── Health report ───────────────────────────────────────────────────────
 
+/**
+ * WHY a row isn't finished. "not done" lumps together four situations
+ * that call for completely different responses, and treating them as one
+ * number ("207 uploads failed") is misleading in both directions.
+ */
+export type BrokenState =
+  /** The job ran and errored. Retrying is worth a shot. */
+  | "failed"
+  /** A job for it is pending/running right now — just wait. */
+  | "queued"
+  /** No job exists and it never started. Nothing will ever pick it up
+   *  unless it's re-queued: the silent backlog. */
+  | "abandoned"
+  /** Bytes are gone from storage — only a real re-upload fixes it. */
+  | "lost";
+
 export interface BrokenRow {
   kind: UploadKind;
   id: string;
   fileName: string;
   status: string;
   error: string | null;
+  state: BrokenState;
   /** True when the raw bytes are still in storage → repairable in place. */
   repairable: boolean;
   createdAt: string | null;
+}
+
+/** Queue-side truth: is anything actually draining? */
+export interface QueueSnapshot {
+  splitPending: number;
+  splitRunning: number;
+  splitFailed: number;
+  normalizePending: number;
+  normalizeRunning: number;
+  normalizeFailed: number;
+  /** Oldest pending video job — a date days back means a jammed queue. */
+  oldestPendingAt: string | null;
+}
+
+/**
+ * Counts over EVERY unfinished row, not just the listed sample. The
+ * detail list is capped for the UI; these are not, so the headline
+ * number can't understate the backlog.
+ */
+export interface BrokenTotals {
+  failed: number;
+  queued: number;
+  abandoned: number;
+}
+
+const VIDEO_JOB_TYPES = ["marketing.video.split-source", "marketing.video.normalize-clip"];
+
+/**
+ * Every clip/source id that a live (pending or running) job is already
+ * pointing at. Read once and matched in memory — the alternative is a
+ * LIKE query per row, and there can be hundreds.
+ */
+function liveJobTargetIds(): Set<string> {
+  const rows = sqlite
+    .prepare(
+      `SELECT input FROM jobs
+        WHERE status IN ('pending','running')
+          AND type IN (${VIDEO_JOB_TYPES.map(() => "?").join(",")})`,
+    )
+    .all(...VIDEO_JOB_TYPES) as Array<{ input: string | null }>;
+
+  const ids = new Set<string>();
+  for (const r of rows) {
+    if (!r.input) continue;
+    try {
+      const parsed = JSON.parse(r.input) as { sourceId?: string; clipId?: string };
+      if (parsed.sourceId) ids.add(parsed.sourceId);
+      if (parsed.clipId) ids.add(parsed.clipId);
+    } catch {
+      /* unparseable input — treat as not-live */
+    }
+  }
+  return ids;
+}
+
+function queueSnapshot(): QueueSnapshot {
+  const count = (type: string, status: string): number =>
+    (sqlite.prepare(`SELECT COUNT(*) AS n FROM jobs WHERE type = ? AND status = ?`).get(type, status) as { n: number }).n;
+
+  const oldest = sqlite
+    .prepare(
+      `SELECT MIN(created_at) AS at FROM jobs
+        WHERE status = 'pending' AND type IN (${VIDEO_JOB_TYPES.map(() => "?").join(",")})`,
+    )
+    .get(...VIDEO_JOB_TYPES) as { at: string | null };
+
+  return {
+    splitPending: count("marketing.video.split-source", "pending"),
+    splitRunning: count("marketing.video.split-source", "running"),
+    splitFailed: count("marketing.video.split-source", "failed"),
+    normalizePending: count("marketing.video.normalize-clip", "pending"),
+    normalizeRunning: count("marketing.video.normalize-clip", "running"),
+    normalizeFailed: count("marketing.video.normalize-clip", "failed"),
+    oldestPendingAt: oldest?.at ?? null,
+  };
 }
 
 export interface OrphanObject {
@@ -372,7 +501,11 @@ export interface OrphanObject {
 export interface UploadHealthReport {
   clips: { total: number; ready: number; failed: number; stuck: number };
   sources: { total: number; done: number; failed: number; stuck: number; emptyDone: number };
+  /** A capped sample for the UI — see `totals` for the real numbers. */
   broken: BrokenRow[];
+  brokenTruncated: boolean;
+  totals: BrokenTotals;
+  queue: QueueSnapshot;
   /** Bytes in storage with no DB row — an upload whose /register never
    *  landed. These are invisible losses: the file is paid for and stored,
    *  but nothing in the app knows it exists. */
@@ -435,28 +568,71 @@ export async function buildUploadHealthReport(): Promise<UploadHealthReport> {
     rawDeleted: number; createdAt: string | null;
   }>;
 
+  const live = liveJobTargetIds();
+
+  /**
+   * `status` alone can't tell "waiting in the queue" from "nothing will
+   * ever pick this up". Both sit at 'uploaded'; the difference is whether
+   * a job still points at the row. That distinction is the whole reason
+   * this breakdown exists.
+   */
+  function classify(id: string, status: string, bytesPresent: boolean): BrokenState {
+    if (!bytesPresent) return "lost";
+    if (live.has(id)) return "queued";
+    if (status === "failed") return "failed";
+    return "abandoned";
+  }
+
   const broken: BrokenRow[] = [];
   for (const c of brokenClips) {
+    const repairable = (await videoStat(c.rawPath)).exists;
     broken.push({
       kind: "clip",
       id: c.id,
       fileName: c.fileName,
       status: c.status,
       error: c.error,
-      repairable: (await videoStat(c.rawPath)).exists,
+      state: classify(c.id, c.status, repairable),
+      repairable,
       createdAt: c.createdAt,
     });
   }
   for (const s of brokenSources) {
+    const repairable = s.rawDeleted === 0 && (await videoStat(s.rawPath)).exists;
     broken.push({
       kind: "source",
       id: s.id,
       fileName: s.fileName,
       status: s.status,
       error: s.error,
-      repairable: s.rawDeleted === 0 && (await videoStat(s.rawPath)).exists,
+      state: classify(s.id, s.status, repairable),
+      repairable,
       createdAt: s.createdAt,
     });
+  }
+
+  /**
+   * Totals over EVERY unfinished row. Deliberately id+status only — no
+   * storage HEAD — so this stays one cheap query even at thousands of
+   * rows. It therefore can't distinguish "lost"; the capped detail list
+   * above is what reports that.
+   */
+  const allUnfinished = [
+    ...(sqlite
+      .prepare(`SELECT id, status FROM marketing_video_clips WHERE status = 'failed' OR ${STUCK_CLIP}`)
+      .all() as Array<{ id: string; status: string }>),
+    ...(sqlite
+      .prepare(
+        `SELECT id, status FROM marketing_video_sources
+          WHERE status = 'failed' OR ${STUCK_SOURCE} OR (status = 'done' AND clip_count = 0)`,
+      )
+      .all() as Array<{ id: string; status: string }>),
+  ];
+  const totals: BrokenTotals = { failed: 0, queued: 0, abandoned: 0 };
+  for (const r of allUnfinished) {
+    if (live.has(r.id)) totals.queued++;
+    else if (r.status === "failed") totals.failed++;
+    else totals.abandoned++;
   }
 
   const { orphans, truncated } = await findOrphanObjects();
@@ -476,6 +652,9 @@ export async function buildUploadHealthReport(): Promise<UploadHealthReport> {
       emptyDone: sourceCounts.emptyDone ?? 0,
     },
     broken,
+    brokenTruncated: brokenClips.length >= MAX_BROKEN || brokenSources.length >= MAX_BROKEN,
+    totals,
+    queue: queueSnapshot(),
     orphans,
     orphansTruncated: truncated,
   };
