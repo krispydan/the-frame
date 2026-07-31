@@ -25,7 +25,13 @@ const StateChoropleth = dynamic(() => import("@/modules/customers/components/sta
   loading: () => <div className="h-[420px] flex items-center justify-center bg-muted/40 rounded-lg text-muted-foreground">Loading map…</div>,
 });
 
+type Segment = "all" | "retail" | "wholesale";
+
+interface SegmentCount { segment: string; customers: number; revenue: number }
+
 interface Analytics {
+  segment: Segment;
+  segmentCounts: { retail: SegmentCount; wholesale: SegmentCount };
   kpi: { customerCount: number; totalLtv: number; avgLtv: number; totalOrders: number; atRiskCount: number; churnedCount: number; newThisMonth: number };
   bestCustomers: Array<{ companyId: string; name: string; segment: string | null; state: string | null; tier: string; ltv: number; orders: number; aov: number; health: string; lastOrderAt: string | null }>;
   atRisk: Array<{ companyId: string; name: string; segment: string | null; state: string | null; tier: string; ltv: number; orders: number; health: string; lastOrderAt: string | null; nextReorder: string | null; daysSinceLastOrder: number | null }>;
@@ -62,17 +68,21 @@ export default function CustomerAnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [geocoding, setGeocoding] = useState(false);
   const [stateMetric, setStateMetric] = useState<"revenue" | "customers">("revenue");
+  // Retail vs wholesale are run as different strategies, so the whole page
+  // scopes to one segment. Server derives a customer's segment from its
+  // orders' channels (see the analytics route).
+  const [segment, setSegment] = useState<Segment>("all");
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/v1/customers/analytics");
+      const res = await fetch(`/api/v1/customers/analytics?segment=${segment}`);
       if (res.ok) setData(await res.json());
     } catch {
       toast.error("Failed to load customer analytics");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [segment]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -124,6 +134,37 @@ export default function CustomerAnalyticsPage() {
           <p className="text-muted-foreground">Where your customers are, who your best are, and who&apos;s slipping away</p>
         </div>
       </div>
+
+      {/* Segment switcher — retail and wholesale are separate strategies, so
+          the entire page (KPIs, map, best/at-risk, by-state) rescopes to the
+          chosen segment. Segment is derived server-side from each customer's
+          order channels. */}
+      <div className="flex flex-col sm:flex-row gap-2">
+        {([
+          { key: "all", label: "All customers", sub: `${(data.segmentCounts.retail.customers + data.segmentCounts.wholesale.customers).toLocaleString()} · ${money(data.segmentCounts.retail.revenue + data.segmentCounts.wholesale.revenue)}` },
+          { key: "wholesale", label: "Wholesale", sub: `${data.segmentCounts.wholesale.customers.toLocaleString()} · ${money(data.segmentCounts.wholesale.revenue)}` },
+          { key: "retail", label: "Retail (DTC)", sub: `${data.segmentCounts.retail.customers.toLocaleString()} · ${money(data.segmentCounts.retail.revenue)}` },
+        ] as Array<{ key: Segment; label: string; sub: string }>).map((s) => (
+          <button
+            key={s.key}
+            onClick={() => setSegment(s.key)}
+            className={`flex-1 text-left rounded-lg border px-4 py-3 transition-colors ${
+              segment === s.key ? "border-foreground bg-foreground text-background" : "hover:border-foreground/40"
+            }`}
+          >
+            <div className="text-sm font-semibold">{s.label}</div>
+            <div className={`text-xs ${segment === s.key ? "text-background/70" : "text-muted-foreground"}`}>{s.sub}</div>
+          </button>
+        ))}
+      </div>
+
+      {segment === "retail" && data.kpi.customerCount === 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          No retail customers are tracked as accounts yet. DTC consumer orders from the getjaxy store only appear
+          here once they&apos;re tied to a customer account — wholesale (B2B) accounts are auto-created, individual
+          retail buyers currently are not.
+        </div>
+      )}
 
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
