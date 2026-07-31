@@ -80,6 +80,48 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // ?diagnose=<email|companyId> — trace one lead end to end: did it reach
+  // interested, was the job enqueued, did it run, what did it return.
+  const diag = (params.get("diagnose") || "").trim();
+  if (diag) {
+    const company = sqlite.prepare(
+      `${COMPANY_SELECT} WHERE c.id = ? OR EXISTS (
+          SELECT 1 FROM contacts ct WHERE ct.company_id = c.id AND LOWER(ct.email) = LOWER(?))
+        LIMIT 1`,
+    ).get(diag, diag) as CompanyRow | undefined;
+    if (!company) return NextResponse.json({ ok: false, error: `No company for "${diag}"` }, { status: 404 });
+
+    const jobRows = sqlite.prepare(
+      `SELECT id, type, status, attempts, error, scheduled_for, created_at, started_at, completed_at, output
+         FROM jobs
+        WHERE type = 'sales.sync_lead_to_shopify_wholesale'
+          AND input LIKE ?
+        ORDER BY created_at DESC LIMIT 5`,
+    ).all(`%${company.id}%`);
+
+    const recentJobs = sqlite.prepare(
+      `SELECT status, COUNT(*) n FROM jobs
+        WHERE type = 'sales.sync_lead_to_shopify_wholesale'
+          AND created_at >= datetime('now','-3 days')
+        GROUP BY status`,
+    ).all();
+
+    return NextResponse.json({
+      ok: true,
+      company: {
+        id: company.id, name: company.name, status: company.status,
+        email: company.email, phone: company.phone,
+        shopifyCustomerId: company.shopify_customer_id,
+        hadAppointment: company.had_appointment > 0,
+        updatedAt: company.updated_at,
+      },
+      jobsForThisLead: jobRows,
+      allSyncJobsLast3Days: recentJobs,
+      wouldTags: buildTags(company),
+      addressComplete: isAddressComplete(buildAddress(company)),
+    });
+  }
+
   const rows = sqlite.prepare(`${COHORT_SQL} LIMIT ?`).all(limit) as CompanyRow[];
   const all = sqlite.prepare(COHORT_SQL).all() as CompanyRow[];
 
