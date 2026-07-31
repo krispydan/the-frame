@@ -324,6 +324,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, commit: true, checked: everWritten.size, affected: losses.length, repaired });
   }
 
+  /**
+   * Re-run call-note enrichment for a lead, then sync it.
+   *
+   * Needed for leads whose enrichment already ran under the old rules and so
+   * never captured an email — the fix only applies to future calls, and a
+   * lead with no email can never sync no matter how many times you retry it.
+   */
+  if (body.reEnrich) {
+    const companyId = String(body.reEnrich);
+    const { enrichInterestedLead } = await import("@/modules/sales/lib/interested-enrichment");
+    // skipSlack: the rep already got the appointment alert; re-alerting would
+    // read as a second appointment.
+    const enrich = await enrichInterestedLead(companyId, { skipSlack: true });
+    const sync = await syncInterestedLeadToShopify(companyId);
+    return NextResponse.json({ ok: true, enrich, sync });
+  }
+
   if (body.suppressBuyers === true) {
     return NextResponse.json({ ok: true, result: await suppressBuyersFromMail(body.limit ?? 200) });
   }
