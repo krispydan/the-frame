@@ -92,12 +92,34 @@ export async function GET(req: NextRequest) {
       `${COMPANY_SELECT} WHERE c.id = ?
           OR EXISTS (SELECT 1 FROM contacts ct WHERE ct.company_id = c.id AND LOWER(ct.email) = LOWER(?))
           OR LOWER(c.name) = LOWER(?)
+          OR LOWER(c.name) LIKE LOWER(?)
           OR (LENGTH(?) >= 7 AND EXISTS (
                 SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id
                   AND REPLACE(REPLACE(REPLACE(REPLACE(cp.phone,'-',''),' ',''),'(',''),')','') LIKE ?))
         LIMIT 1`,
-    ).get(diag, diag, diag, digits, `%${digits.slice(-7)}`) as CompanyRow | undefined;
-    if (!company) return NextResponse.json({ ok: false, error: `No company for "${diag}"` }, { status: 404 });
+    ).get(diag, diag, diag, `%${diag}%`, digits, `%${digits.slice(-7)}`) as CompanyRow | undefined;
+    if (!company) {
+      // A dead "not found" is unhelpful: the lead plainly exists somewhere,
+      // since it produced a Slack alert. Report where its traces are.
+      const callHits = sqlite.prepare(
+        `SELECT company_id, called_at, disposition_label, substr(notes,1,200) notes
+           FROM phoneburner_call_log
+          WHERE notes LIKE ? OR phoneburner_contact_id = ?
+          ORDER BY called_at DESC LIMIT 5`,
+      ).all(`%${diag}%`, diag);
+      const leadHits = sqlite.prepare(
+        `SELECT id, company_id, phone, last_call_disposition FROM campaign_leads
+          WHERE REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),'-',''),' ',''),'(',''),')','') LIKE ?
+          LIMIT 5`,
+      ).all(`%${digits.slice(-7)}`);
+      const nameHits = sqlite.prepare(
+        `SELECT id, name, status FROM companies WHERE LOWER(name) LIKE LOWER(?) LIMIT 5`,
+      ).all(`%${diag.split(/\s+/)[0]}%`);
+      return NextResponse.json(
+        { ok: false, error: `No company matched "${diag}"`, callLogHits: callHits, campaignLeadHits: leadHits, nameHits },
+        { status: 404 },
+      );
+    }
 
     const jobRows = sqlite.prepare(
       `SELECT id, type, status, attempts, error, scheduled_for, created_at, started_at, completed_at, output
