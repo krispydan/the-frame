@@ -336,7 +336,7 @@ export async function POST(req: NextRequest) {
     const { enrichInterestedLead } = await import("@/modules/sales/lib/interested-enrichment");
     // skipSlack: the rep already got the appointment alert; re-alerting would
     // read as a second appointment.
-    const enrich = await enrichInterestedLead(companyId, { skipSlack: true });
+    const enrich = await enrichInterestedLead(companyId, { skipSlack: true, force: body.force !== false });
     const sync = await syncInterestedLeadToShopify(companyId);
     return NextResponse.json({ ok: true, enrich, sync });
   }

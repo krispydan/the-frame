@@ -315,6 +315,10 @@ export interface EnrichOptions {
   /** If no open Pipedrive deal exists yet, create one first so the
    *  note/activity/openers have somewhere to land (backfill). */
   ensureDeal?: boolean;
+  /** Re-run even if this call was already enriched. Needed when the
+   *  extraction rules have changed since — the guard exists to stop
+   *  duplicate work, not to make an old result permanent. */
+  force?: boolean;
 }
 
 /**
@@ -344,7 +348,7 @@ export async function enrichInterestedLead(
     .get(companyId) as InterestedCall | undefined;
 
   if (!call) return { skipped: "no interested call found", companyId };
-  if (alreadyEnriched(call.call_id)) return { skipped: "already enriched", callId: call.call_id };
+  if (!opts.force && alreadyEnriched(call.call_id)) return { skipped: "already enriched", callId: call.call_id };
 
   const writeEnabled = writeBackEnabled();
   const onFile = emailOnFile(companyId);
