@@ -84,11 +84,19 @@ export async function GET(req: NextRequest) {
   // interested, was the job enqueued, did it run, what did it return.
   const diag = (params.get("diagnose") || "").trim();
   if (diag) {
+    // Accept an id, an email, a company name, or a phone number — when a lead
+    // is missing the usual reason is that it has no email, so requiring one to
+    // look it up would make the tool useless in exactly the case it's for.
+    const digits = diag.replace(/[^\d]/g, "");
     const company = sqlite.prepare(
-      `${COMPANY_SELECT} WHERE c.id = ? OR EXISTS (
-          SELECT 1 FROM contacts ct WHERE ct.company_id = c.id AND LOWER(ct.email) = LOWER(?))
+      `${COMPANY_SELECT} WHERE c.id = ?
+          OR EXISTS (SELECT 1 FROM contacts ct WHERE ct.company_id = c.id AND LOWER(ct.email) = LOWER(?))
+          OR LOWER(c.name) = LOWER(?)
+          OR (LENGTH(?) >= 7 AND EXISTS (
+                SELECT 1 FROM company_phones cp WHERE cp.company_id = c.id
+                  AND REPLACE(REPLACE(REPLACE(REPLACE(cp.phone,'-',''),' ',''),'(',''),')','') LIKE ?))
         LIMIT 1`,
-    ).get(diag, diag) as CompanyRow | undefined;
+    ).get(diag, diag, diag, digits, `%${digits.slice(-7)}`) as CompanyRow | undefined;
     if (!company) return NextResponse.json({ ok: false, error: `No company for "${diag}"` }, { status: 404 });
 
     const jobRows = sqlite.prepare(
@@ -119,6 +127,20 @@ export async function GET(req: NextRequest) {
       allSyncJobsLast3Days: recentJobs,
       wouldTags: buildTags(company),
       addressComplete: isAddressComplete(buildAddress(company)),
+      allEmails: company.all_emails,
+      // Why a sync would refuse right now, stated plainly.
+      blockedBecause: !company.email
+        ? "no email on any contact — Shopify requires one, so this lead can never sync"
+        : null,
+      contacts: sqlite.prepare(
+        `SELECT first_name, last_name, email, source, is_primary, created_at
+           FROM contacts WHERE company_id = ? ORDER BY created_at DESC LIMIT 10`,
+      ).all(company.id),
+      recentCalls: sqlite.prepare(
+        `SELECT called_at, disposition_label, connected, notes
+           FROM phoneburner_call_log WHERE company_id = ?
+          ORDER BY called_at DESC LIMIT 3`,
+      ).all(company.id),
     });
   }
 
