@@ -18,20 +18,42 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, Wrench } from "lucide-react";
 
+type BrokenState = "failed" | "queued" | "abandoned" | "lost";
+
 interface BrokenRow {
   kind: "clip" | "source";
   id: string;
   fileName: string;
   status: string;
   error: string | null;
+  state: BrokenState;
   repairable: boolean;
 }
 interface Report {
   clips: { total: number; ready: number; failed: number; stuck: number };
   sources: { total: number; done: number; failed: number; stuck: number; emptyDone: number };
   broken: BrokenRow[];
+  brokenTruncated: boolean;
+  totals: { failed: number; queued: number; abandoned: number };
+  queue: {
+    splitPending: number; splitRunning: number; splitFailed: number;
+    normalizePending: number; normalizeRunning: number; normalizeFailed: number;
+    oldestPendingAt: string | null;
+  };
   orphans: Array<{ kind: string; path: string; sizeBytes: number }>;
   orphansTruncated: boolean;
+}
+
+/** "3 days" — how long the oldest queued job has been waiting. */
+function waitingFor(iso: string | null): string | null {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso.replace(" ", "T") + "Z").getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.floor(hours / 24)} days`;
 }
 
 const API = "/api/v1/marketing/videos/uploads";
@@ -81,6 +103,7 @@ export function UploadHealth({ onChanged }: { onChanged?: () => void }) {
     const parts: string[] = [];
     if (d.requeued) parts.push(`${d.requeued} re-queued`);
     if (d.adopted) parts.push(`${d.adopted} recovered from storage`);
+    if (d.alreadyQueued) parts.push(`${d.alreadyQueued} were already queued`);
     if (d.skipped) parts.push(`${d.skipped} need re-uploading`);
     toast.success(parts.length > 0 ? parts.join(" · ") : "Nothing to fix");
     if (d.adopted > 0) {
@@ -95,9 +118,14 @@ export function UploadHealth({ onChanged }: { onChanged?: () => void }) {
   if (loading) return <div className="h-24 animate-pulse rounded-lg bg-muted" />;
   if (!report) return null;
 
-  const needsUpload = report.broken.filter((b) => !b.repairable);
-  const repairable = report.broken.filter((b) => b.repairable);
-  const problems = report.broken.length + report.orphans.length;
+  const { failed, queued, abandoned } = report.totals;
+  const lost = report.broken.filter((b) => b.state === "lost");
+  const failedRows = report.broken.filter((b) => b.state === "failed");
+  const fixable = failed + abandoned + report.orphans.length;
+  const problems = failed + queued + abandoned + report.orphans.length;
+  const q = report.queue;
+  const draining = q.splitRunning + q.normalizeRunning > 0;
+  const waiting = waitingFor(q.oldestPendingAt);
 
   return (
     <Card>
@@ -116,10 +144,10 @@ export function UploadHealth({ onChanged }: { onChanged?: () => void }) {
           <Button variant="ghost" size="sm" onClick={load}>
             <RefreshCw className="h-4 w-4" />
           </Button>
-          {(repairable.length > 0 || report.orphans.length > 0) && (
+          {fixable > 0 && (
             <Button size="sm" onClick={fixAll} disabled={fixing}>
               {fixing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Wrench className="h-4 w-4 mr-1" />}
-              Fix {repairable.length + report.orphans.length} in place
+              Fix {fixable} in place
             </Button>
           )}
         </div>
@@ -130,11 +158,26 @@ export function UploadHealth({ onChanged }: { onChanged?: () => void }) {
           </p>
         ) : (
           <div className="space-y-2 text-xs">
-            {repairable.length > 0 && (
+            {/* Each line is a different problem with a different answer —
+                "not finished" on its own tells the operator nothing. */}
+            {abandoned > 0 && (
               <p className="text-muted-foreground">
-                <strong className="text-foreground">{repairable.length}</strong> upload
-                {repairable.length === 1 ? "" : "s"} failed processing but the file is still stored — these
-                just need re-running, not re-uploading.
+                <strong className="text-foreground">{abandoned}</strong> never started — no job is queued for
+                {abandoned === 1 ? " it" : " them"}, so nothing will pick
+                {abandoned === 1 ? " it" : " them"} up. The footage is still stored; Fix queues the work.
+              </p>
+            )}
+            {queued > 0 && (
+              <p className="text-muted-foreground">
+                <strong className="text-foreground">{queued}</strong> in progress — queued or running right
+                now. Nothing to do; these finish on their own.
+              </p>
+            )}
+            {failed > 0 && (
+              <p className="text-muted-foreground">
+                <strong className="text-foreground">{failed}</strong> errored while processing. Fix retries
+                {failed === 1 ? " it" : " them"}
+                {failedRows[0]?.error ? ` — e.g. "${failedRows[0].error.slice(0, 90)}"` : ""}.
               </p>
             )}
             {report.orphans.length > 0 && (
@@ -145,14 +188,26 @@ export function UploadHealth({ onChanged }: { onChanged?: () => void }) {
                 them (they come back untagged).
               </p>
             )}
-            {needsUpload.length > 0 && (
+
+            {/* Queue truth. Re-queueing into a jammed queue changes nothing,
+                so say plainly whether anything is actually draining. */}
+            <p className={draining ? "text-muted-foreground" : "text-amber-600"}>
+              Queue: {q.splitRunning + q.normalizeRunning} running ·{" "}
+              {q.splitPending + q.normalizePending} waiting · {q.splitFailed + q.normalizeFailed} failed
+              {waiting ? ` · oldest waiting ${waiting}` : ""}
+              {!draining && q.splitPending + q.normalizePending > 0
+                ? " — nothing is running, so the queue is stalled. Fixing won't help until it drains."
+                : ""}
+            </p>
+
+            {lost.length > 0 && (
               <div>
                 <p className="text-muted-foreground">
-                  <strong className="text-foreground">{needsUpload.length}</strong> genuinely need re-uploading
-                  — the file is gone:
+                  <strong className="text-foreground">{lost.length}</strong>
+                  {report.brokenTruncated ? "+" : ""} genuinely need re-uploading — the file is gone:
                 </p>
                 <ul className="mt-1 max-h-40 space-y-0.5 overflow-y-auto">
-                  {needsUpload.slice(0, 50).map((b) => (
+                  {lost.slice(0, 50).map((b) => (
                     <li key={`${b.kind}-${b.id}`} className="flex items-center gap-2">
                       <Badge variant="outline" className="shrink-0">{b.kind}</Badge>
                       <span className="truncate font-mono">{b.fileName}</span>

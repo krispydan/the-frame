@@ -14,6 +14,7 @@ import { getTestDb, resetTestDb } from "../setup";
 import {
   preflightFiles,
   repairUploads,
+  repairableTargets,
   adoptOrphans,
   buildUploadHealthReport,
 } from "@/modules/marketing/lib/video/upload-preflight";
@@ -236,6 +237,84 @@ describe("orphan recovery", () => {
     putFile(`clips/raw/${checksum}.mp4`);
     expect((await adoptOrphans([`clips/raw/${checksum}.mp4`])).adopted).toBe(1);
     expect((await adoptOrphans([`clips/raw/${checksum}.mp4`])).adopted).toBe(0);
+  });
+});
+
+/** A pending/running job pointing at a row — "someone is on it". */
+function queueJob(kind: "clip" | "source", id: string, status = "pending") {
+  const type = kind === "clip" ? "marketing.video.normalize-clip" : "marketing.video.split-source";
+  const input = kind === "clip" ? { clipId: id } : { sourceId: id };
+  getTestDb()
+    .prepare(`INSERT INTO jobs (id, type, module, status, input) VALUES (?, ?, 'marketing', ?, ?)`)
+    .run(`job-${id}`, type, status, JSON.stringify(input));
+}
+
+describe("why a row isn't finished", () => {
+  beforeEach(() => resetTestDb());
+
+  it("calls it 'queued' when a job is pending — not a failure", async () => {
+    const id = seedSource({ name: "waiting.mp4", size: 1, status: "uploaded", checksum: "a7a7a7a7a7a7a7a7" });
+    queueJob("source", id);
+    const report = await buildUploadHealthReport();
+    expect(report.broken.find((b) => b.id === id)?.state).toBe("queued");
+    expect(report.totals).toMatchObject({ queued: 1, abandoned: 0, failed: 0 });
+  });
+
+  it("calls it 'abandoned' when NO job exists — the silent backlog", async () => {
+    // Identical row + status to the test above. Only the queue differs,
+    // which is exactly the distinction status alone can't express.
+    const id = seedSource({ name: "orphaned-work.mp4", size: 1, status: "uploaded", checksum: "b8b8b8b8b8b8b8b8" });
+    const report = await buildUploadHealthReport();
+    expect(report.broken.find((b) => b.id === id)?.state).toBe("abandoned");
+    expect(report.totals).toMatchObject({ abandoned: 1, queued: 0 });
+  });
+
+  it("a finished job doesn't keep a row looking queued", async () => {
+    const id = seedSource({ name: "done-job.mp4", size: 1, status: "uploaded", checksum: "c9c9c9c9c9c9c9c9" });
+    queueJob("source", id, "completed");
+    const report = await buildUploadHealthReport();
+    expect(report.broken.find((b) => b.id === id)?.state).toBe("abandoned");
+  });
+
+  it("calls it 'lost' when the bytes are gone, whatever the queue says", async () => {
+    const id = seedClip({ name: "gone.mp4", size: 1, status: "failed", checksum: "d0d0d0d0d0d0d0d0", withFile: false });
+    const report = await buildUploadHealthReport();
+    expect(report.broken.find((b) => b.id === id)?.state).toBe("lost");
+  });
+
+  it("reports queue depth so a stalled queue is visible", async () => {
+    const id = seedSource({ name: "q.mp4", size: 1, status: "uploaded", checksum: "e1e1e1e1e1e1e1e1" });
+    queueJob("source", id);
+    const report = await buildUploadHealthReport();
+    expect(report.queue.splitPending).toBe(1);
+    expect(report.queue.splitRunning).toBe(0);
+    expect(report.queue.oldestPendingAt).toBeTruthy();
+  });
+});
+
+describe("repair doesn't pile onto a backed-up queue", () => {
+  beforeEach(() => resetTestDb());
+
+  it("leaves a row alone when a job is already pending", async () => {
+    const id = seedSource({ name: "already.mp4", size: 1, status: "uploaded", checksum: "f2f2f2f2f2f2f2f2" });
+    queueJob("source", id);
+    const r = await repairUploads([{ kind: "source", id }]);
+    expect(r.alreadyQueued).toBe(1);
+    expect(r.requeued).toBe(0);
+    const jobs = getTestDb().prepare(`SELECT COUNT(*) AS n FROM jobs`).get() as { n: number };
+    expect(jobs.n).toBe(1); // no duplicate queued
+  });
+
+  it("repairableTargets covers everything, not just the report's capped list", () => {
+    for (let i = 0; i < 5; i++) {
+      seedSource({ name: `s${i}.mp4`, size: i + 1, status: "uploaded", checksum: `1234567890abcde${i}` });
+    }
+    const queuedId = seedSource({ name: "busy.mp4", size: 99, status: "uploaded", checksum: "fedcba09876543ff" });
+    queueJob("source", queuedId);
+
+    const targets = repairableTargets();
+    expect(targets).toHaveLength(5); // the queued one is excluded
+    expect(targets.some((t) => t.id === queuedId)).toBe(false);
   });
 });
 
