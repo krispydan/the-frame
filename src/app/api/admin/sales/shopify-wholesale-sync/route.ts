@@ -219,41 +219,51 @@ export async function POST(req: NextRequest) {
    * { restoreTags: true } reports; add { commit: true } to write them back.
    */
   if (body.restoreTags === true) {
+    // Compare every tag we have EVER written for a company (from job history)
+    // against what the customer carries in Shopify right now. Anything missing
+    // was replaced rather than merged.
+    //
+    // Comparing job-to-job isn't enough: a loss caused by a manual admin call
+    // leaves no job row, so the only reliable baseline is the live store.
     const rows = sqlite.prepare(
-      `SELECT input, output, created_at FROM jobs
+      `SELECT output FROM jobs
         WHERE type = 'sales.sync_lead_to_shopify_wholesale' AND status = 'completed'
         ORDER BY created_at ASC`,
-    ).all() as Array<{ input: string; output: string; created_at: string }>;
+    ).all() as Array<{ output: string }>;
 
-    const seen = new Map<string, { tags: Set<string>; customerId: string | null }>();
-    const losses: Array<{ companyId: string; customerId: string | null; lost: string[] }> = [];
+    const everWritten = new Map<string, { tags: Set<string>; customerId: string | null }>();
     for (const r of rows) {
       let out: { companyId?: string; shopifyCustomerId?: string | null; tags?: string[] };
       try { out = JSON.parse(r.output); } catch { continue; }
       if (!out.companyId || !Array.isArray(out.tags)) continue;
-      const prev = seen.get(out.companyId);
-      if (prev) {
-        const lost = [...prev.tags].filter((t) => !out.tags!.includes(t));
-        if (lost.length) {
-          const rec = losses.find((l) => l.companyId === out.companyId);
-          if (rec) rec.lost = [...new Set([...rec.lost, ...lost])];
-          else losses.push({ companyId: out.companyId, customerId: out.shopifyCustomerId ?? prev.customerId, lost });
-        }
-      }
-      seen.set(out.companyId, {
+      const prev = everWritten.get(out.companyId);
+      everWritten.set(out.companyId, {
         tags: new Set([...(prev?.tags ?? []), ...out.tags]),
         customerId: out.shopifyCustomerId ?? prev?.customerId ?? null,
       });
     }
 
-    if (body.commit !== true) {
-      return NextResponse.json({ ok: true, commit: false, affected: losses.length, losses });
+    const client = await getShopifyClientByChannel("wholesale");
+    const losses: Array<{ companyId: string; customerId: string; lost: string[] }> = [];
+    for (const [companyId, rec] of everWritten) {
+      if (!rec.customerId) continue;
+      try {
+        const cur = await client.graphql<{ customer: { tags: string[] } | null }>(
+          `query($id: ID!) { customer(id: $id) { tags } }`,
+          { id: rec.customerId },
+        );
+        const live = new Set(cur.customer?.tags ?? []);
+        const lost = [...rec.tags].filter((t) => !live.has(t));
+        if (lost.length) losses.push({ companyId, customerId: rec.customerId, lost });
+      } catch { /* skip unreadable customers */ }
     }
 
-    const client = await getShopifyClientByChannel("wholesale");
+    if (body.commit !== true) {
+      return NextResponse.json({ ok: true, commit: false, checked: everWritten.size, affected: losses.length, losses });
+    }
+
     const repaired: Array<{ companyId: string; restored: string[]; error?: string }> = [];
     for (const l of losses) {
-      if (!l.customerId) { repaired.push({ companyId: l.companyId, restored: [], error: "no customer id" }); continue; }
       try {
         const res = await client.graphql<{ tagsAdd: { userErrors: Array<{ message: string }> } }>(
           `mutation AddTags($id: ID!, $tags: [String!]!) {
@@ -267,7 +277,7 @@ export async function POST(req: NextRequest) {
         repaired.push({ companyId: l.companyId, restored: [], error: e instanceof Error ? e.message : String(e) });
       }
     }
-    return NextResponse.json({ ok: true, commit: true, affected: losses.length, repaired });
+    return NextResponse.json({ ok: true, commit: true, checked: everWritten.size, affected: losses.length, repaired });
   }
 
   if (body.suppressBuyers === true) {
