@@ -189,6 +189,57 @@ export async function r2Head(key: string): Promise<{ exists: boolean; size: numb
   };
 }
 
+/**
+ * List every object under a prefix (ListObjectsV2, following the
+ * continuation token). Used by the orphan sweep, which has to diff what's
+ * in the bucket against what the DB knows about.
+ *
+ * Responses are XML; the two fields we need are simple non-nested tags,
+ * so they're pulled out with a regex rather than adding an XML parser.
+ */
+export async function r2List(
+  prefix: string,
+  maxObjects = 10_000,
+): Promise<Array<{ key: string; size: number }>> {
+  const { client: c, cfg } = client();
+  const out: Array<{ key: string; size: number }> = [];
+  let token: string | undefined;
+
+  do {
+    const params = new URLSearchParams({ "list-type": "2", prefix: normalizeKey(prefix), "max-keys": "1000" });
+    if (token) params.set("continuation-token", token);
+    const res = await c.fetch(`${bucketEndpoint(cfg)}?${params.toString()}`, { method: "GET" });
+    if (!res.ok) {
+      throw new Error(`R2 LIST ${prefix} failed: ${res.status} ${(await res.text().catch(() => "")).slice(0, 300)}`);
+    }
+    const xml = await res.text();
+
+    for (const m of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
+      const body = m[1];
+      const key = /<Key>([\s\S]*?)<\/Key>/.exec(body)?.[1];
+      if (!key) continue;
+      const size = parseInt(/<Size>(\d+)<\/Size>/.exec(body)?.[1] ?? "0", 10);
+      out.push({ key: decodeXmlEntities(key), size });
+      if (out.length >= maxObjects) return out;
+    }
+
+    token = /<IsTruncated>true<\/IsTruncated>/.test(xml)
+      ? /<NextContinuationToken>([\s\S]*?)<\/NextContinuationToken>/.exec(xml)?.[1]
+      : undefined;
+  } while (token);
+
+  return out;
+}
+
+function decodeXmlEntities(s: string): string {
+  return s
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
 export async function r2Delete(key: string): Promise<void> {
   const { client: c, cfg } = client();
   const res = await c.fetch(objectUrl(cfg, key), { method: "DELETE" });

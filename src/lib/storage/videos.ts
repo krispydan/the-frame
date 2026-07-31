@@ -23,6 +23,7 @@ import { tmpdir } from "os";
 import {
   saveMedia,
   readMedia,
+  listMedia,
   mediaStat,
   deleteMedia,
   materializeMedia,
@@ -99,6 +100,16 @@ export async function readVideo(relPath: string): Promise<Buffer> {
 /** Delete a stored file. Silent if already gone. */
 export async function deleteVideo(relPath: string): Promise<void> {
   await deleteMedia(vkey(relPath));
+}
+
+/**
+ * Every stored file under a relative prefix (e.g. "clips/raw/"), with the
+ * "videos/" storage prefix stripped back off so the paths match what the
+ * DB stores. Used by the orphan sweep to diff storage against the DB.
+ */
+export async function listVideos(relPrefix: string): Promise<Array<{ path: string; sizeBytes: number }>> {
+  const objects = await listMedia(vkey(relPrefix));
+  return objects.map((o) => ({ path: o.key.replace(/^videos\//, ""), sizeBytes: o.size }));
 }
 
 /** Return { size, exists } for a stored file. Never throws. */

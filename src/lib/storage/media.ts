@@ -11,7 +11,7 @@
  * (videos/* → VIDEOS_PATH, images/* → IMAGES_PATH) so existing on-disk
  * layouts are preserved until the file migration runs.
  */
-import { mkdir, writeFile, readFile, unlink, stat, rename } from "fs/promises";
+import { mkdir, writeFile, readFile, unlink, stat, rename, readdir } from "fs/promises";
 import path from "path";
 import os from "os";
 import {
@@ -21,6 +21,7 @@ import {
   r2GetToFile,
   r2Head,
   r2Delete,
+  r2List,
   r2PresignPut,
   r2PublicUrl,
   normalizeKey,
@@ -104,6 +105,45 @@ export async function mediaStat(key: string): Promise<{ exists: boolean; size: n
   } catch {
     return { exists: false, size: 0 };
   }
+}
+
+/**
+ * Every object under a key prefix, as full keys + sizes. Recurses on the
+ * local backend so it matches R2's flat prefix listing. Returns [] when
+ * the prefix doesn't exist rather than throwing — an empty bucket and a
+ * missing directory mean the same thing to callers.
+ */
+export async function listMedia(prefix: string): Promise<Array<{ key: string; size: number }>> {
+  const p = normalizeKey(prefix);
+  if (mediaOnR2()) {
+    return (await r2List(p)).map((o) => ({ key: o.key, size: o.size }));
+  }
+
+  const root = localPath(p);
+  const out: Array<{ key: string; size: number }> = [];
+  async function walk(dir: string, keyPrefix: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return; // missing directory === nothing stored under this prefix
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      const key = `${keyPrefix}${entry.name}`;
+      if (entry.isDirectory()) {
+        await walk(full, `${key}/`);
+      } else if (entry.isFile()) {
+        try {
+          out.push({ key, size: (await stat(full)).size });
+        } catch {
+          /* raced deletion */
+        }
+      }
+    }
+  }
+  await walk(root, p.endsWith("/") ? p : `${p}/`);
+  return out;
 }
 
 export async function deleteMedia(key: string): Promise<void> {

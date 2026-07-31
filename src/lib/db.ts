@@ -197,6 +197,13 @@ try { sqlite.exec("ALTER TABLE marketing_tiktok_sounds ADD COLUMN prev_synced_at
 // footage file and flag it — the clips are all we keep.
 try { sqlite.exec("ALTER TABLE marketing_video_sources ADD COLUMN raw_deleted INTEGER NOT NULL DEFAULT 0"); } catch { /* exists */ }
 
+// Upload preflight looks files up by name+size before a single byte
+// moves, so re-dropping a whole shoot folder only uploads what's new.
+// NOT unique: split-derived clips legitimately share a base name, and a
+// genuine duplicate must stay ingestable — this is a lookup index only.
+try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_video_clip_name_size ON marketing_video_clips (file_name, size_bytes)"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_video_source_name_size ON marketing_video_sources (file_name, size_bytes)"); } catch { /* exists */ }
+
 // Reviewer notes on catalog images (SKU identifier) — separate from
 // alt_text, which feeds marketplace exports and must stay clean.
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN notes TEXT"); } catch { /* exists */ }
