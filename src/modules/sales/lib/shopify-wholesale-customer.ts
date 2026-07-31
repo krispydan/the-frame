@@ -401,6 +401,27 @@ async function findByEmail(
   return data.customers.edges[0]?.node ?? null;
 }
 
+/** Load a customer by gid — needed when the email changed and search misses. */
+async function findById(
+  client: Awaited<ReturnType<typeof getShopifyClientByChannel>>,
+  id: string,
+): Promise<GqlCustomer | null> {
+  try {
+    const data = await client.graphql<{ customer: GqlCustomer | null }>(
+      `query GetCustomer($id: ID!) {
+         customer(id: $id) {
+           id email tags numberOfOrders
+           emailMarketingConsent { marketingState marketingOptInLevel }
+         }
+       }`,
+      { id },
+    );
+    return data.customer ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Create or update the wholesale customer.
  *
@@ -439,7 +460,12 @@ export async function syncInterestedLeadToShopify(
       existing = await findByEmail(client, c.email);
       if (existing) customerId = existing.id;
     } else {
-      existing = await findByEmail(client, c.email);
+      // Look up by id FIRST when we already know it. Searching by email misses
+      // whenever the address has changed since we stamped it — and a miss means
+      // `existing` is null, the tag merge is skipped, and customerUpdate
+      // replaces the whole tag list. That silently destroyed a customer's
+      // AJM-* and instantly-interested tags the first time it happened.
+      existing = (await findById(client, customerId)) ?? (await findByEmail(client, c.email));
     }
 
     const alreadyOrdered = Number(existing?.numberOfOrders ?? "0") > 0;
