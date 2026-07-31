@@ -218,7 +218,34 @@ function applyLeadContactUpdates(
   const rawName = out.name;
   const role = (analysis.contact?.role ?? "").trim() || null;
   const alt = analysis.alternateEmail;
-  const hiConf = alt && alt.confidence >= 0.9 ? alt.value : null;
+  let hiConf = alt && alt.confidence >= 0.9 ? alt.value : null;
+
+  /**
+   * Fall back to catalogSendTo when the company has NO email at all.
+   *
+   * The 0.9 confidence gate is right when we already hold a good address — a
+   * half-read email off a recording shouldn't displace one. But when there's
+   * nothing on file, the same gate throws away the only address we have:
+   * Anderson Ranch reached "interested" with the rep having found
+   * info@andersonranch.org on the website, the frame told everyone in Slack to
+   * send the catalog there, and then stored no email — so the lead could never
+   * reach Shopify, Omnisend or a mail merge.
+   *
+   * A generic info@ is worth less than a named buyer, which is exactly why the
+   * AI rates it low. It is still worth infinitely more than nothing.
+   */
+  if (!hiConf && analysis.catalogSendTo) {
+    const hasAnyEmail = sqlite
+      .prepare(
+        `SELECT 1 FROM contacts WHERE company_id = ?
+           AND TRIM(COALESCE(email,'')) <> ''
+           AND LOWER(email) NOT LIKE '%@relay.faire.com%' LIMIT 1`,
+      )
+      .get(companyId);
+    if (!hasAnyEmail && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(analysis.catalogSendTo)) {
+      hiConf = analysis.catalogSendTo.trim().toLowerCase();
+    }
+  }
 
   try {
     // A) New alternate email → ensure a contact carries it.
