@@ -210,6 +210,66 @@ export async function POST(req: NextRequest) {
   }
   const body = await req.json().catch(() => ({}));
 
+  /**
+   * Audit + repair for the tag-loss bug: a run that wrote FEWER tags than an
+   * earlier run for the same company means the merge was skipped and tags were
+   * replaced. The jobs table records what each run wrote, so the lost tags are
+   * recoverable from history rather than gone.
+   *
+   * { restoreTags: true } reports; add { commit: true } to write them back.
+   */
+  if (body.restoreTags === true) {
+    const rows = sqlite.prepare(
+      `SELECT input, output, created_at FROM jobs
+        WHERE type = 'sales.sync_lead_to_shopify_wholesale' AND status = 'completed'
+        ORDER BY created_at ASC`,
+    ).all() as Array<{ input: string; output: string; created_at: string }>;
+
+    const seen = new Map<string, { tags: Set<string>; customerId: string | null }>();
+    const losses: Array<{ companyId: string; customerId: string | null; lost: string[] }> = [];
+    for (const r of rows) {
+      let out: { companyId?: string; shopifyCustomerId?: string | null; tags?: string[] };
+      try { out = JSON.parse(r.output); } catch { continue; }
+      if (!out.companyId || !Array.isArray(out.tags)) continue;
+      const prev = seen.get(out.companyId);
+      if (prev) {
+        const lost = [...prev.tags].filter((t) => !out.tags!.includes(t));
+        if (lost.length) {
+          const rec = losses.find((l) => l.companyId === out.companyId);
+          if (rec) rec.lost = [...new Set([...rec.lost, ...lost])];
+          else losses.push({ companyId: out.companyId, customerId: out.shopifyCustomerId ?? prev.customerId, lost });
+        }
+      }
+      seen.set(out.companyId, {
+        tags: new Set([...(prev?.tags ?? []), ...out.tags]),
+        customerId: out.shopifyCustomerId ?? prev?.customerId ?? null,
+      });
+    }
+
+    if (body.commit !== true) {
+      return NextResponse.json({ ok: true, commit: false, affected: losses.length, losses });
+    }
+
+    const client = await getShopifyClientByChannel("wholesale");
+    const repaired: Array<{ companyId: string; restored: string[]; error?: string }> = [];
+    for (const l of losses) {
+      if (!l.customerId) { repaired.push({ companyId: l.companyId, restored: [], error: "no customer id" }); continue; }
+      try {
+        const res = await client.graphql<{ tagsAdd: { userErrors: Array<{ message: string }> } }>(
+          `mutation AddTags($id: ID!, $tags: [String!]!) {
+             tagsAdd(id: $id, tags: $tags) { userErrors { message } }
+           }`,
+          { id: l.customerId, tags: l.lost },
+        );
+        const errs = res.tagsAdd.userErrors;
+        repaired.push({ companyId: l.companyId, restored: errs?.length ? [] : l.lost, error: errs?.length ? errs.map((e) => e.message).join("; ") : undefined });
+      } catch (e) {
+        repaired.push({ companyId: l.companyId, restored: [], error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    return NextResponse.json({ ok: true, commit: true, affected: losses.length, repaired });
+  }
+
   if (body.suppressBuyers === true) {
     return NextResponse.json({ ok: true, result: await suppressBuyersFromMail(body.limit ?? 200) });
   }
