@@ -93,6 +93,7 @@ export default function CustomerAnalyticsPage() {
     setGeocoding(true);
     try {
       let rounds = 0;
+      let totalGeocoded = 0;
       const maxRounds = 60;
       while (rounds < maxRounds) {
         const res = await fetch("/api/v1/customers/geocode", {
@@ -102,12 +103,35 @@ export default function CustomerAnalyticsPage() {
         });
         const d = await res.json();
         rounds++;
-        toast.message(`Geocoded ${d.geocoded ?? 0} this batch · ${d.remaining ?? 0} pending`);
+        totalGeocoded += d.geocoded ?? 0;
+        toast.message(
+          `Geocoded ${d.geocoded ?? 0} this batch · ${d.remaining ?? 0} pending` +
+            (d.failed ? ` · ${d.failed} failed` : ""),
+        );
         await load();
-        // Stop when a batch processes nothing (queue drained for this mode).
+        // Stop conditions:
+        //  - nothing left to process (queue drained), OR
+        //  - a retry round resolved NOTHING new. Retrying the same failing
+        //    rows again won't help, so bail instead of spinning 60 rounds.
         if ((d.processed ?? 0) === 0) break;
+        if (retryFailed && (d.geocoded ?? 0) === 0) {
+          // No progress on a retry pass — is the geocoder even reachable?
+          try {
+            const diag = await (await fetch("/api/v1/customers/geocode?diag=true")).json();
+            if (!diag.reachable || diag.status !== 200 || !diag.gotResult) {
+              toast.error(
+                `Geocoder unreachable from the server (${diag.error || `HTTP ${diag.status}`}). ` +
+                  "These aren't bad addresses — Nominatim is blocking/limiting our IP.",
+              );
+            } else {
+              toast.message("Remaining rows have addresses Nominatim can't resolve — likely incomplete in Shopify.");
+            }
+          } catch { /* diag best-effort */ }
+          break;
+        }
       }
-      toast.success("Geocoding complete");
+      if (totalGeocoded > 0) toast.success(`Geocoding complete — placed ${totalGeocoded} customers`);
+      else toast.message("Geocoding finished — no new customers placed");
     } catch {
       toast.error("Geocoding failed");
     } finally {

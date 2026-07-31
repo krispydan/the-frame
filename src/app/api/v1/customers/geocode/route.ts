@@ -1,11 +1,17 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
-import { geocodeCompanies, countUngeocodedCustomers } from "@/modules/customers/lib/geocoding";
+import { geocodeCompanies, countUngeocodedCustomers, geocodeDiagnostic } from "@/modules/customers/lib/geocoding";
 
 /**
  * GET /api/v1/customers/geocode → how many customers still need geocoding
+ * GET /api/v1/customers/geocode?diag=true → probe Nominatim from the server
+ *   (tells us if geocoding is failing because of bad addresses vs. the
+ *   geocoder blocking/rate-limiting our server's IP).
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  if (request.nextUrl.searchParams.get("diag") === "true") {
+    return NextResponse.json(await geocodeDiagnostic());
+  }
   return NextResponse.json({ remaining: countUngeocodedCustomers() });
 }
 

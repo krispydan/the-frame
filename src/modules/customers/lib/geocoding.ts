@@ -116,15 +116,27 @@ export async function geocodeCompanies(opts?: {
     ? "JOIN customer_accounts ca ON ca.company_id = c.id"
     : "";
 
+  // A company can only be geocoded if it has a street address, or a city, or a
+  // state — anything less has nothing to look up. Mirrors buildQuery /
+  // buildCoarseQuery. Used to keep the retry queue from fixating on rows that
+  // can never resolve (they'd be re-selected forever and never make progress).
+  const HAS_LOCATABLE_ADDRESS =
+    "(TRIM(COALESCE(c.address,'')) != '' OR TRIM(COALESCE(c.city,'')) != '' OR TRIM(COALESCE(c.state,'')) != '')";
+
   // Selection:
   //  - force: everything
-  //  - retryFailed: any company still without coordinates (ignore geocoded_at)
+  //  - retryFailed: companies still without coordinates that actually HAVE an
+  //    address to try (excluding the address-less avoids an infinite retry loop —
+  //    those rows never advance out of latitude IS NULL). ordered oldest-attempt
+  //    first so successive batches rotate through the whole failed set.
   //  - default: only companies never attempted (geocoded_at IS NULL)
   let whereClause: string;
+  let orderClause = "";
   if (opts?.force) {
     whereClause = "1=1";
   } else if (opts?.retryFailed) {
-    whereClause = "c.latitude IS NULL";
+    whereClause = `c.latitude IS NULL AND ${HAS_LOCATABLE_ADDRESS}`;
+    orderClause = "ORDER BY c.geocoded_at ASC";
   } else {
     whereClause = "c.geocoded_at IS NULL";
   }
@@ -134,6 +146,7 @@ export async function geocodeCompanies(opts?: {
     FROM companies c
     ${joinCustomers}
     WHERE ${whereClause}
+    ${orderClause}
     LIMIT ?
   `).all(limit) as CompanyRow[];
 
@@ -192,6 +205,41 @@ export async function geocodeCompanyById(companyId: string, opts?: { force?: boo
     return !!geo;
   } catch {
     return false;
+  }
+}
+
+/**
+ * One-shot health check: can the SERVER actually reach Nominatim and get a
+ * result back? Geocoding failing for every row usually means one of two very
+ * different things — the addresses are unusable, or Nominatim is rate-limiting
+ * / blocking our server's IP (a common cause of "stuck" geocoding on hosted
+ * infra). This looks up a known-good address and reports exactly what came
+ * back, so we can tell those apart without guessing.
+ */
+export async function geocodeDiagnostic(): Promise<{
+  reachable: boolean;
+  status: number | null;
+  gotResult: boolean;
+  sample: { lat: number; lng: number } | null;
+  error: string | null;
+}> {
+  const url = `${NOMINATIM_URL}?q=${encodeURIComponent("New York, NY, US")}&format=json&limit=1`;
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
+    let sample: { lat: number; lng: number } | null = null;
+    if (res.ok) {
+      const data = (await res.json()) as Array<{ lat: string; lon: string }>;
+      if (data.length) sample = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+    }
+    return {
+      reachable: true,
+      status: res.status,
+      gotResult: !!sample,
+      sample,
+      error: res.ok ? null : `HTTP ${res.status}`,
+    };
+  } catch (e) {
+    return { reachable: false, status: null, gotResult: false, sample: null, error: String(e) };
   }
 }
 
