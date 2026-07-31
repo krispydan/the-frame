@@ -80,6 +80,8 @@ export interface CompanyRow {
   created_at: string | null;
   updated_at: string | null;
   city_state: string | null;
+  /** Every known email, so the note can carry the ones Shopify can't hold. */
+  all_emails: string | null;
 }
 
 /**
@@ -97,10 +99,33 @@ export const COMPANY_SELECT = `
            ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS first_name,
          (SELECT ct.last_name FROM contacts ct WHERE ct.company_id = c.id
            ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS last_name,
+         -- Best email, NOT simply the primary one.
+         --
+         -- When a rep captures a better address on a Set Appointment call,
+         -- addCompanyEmail() files it as a NON-primary contact (it deliberately
+         -- won't disturb an existing primary). Ordering by is_primary therefore
+         -- returned the stale scraped address and ignored the one the rep had
+         -- just been given — so we matched the wrong Shopify customer and the
+         -- new address never arrived. Rep-captured beats scraped; newer beats
+         -- older within the same rank.
          (SELECT ct.email FROM contacts ct WHERE ct.company_id = c.id
            AND TRIM(COALESCE(ct.email,'')) <> ''
            AND LOWER(ct.email) NOT LIKE '%@relay.faire.com%'
-           ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
+           ORDER BY
+             CASE
+               WHEN LOWER(COALESCE(ct.source,'')) LIKE '%phoneburner%' THEN 0
+               WHEN LOWER(COALESCE(ct.source,'')) IN ('manual','user','frame') THEN 1
+               WHEN LOWER(COALESCE(ct.source,'')) LIKE '%facebook%' THEN 2
+               WHEN ct.is_primary = 1 THEN 3
+               ELSE 4
+             END,
+             ct.created_at DESC
+           LIMIT 1) AS email,
+         (SELECT GROUP_CONCAT(x.email, ', ') FROM (
+            SELECT DISTINCT ct.email FROM contacts ct WHERE ct.company_id = c.id
+             AND TRIM(COALESCE(ct.email,'')) <> ''
+             AND LOWER(ct.email) NOT LIKE '%@relay.faire.com%'
+           ) x) AS all_emails,
          (SELECT cp.phone FROM company_phones cp WHERE cp.company_id = c.id
            ORDER BY cp.is_primary DESC, cp.created_at ASC LIMIT 1) AS phone,
          (SELECT u.name FROM users u WHERE u.id = c.owner_id) AS owner_name,
@@ -219,6 +244,15 @@ export function buildNote(c: CompanyRow): string {
     lines.push("");
     lines.push(`ICP tier: ${c.icp_tier}`);
     if (c.icp_reasoning) lines.push(`Why: ${c.icp_reasoning.slice(0, 400)}`);
+  }
+
+  // Shopify holds one email per customer; the others would otherwise be lost.
+  const others = (c.all_emails || "")
+    .split(",").map((e) => e.trim())
+    .filter((e) => e && e.toLowerCase() !== (c.email || "").toLowerCase());
+  if (others.length) {
+    lines.push("");
+    lines.push(`Other emails on file: ${others.join(", ")}`);
   }
 
   if (c.google_rating != null || c.website || c.instagram_url) {
