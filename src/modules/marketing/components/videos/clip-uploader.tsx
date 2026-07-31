@@ -15,7 +15,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { sha256Hex16, directUploadAvailable } from "./direct-upload";
+import { sha256Hex16, directUploadAvailable, preflight, postWithRetry } from "./direct-upload";
 // Bundled, same-origin Uppy styles. Static imports work in an App Router
 // client component and guarantee the dashboard is always styled.
 import "@uppy/core/dist/style.min.css";
@@ -94,9 +94,10 @@ export function ClipUploader({
 
       const uppy = new Uppy({
         id: "video-clip-uploader",
-        // Upload as soon as files are dropped — batch defaults are set
-        // above beforehand, so there's no per-file step to wait for.
-        autoProceed: true,
+        // NOT autoProceed: every batch is preflighted first (see the
+        // files-added handler) so files we already have never upload.
+        // uppy.upload() is called explicitly once that returns.
+        autoProceed: false,
         restrictions: {
           maxFileSize: 400 * 1024 * 1024,
           allowedFileTypes: ["video/*", ".mp4", ".mov", ".m4v", ".webm", ".mkv"],
@@ -108,7 +109,61 @@ export function ClipUploader({
         height: 360,
         proudlyDisplayPoweredByUppy: false,
         showProgressDetails: true,
-        note: "Drop videos (up to 400MB each). With Auto-clip on, each one is split into 3–5s clips and the original is deleted. Set the batch defaults above FIRST.",
+        note: "Drop videos (up to 400MB each). Anything already in the library is skipped automatically — re-dropping a whole shoot folder only uploads what's new. Set the batch defaults above FIRST.",
+      });
+
+      // ── Preflight: decide what to upload BEFORE any bytes move ──
+      //
+      // Matching is by file name + size, which the browser knows for free.
+      // Files we already have are removed from the batch; files whose
+      // upload landed but whose processing failed are re-queued server-side
+      // (their bytes are still in R2 — no reason to send them again).
+      uppy.on("files-added", async (added) => {
+        const batch = added.map((f) => ({
+          id: f.id,
+          fileName: f.name ?? "",
+          sizeBytes: f.size ?? 0,
+        }));
+        const pre = await preflight(batch.map(({ fileName, sizeBytes }) => ({ fileName, sizeBytes })));
+
+        // Preflight failed → upload everything. /register still dedupes by
+        // checksum, so the cost is bandwidth, never a duplicate row.
+        if (!pre) {
+          uppy.upload();
+          return;
+        }
+
+        const repairTargets: Array<{ kind: "clip" | "source"; id: string }> = [];
+        let skipped = 0;
+        pre.results.forEach((r, i) => {
+          const file = batch[i];
+          if (!file) return;
+          if (r.verdict === "skip") {
+            uppy.removeFile(file.id);
+            skipped++;
+          } else if (r.verdict === "repair") {
+            uppy.removeFile(file.id);
+            if (r.kind && r.id) repairTargets.push({ kind: r.kind, id: r.id });
+          }
+        });
+
+        if (repairTargets.length > 0) {
+          const { ok } = await postWithRetry("/api/v1/marketing/videos/uploads/repair", {
+            targets: repairTargets,
+          });
+          if (ok) {
+            toast.success(
+              `${repairTargets.length} previously failed upload${repairTargets.length === 1 ? "" : "s"} re-queued — no re-upload needed`,
+            );
+          }
+        }
+        if (skipped > 0) {
+          toast.message(`${skipped} file${skipped === 1 ? "" : "s"} already in the library — skipped`);
+        }
+
+        const remaining = uppy.getFiles().filter((f) => !f.progress?.uploadComplete).length;
+        if (remaining > 0) uppy.upload();
+        else if (skipped > 0 || repairTargets.length > 0) onUploadComplete();
       });
 
       // After a direct upload lands in R2, we record the DB row via
@@ -158,28 +213,28 @@ export function ClipUploader({
             | undefined;
           if (!checksum) return;
           const registerUrl = d.autoClip ? SOURCE_REGISTER : CLIP_REGISTER;
+          // Retried + keepalive: the bytes are already in R2 by now, so a
+          // lost register call means paying to store a file the app has no
+          // record of. That silent orphan is the worst outcome here.
           registerPromises.push(
-            fetch(registerUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                checksum,
-                fileName: file?.name,
-                categoryId: d.categoryId,
-                skuIds: d.skuIds,
-                audioMode: d.audioMode,
-                talent: d.talent.trim(),
-                // Split settings only used by the source (auto-clip) endpoint.
-                ...(d.autoClip ? { minClipSec: 3, maxClipSec: 5 } : {}),
-              }),
-            })
-              .then(async (res) => {
-                const b = await res.json().catch(() => ({}));
-                registerResults.push({ ok: res.ok, deduped: !!b.deduped });
-              })
-              .catch(() => {
-                registerResults.push({ ok: false, deduped: false });
-              }),
+            postWithRetry(registerUrl, {
+              checksum,
+              fileName: file?.name,
+              categoryId: d.categoryId,
+              skuIds: d.skuIds,
+              audioMode: d.audioMode,
+              talent: d.talent.trim(),
+              // Split settings only used by the source (auto-clip) endpoint.
+              ...(d.autoClip ? { minClipSec: 3, maxClipSec: 5 } : {}),
+            }).then(({ ok, data }) => {
+              registerResults.push({ ok, deduped: !!data.deduped });
+              if (!ok) {
+                toast.error(
+                  `${file?.name ?? "File"}: uploaded but couldn't be recorded — use Fix stuck uploads`,
+                  { duration: 10000 },
+                );
+              }
+            }),
           );
         });
       } else {

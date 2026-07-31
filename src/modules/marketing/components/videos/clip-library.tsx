@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { RefreshCw, ScanSearch, Scissors, Trash2, Volume2, VolumeX, Zap } from "lucide-react";
 import { ClipUploader, type UploaderCategory, type UploaderProduct } from "./clip-uploader";
 import { SourceAutoClipper } from "./source-auto-clipper";
+import { UploadHealth } from "./upload-health";
 
 type Category = UploaderCategory & {
   description: string | null;
@@ -282,7 +283,10 @@ export function ClipLibrary() {
       </div>
 
       {showUploader && (
-        <ClipUploader categories={activeCategories} products={products} talents={talents} onUploadComplete={load} />
+        <>
+          <UploadHealth onChanged={load} />
+          <ClipUploader categories={activeCategories} products={products} talents={talents} onUploadComplete={load} />
+        </>
       )}
 
       {showAutoClipper && (
