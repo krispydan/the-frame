@@ -72,6 +72,25 @@ export default function CustomerAnalyticsPage() {
   // scopes to one segment. Server derives a customer's segment from its
   // orders' channels (see the analytics route).
   const [segment, setSegment] = useState<Segment>("all");
+  // Breakdown of why the still-unmapped customers couldn't be geocoded.
+  const [failures, setFailures] = useState<{
+    totalUnmapped: number;
+    summary: Array<{ reason: string; label: string; count: number }>;
+    examples: Record<string, Array<{ name: string; address: string | null; city: string | null; state: string | null; zip: string | null; country: string | null }>>;
+  } | null>(null);
+  const [loadingFailures, setLoadingFailures] = useState(false);
+
+  const loadFailures = useCallback(async () => {
+    setLoadingFailures(true);
+    try {
+      const res = await fetch("/api/v1/customers/geocode/failures");
+      if (res.ok) setFailures(await res.json());
+    } catch {
+      toast.error("Couldn't load geocoding diagnostics");
+    } finally {
+      setLoadingFailures(false);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -245,9 +264,53 @@ export default function CustomerAnalyticsPage() {
                 {geocoding ? "Retrying…" : `Retry ${geocode.total - geocode.mapped} failed`}
               </Button>
             )}
+            {(geocode.total - geocode.mapped) > 0 && (
+              <Button size="sm" variant="ghost" onClick={loadFailures} disabled={loadingFailures}>
+                {loadingFailures ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
+                Why unmapped?
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent>
+          {failures && (
+            <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm">
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-medium">Why {failures.totalUnmapped} couldn&apos;t be located</span>
+                <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setFailures(null)}>Hide</button>
+              </div>
+              <div className="space-y-2">
+                {failures.summary.map((s) => (
+                  <div key={s.reason}>
+                    <div className="flex items-baseline justify-between">
+                      <span>{s.label}</span>
+                      <span className="font-semibold tabular-nums ml-2">{s.count}</span>
+                    </div>
+                    {failures.examples[s.reason]?.length > 0 && (
+                      <div className="text-xs text-muted-foreground mt-0.5 pl-1">
+                        e.g.{" "}
+                        {failures.examples[s.reason].slice(0, 4).map((ex, i) => (
+                          <span key={i}>
+                            {i > 0 ? "; " : ""}
+                            {ex.name}
+                            {(() => {
+                              const loc = [ex.address, ex.city, ex.state, ex.zip, ex.country].filter(Boolean).join(", ");
+                              return loc ? ` (${loc})` : " (no address)";
+                            })()}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground mt-2 pt-2 border-t">
+                &quot;No address&quot; and &quot;partial data&quot; rows need the address filled in Shopify (or via the
+                address backfill); &quot;couldn&apos;t match&quot; rows usually have a typo or a freeform/international
+                address the geocoder can&apos;t parse.
+              </p>
+            </div>
+          )}
           {data.geoPoints.length === 0 ? (
             <div className="h-[300px] flex flex-col items-center justify-center bg-muted/40 rounded-lg gap-3 text-center">
               <MapPin className="h-8 w-8 text-muted-foreground" />
