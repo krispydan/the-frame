@@ -60,7 +60,63 @@ export function skuMatchModel(): string {
     "claude-haiku-4-5-20251001";
   if (!skuMatchLogged) {
     skuMatchLogged = true;
-    console.info(`[sku-match] AI model: ${m}`);
+    console.info(`[sku-match] AI model: ${m} (${isCheapVisionModel(m) ? "cheap tier" : "EXPENSIVE TIER"})`);
   }
   return m;
+}
+
+/**
+ * Kill switch. Set SKU_MATCH_DISABLED=1 and every vision call returns an
+ * error without touching the API — nothing can spend, whatever is queued.
+ * Checked per call, not cached, so it takes effect the moment the env
+ * changes (or a redeploy lands) even mid-batch.
+ */
+export function skuMatchDisabled(): boolean {
+  const v = process.env.SKU_MATCH_DISABLED;
+  return v === "1" || v === "true" || v === "yes";
+}
+
+/**
+ * Ceiling for ONE bulk identification run, in USD. The run stops when it
+ * crosses this. Default is deliberately small: a batch over a whole clip
+ * library is the only thing here that can spend real money unattended.
+ */
+export function skuMatchMaxUsd(): number {
+  const n = Number(process.env.SKU_MATCH_MAX_USD);
+  return Number.isFinite(n) && n > 0 ? n : 5;
+}
+
+/**
+ * USD per MILLION tokens, by model. Costs were previously computed with
+ * Haiku's prices hardcoded no matter which model ran — so a run on Opus
+ * logged about 1/15th of what it actually billed, and the overspend was
+ * invisible until the invoice. Pricing is looked up by model id now, and
+ * an unknown id is assumed EXPENSIVE rather than cheap.
+ */
+interface ModelPrice {
+  inPerM: number;
+  outPerM: number;
+  /** Multipliers on the input rate for prompt-cache writes/reads. */
+  cacheWriteMult: number;
+  cacheReadMult: number;
+  cheap: boolean;
+}
+
+const ANTHROPIC_CACHE = { cacheWriteMult: 1.25, cacheReadMult: 0.1 };
+
+const MODEL_PRICING: Array<{ match: RegExp; price: ModelPrice }> = [
+  { match: /haiku/i, price: { inPerM: 1, outPerM: 5, ...ANTHROPIC_CACHE, cheap: true } },
+  { match: /sonnet/i, price: { inPerM: 3, outPerM: 15, ...ANTHROPIC_CACHE, cheap: false } },
+  { match: /opus/i, price: { inPerM: 15, outPerM: 75, ...ANTHROPIC_CACHE, cheap: false } },
+];
+
+/** Unknown ids fall back to the priciest tier — never under-report. */
+const UNKNOWN_PRICE: ModelPrice = { inPerM: 15, outPerM: 75, ...ANTHROPIC_CACHE, cheap: false };
+
+export function modelPricing(model: string): ModelPrice {
+  return MODEL_PRICING.find((p) => p.match.test(model))?.price ?? UNKNOWN_PRICE;
+}
+
+export function isCheapVisionModel(model: string): boolean {
+  return modelPricing(model).cheap;
 }
