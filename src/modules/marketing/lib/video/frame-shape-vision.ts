@@ -8,7 +8,10 @@
  * frame-shape.ts, which composes these.
  */
 import sharp from "sharp";
-import { skuMatchModel } from "../ai-model";
+import { skuMatchModel, skuMatchDisabled } from "../ai-model";
+
+/** Shown wherever a call was refused by the kill switch. */
+const SKU_MATCH_OFF = "AI SKU matching is turned off (SKU_MATCH_DISABLED)";
 
 export const normShape = (s: string | null | undefined): string =>
   (s ?? "").trim().toLowerCase();
@@ -148,6 +151,7 @@ export async function detectGlassesBox(
   mime: string,
   model = skuMatchModel(),
 ): Promise<DetectResult> {
+  if (skuMatchDisabled()) return { ok: false, box: null, error: SKU_MATCH_OFF };
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: false, box: null, error: "ANTHROPIC_API_KEY not configured" };
 
@@ -432,6 +436,9 @@ export async function matchProductsFromSheets(
   } = {},
   model = skuMatchModel(),
 ): Promise<ProductMatchResult> {
+  if (skuMatchDisabled()) {
+    return { ok: false, clearShot: false, shape: null, matches: [], videoType: null, error: SKU_MATCH_OFF };
+  }
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: false, clearShot: false, shape: null, matches: [], videoType: null, error: "ANTHROPIC_API_KEY not configured" };
   if (catalog.length === 0) return { ok: false, clearShot: false, shape: null, matches: [], videoType: null, error: "No catalog images" };

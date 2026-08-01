@@ -62,6 +62,23 @@ registerJobHandler("marketing.media.frameshape-all", async () => {
   // background worker so there's no request-timeout cap.
   const { sqlite } = await import("@/lib/db");
   const { suggestFrameShape } = await import("./frame-shape");
+  const { skuMatchDisabled, skuMatchMaxUsd, skuMatchModel, isCheapVisionModel } = await import("../ai-model");
+
+  // Refuse outright when the kill switch is on — don't burn a queue slot
+  // making a thousand calls that each return "disabled".
+  if (skuMatchDisabled()) {
+    console.warn("[frame-shape] bulk: refused — SKU_MATCH_DISABLED is set");
+    return { scanned: 0, suggested: 0, none: 0, failed: 0, costUsd: 0, disabled: true };
+  }
+
+  const model = skuMatchModel();
+  const budgetUsd = skuMatchMaxUsd();
+  if (!isCheapVisionModel(model)) {
+    console.warn(
+      `[frame-shape] bulk: running on ${model}, which is NOT a cheap vision tier. ` +
+        `Capped at $${budgetUsd}. Set MARKETING_SKU_MATCH_MODEL to a cheap model.`,
+    );
+  }
 
   const ids = (sqlite.prepare(`
     SELECT c.id FROM marketing_video_clips c
@@ -76,7 +93,23 @@ registerJobHandler("marketing.media.frameshape-all", async () => {
   let none = 0;
   let failed = 0;
   let costUsd = 0;
+  let stoppedOnBudget = false;
   for (const [i, clipId] of ids.entries()) {
+    // Checked EVERY iteration, so flipping the env (or the budget) stops
+    // a run that's already going rather than only the next one.
+    if (skuMatchDisabled()) {
+      console.warn(`[frame-shape] bulk: stopped at ${i}/${ids.length} — kill switch flipped mid-run`);
+      stoppedOnBudget = true;
+      break;
+    }
+    if (costUsd >= budgetUsd) {
+      console.warn(
+        `[frame-shape] bulk: STOPPED at ${i}/${ids.length} — hit the $${budgetUsd} cap ` +
+          `(spent ≈ $${costUsd.toFixed(2)} on ${model}). Raise SKU_MATCH_MAX_USD to continue.`,
+      );
+      stoppedOnBudget = true;
+      break;
+    }
     try {
       const r = await suggestFrameShape("clip", clipId);
       costUsd += r.costUsd ?? 0;
@@ -92,9 +125,18 @@ registerJobHandler("marketing.media.frameshape-all", async () => {
     }
   }
   console.info(
-    `[frame-shape] bulk done: ${ids.length} clips — ${suggested} suggested, ${none} no-clear-shot, ${failed} failed, total ≈ $${costUsd.toFixed(2)}`,
+    `[frame-shape] bulk ${stoppedOnBudget ? "STOPPED EARLY" : "done"}: ${suggested} suggested, ` +
+      `${none} no-clear-shot, ${failed} failed of ${ids.length} — total ≈ $${costUsd.toFixed(2)} on ${model}`,
   );
-  return { scanned: ids.length, suggested, none, failed, costUsd: Math.round(costUsd * 10000) / 10000 };
+  return {
+    scanned: ids.length,
+    suggested,
+    none,
+    failed,
+    costUsd: Math.round(costUsd * 10000) / 10000,
+    model,
+    stoppedOnBudget,
+  };
 });
 
 registerJobHandler("marketing.video.render-post", async (input) => {

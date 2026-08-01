@@ -30,7 +30,7 @@ import { unlink } from "fs/promises";
 import { and, eq } from "drizzle-orm";
 import { db, sqlite } from "@/lib/db";
 import { mediaMatches } from "@/modules/marketing/schema";
-import { skuMatchModel } from "../ai-model";
+import { skuMatchModel, modelPricing } from "../ai-model";
 import { runFfmpeg } from "./ffmpeg";
 import { materializeVideo, videoScratchPath, saveVideo, videoUrl } from "@/lib/storage/videos";
 import { materializeMedia } from "@/lib/storage/media";
@@ -195,18 +195,26 @@ export interface SuggestResult {
   costUsd?: number;
 }
 
-// Haiku 4.5 pricing per million tokens; cache writes 1.25x, reads 0.1x.
-const IN_PER_M = 1, OUT_PER_M = 5, CACHE_WRITE_MULT = 1.25, CACHE_READ_MULT = 0.1;
-
-function usageCostUsd(usages: Array<TokenUsage | undefined>): number {
+/**
+ * Cost of a run, priced for the model that ACTUALLY ran.
+ *
+ * This used to hardcode Haiku's rates regardless of the configured
+ * model, so a library-wide run on Opus reported roughly a fifteenth of
+ * what it billed — the log said single-digit dollars while the invoice
+ * said three figures. Rates now come from the model id, and an id we
+ * don't recognise is priced at the top tier so the number can only ever
+ * be an over-estimate.
+ */
+function usageCostUsd(usages: Array<TokenUsage | undefined>, model = skuMatchModel()): number {
+  const p = modelPricing(model);
   let usd = 0;
   for (const u of usages) {
     if (!u) continue;
     usd +=
-      ((u.input_tokens ?? 0) * IN_PER_M +
-        (u.cache_creation_input_tokens ?? 0) * IN_PER_M * CACHE_WRITE_MULT +
-        (u.cache_read_input_tokens ?? 0) * IN_PER_M * CACHE_READ_MULT +
-        (u.output_tokens ?? 0) * OUT_PER_M) /
+      ((u.input_tokens ?? 0) * p.inPerM +
+        (u.cache_creation_input_tokens ?? 0) * p.inPerM * p.cacheWriteMult +
+        (u.cache_read_input_tokens ?? 0) * p.inPerM * p.cacheReadMult +
+        (u.output_tokens ?? 0) * p.outPerM) /
       1_000_000;
   }
   return usd;
