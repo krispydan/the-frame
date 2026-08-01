@@ -53,16 +53,31 @@ let skuMatchLogged = false;
  * defaults to the CHEAP vision model (Haiku) rather than Opus. Override
  * with MARKETING_SKU_MATCH_MODEL (e.g. bump to Sonnet if accuracy needs it).
  */
+export const DEFAULT_SKU_MATCH_MODEL = "gemini-2.5-flash-lite";
+
 export function skuMatchModel(): string {
   const m =
     process.env.MARKETING_SKU_MATCH_MODEL ||
     process.env.ANTHROPIC_VISION_MODEL ||
-    "claude-haiku-4-5-20251001";
+    DEFAULT_SKU_MATCH_MODEL;
   if (!skuMatchLogged) {
     skuMatchLogged = true;
-    console.info(`[sku-match] AI model: ${m} (${isCheapVisionModel(m) ? "cheap tier" : "EXPENSIVE TIER"})`);
+    console.info(
+      `[sku-match] AI model: ${m} (${visionProvider(m)}, ${isCheapVisionModel(m) ? "cheap tier" : "EXPENSIVE TIER"})`,
+    );
   }
   return m;
+}
+
+export type VisionProvider = "gemini" | "anthropic";
+
+/**
+ * Which API a model id belongs to. Anthropic is still supported so the
+ * old model can be restored with one env var if Gemini's accuracy on
+ * frame shapes turns out worse.
+ */
+export function visionProvider(model: string): VisionProvider {
+  return /^gemini/i.test(model) ? "gemini" : "anthropic";
 }
 
 /**
@@ -103,8 +118,15 @@ interface ModelPrice {
 }
 
 const ANTHROPIC_CACHE = { cacheWriteMult: 1.25, cacheReadMult: 0.1 };
+// Gemini's implicit cache costs nothing to write and reads at 90% off.
+const GEMINI_CACHE = { cacheWriteMult: 0, cacheReadMult: 0.1 };
 
+// Order matters — first regex wins, so put the more specific ids first.
 const MODEL_PRICING: Array<{ match: RegExp; price: ModelPrice }> = [
+  { match: /^gemini-2\.5-flash-lite/i, price: { inPerM: 0.1, outPerM: 0.4, ...GEMINI_CACHE, cheap: true } },
+  { match: /^gemini-2\.5-flash/i, price: { inPerM: 0.3, outPerM: 2.5, ...GEMINI_CACHE, cheap: true } },
+  { match: /^gemini-3\.1-flash-lite/i, price: { inPerM: 0.25, outPerM: 1.5, ...GEMINI_CACHE, cheap: true } },
+  { match: /^gemini-3\.5-flash-lite/i, price: { inPerM: 0.3, outPerM: 2.5, ...GEMINI_CACHE, cheap: true } },
   { match: /haiku/i, price: { inPerM: 1, outPerM: 5, ...ANTHROPIC_CACHE, cheap: true } },
   { match: /sonnet/i, price: { inPerM: 3, outPerM: 15, ...ANTHROPIC_CACHE, cheap: false } },
   { match: /opus/i, price: { inPerM: 15, outPerM: 75, ...ANTHROPIC_CACHE, cheap: false } },
