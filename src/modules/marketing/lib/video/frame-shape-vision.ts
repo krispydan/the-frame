@@ -8,10 +8,27 @@
  * frame-shape.ts, which composes these.
  */
 import sharp from "sharp";
-import { skuMatchModel, skuMatchDisabled } from "../ai-model";
+import { skuMatchModel, skuMatchDisabled, visionProvider } from "../ai-model";
+import {
+  geminiJsonCall,
+  GEMINI_DETECT_SCHEMA,
+  GEMINI_MATCH_SCHEMA,
+  type VisionPart,
+} from "./vision-gemini";
 
 /** Shown wherever a call was refused by the kill switch. */
 const SKU_MATCH_OFF = "AI SKU matching is turned off (SKU_MATCH_DISABLED)";
+
+/** Clamp a model-supplied box to the image and reject degenerate ones. */
+function normalizeBox(b: { x?: number; y?: number; w?: number; h?: number }): GlassesBox | null {
+  const box: GlassesBox = {
+    x: Math.max(0, Math.min(1, Number(b.x) || 0)),
+    y: Math.max(0, Math.min(1, Number(b.y) || 0)),
+    w: Math.max(0, Math.min(1, Number(b.w) || 0)),
+    h: Math.max(0, Math.min(1, Number(b.h) || 0)),
+  };
+  return box.w < 0.02 || box.h < 0.02 ? null : box;
+}
 
 export const normShape = (s: string | null | undefined): string =>
   (s ?? "").trim().toLowerCase();
@@ -152,16 +169,36 @@ export async function detectGlassesBox(
   model = skuMatchModel(),
 ): Promise<DetectResult> {
   if (skuMatchDisabled()) return { ok: false, box: null, error: SKU_MATCH_OFF };
+
+  const DETECT_SYSTEM =
+    "You locate eyewear in a photo or video still. Return a TIGHT bounding box around just the glasses or sunglasses — " +
+    "the lenses, frame, and visible temples — whether worn on a face or held up. Coordinates are fractions of the image " +
+    "(0-1), x/y at the top-left of the box. If no glasses are visible, set found=false.";
+
+  if (visionProvider(model) === "gemini") {
+    const parts: VisionPart[] = [
+      { kind: "image", mime, base64 },
+      { kind: "text", text: "Locate the glasses and return a tight bounding box." },
+    ];
+    const r = await geminiJsonCall<{ found?: boolean; box?: { x?: number; y?: number; w?: number; h?: number } }>(
+      model,
+      DETECT_SYSTEM,
+      parts,
+      GEMINI_DETECT_SCHEMA,
+      256,
+    );
+    if (!r.ok || !r.data) return { ok: false, box: null, usage: r.usage, error: r.error ?? "No response" };
+    if (!r.data.found || !r.data.box) return { ok: true, box: null, usage: r.usage };
+    return { ok: true, box: normalizeBox(r.data.box), usage: r.usage };
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: false, box: null, error: "ANTHROPIC_API_KEY not configured" };
 
   const body = {
     model,
     max_tokens: 256,
-    system:
-      "You locate eyewear in a photo or video still. Return a TIGHT bounding box around just the glasses or sunglasses — " +
-      "the lenses, frame, and visible temples — whether worn on a face or held up. Coordinates are fractions of the image " +
-      "(0-1), x/y at the top-left of the box. If no glasses are visible, set found=false.",
+    system: DETECT_SYSTEM,
     tools: [DETECT_TOOL],
     tool_choice: { type: "tool", name: DETECT_TOOL.name },
     messages: [
@@ -190,16 +227,8 @@ export async function detectGlassesBox(
     if (!call?.input) return { ok: false, box: null, error: "No tool_use in response" };
     const input = call.input as { found?: boolean; box?: { x?: number; y?: number; w?: number; h?: number } };
     if (!input.found || !input.box) return { ok: true, box: null, usage: data.usage };
-    const b = input.box;
-    const box: GlassesBox = {
-      x: Math.max(0, Math.min(1, Number(b.x) || 0)),
-      y: Math.max(0, Math.min(1, Number(b.y) || 0)),
-      w: Math.max(0, Math.min(1, Number(b.w) || 0)),
-      h: Math.max(0, Math.min(1, Number(b.h) || 0)),
-    };
-    // A degenerate box is unusable — treat as not found.
-    if (box.w < 0.02 || box.h < 0.02) return { ok: true, box: null, usage: data.usage };
-    return { ok: true, box, usage: data.usage };
+    // A degenerate box is unusable — normalizeBox returns null for those.
+    return { ok: true, box: normalizeBox(input.box), usage: data.usage };
   } catch (e) {
     return { ok: false, box: null, error: e instanceof Error ? e.message : String(e) };
   }
@@ -439,11 +468,10 @@ export async function matchProductsFromSheets(
   if (skuMatchDisabled()) {
     return { ok: false, clearShot: false, shape: null, matches: [], videoType: null, error: SKU_MATCH_OFF };
   }
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return { ok: false, clearShot: false, shape: null, matches: [], videoType: null, error: "ANTHROPIC_API_KEY not configured" };
   if (catalog.length === 0) return { ok: false, clearShot: false, shape: null, matches: [], videoType: null, error: "No catalog images" };
   if (crops.length === 0) return { ok: false, clearShot: false, shape: null, matches: [], videoType: null, error: "No target crops" };
   const productCount = catalog.length;
+  const provider = visionProvider(model);
 
   const system =
     "You identify eyewear by FRAME SHAPE for a sunglasses catalog. You are given every product we sell — one labelled photo " +
@@ -499,6 +527,85 @@ export async function matchProductsFromSheets(
       (opts.videoTypes?.length ? " Also set videoType to the best-fitting slug." : ""),
   });
 
+  /** Validate + rank whatever the model returned. Provider-independent:
+   *  hallucinated or out-of-range numbers are dropped either way. */
+  const shape = (
+    input: {
+      clearShot?: boolean;
+      shape?: string;
+      videoType?: string;
+      matches?: Array<{ number?: number; confidence?: number }>;
+    },
+    usage?: TokenUsage,
+  ): ProductMatchResult => {
+    const allowedTypes = new Set((opts.videoTypes ?? []).map((t) => t.slug));
+    const videoType =
+      input.videoType && allowedTypes.has(String(input.videoType).trim()) ? String(input.videoType).trim() : null;
+    const seen = new Set<number>();
+    const matches: ProductMatchGuess[] = (input.matches ?? [])
+      .map((m) => ({ index: Math.round(Number(m.number)), confidence: Math.max(0, Math.min(100, Number(m.confidence) || 0)) }))
+      .filter((m) => Number.isInteger(m.index) && m.index >= 1 && m.index <= productCount && !seen.has(m.index) && seen.add(m.index))
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, 10);
+    return {
+      ok: true,
+      clearShot: Boolean(input.clearShot) && matches.length > 0,
+      shape: input.shape ? normShape(input.shape) : null,
+      matches,
+      videoType,
+      usage,
+    };
+  };
+
+  if (provider === "gemini") {
+    // Same ORDER as the Anthropic path — catalog first. Gemini's implicit
+    // cache only hits on a byte-identical leading prefix, so the stable
+    // catalog must precede the varying target.
+    const parts: VisionPart[] = [
+      { kind: "text", text: `CATALOG — all ${productCount} products, one labelled photo each:` },
+    ];
+    for (const c of catalog) {
+      parts.push({ kind: "text", text: c.label });
+      parts.push({ kind: "image", mime: "image/jpeg", base64: c.base64 });
+    }
+    parts.push({
+      kind: "text",
+      text: `TARGET — the same pair of glasses, seen in ${crops.length} still${crops.length === 1 ? "" : "s"} from the video:`,
+    });
+    for (const c of crops) parts.push({ kind: "image", mime: c.mime, base64: c.base64 });
+    if (opts.videoTypes?.length && opts.fullFrame) {
+      const typeList = opts.videoTypes
+        .map((t) => `- ${t.slug}: ${t.name}${t.description ? ` — ${t.description}` : ""}`)
+        .join("\n");
+      parts.push({
+        kind: "text",
+        text: "FULL FRAME — one uncropped still, for classifying the VIDEO TYPE (what kind of shot this is):",
+      });
+      parts.push({ kind: "image", mime: opts.fullFrame.mime, base64: opts.fullFrame.base64 });
+      parts.push({ kind: "text", text: `VIDEO TYPES — pick the one slug that best describes this video:\n${typeList}` });
+    }
+    parts.push({
+      kind: "text",
+      text:
+        "List the up-to-10 product numbers whose FRAME SHAPE best matches the target, ranked most-likely first with a confidence %. Ignore colour entirely." +
+        (opts.videoTypes?.length ? " Also set videoType to the best-fitting slug." : ""),
+    });
+
+    const r = await geminiJsonCall<{
+      clearShot?: boolean;
+      shape?: string;
+      videoType?: string;
+      matches?: Array<{ number?: number; confidence?: number }>;
+    }>(model, system, parts, GEMINI_MATCH_SCHEMA, 1024);
+    if (!r.ok || !r.data) {
+      return { ok: false, clearShot: false, shape: null, matches: [], videoType: null, usage: r.usage, error: r.error ?? "No response" };
+    }
+    return shape(r.data, r.usage);
+  }
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return { ok: false, clearShot: false, shape: null, matches: [], videoType: null, error: "ANTHROPIC_API_KEY not configured" };
+
   const body = {
     model,
     max_tokens: 1024,
@@ -527,24 +634,7 @@ export async function matchProductsFromSheets(
       videoType?: string;
       matches?: Array<{ number?: number; confidence?: number }>;
     };
-    const allowedTypes = new Set((opts.videoTypes ?? []).map((t) => t.slug));
-    const videoType =
-      input.videoType && allowedTypes.has(String(input.videoType).trim()) ? String(input.videoType).trim() : null;
-
-    const seen = new Set<number>();
-    const matches: ProductMatchGuess[] = (input.matches ?? [])
-      .map((m) => ({ index: Math.round(Number(m.number)), confidence: Math.max(0, Math.min(100, Number(m.confidence) || 0)) }))
-      .filter((m) => Number.isInteger(m.index) && m.index >= 1 && m.index <= productCount && !seen.has(m.index) && seen.add(m.index))
-      .sort((a, b) => b.confidence - a.confidence)
-      .slice(0, 10);
-    return {
-      ok: true,
-      clearShot: Boolean(input.clearShot) && matches.length > 0,
-      shape: input.shape ? normShape(input.shape) : null,
-      matches,
-      videoType,
-      usage: data.usage,
-    };
+    return shape(input, data.usage);
   } catch (e) {
     return { ok: false, clearShot: false, shape: null, matches: [], videoType: null, error: e instanceof Error ? e.message : String(e) };
   }
