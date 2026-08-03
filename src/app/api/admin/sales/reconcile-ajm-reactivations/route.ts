@@ -1,0 +1,251 @@
+export const dynamic = "force-dynamic";
+export const maxDuration = 600;
+
+import { NextRequest, NextResponse } from "next/server";
+import { sqlite } from "@/lib/db";
+import { phoneBurnerClient } from "@/modules/sales/lib/phoneburner-client";
+
+/**
+ * POST /api/admin/sales/reconcile-ajm-reactivations
+ *
+ * Reconciles the AJM master (v6+) against Frame + a PhoneBurner folder so
+ * Christina & Sandra only see callable leads.
+ *
+ * Body:
+ * {
+ *   folder_id: "66249536",              // PB folder to reconcile
+ *   ignore:   [{email, company, ajm_ignore_reason, ...}, ...],
+ *   callable: [{email, company, phone, first_name, last_name, ...}, ...],
+ *   dryRun?:  true                       // preview only, no mutations
+ * }
+ *
+ * Ignore = Status='Closed Lost' OR Ignore Reason != '' (12k+ rows).
+ *   → Frame: companies.status='not_qualified' + companies.ajm_ignore_reason.
+ *     (never touches rows already status='customer' — those are real
+ *     Jaxy buyers who should not be demoted.)
+ *   → PB: any contact in `folder_id` whose email matches gets moved out
+ *     of the folder (category_id set to null via updateContact). We
+ *     don't delete — that would lose historical call notes.
+ *
+ * Callable = no Status, no Ignore Reason, has email (~1k rows).
+ *   → PB: createOrGetContact into `folder_id`, on_duplicate:"update"
+ *     so pre-existing contacts get moved INTO the folder.
+ *   → Frame: no status change (leave whatever pipeline stage they're at).
+ *
+ * Idempotent — safe to re-run on the same payload.
+ * Auth: x-admin-key: jaxy2026.
+ */
+
+interface Row {
+  email: string;
+  company?: string;
+  phone?: string;
+  first_name?: string;
+  last_name?: string;
+  city?: string;
+  state?: string;
+  total_orders?: string;
+  total_spend?: string;
+  first_order?: string;
+  last_order?: string;
+  category?: string;
+  ajm_ignore_reason?: string;
+  reason?: string;
+  status?: string;
+}
+
+interface Body {
+  folder_id?: string;
+  ignore?: Row[];
+  callable?: Row[];
+  dryRun?: boolean;
+}
+
+interface PbContactSummary {
+  id: string;
+  email: string;
+  category_id: string | null;
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    return await handle(req);
+  } catch (e) {
+    console.error("[reconcile-ajm-reactivations] crashed:", e);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+        stack: e instanceof Error ? e.stack?.split("\n").slice(0, 8) : undefined,
+      },
+      { status: 500 },
+    );
+  }
+}
+
+async function handle(req: NextRequest) {
+  if (req.headers.get("x-admin-key") !== "jaxy2026") {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const body = (await req.json()) as Body;
+  const folderId = String(body.folder_id || "").trim();
+  const ignore = (body.ignore || []).filter((r) => r.email);
+  const callable = (body.callable || []).filter((r) => r.email);
+  if (!folderId) return NextResponse.json({ ok: false, error: "folder_id required" }, { status: 400 });
+  if (ignore.length === 0 && callable.length === 0) {
+    return NextResponse.json({ ok: false, error: "empty ignore + callable" }, { status: 400 });
+  }
+
+  // Normalise emails lowercase for match sets
+  const ignoreByEmail = new Map<string, Row>();
+  for (const r of ignore) ignoreByEmail.set(r.email.toLowerCase(), r);
+  const callableByEmail = new Map<string, Row>();
+  for (const r of callable) callableByEmail.set(r.email.toLowerCase(), r);
+
+  // ── 1. Frame: flip ignore-set companies to not_qualified ──────────────
+  const frameUpdate = sqlite.prepare(
+    `UPDATE companies
+        SET status = 'not_qualified',
+            ajm_ignore_reason = ?,
+            updated_at = datetime('now')
+      WHERE id = (SELECT company_id FROM contacts WHERE lower(email) = ? LIMIT 1)
+        AND status != 'customer'`,
+  );
+  let frameUpdated = 0;
+  const frameSkippedCustomers: string[] = [];
+  const customerCheck = sqlite.prepare(
+    `SELECT c.id, c.status FROM companies c
+       JOIN contacts ct ON ct.company_id = c.id
+      WHERE lower(ct.email) = ? LIMIT 1`,
+  );
+
+  if (!body.dryRun) {
+    for (const r of ignore) {
+      const email = r.email.toLowerCase();
+      const co = customerCheck.get(email) as { id: string; status: string } | undefined;
+      if (!co) continue;
+      if (co.status === "customer") {
+        frameSkippedCustomers.push(r.email);
+        continue;
+      }
+      frameUpdate.run(r.ajm_ignore_reason || r.reason || "closed_lost", email);
+      frameUpdated++;
+    }
+  }
+
+  // ── 2. PhoneBurner: enumerate current folder contents ────────────────
+  const folderContacts: PbContactSummary[] = [];
+  let page = 1;
+  let pageCap = 200; // safety — folder shouldn't have >20k contacts
+  while (pageCap-- > 0) {
+    const raw = (await phoneBurnerClient.rawGet("/contacts", {
+      category_id: folderId,
+      page,
+      page_size: 100,
+    })) as Record<string, unknown> | null;
+    if (!raw) break;
+    const embedded = (raw._embedded as { contacts?: unknown[] } | undefined)?.contacts;
+    const list: unknown[] = Array.isArray(embedded) ? embedded : [];
+    if (list.length === 0) break;
+    for (const c of list) {
+      const rec = c as Record<string, unknown>;
+      const id = String(rec.id || rec.user_id || "");
+      // PB contact emails live in an array under `emails` or top-level `email`.
+      const emails = rec.emails as Array<Record<string, unknown>> | undefined;
+      const primaryEmail = Array.isArray(emails) && emails[0]
+        ? String((emails[0].email as string) || "").toLowerCase()
+        : String((rec.email as string) || "").toLowerCase();
+      const catId = rec.category_id != null ? String(rec.category_id) : null;
+      if (id && primaryEmail) folderContacts.push({ id, email: primaryEmail, category_id: catId });
+    }
+    // PB pagination: stop if we got a short page
+    if (list.length < 100) break;
+    page++;
+  }
+
+  // ── 3. PB: move ignore-matches OUT of the folder ─────────────────────
+  const pbToMoveOut: PbContactSummary[] = folderContacts.filter((c) =>
+    ignoreByEmail.has(c.email),
+  );
+  let pbMovedOut = 0;
+  const pbMoveErrors: Array<{ id: string; email: string; reason: string }> = [];
+
+  if (!body.dryRun) {
+    for (const c of pbToMoveOut) {
+      try {
+        // Clear category — contact stays in PB (history preserved) but leaves this folder.
+        await phoneBurnerClient.updateContact(c.id, { category_id: undefined });
+        pbMovedOut++;
+      } catch (e) {
+        pbMoveErrors.push({ id: c.id, email: c.email, reason: e instanceof Error ? e.message : String(e) });
+      }
+    }
+  }
+
+  // ── 4. PB: add callable that aren't already in the folder ────────────
+  const folderEmailSet = new Set(folderContacts.map((c) => c.email));
+  const pbToAdd = callable.filter((r) => !folderEmailSet.has(r.email.toLowerCase()));
+  let pbAdded = 0;
+  const pbAddErrors: Array<{ email: string; reason: string }> = [];
+
+  let ownerId = "";
+  if (!body.dryRun && pbToAdd.length > 0) {
+    const cached = sqlite
+      .prepare("SELECT value FROM settings WHERE key = 'phoneburner_owner_id' LIMIT 1")
+      .get() as { value: string | null } | undefined;
+    ownerId = cached?.value || (await phoneBurnerClient.discoverOwnerId()) || "";
+    if (!ownerId) {
+      return NextResponse.json(
+        { ok: false, error: "PhoneBurner owner_id unavailable" },
+        { status: 502 },
+      );
+    }
+
+    for (const r of pbToAdd) {
+      try {
+        const noteLines: string[] = [
+          `AJM reactivation: ${r.company || ""}${r.city ? ` — ${r.city}, ${r.state || ""}` : ""}`,
+        ];
+        if (r.total_orders) noteLines.push(`${r.total_orders} orders / ${r.total_spend || "-"} lifetime`);
+        if (r.first_order || r.last_order) noteLines.push(`first ${r.first_order || "-"} last ${r.last_order || "-"}`);
+        if (r.category) noteLines.push(`AJM cat: ${r.category}`);
+
+        const { id } = await phoneBurnerClient.createOrGetContact({
+          owner_id: ownerId,
+          first_name: (r.first_name || r.company || "").slice(0, 64) || "-",
+          last_name: r.last_name || r.company?.slice(0, 40) || "-",
+          email: r.email,
+          phone: r.phone || undefined,
+          category_id: folderId,
+          notes: noteLines.join("\n"),
+          on_duplicate: "update",
+        });
+        if (!id) throw new Error("createOrGetContact returned no id");
+        pbAdded++;
+      } catch (e) {
+        pbAddErrors.push({ email: r.email, reason: e instanceof Error ? e.message : String(e) });
+      }
+    }
+  }
+
+  return NextResponse.json({
+    ok: true,
+    dry_run: !!body.dryRun,
+    folder_id: folderId,
+    input: { ignore_count: ignore.length, callable_count: callable.length },
+    frame: {
+      updated_to_not_qualified: frameUpdated,
+      skipped_because_customer: frameSkippedCustomers.length,
+      customer_emails_skipped: frameSkippedCustomers.slice(0, 20),
+    },
+    phoneburner: {
+      folder_current_size: folderContacts.length,
+      to_move_out: pbToMoveOut.length,
+      moved_out: pbMovedOut,
+      move_errors: pbMoveErrors.slice(0, 20),
+      to_add: pbToAdd.length,
+      added: pbAdded,
+      add_errors: pbAddErrors.slice(0, 20),
+    },
+  });
+}

@@ -519,6 +519,12 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN ajm_total_orders INTEGER"); 
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN ajm_first_order TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN ajm_last_order TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN ajm_status TEXT"); } catch { /* exists */ }
+// Populated from v6+ AJM master. Non-null → do not outreach; value is the
+// original reason ("Pre 2020", "Ordered Pre 2023", "Non US", etc.) so we
+// can filter/report. Companies flipped to not_qualified by the AJM reconcile
+// endpoint carry the reason string here.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN ajm_ignore_reason TEXT"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_companies_ajm_ignore ON companies (ajm_ignore_reason) WHERE ajm_ignore_reason IS NOT NULL"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN ajm_category TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_ajm_spend ON companies (ajm_total_spend)"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_ajm_last_order ON companies (ajm_last_order)"); } catch { /* exists */ }
