@@ -3,7 +3,7 @@ export const maxDuration = 600;
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
-import { phoneBurnerClient } from "@/modules/sales/lib/phoneburner-client";
+import { phoneBurnerClient, phoneBurnerAccounts, type PbRep } from "@/modules/sales/lib/phoneburner-client";
 
 /**
  * POST /api/admin/sales/reconcile-ajm-reactivations
@@ -65,6 +65,7 @@ interface PbContactSummary {
   id: string;
   email: string;
   category_id: string | null;
+  rep: PbRep; // which account owns this contact (so we call the right client on move-out)
 }
 
 /**
@@ -170,45 +171,61 @@ async function handle(req: NextRequest) {
   }
 
   // ── 2. PhoneBurner: enumerate current folder contents ────────────────
+  // The folder is a SHARED list — Sandra sees her contacts (~920),
+  // Christina sees hers (~500). PB's GET /contacts?category_id=X only
+  // returns contacts OWNED by the authenticated account, so we must
+  // iterate each configured rep-account and merge results, otherwise
+  // ignore-cohort matches under one rep silently stay in the other
+  // rep's dial queue.
+  //
   // PB API shape (per listContactsByUpdated at phoneburner-client.ts:305):
   //   { contacts: { contacts: [...], total_pages: N } }
   // Each contact has `user_id` (id) + `primary_email.email_address` +
   // `category_id`.
   const folderContacts: PbContactSummary[] = [];
-  let page = 1;
-  let pageCap = 500; // safety
-  let totalPages: number | null = null;
+  const perRepCounts: Record<string, number> = {};
   let rawShapeSample: unknown = null;
-  while (pageCap-- > 0) {
-    const raw = (await phoneBurnerClient.rawGet("/contacts", {
-      category_id: folderId,
-      page,
-      page_size: 100,
-    })) as Record<string, unknown> | null;
-    if (!raw) break;
-    if (page === 1) rawShapeSample = shapeOnly(raw);
-    const env = ((raw.contacts ?? raw) as Record<string, unknown>) || {};
-    const arr = (env.contacts as unknown[]) || [];
-    const list: unknown[] = Array.isArray(arr) ? arr : [];
-    if (totalPages == null) {
-      const tp = env.total_pages ?? env.totalPages;
-      totalPages = tp != null && Number.isFinite(Number(tp)) ? Number(tp) : null;
+  const accounts = phoneBurnerAccounts(); // [{rep, client, ownerSetting}, ...]
+
+  for (const acct of accounts) {
+    let page = 1;
+    let pageCap = 500;
+    let totalPages: number | null = null;
+    let count = 0;
+    while (pageCap-- > 0) {
+      const raw = (await acct.client.rawGet("/contacts", {
+        category_id: folderId,
+        page,
+        page_size: 100,
+      })) as Record<string, unknown> | null;
+      if (!raw) break;
+      if (rawShapeSample == null) rawShapeSample = shapeOnly(raw);
+      const env = ((raw.contacts ?? raw) as Record<string, unknown>) || {};
+      const arr = (env.contacts as unknown[]) || [];
+      const list: unknown[] = Array.isArray(arr) ? arr : [];
+      if (totalPages == null) {
+        const tp = env.total_pages ?? env.totalPages;
+        totalPages = tp != null && Number.isFinite(Number(tp)) ? Number(tp) : null;
+      }
+      if (list.length === 0) break;
+      for (const c of list) {
+        const rec = c as Record<string, unknown>;
+        const id = String(rec.user_id || rec.id || "");
+        const pe = rec.primary_email as { email_address?: unknown } | string | undefined;
+        const primaryEmail = typeof pe === "string"
+          ? pe.toLowerCase().trim()
+          : String((pe?.email_address as string) || "").toLowerCase().trim();
+        const catId = rec.category_id != null ? String(rec.category_id) : null;
+        if (id && primaryEmail) {
+          folderContacts.push({ id, email: primaryEmail, category_id: catId, rep: acct.rep });
+          count++;
+        }
+      }
+      if (totalPages != null && page >= totalPages) break;
+      if (list.length < 100) break;
+      page++;
     }
-    if (list.length === 0) break;
-    for (const c of list) {
-      const rec = c as Record<string, unknown>;
-      const id = String(rec.user_id || rec.id || "");
-      // Primary email: { email_address: "..." } or a raw string.
-      const pe = rec.primary_email as { email_address?: unknown } | string | undefined;
-      const primaryEmail = typeof pe === "string"
-        ? pe.toLowerCase().trim()
-        : String((pe?.email_address as string) || "").toLowerCase().trim();
-      const catId = rec.category_id != null ? String(rec.category_id) : null;
-      if (id && primaryEmail) folderContacts.push({ id, email: primaryEmail, category_id: catId });
-    }
-    if (totalPages != null && page >= totalPages) break;
-    if (list.length < 100) break;
-    page++;
+    perRepCounts[acct.rep] = count;
   }
 
   // ── 3. PB: move ignore-matches OUT of the folder ─────────────────────
@@ -219,14 +236,18 @@ async function handle(req: NextRequest) {
   const pbMoveErrors: Array<{ id: string; email: string; reason: string }> = [];
 
   if (!body.dryRun) {
-    // Parallelize with concurrency 8 to stay under Cloudflare's 100s edge cap.
+    // Move-out must be executed via the OWNING rep's account — otherwise
+    // PB returns 404 (contact not visible to the caller). Build a quick
+    // rep-keyed client map to route calls correctly.
+    const clientByRep = new Map(accounts.map((a) => [a.rep, a.client] as const));
     await runWithConcurrency(pbToMoveOut, 8, async (c) => {
+      const client = clientByRep.get(c.rep) || phoneBurnerClient;
       try {
         // Clear category — contact stays in PB (history preserved) but leaves this folder.
-        await phoneBurnerClient.updateContact(c.id, { category_id: undefined });
+        await client.updateContact(c.id, { category_id: undefined });
         pbMovedOut++;
       } catch (e) {
-        pbMoveErrors.push({ id: c.id, email: c.email, reason: e instanceof Error ? e.message : String(e) });
+        pbMoveErrors.push({ id: c.id, email: c.email, reason: `${c.rep}: ${e instanceof Error ? e.message : String(e)}` });
       }
     });
   }
@@ -289,7 +310,7 @@ async function handle(req: NextRequest) {
     },
     phoneburner: {
       folder_current_size: folderContacts.length,
-      total_pages: totalPages,
+      per_rep_counts: perRepCounts,
       raw_shape_page1: rawShapeSample,
       to_move_out: pbToMoveOut.length,
       moved_out: pbMovedOut,

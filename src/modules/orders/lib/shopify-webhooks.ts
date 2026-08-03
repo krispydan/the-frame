@@ -6,6 +6,7 @@ import { inventory, inventoryMovements } from "@/modules/inventory/schema";
 import { webhookRegistry, verifyShopifyHmac } from "@/modules/core/lib/webhooks";
 import { eventBus } from "@/modules/core/lib/event-bus";
 import { ensureCustomerAccount } from "@/modules/customers/lib/account-sync";
+import { suppressLeadOnConversion } from "@/modules/sales/lib/suppress-on-conversion";
 import { addCompanyEmail } from "@/modules/sales/lib/company-emails";
 import { eq, and } from "drizzle-orm";
 
@@ -434,6 +435,25 @@ export async function handleOrderCreate(order: ShopifyOrder, shopDomain?: string
         await geocodeCompanyById(companyId);
       } catch (e) {
         console.error("[Shopify Webhook] geocode on order failed:", e);
+      }
+    })();
+
+    // Auto-suppress: this company is now a customer, so stop all
+    // outbound outreach — pull them out of every PB dial folder and
+    // blocklist their emails in Instantly. Fire-and-forget; never
+    // blocks order ingest.
+    const buyerEmail = order.email || order.customer?.email || null;
+    void (async () => {
+      try {
+        const r = await suppressLeadOnConversion(companyId, buyerEmail);
+        if (r.frameFlipped || r.pbContactsCleared > 0 || r.instantlyBlocklisted > 0) {
+          console.log(
+            `[Shopify Webhook] suppressed converted lead ${companyId}: ` +
+              `frame=${r.frameFlipped} pb=${r.pbContactsCleared} instantly=${r.instantlyBlocklisted}`,
+          );
+        }
+      } catch (e) {
+        console.error("[Shopify Webhook] suppress-on-conversion failed:", e);
       }
     })();
   }
