@@ -53,6 +53,7 @@ export async function GET(req: NextRequest) {
       "company", "status", "first_call", "last_call", "calls", "connects",
       "appointments_set", "orders_after_first_call", "revenue_after_first_call",
       "first_order_after", "days_call_to_order", "had_prior_orders", "revenue_before",
+      "lead_source", "is_ajm", "ajm_total_spend", "ajm_total_orders", "ajm_last_order",
       "classification",
     ].join(",");
     const all = [...result.wins, ...result.openAppointments];
@@ -60,7 +61,10 @@ export async function GET(req: NextRequest) {
       d.companyName, d.status, d.firstCallAt, d.lastCallAt, d.calls, d.connects,
       d.setAppointment, d.ordersAfter, d.revenueAfter, d.firstOrderAfterAt,
       d.daysCallToOrder ?? "", d.hadPriorOrders ? "yes" : "no", d.revenueBefore,
-      d.ordersAfter === 0 ? "appointment, no order yet" : d.hadPriorOrders ? "reactivation" : "new customer",
+      d.leadSource, d.isAjm ? "yes" : "no", d.ajmTotalSpend ?? "", d.ajmTotalOrders ?? "", d.ajmLastOrder ?? "",
+      d.ordersAfter === 0
+        ? "appointment, no order yet"
+        : d.isAjm ? "AJM prior relationship" : d.hadPriorOrders ? "reactivation" : "new cold customer",
     ].map(esc).join(","));
     return new NextResponse([header, ...body].join("\n"), {
       headers: {

@@ -37,6 +37,13 @@ export interface RepRoiRow {
   /** Had they ordered BEFORE the rep ever called? Then this is reactivation. */
   hadPriorOrders: boolean;
   revenueBefore: number;
+  /** Where the lead came from, in a fixed vocabulary. */
+  leadSource: string;
+  /** AJ Morgan history — a prior relationship, not a cold prospect. */
+  isAjm: boolean;
+  ajmTotalSpend: number | null;
+  ajmTotalOrders: number | null;
+  ajmLastOrder: string | null;
 }
 
 export interface RepRoiResult {
@@ -74,6 +81,31 @@ export interface RepRoiResult {
     appointmentToOrderPct: number;
     /** Every called company, whether or not an appointment was set. */
     callToOrderPct: number;
+  };
+
+  /**
+   * The warm-vs-cold question: an AJ Morgan customer already had a buying
+   * relationship, so crediting their order to a cold call overstates the
+   * outreach. Reported separately rather than netted off, because "would they
+   * have ordered anyway" is a judgement, not a fact — this gives you the split
+   * to make it with.
+   */
+  attribution: {
+    ajmBuyers: number;
+    ajmRevenue: number;
+    nonAjmBuyers: number;
+    nonAjmRevenue: number;
+    ajmSharePct: number;
+    /** ROI counting ONLY genuinely cold leads. */
+    coldOnlyRevenueRoi: number;
+    coldOnlyGrossProfitRoi: number;
+    /** How many of the companies she CALLED were AJM to begin with. */
+    ajmCompaniesCalled: number;
+    ajmCallShare: number;
+    /** Order rate within each group — does calling work better on warm leads? */
+    ajmOrderRatePct: number;
+    coldOrderRatePct: number;
+    bySource: Array<{ source: string; called: number; buyers: number; revenue: number; orderRatePct: number }>;
   };
 
   economics: {
@@ -179,6 +211,7 @@ export function getRepRoi(opts: {
   const rows = sqlite
     .prepare(
       `SELECT c.id AS companyId, c.name AS companyName, c.status,
+              c.source, c.tags, c.ajm_total_spend, c.ajm_total_orders, c.ajm_last_order,
               MIN(pb.called_at) AS firstCallAt,
               MAX(pb.called_at) AS lastCallAt,
               COUNT(*) AS calls,
@@ -191,6 +224,8 @@ export function getRepRoi(opts: {
     )
     .all(...agentArgs, windowStart) as Array<{
     companyId: string; companyName: string | null; status: string;
+    source: string | null; tags: string | null;
+    ajm_total_spend: number | null; ajm_total_orders: number | null; ajm_last_order: string | null;
     firstCallAt: string; lastCallAt: string; calls: number; connects: number; setAppointment: number;
   }>;
 
@@ -213,9 +248,29 @@ export function getRepRoi(opts: {
     const days = after.firstAt
       ? Math.max(0, Math.round((Date.parse(after.firstAt) - Date.parse(r.firstCallAt)) / 86400000))
       : null;
+    const src = (r.source || "").toLowerCase();
+    let tagList: string[] = [];
+    try { tagList = r.tags ? (JSON.parse(r.tags) as string[]).map((t) => String(t).toLowerCase()) : []; } catch { /* legacy */ }
+    const hasTag = (t: string) => src.includes(t) || tagList.some((x) => x.includes(t));
+    // AJM by ANY signal: the tag, the source, or actual AJ Morgan spend
+    // history. Relying on one alone under-counts — the import populated
+    // spend for some rows that never got tagged.
+    const isAjm = hasTag("ajm") || (r.ajm_total_spend ?? 0) > 0 || (r.ajm_total_orders ?? 0) > 0;
+    const leadSource = isAjm ? "ajm"
+      : hasTag("facebook") || hasTag("meta") ? "facebook-ads"
+      : hasTag("instantly") ? "cold-email"
+      : hasTag("faire") ? "faire"
+      : hasTag("storeleads") || hasTag("csv") || hasTag("crawl") || hasTag("import") ? "imported-list"
+      : src ? "other" : "unknown";
+
     return {
       companyId: r.companyId,
       companyName: r.companyName,
+      leadSource,
+      isAjm,
+      ajmTotalSpend: r.ajm_total_spend ?? null,
+      ajmTotalOrders: r.ajm_total_orders ?? null,
+      ajmLastOrder: r.ajm_last_order ?? null,
       firstCallAt: r.firstCallAt,
       lastCallAt: r.lastCallAt,
       calls: r.calls,
@@ -239,6 +294,21 @@ export function getRepRoi(opts: {
   const reactivatedRevenue = Math.round(reactivated.reduce((t, d) => t + d.revenueAfter, 0) * 100) / 100;
   const totalRevenue = Math.round((newRevenue + reactivatedRevenue) * 100) / 100;
   const orders = buyers.reduce((t, d) => t + d.ordersAfter, 0);
+
+  const ajmBuyers = buyers.filter((d) => d.isAjm);
+  const coldBuyers = buyers.filter((d) => !d.isAjm);
+  const ajmRevenue = Math.round(ajmBuyers.reduce((t, d) => t + d.revenueAfter, 0) * 100) / 100;
+  const coldRevenue = Math.round(coldBuyers.reduce((t, d) => t + d.revenueAfter, 0) * 100) / 100;
+  const ajmCalled = detail.filter((d) => d.isAjm);
+  const coldCalled = detail.filter((d) => !d.isAjm);
+
+  const sourceAgg = new Map<string, { called: number; buyers: number; revenue: number }>();
+  for (const d of detail) {
+    const cur = sourceAgg.get(d.leadSource) ?? { called: 0, buyers: 0, revenue: 0 };
+    cur.called += 1;
+    if (d.ordersAfter > 0) { cur.buyers += 1; cur.revenue += d.revenueAfter; }
+    sourceAgg.set(d.leadSource, cur);
+  }
 
   const grossProfit = Math.round(totalRevenue * (marginPct / 100) * 100) / 100;
   const breakEvenRevenue = Math.round((totalCost / (marginPct / 100)) * 100) / 100;
@@ -323,6 +393,27 @@ export function getRepRoi(opts: {
         ? Math.round((detail.filter((d) => d.setAppointment > 0 && d.ordersAfter > 0).length / companiesWithAppt) * 1000) / 10
         : 0,
       callToOrderPct: detail.length > 0 ? Math.round((buyers.length / detail.length) * 1000) / 10 : 0,
+    },
+    attribution: {
+      ajmBuyers: ajmBuyers.length,
+      ajmRevenue,
+      nonAjmBuyers: coldBuyers.length,
+      nonAjmRevenue: coldRevenue,
+      ajmSharePct: totalRevenue > 0 ? Math.round((ajmRevenue / totalRevenue) * 1000) / 10 : 0,
+      coldOnlyRevenueRoi: totalCost > 0 ? Math.round((coldRevenue / totalCost) * 100) / 100 : 0,
+      coldOnlyGrossProfitRoi: totalCost > 0
+        ? Math.round((coldRevenue * (marginPct / 100) / totalCost) * 100) / 100 : 0,
+      ajmCompaniesCalled: ajmCalled.length,
+      ajmCallShare: detail.length > 0 ? Math.round((ajmCalled.length / detail.length) * 1000) / 10 : 0,
+      ajmOrderRatePct: ajmCalled.length > 0 ? Math.round((ajmBuyers.length / ajmCalled.length) * 1000) / 10 : 0,
+      coldOrderRatePct: coldCalled.length > 0 ? Math.round((coldBuyers.length / coldCalled.length) * 1000) / 10 : 0,
+      bySource: [...sourceAgg.entries()]
+        .map(([source, v]) => ({
+          source, called: v.called, buyers: v.buyers,
+          revenue: Math.round(v.revenue * 100) / 100,
+          orderRatePct: v.called > 0 ? Math.round((v.buyers / v.called) * 1000) / 10 : 0,
+        }))
+        .sort((a, b) => b.revenue - a.revenue || b.called - a.called),
     },
     economics: {
       revenueRoi: totalCost > 0 ? Math.round((totalRevenue / totalCost) * 100) / 100 : 0,
