@@ -11,9 +11,10 @@ import { sql } from "drizzle-orm";
  * header fields repeated). Upload it in ShipHero under Purchase Orders →
  * Import so the 3PL can receive against the same PO.
  *
- * Field conventions (established workflow):
- *   Vendor = factory code (JX2…), Status = pending, Sell Ahead = 1,
- *   Payment Due By = unlimited, Price = unit product cost (FOB),
+ * Field conventions (per Daniel, Aug 2026):
+ *   Vendor = "Jaxy" (always — ShipHero's vendor is us, not the factory),
+ *   Status = pending, Sell Ahead = 0, Payment Due By = unlimited,
+ *   Price = unit product cost (FOB),
  *   Shipping Carrier/Method + Tracking from the PO record.
  */
 
@@ -64,12 +65,12 @@ export async function GET(
       || ((po.shipping_method as string) === "air" ? "DHL" : (po.shipping_method as string) || "");
 
     const common = [
-      po.po_number, po.factory_code || po.factory_name, shipDate, poDate, "pending",
+      po.po_number, "Jaxy", shipDate, poDate, "pending",
       carrier, method, 0, 0, 0,
       po.tracking_number || "", "", "unlimited", "", "",
     ];
     const rows = lines.map((l) =>
-      [...common, l.sku, "", l.quantity, 1, l.unit_cost].map(csvEscape).join(","),
+      [...common, l.sku, "", l.quantity, 0, l.unit_cost].map(csvEscape).join(","),
     );
     const csv = [HEADER.join(","), ...rows].join("\n") + "\n";
 
