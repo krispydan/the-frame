@@ -46,6 +46,7 @@ type PurchaseOrder = {
   expected_arrival_date: string | null;
   actual_arrival_date: string | null;
   tracking_number: string | null;
+  tracking_carrier: string | null;
   notes: string | null;
 };
 
@@ -363,11 +364,9 @@ function PODetailPanel({
             <Button size="sm" onClick={() => onUpdateStatus("submitted")} className="gap-1.5">
               <FileText className="h-3.5 w-3.5" /> Mark as Sent
             </Button>
-            <Button size="sm" variant="outline" asChild>
-              <a href={`/api/v1/inventory/purchase-orders/${detail.id}/pdf`} target="_blank" className="gap-1.5">
-                <ExternalLink className="h-3.5 w-3.5" /> View PDF
-              </a>
-            </Button>
+            <Button size="sm" variant="outline" render={<a href={`/api/v1/inventory/purchase-orders/${detail.id}/pdf`} target="_blank" className="gap-1.5" />}>
+            <ExternalLink className="h-3.5 w-3.5" /> View PDF
+          </Button>
           </>
         )}
         {canReceive && (
@@ -400,17 +399,19 @@ function PODetailPanel({
           </Dialog>
         )}
         {detail.status !== "draft" && (
-          <Button size="sm" variant="ghost" asChild>
-            <a href={`/api/v1/inventory/purchase-orders/${detail.id}/pdf`} target="_blank" className="gap-1.5">
-              <ExternalLink className="h-3.5 w-3.5" /> PDF
-            </a>
+          <Button size="sm" variant="ghost" render={<a href={`/api/v1/inventory/purchase-orders/${detail.id}/pdf`} target="_blank" className="gap-1.5" />}>
+            <ExternalLink className="h-3.5 w-3.5" /> PDF
           </Button>
         )}
-        <Button size="sm" variant="outline" asChild>
-          <a href={`/api/v1/inventory/purchase-orders/${detail.id}/shiphero-csv`} download className="gap-1.5">
-            <Download className="h-3.5 w-3.5" /> ShipHero CSV
-          </a>
-        </Button>
+        <Button size="sm" variant="outline" render={<a href={`/api/v1/inventory/purchase-orders/${detail.id}/shiphero-csv`} download className="gap-1.5" />}>
+            <Download className="h-3.5 w-3.5" /> ShipHero PO CSV
+          </Button>
+        <Button size="sm" variant="ghost" render={<a href={`/api/v1/inventory/shiphero/uom-csv?scope=po&poId=${detail.id}`} download className="gap-1.5" />}>
+            <Download className="h-3.5 w-3.5" /> UOM (this PO)
+          </Button>
+        <Button size="sm" variant="ghost" render={<a href={`/api/v1/inventory/shiphero/products-csv?scope=po&poId=${detail.id}`} download className="gap-1.5" />}>
+            <Download className="h-3.5 w-3.5" /> 4-Pack Products (this PO)
+          </Button>
       </div>
 
       {/* Tabbed Detail */}
@@ -770,6 +771,13 @@ export default function PurchaseOrdersPage() {
             <p className="text-muted-foreground text-sm">Manage factory orders, receiving, and QC</p>
           </div>
         </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" render={<a href="/api/v1/inventory/shiphero/uom-csv" download className="gap-1.5" />}>
+            <Download className="h-3.5 w-3.5" /> ShipHero UOM CSV
+          </Button>
+          <Button variant="outline" size="sm" render={<a href="/api/v1/inventory/shiphero/products-csv" download className="gap-1.5" />}>
+            <Download className="h-3.5 w-3.5" /> ShipHero 4-Pack Products CSV
+          </Button>
         <Dialog open={showCreate} onOpenChange={setShowCreate}>
           <DialogTrigger render={<Button className="gap-2"><Plus className="h-4 w-4" /> New PO</Button>} />
           <DialogContent className="w-full sm:max-w-3xl max-h-[85vh] overflow-y-auto">
@@ -964,6 +972,7 @@ export default function PurchaseOrdersPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Summary Cards */}

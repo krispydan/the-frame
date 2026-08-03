@@ -14,8 +14,13 @@ import { sql } from "drizzle-orm";
  * Field conventions (per Daniel, Aug 2026):
  *   Vendor = "Jaxy" (always — ShipHero's vendor is us, not the factory),
  *   Status = pending, Sell Ahead = 0, Payment Due By = unlimited,
- *   Price = unit product cost (FOB),
  *   Shipping Carrier/Method + Tracking from the PO record.
+ *
+ * UNITS OF MEASURE: factories pack 4 pairs per zip bag, and ShipHero receives
+ * by the pack UOM ({sku}-4PK), so PO lines are expressed in PACKS — quantity =
+ * units / 4, price = FOB unit cost × 4. Lines whose quantity isn't divisible
+ * by the pack size fall back to the individual SKU in units (defensive).
+ * Override with ?packSize=N (packSize=1 forces individual units).
  */
 
 const HEADER = [
@@ -31,10 +36,11 @@ const csvEscape = (v: string | number | null | undefined): string => {
 };
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const packSize = Math.max(1, parseInt(new URL(req.url).searchParams.get("packSize") || "4", 10) || 4);
   try {
     const po = db.get(sql`
       SELECT po.*, f.code AS factory_code, f.name AS factory_name
@@ -69,9 +75,13 @@ export async function GET(
       carrier, method, 0, 0, 0,
       po.tracking_number || "", "", "unlimited", "", "",
     ];
-    const rows = lines.map((l) =>
-      [...common, l.sku, "", l.quantity, 0, l.unit_cost].map(csvEscape).join(","),
-    );
+    const rows = lines.map((l) => {
+      const inPacks = packSize > 1 && l.quantity % packSize === 0 && !/-\d+PK$/i.test(l.sku);
+      const sku = inPacks ? `${l.sku}-${packSize}PK` : l.sku;
+      const qty = inPacks ? l.quantity / packSize : l.quantity;
+      const price = inPacks ? Math.round(l.unit_cost * packSize * 100) / 100 : l.unit_cost;
+      return [...common, sku, "", qty, 0, price].map(csvEscape).join(",");
+    });
     const csv = [HEADER.join(","), ...rows].join("\n") + "\n";
 
     return new NextResponse(csv, {
