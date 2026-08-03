@@ -72,6 +72,26 @@ interface PbContactSummary {
  * Used to surface the actual PB API response shape when parsing returns 0
  * contacts, so we can adjust the parser without needing token access.
  */
+/**
+ * Simple concurrency-limited task runner. Kicks off `limit` workers that
+ * pull from the shared queue until it's empty. Avoids Cloudflare's 100s
+ * edge cap on long serial API loops.
+ */
+async function runWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  task: (item: T) => Promise<void>,
+): Promise<void> {
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < items.length) {
+      const i = cursor++;
+      await task(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
 function shapeOnly(v: unknown, depth = 0): unknown {
   if (depth > 3 || v == null) return typeof v;
   if (Array.isArray(v)) return v.length === 0 ? "array[0]" : [`array[${v.length}]`, shapeOnly(v[0], depth + 1)];
@@ -199,7 +219,8 @@ async function handle(req: NextRequest) {
   const pbMoveErrors: Array<{ id: string; email: string; reason: string }> = [];
 
   if (!body.dryRun) {
-    for (const c of pbToMoveOut) {
+    // Parallelize with concurrency 8 to stay under Cloudflare's 100s edge cap.
+    await runWithConcurrency(pbToMoveOut, 8, async (c) => {
       try {
         // Clear category — contact stays in PB (history preserved) but leaves this folder.
         await phoneBurnerClient.updateContact(c.id, { category_id: undefined });
@@ -207,7 +228,7 @@ async function handle(req: NextRequest) {
       } catch (e) {
         pbMoveErrors.push({ id: c.id, email: c.email, reason: e instanceof Error ? e.message : String(e) });
       }
-    }
+    });
   }
 
   // ── 4. PB: add callable that aren't already in the folder ────────────
@@ -229,7 +250,7 @@ async function handle(req: NextRequest) {
       );
     }
 
-    for (const r of pbToAdd) {
+    await runWithConcurrency(pbToAdd, 8, async (r) => {
       try {
         const noteLines: string[] = [
           `AJM reactivation: ${r.company || ""}${r.city ? ` — ${r.city}, ${r.state || ""}` : ""}`,
@@ -253,7 +274,7 @@ async function handle(req: NextRequest) {
       } catch (e) {
         pbAddErrors.push({ email: r.email, reason: e instanceof Error ? e.message : String(e) });
       }
-    }
+    });
   }
 
   return NextResponse.json({
