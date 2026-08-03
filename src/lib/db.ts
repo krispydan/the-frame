@@ -204,6 +204,15 @@ try { sqlite.exec("ALTER TABLE marketing_video_sources ADD COLUMN raw_deleted IN
 try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_video_clip_name_size ON marketing_video_clips (file_name, size_bytes)"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_video_source_name_size ON marketing_video_sources (file_name, size_bytes)"); } catch { /* exists */ }
 
+// Split review: long clips (a whole video uploaded without auto-clip) get
+// reviewed once and either split into shorter clips or dismissed. Without
+// a reviewed stamp the same clips resurface in the queue forever.
+try { sqlite.exec("ALTER TABLE marketing_video_clips ADD COLUMN split_reviewed_at TEXT"); } catch { /* exists */ }
+// Cached ffmpeg scene-cut timestamps (JSON number[]) so reopening the
+// splitter is instant instead of re-running detection.
+try { sqlite.exec("ALTER TABLE marketing_video_clips ADD COLUMN scene_cuts_json TEXT"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_video_clip_duration ON marketing_video_clips (duration_sec)"); } catch { /* exists */ }
+
 // Reviewer notes on catalog images (SKU identifier) — separate from
 // alt_text, which feeds marketplace exports and must stay clean.
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN notes TEXT"); } catch { /* exists */ }

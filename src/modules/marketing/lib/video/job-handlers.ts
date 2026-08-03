@@ -41,6 +41,26 @@ registerJobHandler("marketing.video.split-source", async (input) => {
   return (await splitSource(sourceId)) as unknown as Record<string, unknown>;
 });
 
+registerJobHandler("marketing.video.split-clip", async (input) => {
+  // Manual split of one long clip into the segments a reviewer drew.
+  // A job because each segment re-encodes AND normalizes — six of them
+  // outlast a request.
+  const clipId = input.clipId;
+  if (!clipId || typeof clipId !== "string") {
+    throw new Error("clipId is required for marketing.video.split-clip jobs");
+  }
+  const segments = Array.isArray(input.segments) ? input.segments : [];
+  if (segments.length === 0) throw new Error("segments are required");
+
+  const { applySplit } = await import("./split-review");
+  const outcome = await applySplit(
+    clipId,
+    segments as Array<{ startSec: number; endSec: number }>,
+    input.parentAction === "keep" ? "keep" : "archive",
+  );
+  return outcome as unknown as Record<string, unknown>;
+});
+
 registerJobHandler("marketing.media.identify", async (input) => {
   // Legacy handler (identification is synchronous filename matching now,
   // run directly by the media-match route) — kept so any jobs queued

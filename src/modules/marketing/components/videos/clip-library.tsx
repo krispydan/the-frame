@@ -68,6 +68,9 @@ export function ClipLibrary() {
   const [filterTalent, setFilterTalent] = useState("");
   const [filterUntagged, setFilterUntagged] = useState(false);
   const [filterProducts, setFilterProducts] = useState(""); // "" | "tagged" | "untagged"
+  const [filterLength, setFilterLength] = useState(""); // "" | "long" | "short"
+  /** Long clips nobody has triaged yet — drives the toolbar badge. */
+  const [longPending, setLongPending] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editClip, setEditClip] = useState<Clip | null>(null);
   const [showCategories, setShowCategories] = useState(false);
@@ -84,6 +87,12 @@ export function ClipLibrary() {
     if (filterTalent) params.set("talent", filterTalent);
     if (filterUntagged) params.set("untagged", "1");
     if (filterProducts) params.set("products", filterProducts);
+    if (filterLength === "long") {
+      params.set("minDuration", "10");
+      params.set("sort", "longest");
+    } else if (filterLength === "short") {
+      params.set("maxDuration", "10");
+    }
     params.set("limit", String(PAGE_SIZE));
     params.set("offset", String(page * PAGE_SIZE));
     Promise.all([
@@ -99,7 +108,7 @@ export function ClipLibrary() {
       // If a page emptied out (e.g. after deleting its last clips), step back.
       if (list.length === 0 && page > 0) setPage((p) => Math.max(0, p - 1));
     });
-  }, [filterCategory, filterStatus, filterTalent, filterUntagged, filterProducts, page]);
+  }, [filterCategory, filterStatus, filterTalent, filterUntagged, filterProducts, filterLength, page]);
 
   useEffect(() => {
     load();
@@ -108,12 +117,24 @@ export function ClipLibrary() {
   // Any filter change resets to the first page.
   useEffect(() => {
     setPage(0);
-  }, [filterCategory, filterStatus, filterTalent, filterUntagged, filterProducts]);
+  }, [filterCategory, filterStatus, filterTalent, filterUntagged, filterProducts, filterLength]);
 
+  // Async IIFE + cancellation: state settles in the continuation, and an
+  // unmount mid-flight can't set on a dead component.
   useEffect(() => {
-    fetch("/api/v1/marketing/videos/skus")
-      .then((r) => r.json())
-      .then((d) => setProducts(d.products ?? []));
+    let cancelled = false;
+    (async () => {
+      const [skus, review] = await Promise.all([
+        fetch("/api/v1/marketing/videos/skus").then((r) => r.json()).catch(() => null),
+        fetch("/api/v1/marketing/videos/clips/review?limit=1").then((r) => r.json()).catch(() => null),
+      ]);
+      if (cancelled) return;
+      setProducts(skus?.products ?? []);
+      setLongPending(review?.stats?.pending ?? 0);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Poll while anything is normalizing so statuses flip live.
@@ -230,6 +251,14 @@ export function ClipLibrary() {
         <Button variant="outline" render={<Link href="/marketing/videos/identify" />}>
           <ScanSearch className="h-4 w-4 mr-1" /> Identify SKUs
         </Button>
+        {/* Long clips are unusable as-is — the composer wants 3-5s beats.
+            The badge is the nudge; the page is the workflow. */}
+        <Button variant="outline" render={<Link href="/marketing/videos/clips/review" />}>
+          <Scissors className="h-4 w-4 mr-1" /> Split review
+          {longPending > 0 && (
+            <Badge variant="destructive" className="ml-1.5">{longPending}</Badge>
+          )}
+        </Button>
         <Button variant="outline" onClick={() => setShowCategories(true)}>
           Categories
         </Button>
@@ -274,6 +303,16 @@ export function ClipLibrary() {
           <option value="">All products</option>
           <option value="tagged">Tagged products</option>
           <option value="untagged">Untagged products</option>
+        </select>
+        <select
+          value={filterLength}
+          onChange={(e) => setFilterLength(e.target.value)}
+          className="border rounded px-2 py-1.5 text-sm bg-background"
+          title="Filter by clip length"
+        >
+          <option value="">Any length</option>
+          <option value="long">Long (10s+)</option>
+          <option value="short">Short (under 10s)</option>
         </select>
         <label className="flex items-center gap-1.5 text-sm" title="Clips with no category assigned">
           <input type="checkbox" checked={filterUntagged} onChange={(e) => setFilterUntagged(e.target.checked)} />
