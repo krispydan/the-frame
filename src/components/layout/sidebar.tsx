@@ -52,6 +52,7 @@ import {
   Clapperboard,
   Film,
   PackageSearch,
+  PhoneCall,
 } from "lucide-react";
 import {
   Sidebar,
@@ -227,11 +228,12 @@ const marketingNav: NavItem[] = [
   { title: "Overview", href: "/marketing", icon: Megaphone },
   {
     title: "Cold outreach", href: "/campaigns", icon: Send,
-    owns: ["/marketing/outreach"],
+    owns: ["/marketing/outreach", "/sales/outreach-roi"],
     children: [
       { title: "Campaigns", href: "/campaigns", icon: Send },
       { title: "Reply inbox", href: "/campaigns/inbox", icon: Inbox },
       { title: "Outreach analytics", href: "/marketing/outreach", icon: BarChart3 },
+      { title: "Call ROI", href: "/sales/outreach-roi", icon: PhoneCall },
     ],
   },
   {
@@ -282,7 +284,7 @@ const ROLE_ALLOWED_HREFS: Record<string, string[]> = {
   owner: ["*"],
   sales_manager: ["/dashboard", "/targets", "/prospects", "/prospects/review", "/prospects/sources", "/prospects/facebook-leads", "/segments", "/campaigns", "/campaigns/inbox", "/marketing/outreach", "/pipeline", "/customers", "/customers/analytics", "/brands", "/catalog", "/inventory/performance", "/inventory/colors"],
   warehouse: ["/dashboard", "/orders", "/orders/international", "/catalog", "/catalog/intake", "/media", "/inventory", "/inventory/performance", "/inventory/colors", "/inventory/factories", "/inventory/reorder", "/inventory/purchase-orders", "/inventory/exports"],
-  finance: ["/dashboard", "/orders", "/finance", "/finance/cogs", "/finance/xero", "/inventory/performance", "/inventory/colors", "/inventory/factories"],
+  finance: ["/dashboard", "/orders", "/finance", "/finance/cogs", "/finance/xero", "/sales/outreach-roi", "/inventory/performance", "/inventory/colors", "/inventory/factories"],
   marketing: ["/dashboard", "/marketing", "/marketing/outreach", "/marketing/email", "/marketing/email/plan", "/marketing/email/calendar", "/marketing/email/designer-queue", "/marketing/email/prompts", "/marketing/videos", "/marketing/videos/clips", "/marketing/videos/recipes", "/marketing/videos/identify", "/marketing/videos/products", "/marketing/calendar", "/catalog", "/catalog/export", "/media", "/campaigns", "/campaigns/inbox", "/prospects/facebook-leads", "/inventory/performance", "/inventory/colors"],
   support: ["/dashboard", "/orders", "/customers", "/customers/analytics"],
   ai: ["/dashboard", "/ai"],
