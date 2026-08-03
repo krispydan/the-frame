@@ -36,6 +36,56 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  /**
+   * The control group. "They'd have ordered anyway" is testable: compare AJM
+   * companies the rep CALLED against AJM companies she never called, over the
+   * same window. If both order at the same rate, the calls added nothing; if
+   * called ones order more, the lift is the rep's real contribution.
+   *
+   * Not a randomised trial — the called list was chosen, likely favouring
+   * better prospects — so read the lift as an upper bound, not a causal fact.
+   */
+  if (p.get("control") === "1") {
+    const since = p.get("since") || "2026-06-18";
+    const patterns = (p.get("agent") || "hello@getjaxy.com").split(",").map((x) => x.trim());
+    const agentSql = patterns.map(() => "LOWER(COALESCE(pb.agent_email,'')) LIKE ?").join(" OR ");
+    const agentArgs = patterns.map((x) => `%${x.toLowerCase()}%`);
+
+    const isAjm = `(LOWER(COALESCE(c.tags,'')) LIKE '%ajm%' OR LOWER(COALESCE(c.source,'')) LIKE '%ajm%'
+                    OR COALESCE(c.ajm_total_spend,0) > 0 OR COALESCE(c.ajm_total_orders,0) > 0)`;
+    const calledSql = `EXISTS (SELECT 1 FROM phoneburner_call_log pb
+                                WHERE pb.company_id = c.id AND pb.called_at >= ? AND (${agentSql}))`;
+    const orderedSql = `EXISTS (SELECT 1 FROM orders o WHERE o.company_id = c.id
+                                 AND o.status NOT IN ('cancelled','returned')
+                                 AND COALESCE(o.placed_at, o.created_at) >= ?)`;
+
+    const group = (called: boolean) =>
+      sqlite.prepare(
+        `SELECT COUNT(*) companies,
+                SUM(CASE WHEN ${orderedSql} THEN 1 ELSE 0 END) buyers,
+                COALESCE(SUM((SELECT COALESCE(SUM(o.total),0) FROM orders o
+                               WHERE o.company_id = c.id AND o.status NOT IN ('cancelled','returned')
+                                 AND COALESCE(o.placed_at, o.created_at) >= ?)),0) revenue,
+                AVG(COALESCE(c.ajm_total_spend,0)) avgPriorSpend
+           FROM companies c
+          WHERE ${isAjm} AND ${called ? "" : "NOT "}${calledSql}`,
+      ).get(since, since, since, ...agentArgs) as { companies: number; buyers: number; revenue: number; avgPriorSpend: number };
+
+    const called = group(true);
+    const notCalled = group(false);
+    const rate = (g: { companies: number; buyers: number }) =>
+      g.companies > 0 ? Math.round((g.buyers / g.companies) * 1000) / 10 : 0;
+
+    return NextResponse.json({
+      ok: true,
+      note: "AJM companies called vs never called, same window. Not randomised — the called list was chosen, so treat the lift as an upper bound.",
+      since,
+      called: { ...called, orderRatePct: rate(called), revenuePerCompany: called.companies ? Math.round(called.revenue / called.companies * 100) / 100 : 0 },
+      notCalled: { ...notCalled, orderRatePct: rate(notCalled), revenuePerCompany: notCalled.companies ? Math.round(notCalled.revenue / notCalled.companies * 100) / 100 : 0 },
+      liftPct: Math.round((rate(called) - rate(notCalled)) * 10) / 10,
+    });
+  }
+
   const result = getRepRoi({
     rep: p.get("rep") || "sandra",
     agentPatterns: p.get("agent")?.split(",").map((s) => s.trim()).filter(Boolean),
