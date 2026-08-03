@@ -67,6 +67,22 @@ interface PbContactSummary {
   category_id: string | null;
 }
 
+/**
+ * Return the shape of a nested JSON value: keys + types, no values.
+ * Used to surface the actual PB API response shape when parsing returns 0
+ * contacts, so we can adjust the parser without needing token access.
+ */
+function shapeOnly(v: unknown, depth = 0): unknown {
+  if (depth > 3 || v == null) return typeof v;
+  if (Array.isArray(v)) return v.length === 0 ? "array[0]" : [`array[${v.length}]`, shapeOnly(v[0], depth + 1)];
+  if (typeof v === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v).slice(0, 20)) out[k] = shapeOnly(val, depth + 1);
+    return out;
+  }
+  return typeof v;
+}
+
 export async function POST(req: NextRequest) {
   try {
     return await handle(req);
@@ -134,9 +150,15 @@ async function handle(req: NextRequest) {
   }
 
   // ── 2. PhoneBurner: enumerate current folder contents ────────────────
+  // PB API shape (per listContactsByUpdated at phoneburner-client.ts:305):
+  //   { contacts: { contacts: [...], total_pages: N } }
+  // Each contact has `user_id` (id) + `primary_email.email_address` +
+  // `category_id`.
   const folderContacts: PbContactSummary[] = [];
   let page = 1;
-  let pageCap = 200; // safety — folder shouldn't have >20k contacts
+  let pageCap = 500; // safety
+  let totalPages: number | null = null;
+  let rawShapeSample: unknown = null;
   while (pageCap-- > 0) {
     const raw = (await phoneBurnerClient.rawGet("/contacts", {
       category_id: folderId,
@@ -144,21 +166,27 @@ async function handle(req: NextRequest) {
       page_size: 100,
     })) as Record<string, unknown> | null;
     if (!raw) break;
-    const embedded = (raw._embedded as { contacts?: unknown[] } | undefined)?.contacts;
-    const list: unknown[] = Array.isArray(embedded) ? embedded : [];
+    if (page === 1) rawShapeSample = shapeOnly(raw);
+    const env = ((raw.contacts ?? raw) as Record<string, unknown>) || {};
+    const arr = (env.contacts as unknown[]) || [];
+    const list: unknown[] = Array.isArray(arr) ? arr : [];
+    if (totalPages == null) {
+      const tp = env.total_pages ?? env.totalPages;
+      totalPages = tp != null && Number.isFinite(Number(tp)) ? Number(tp) : null;
+    }
     if (list.length === 0) break;
     for (const c of list) {
       const rec = c as Record<string, unknown>;
-      const id = String(rec.id || rec.user_id || "");
-      // PB contact emails live in an array under `emails` or top-level `email`.
-      const emails = rec.emails as Array<Record<string, unknown>> | undefined;
-      const primaryEmail = Array.isArray(emails) && emails[0]
-        ? String((emails[0].email as string) || "").toLowerCase()
-        : String((rec.email as string) || "").toLowerCase();
+      const id = String(rec.user_id || rec.id || "");
+      // Primary email: { email_address: "..." } or a raw string.
+      const pe = rec.primary_email as { email_address?: unknown } | string | undefined;
+      const primaryEmail = typeof pe === "string"
+        ? pe.toLowerCase().trim()
+        : String((pe?.email_address as string) || "").toLowerCase().trim();
       const catId = rec.category_id != null ? String(rec.category_id) : null;
       if (id && primaryEmail) folderContacts.push({ id, email: primaryEmail, category_id: catId });
     }
-    // PB pagination: stop if we got a short page
+    if (totalPages != null && page >= totalPages) break;
     if (list.length < 100) break;
     page++;
   }
@@ -240,6 +268,8 @@ async function handle(req: NextRequest) {
     },
     phoneburner: {
       folder_current_size: folderContacts.length,
+      total_pages: totalPages,
+      raw_shape_page1: rawShapeSample,
       to_move_out: pbToMoveOut.length,
       moved_out: pbMovedOut,
       move_errors: pbMoveErrors.slice(0, 20),

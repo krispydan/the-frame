@@ -1,0 +1,9 @@
+[mcp_servers.the-frame]
+command = "npx"
+args = [
+    "tsx",
+    "src/mcp-server/index.ts",
+]
+
+[mcp_servers.the-frame.env]
+FRAME_API_KEY = "d7b54adb537de1f8a7fe41cffc3b595f39b37490a47edadfe8661e04a55cebc6"
