@@ -19,8 +19,9 @@ import { Input } from "@/components/ui/input";
 import { VideoPlayer } from "@/components/ui/video-player";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import { ClipPreviewDialog } from "@/modules/marketing/components/videos/clip-preview-dialog";
+import { ClipEditor } from "@/modules/marketing/components/videos/clip-editor";
 import {
-  ArrowLeft, ArrowRight, Boxes, Check, Download, Loader2, Play, Plus, RefreshCw, Sparkles, Upload, X,
+  ArrowLeft, Boxes, Check, Download, Play, Plus, RefreshCw, Sparkles, Upload,
 } from "lucide-react";
 
 type Clip = {
@@ -104,7 +105,6 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
     return a !== seq.map((c) => c.id).join("|");
   }, [detail, seq]);
 
-  const totalSec = useMemo(() => seq.reduce((s, c) => s + (c.durationSec ?? 0), 0), [seq]);
   const hasProductShot = useMemo(() => seq.some((c) => c.isProductShot), [seq]);
   const inSeq = useMemo(() => new Set(seq.map((c) => c.id)), [seq]);
 
@@ -125,15 +125,6 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
     toast.error(d.error ?? "Failed");
     return false;
   };
-
-  const move = (i: number, dir: -1 | 1) =>
-    setSeq((prev) => {
-      const next = [...prev];
-      const j = i + dir;
-      if (j < 0 || j >= next.length) return prev;
-      [next[i], next[j]] = [next[j], next[i]];
-      return next;
-    });
 
   /** Push to both Shopify stores; each reports independently. */
   const publish = async () => {
@@ -242,94 +233,25 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
         </div>
 
         <div className="space-y-3 min-w-0">
-          {/* Clip sequence */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
-                Clips in this video
-                <span className="text-xs font-normal text-muted-foreground">reorder or remove — saving rebuilds the video</span>
-                <span className="ml-auto text-xs font-normal text-muted-foreground">
-                  {seq.length} clips · {totalSec.toFixed(1)}s
-                </span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {!hasProductShot && seq.length > 0 && (
+          {/* Clip sequence — same editor the post page uses */}
+          <ClipEditor
+            clips={seq}
+            onChange={setSeq}
+            onSave={() => patch({ clipIds: seq.map((c) => c.id) }, "Rebuilt")}
+            dirty={dirty}
+            saving={saving}
+            saveLabel="Save & rebuild"
+            savingLabel="Rebuilding…"
+            subtitle="trim · reframe · add effects · reorder — this is the product video, in order"
+            emptyHint="No clips yet — add some from below."
+            warning={
+              !hasProductShot && seq.length > 0 ? (
                 <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700">
                   No clip here shows the product — add a product shot or the build will be refused.
                 </p>
-              )}
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {seq.map((c, i) => (
-                  <div key={`${c.id}-${i}`} className="group/clip w-28 shrink-0">
-                    <div className="relative aspect-[9/16] overflow-hidden rounded-lg border bg-muted">
-                      {/* The poster is the play surface — click to watch it. */}
-                      <button
-                        type="button"
-                        onClick={() => setWatching({ clip: c, inVideo: true, index: i })}
-                        title="Watch this clip"
-                        className="absolute inset-0 h-full w-full"
-                      >
-                        {c.posterUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={c.posterUrl} alt="" className="h-full w-full object-cover" />
-                        ) : null}
-                        <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover/clip:bg-black/25 group-hover/clip:opacity-100">
-                          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-black">
-                            <Play className="h-4 w-4 translate-x-px fill-current" />
-                          </span>
-                        </span>
-                      </button>
-                      <span className="pointer-events-none absolute left-1 top-1 z-10 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/70 px-1 text-[10px] font-semibold text-white">
-                        {i + 1}
-                      </span>
-                      {c.durationSec != null && (
-                        <span className="pointer-events-none absolute bottom-1 right-1 z-10 rounded bg-black/70 px-1 text-[10px] text-white">
-                          {c.durationSec.toFixed(1)}s
-                        </span>
-                      )}
-                      <button
-                        onClick={() => setSeq((prev) => prev.filter((_, j) => j !== i))}
-                        title="Remove"
-                        className="absolute right-1 top-1 z-20 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition hover:bg-red-600 group-hover/clip:opacity-100"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                      <button
-                        onClick={() => move(i, -1)}
-                        disabled={i === 0}
-                        title="Move earlier"
-                        className="absolute left-1 top-1/2 z-20 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition hover:bg-black/70 group-hover/clip:opacity-100 disabled:hidden"
-                      >
-                        <ArrowLeft className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={() => move(i, 1)}
-                        disabled={i === seq.length - 1}
-                        title="Move later"
-                        className="absolute right-1 top-1/2 z-20 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition hover:bg-black/70 group-hover/clip:opacity-100 disabled:hidden"
-                      >
-                        <ArrowRight className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                    <p className="truncate text-center text-[10px] text-muted-foreground" title={c.fileName}>
-                      {c.categoryName ?? c.fileName}
-                    </p>
-                  </div>
-                ))}
-                {seq.length === 0 && (
-                  <p className="p-3 text-sm text-muted-foreground">No clips yet — add some from below.</p>
-                )}
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button size="sm" onClick={() => patch({ clipIds: seq.map((c) => c.id) }, "Rebuilt")} disabled={saving || !dirty || seq.length === 0}>
-                  {saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
-                  Save &amp; rebuild
-                </Button>
-                {dirty && <span className="text-xs text-amber-600">Unsaved changes</span>}
-              </div>
-            </CardContent>
-          </Card>
+              ) : null
+            }
+          />
 
           {/* Other clips of this product */}
           <Card>
