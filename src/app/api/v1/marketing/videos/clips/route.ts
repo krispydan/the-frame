@@ -3,7 +3,9 @@
  *
  * Filters: status, category (id or slug), skuId, talent (name, or "none"
  * for clips with nobody in them), untagged=1 (no category), products
- * ("tagged" = has ≥1 product, "untagged" = has none), search.
+ * ("tagged" = has ≥1 product, "untagged" = has none), search,
+ * minDuration/maxDuration (seconds), splitReview ("pending" = long and
+ * not yet triaged, "done" = already reviewed), sort ("longest").
  * Returns clips with category + product joins and public asset URLs,
  * plus the distinct talent list for the UI's pickers/datalists.
  */
@@ -23,6 +25,10 @@ export async function GET(request: NextRequest) {
   const productsFilter = searchParams.get("products") || ""; // "tagged" | "untagged"
   const product = searchParams.get("product") || ""; // product NAME contains
   const search = searchParams.get("search") || "";
+  const minDuration = Number(searchParams.get("minDuration"));
+  const maxDuration = Number(searchParams.get("maxDuration"));
+  const splitReview = searchParams.get("splitReview") || ""; // "pending" | "done"
+  const sort = searchParams.get("sort") || "";
   const limit = Math.min(500, parseInt(searchParams.get("limit") || "200", 10));
   const offset = parseInt(searchParams.get("offset") || "0", 10);
 
@@ -72,13 +78,29 @@ export async function GET(request: NextRequest) {
     params.push(like, like, like, like);
   }
 
+  // Length filters drive the split-review queue. duration_sec is NULL
+  // until a clip normalizes, and an unknown length is not evidence of a
+  // long clip — those stay out of the queue rather than cluttering it.
+  if (Number.isFinite(minDuration) && minDuration > 0) {
+    clauses.push("c.duration_sec IS NOT NULL AND c.duration_sec >= ?");
+    params.push(minDuration);
+  }
+  if (Number.isFinite(maxDuration) && maxDuration > 0) {
+    clauses.push("c.duration_sec IS NOT NULL AND c.duration_sec <= ?");
+    params.push(maxDuration);
+  }
+  if (splitReview === "pending") clauses.push("c.split_reviewed_at IS NULL");
+  else if (splitReview === "done") clauses.push("c.split_reviewed_at IS NOT NULL");
+
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  // Longest-first is what the review queue wants: worst offenders lead.
+  const orderBy = sort === "longest" ? "c.duration_sec DESC, c.created_at DESC" : "c.created_at DESC";
   const rows = sqlite.prepare(`
     SELECT c.*, cat.slug AS category_slug, cat.name AS category_name
     FROM marketing_video_clips c
     LEFT JOIN marketing_video_clip_categories cat ON cat.id = c.category_id
     ${where}
-    ORDER BY c.created_at DESC
+    ORDER BY ${orderBy}
     LIMIT ? OFFSET ?
   `).all(...params, limit, offset) as Array<Record<string, unknown>>;
 

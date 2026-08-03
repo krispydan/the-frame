@@ -83,6 +83,14 @@ export const videoClips = sqliteTable("marketing_video_clips", {
   lastUsedAt: text("last_used_at"),
   /** Normalization profile version — never mix versions in one concat. */
   normVersion: integer("norm_version").notNull().default(1),
+  /**
+   * When a human decided this clip's length was fine, or split it. Long
+   * clips queue for review; this is what takes them back out of the queue
+   * so the same footage isn't re-triaged every week.
+   */
+  splitReviewedAt: text("split_reviewed_at"),
+  /** Cached ffmpeg scene-cut timestamps (JSON number[]) for the splitter. */
+  sceneCutsJson: text("scene_cuts_json"),
   error: text("error"),
   notes: text("notes"),
   createdAt: timestamp("created_at"),
