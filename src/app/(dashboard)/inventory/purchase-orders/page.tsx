@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import {
   Plus, ChevronLeft, Package, ClipboardCheck, AlertTriangle,
-  FileText, ExternalLink, X, ChevronsUpDown, Check, ClipboardPaste, Plane, Ship,
+  FileText, ExternalLink, X, ChevronsUpDown, Check, ClipboardPaste, Plane, Ship, Download,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -406,6 +406,11 @@ function PODetailPanel({
             </a>
           </Button>
         )}
+        <Button size="sm" variant="outline" asChild>
+          <a href={`/api/v1/inventory/purchase-orders/${detail.id}/shiphero-csv`} download className="gap-1.5">
+            <Download className="h-3.5 w-3.5" /> ShipHero CSV
+          </a>
+        </Button>
       </div>
 
       {/* Tabbed Detail */}
