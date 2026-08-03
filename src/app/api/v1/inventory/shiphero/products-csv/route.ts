@@ -68,11 +68,14 @@ export async function GET(req: NextRequest) {
       .filter((s) => !/-\d+PK$/i.test(s.sku))
       .map((s) => {
         const name = `${s.productName ?? s.sku}${s.colorName ? ` - ${s.colorName}` : ""} (${packSize}-pack)`;
+        // Product type is encoded in the SKU: -R- readers, -S- (or legacy) sunglasses.
+        const kind = /-R-/.test(s.sku) ? "Reading glasses" : "Sunglasses";
         return [
           name, `${s.sku}-${packSize}PK`, 0, "", 0, 0, "", "",
-          "", 0, 0, `Sunglasses (${packSize}-pack inner pack)`, 0,
+          "", 0, 0, `${kind} (${packSize}-pack inner pack)`, 0,
           0, weight, h, w, l, 0, "CN",
-          "9004.10.0000", 0, 0, 0,
+          // HTS: 9004.10 sunglasses; 9004.90 other spectacles (readers)
+          kind === "Reading glasses" ? "9004.90.0000" : "9004.10.0000", 0, 0, 0,
           0, "", 0, 0, "USD",
           0, 0, 0, "", 1,
         ].map(csvEscape).join(",");
