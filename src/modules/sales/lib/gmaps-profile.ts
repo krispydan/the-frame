@@ -161,10 +161,18 @@ export async function captureListings(
     deadlineMs?: number;
     /** Crawl each place's detail page (hours + description). Default true. */
     detail?: boolean;
+    /** Search strings per Apify run. Default BATCH_SIZE. See note below. */
+    batchSize?: number;
   } = {},
 ): Promise<CaptureResult> {
   const cohort = opts.cohort ?? "customers";
   const detail = opts.detail !== false;
+  // Batching amortises actor startup, which is worth it when Apify is
+  // healthy. When it isn't, batching is strictly harmful: a run that
+  // overruns the 300s ceiling loses everything in it, so a batch of three
+  // turns one slow store into three lost ones. Callers drop to 1 to trade
+  // throughput for the ability to make progress at all.
+  const batchSize = Math.max(1, opts.batchSize ?? BATCH_SIZE);
   const limit = Math.max(1, Math.min(500, opts.limit ?? 50));
   const targets = loadTargets(limit, { cohort });
 
@@ -198,12 +206,12 @@ export async function captureListings(
   const deadlineMs = opts.deadlineMs ?? 540_000;
   const outOfTime = () => Date.now() - startedAt > deadlineMs;
 
-  for (let i = 0; i < targets.length; i += BATCH_SIZE) {
+  for (let i = 0; i < targets.length; i += batchSize) {
     if (outOfTime()) {
       result.stoppedEarly = true;
       break;
     }
-    const batch = targets.slice(i, i + BATCH_SIZE);
+    const batch = targets.slice(i, i + batchSize);
     let places: GoogleMapsPlace[] = [];
     try {
       places = await apifyClient.runGoogleMapsScraper(
