@@ -191,6 +191,13 @@ export const CRON_JOBS: CronJob[] = [
   // spend stays flat and predictable.
   {
     id: "gmaps-refresh-customer-listings",
+    // Paused for the OOM incident AND on Daniel's explicit instruction to stop
+    // the periodic re-scrape. Two independent reasons, and the second outlives
+    // the first: automatic refresh is only worth having if you trust the
+    // match, and the matcher is currently returning wrong businesses. A
+    // refresh loop against a bad matcher overwrites good records with bad ones
+    // on a timer, unattended. Do not re-enable with the OOM batch.
+    guard: PAUSED_OOM,
     schedule: "30 12 * * *",  // 12:30 UTC ≈ 5:30am PT
     description: "Refresh Google Maps listings for customers whose data is over 120 days old (rating, reviews, hours, closure)",
     handler: () => refreshStaleCustomerListings(20, 120),
@@ -495,10 +502,17 @@ export const CRON_JOBS: CronJob[] = [
   },
   {
     id: "ajm-gmaps-enrich",
+    // Paused: OOM incident 2026-08-04. Fourth scheduled caller of the same
+    // Apify actor. It was already defaultEnabled: false, but that only applies
+    // when no cron_job_state row exists — "off by default" is not off for a
+    // job that has ever run, so the guard is what actually stops it.
+    guard: PAUSED_OOM,
     schedule: "*/10 * * * *",  // every 10 min during business hours
     description: "Enrich the AJM cohort (ajm_2025) via Apify Google Maps — website, hours, rating, permanently-closed. Chips away ~40/run. Opt-in (Apify cost ~$2-3/1000).",
     handler: () => enrichViaGoogleMaps({ ajm: true, limit: 40 }) as Promise<unknown>,
-    guard: () => isDuringBusinessHours(),
+    // (the business-hours guard this job used to carry is subsumed by the
+    // PAUSED_OOM guard above — a second `guard` key would silently win and
+    // un-pause it. Restore isDuringBusinessHours here when un-pausing.)
     defaultEnabled: false,
   },
   {
