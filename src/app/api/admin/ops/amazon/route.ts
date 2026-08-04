@@ -11,7 +11,6 @@ import {
 } from "@/modules/integrations/lib/amazon/sync";
 import { importAmazonOrders } from "@/modules/orders/lib/amazon-sync";
 import { bridgeAmazonSettlements } from "@/modules/integrations/lib/amazon/settlement-bridge";
-import { getSyncState } from "@/modules/integrations/lib/amazon/ingest";
 import {
   getAmazonHeadline,
   getAmazonSyncHealth,
@@ -119,7 +118,9 @@ export async function GET(req: NextRequest) {
           imported,
           headline: getAmazonHeadline({ from, to: today }),
           unmappedSkus: getAmazonUnmappedSkus(),
-          reports: getSyncState(),
+          // Same source as ?view=health, so `stale` is reported consistently
+          // rather than only on one view.
+          reports: getAmazonSyncHealth(),
         });
       }
     }
@@ -174,14 +175,42 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true, action, result, imported, bridged });
       }
 
-      case "sync-orders":
-        return NextResponse.json({ ok: true, action, result: await syncAndImportAmazonOrders({}) });
+      // These accept an optional date range so a long history can be pulled
+      // one report at a time. The `backfill` action runs every report in a
+      // single request, which exceeds Railway's 300s edge timeout once the
+      // range is wide — the slowest report alone takes ~36s per 7-day chunk.
+      case "sync-orders": {
+        const { from, to } = body as { from?: string; to?: string };
+        if ((from !== undefined && !isDate(from)) || (to !== undefined && !isDate(to))) {
+          return NextResponse.json({ ok: false, error: "`from`/`to` must be YYYY-MM-DD" }, { status: 400 });
+        }
+        return NextResponse.json({
+          ok: true, action,
+          result: await syncAndImportAmazonOrders({ dateFrom: from, dateTo: to }),
+        });
+      }
 
-      case "sync-settlements":
-        return NextResponse.json({ ok: true, action, result: await syncAndBridgeAmazonSettlements({}) });
+      case "sync-settlements": {
+        const { from, to } = body as { from?: string; to?: string };
+        if ((from !== undefined && !isDate(from)) || (to !== undefined && !isDate(to))) {
+          return NextResponse.json({ ok: false, error: "`from`/`to` must be YYYY-MM-DD" }, { status: 400 });
+        }
+        return NextResponse.json({
+          ok: true, action,
+          result: await syncAndBridgeAmazonSettlements({ dateFrom: from, dateTo: to }),
+        });
+      }
 
-      case "sync-traffic":
-        return NextResponse.json({ ok: true, action, result: await syncAmazonSalesTraffic({}) });
+      case "sync-traffic": {
+        const { from, to } = body as { from?: string; to?: string };
+        if ((from !== undefined && !isDate(from)) || (to !== undefined && !isDate(to))) {
+          return NextResponse.json({ ok: false, error: "`from`/`to` must be YYYY-MM-DD" }, { status: 400 });
+        }
+        return NextResponse.json({
+          ok: true, action,
+          result: await syncAmazonSalesTraffic({ dateFrom: from, dateTo: to }),
+        });
+      }
 
       case "sync-inventory":
         return NextResponse.json({ ok: true, action, result: await syncAmazonFbaInventory({}) });

@@ -1,0 +1,1 @@
+{"ok":true,"action":"sync-traffic","result":{"report":"sales_traffic","ok":true,"dateFrom":"2026-07-28","dateTo":"2026-08-03","ingest":{"received":6,"inserted":6,"updated":0,"skipped":0,"rejected":[]},"durationMs":1201}}
