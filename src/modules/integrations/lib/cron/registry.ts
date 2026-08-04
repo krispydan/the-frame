@@ -192,13 +192,21 @@ export const CRON_JOBS: CronJob[] = [
     schedule: "*/3 * * * *",
     description: "Backfill Google Maps listings for the profiling cohorts — customers first, then a capped control sample",
     handler: async () => {
-      if (countRemaining("customers") > 0) {
-        return { cohort: "customers", ...(await captureListings({ cohort: "customers", limit: 5 })) };
+      const cohort = countRemaining("customers") > 0
+        ? "customers" as const
+        : countControlListings() < CONTROL_SAMPLE_TARGET
+          ? "called-no-order" as const
+          : null;
+      if (!cohort) return { done: true, controls: countControlListings() };
+
+      const res = await captureListings({ cohort, limit: 6 });
+      // A tick that captured nothing because Apify timed out is a failure, and
+      // cron_runs is the only place anyone will look. Reporting "ok" here is
+      // how a backfill sits at zero for an hour without anyone noticing.
+      if (res.captured === 0 && res.errors.length > 0) {
+        throw new Error(`captured 0 of ${res.attempted}: ${res.errors[0].reason}`);
       }
-      if (countControlListings() < CONTROL_SAMPLE_TARGET) {
-        return { cohort: "called-no-order", ...(await captureListings({ cohort: "called-no-order", limit: 5 })) };
-      }
-      return { done: true, controls: countControlListings() };
+      return { cohort, ...res };
     },
     fireAndForget: true,
   },

@@ -47,10 +47,15 @@ export interface CaptureResult {
   remaining: number;
 }
 
-// Matches the existing enrichment's tuning: batches of 5 keep each Apify run
-// inside its resolution window; 10 reliably timed out on boutique-shaped
-// queries.
-const BATCH_SIZE = 5;
+/**
+ * Apify's run-sync-get-dataset-items endpoint has a hard 300-second ceiling —
+ * the `timeout` query param can't raise it, and overrunning returns HTTP 408
+ * with the whole batch's work discarded. Profiling asks for the detail page
+ * (hours, description), which is the slow part, so three per run leaves
+ * headroom on boutique-shaped queries. Five was landing right on the line and
+ * losing every store in the batch when it tipped over.
+ */
+const BATCH_SIZE = 3;
 
 function loadTargets(limit: number, opts: { cohort: "customers" | "called-no-order" }): Target[] {
   const base = opts.cohort === "customers"
@@ -163,10 +168,26 @@ export async function captureListings(
         { maxPerSearch: 1, fast: false },
       );
     } catch (e) {
+      // A batch dies as a unit: one store whose detail page crawls slowly
+      // takes its neighbours' results down with it when the run hits Apify's
+      // 300s ceiling. Retry the batch one store at a time so we keep the ones
+      // that would have resolved fine, and only lose the actual straggler.
+      const reason = e instanceof Error ? e.message.slice(0, 160) : String(e);
+      console.log(`[gmaps-profile] batch failed (${reason}) — retrying ${batch.length} singly`);
       for (const t of batch) {
-        result.errors.push({ company: t.name, reason: e instanceof Error ? e.message.slice(0, 160) : String(e) });
+        try {
+          const solo = await apifyClient.runGoogleMapsScraper([searchStringFor(t)], {
+            maxPerSearch: 1,
+            fast: false,
+          });
+          places.push(...solo);
+        } catch (inner) {
+          result.errors.push({
+            company: t.name,
+            reason: inner instanceof Error ? inner.message.slice(0, 160) : String(inner),
+          });
+        }
       }
-      continue;
     }
 
     for (const t of batch) {
