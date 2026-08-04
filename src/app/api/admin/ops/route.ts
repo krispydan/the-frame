@@ -17,6 +17,8 @@ export async function GET(req: NextRequest) {
       "POST /api/admin/ops/geocode?confirm=1": "run a geocode batch { limit, force, retryFailed, customersOnly }",
       "POST /api/admin/ops/backfill-addresses?confirm=1": "fill blank company addresses from Shopify { stores, maxPages }",
       "GET  /api/admin/ops/order-lookup?number=&accountId=": "where an order actually lives vs. the account",
+    "GET  /api/admin/ops/amazon?view=status|health|month-end|xero|settlements": "Amazon channel diagnostics (read-only)",
+    "POST /api/admin/ops/amazon?confirm=1": "Amazon operations { action: backfill | sync-orders | sync-settlements | sync-traffic | sync-inventory | import-only | bridge-only | post-xero }",
     },
     auth: "x-ops-key: <OPS_TOKEN>  (mutations also require ?confirm=1)",
   });

@@ -24,10 +24,45 @@ Code) instead of pasting `fetch()` snippets into the browser console.
 | POST | `/api/admin/ops/geocode?confirm=1` | Run one geocode batch `{ limit, force, retryFailed, customersOnly }` |
 | POST | `/api/admin/ops/backfill-addresses?confirm=1` | Fill blank company addresses from Shopify `{ stores, maxPages }` |
 | GET | `/api/admin/ops/order-lookup?number=&accountId=` | Where an order actually lives vs. the account |
+| GET | `/api/admin/ops/amazon?view=status\|health\|month-end\|xero\|settlements` | Amazon channel diagnostics (read-only) |
+| POST | `/api/admin/ops/amazon?confirm=1` | Amazon operations — see below |
 
 The shared logic behind these lives in libs (`address-backfill.ts`,
 `geocoding.ts`, `order-lookup.ts`) and is also used by the session-guarded
 `/api/v1/*` equivalents the UI calls — one implementation, two front doors.
+
+## Amazon channel operations
+
+The Amazon UI and API live under `/api/v1/*`, which sits behind the login
+middleware, so tooling cannot drive them. `/api/admin/ops/amazon` exposes the
+same libraries through the token-guarded door.
+
+```
+GET  /api/admin/ops/amazon?view=status        archive + import counts, headline, unmapped SKUs
+GET  /api/admin/ops/amazon?view=health        per-report sync health
+GET  /api/admin/ops/amazon?view=xero          are the Xero mappings complete?
+GET  /api/admin/ops/amazon?view=month-end&month=2026-07
+GET  /api/admin/ops/amazon?view=settlements
+
+POST /api/admin/ops/amazon?confirm=1
+  { "action": "backfill", "from": "2026-06-01" }   full pull + import + bridge
+  { "action": "sync-orders" }                       daily orders + import
+  { "action": "sync-settlements" }                  settlements + bridge
+  { "action": "sync-traffic" | "sync-inventory" }
+  { "action": "import-only" }                       re-normalise from the archive
+  { "action": "bridge-only" }                       re-derive settlements
+  { "action": "post-xero", "dryRun": true }         build journals, post nothing
+```
+
+`import-only` and `bridge-only` re-derive from the local archive without
+touching Windsor — the fast path after fixing a SKU alias or fee mapping.
+
+**Posting to Xero is deliberately harder to trigger than anything else here:**
+it needs `confirm=1` AND an explicit `"dryRun": false`. A journal is not easily
+unpicked — the correction path is a reversing journal, not a delete — so the
+safe outcome is what happens when a parameter is forgotten. Recommended
+sequence: dry run → `"status": "DRAFT", "limit": 1` → review in Xero →
+`"status": "POSTED"`.
 
 ## Reachability from Claude Code's sandbox
 
@@ -55,9 +90,17 @@ tooling reach these endpoints, do ONE of:
 1. ✅ `OPS_TOKEN` is set as a **Railway env var** (server checks against it).
 2. ✅ `OPS_TOKEN` is set in the **Claude Code environment** variables, so it's
    available to Claude sessions as `$OPS_TOKEN` (never printed/committed/chatted).
-3. ⏳ **Reachability route not yet chosen** (R2/R3 above). Until one is in
-   place, `theframe.getjaxy.com` times out from the sandbox and the endpoints
-   can only be driven from the browser. Preferred: R2 (the service's real
+3. ✅ **Reachability is solved (Aug 2026).** Both routes work from the sandbox:
+   - **R2:** `https://the-frame-production.up.railway.app` — the service's
+     Railway-generated domain, discoverable from the Railway GraphQL API using
+     the `RAILWAY_TOKEN` project token already present in the Claude Code
+     environment (`Project-Access-Token` header, not `Bearer`).
+   - The custom domain `theframe.getjaxy.com` **also responds now** — the hang
+     documented below has resolved. The Railway domain is still preferred as it
+     skips the custom-domain path entirely.
+
+   Historical note (kept for context): the endpoints previously
+   could only be driven from the browser. Preferred: R2 (the service's real
    `*.up.railway.app` public domain).
 4. Verify once a route exists: from a Claude session,
    `curl --cacert /root/.ccr/ca-bundle.crt -H "x-ops-key: $OPS_TOKEN" <origin>/api/admin/ops`
