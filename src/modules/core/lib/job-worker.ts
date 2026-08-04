@@ -146,9 +146,20 @@ export function startJobWorker(): void {
 
   pollTimer = setInterval(async () => {
     try {
-      // Process up to 3 jobs per tick
+      // One job per tick, not three.
+      //
+      // "Up to 3" was fine while jobs were API calls and DB writes. It stopped
+      // being fine once video renders joined the queue: three 1080x1920
+      // libx264 encodes at ~800MB each is ~2.4GB, which is how the container
+      // got OOM-killed into a restart loop on 2026-08-04. ffmpeg is now
+      // serialised at the binary too — this is the second line of defence, and
+      // it also stops any FUTURE memory-heavy handler from tripling itself
+      // before anyone notices.
+      //
+      // Throughput cost is small: the loop ticks every 5s, so a backlog of
+      // cheap jobs still drains at ~12/minute.
       let processed = 0;
-      while (processed < 3) {
+      while (processed < 1) {
         const found = await processNext();
         if (!found) break;
         processed++;
