@@ -189,7 +189,12 @@ export const CRON_JOBS: CronJob[] = [
   // baseline share of every category, and the next 2,700 would just be spend.
   {
     id: "gmaps-profile-backfill",
-    schedule: "*/3 * * * *",
+    // */5, not */3, because the Railway cron service ticks every FIVE minutes
+    // despite what docs/scheduled-jobs.md says. A "*/3" schedule only fires on
+    // the ticks whose minute is also divisible by 3 — :00, :15, :30, :45 — so
+    // it silently means "every 15 minutes". Match the tick cadence or the
+    // schedule you wrote is not the schedule you get.
+    schedule: "*/5 * * * *",
     description: "Backfill Google Maps listings for the profiling cohorts — customers first, then a capped control sample",
     handler: async () => {
       const cohort = countRemaining("customers") > 0
