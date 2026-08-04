@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const body = (await req.json()) as { contact_id?: string; move_out?: boolean };
+  const body = (await req.json()) as { contact_id?: string; move_out?: boolean; move_to?: string };
   const contactId = String(body.contact_id || "").trim();
   if (!contactId) return NextResponse.json({ ok: false, error: "contact_id required" }, { status: 400 });
 
@@ -79,7 +79,22 @@ export async function POST(req: NextRequest) {
         // available operations here.
         _links: (raw as Record<string, unknown>)?._links ?? null,
       };
-      if (body.move_out) {
+      if (body.move_to) {
+        // Move to a real target folder — proven to work with updateContact.
+        try {
+          await acct.client.updateContact(contactId, { category_id: body.move_to } as never);
+          const afterRaw = await acct.client.getContact(contactId);
+          let ac = afterRaw as Record<string, unknown>;
+          if (ac?.contacts && typeof ac.contacts === "object") ac = ac.contacts as Record<string, unknown>;
+          const ai = ac.contacts;
+          if (Array.isArray(ai)) ac = (ai[0] as Record<string, unknown>) || {};
+          else if (ai && typeof ai === "object") ac = ai as Record<string, unknown>;
+          const nestedCategory = (ac.category as { category_id?: unknown } | null | undefined)?.category_id ?? null;
+          attempt.after = { move_to: body.move_to, nested_after: nestedCategory, success: String(nestedCategory) === body.move_to };
+        } catch (e) {
+          attempt.after = { move_to: body.move_to, error: (e instanceof Error ? e.message : String(e)).slice(0, 200) };
+        }
+      } else if (body.move_out) {
         // Probe several endpoints/verbs — PUT /contacts/{id} with
         // any category shape didn't clear the nested category. Try
         // folder-scoped delete + category-scoped delete + POST actions.
