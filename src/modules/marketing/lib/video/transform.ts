@@ -53,8 +53,13 @@ function planTransform(t: ClipTransform, w: number, h: number): { suffix: string
     const ch = even(h / z);
     const cx = clamp(Math.round(clamp(t.x, 0, 1) * w - cw / 2), 0, w - cw);
     const cy = clamp(Math.round(clamp(t.y, 0, 1) * h - ch / 2), 0, h - ch);
+    // Name carries the focal point too — two reframes of the same clip at
+    // the same zoom but different positions are different shots, and
+    // identical filenames make them indistinguishable in the library.
+    const px = Math.round(clamp(t.x, 0, 1) * 100);
+    const py = Math.round(clamp(t.y, 0, 1) * 100);
     return {
-      suffix: `reframe_${z.toFixed(2)}`,
+      suffix: `reframe_${z.toFixed(2)}_${px}x${py}`,
       args: ["-vf", `crop=${cw}:${ch}:${cx}:${cy},scale=${w}:${h},setsar=1`, ...enc, "-c:a", "copy", ...tail],
     };
   }
