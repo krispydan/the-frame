@@ -178,6 +178,8 @@ function ClipTagEditor({
   const [categoryId, setCategoryId] = useState("");
   const [talent, setTalent] = useState("");
   const [skuIds, setSkuIds] = useState<Set<string>>(new Set());
+  /** The tags as loaded — fixes the list order while you edit. */
+  const [initialSkuIds, setInitialSkuIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
 
   useEffect(() => {
@@ -192,7 +194,9 @@ function ClipTagEditor({
       const c = detail?.clip;
       setCategoryId(String(c?.category_id ?? ""));
       setTalent(String(c?.talent ?? ""));
-      setSkuIds(new Set((c?.products ?? []).map((p: { skuId: string }) => p.skuId)));
+      const tagged = new Set<string>((c?.products ?? []).map((p: { skuId: string }) => p.skuId));
+      setSkuIds(tagged);
+      setInitialSkuIds(tagged);
       setCategories((cats?.categories ?? []).filter((x: CategoryOption) => !x.archived));
       setSkus(skuList?.skus ?? skuList?.products?.flatMap((p: { skuIds: string[]; name: string }) =>
         p.skuIds.map((id) => ({ id, sku: null, colorName: null, productName: p.name }))) ?? []);
@@ -210,10 +214,22 @@ function ClipTagEditor({
       entry.skuIds.push(s.id);
       byProduct.set(name, entry);
     }
-    const list = [...byProduct.values()].sort((a, b) => a.name.localeCompare(b.name));
+    // What was ALREADY tagged floats to the top. You open this because a
+    // tag is wrong, and a wrong tag you have to scroll a hundred products
+    // to find is the thing that made it hard to fix in the first place.
+    //
+    // Ordered by the tags as LOADED, not as currently checked — otherwise
+    // every click makes the row you just hit jump to the top and the list
+    // reshuffle under the cursor.
+    const list = [...byProduct.values()].sort((a, b) => {
+      const aOn = a.skuIds.some((id) => initialSkuIds.has(id));
+      const bOn = b.skuIds.some((id) => initialSkuIds.has(id));
+      if (aOn !== bOn) return aOn ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
     const q = search.trim().toLowerCase();
     return q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list;
-  }, [skus, search]);
+  }, [skus, search, initialSkuIds]);
 
   const toggleProduct = (ids: string[]) => {
     setSkuIds((prev) => {

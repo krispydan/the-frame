@@ -100,6 +100,7 @@ export function ClipEditor<T extends EditorClip>({
   readOnly = false,
   readOnlyReason,
   onAddClick,
+  onClipEdited,
   addLabel = "Add clip",
   title = "Clip editor",
   subtitle = "trim · reframe · add effects · reorder — this is your video, in order",
@@ -119,6 +120,12 @@ export function ClipEditor<T extends EditorClip>({
   readOnly?: boolean;
   readOnlyReason?: string;
   onAddClick?: () => void;
+  /**
+   * Called after a clip's tags are fixed from the preview dialog. The
+   * editor only holds the sequence, not the clip records, so the host has
+   * to refetch for the corrected category / products to show up.
+   */
+  onClipEdited?: () => void;
   addLabel?: string;
   title?: string;
   subtitle?: string;
@@ -407,6 +414,7 @@ export function ClipEditor<T extends EditorClip>({
         <ClipPreviewDialog
           clip={clips[watchingIdx]}
           onClose={() => setWatchingIdx(null)}
+          onEdited={onClipEdited}
           onRemove={
             readOnly || clips.length <= minClips
               ? undefined

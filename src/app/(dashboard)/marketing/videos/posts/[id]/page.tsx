@@ -402,6 +402,7 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
         readOnly={post.status === "posted"}
         readOnlyReason="Posted videos can't be edited"
         onAddClick={openPicker}
+        onClipEdited={load}
       >
           {/* Clip picker — searchable / filterable, server-side (750+ clips) */}
           {pickerOpen && (
@@ -501,6 +502,7 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
             previewUrl: watching.clip.previewUrl,
           }}
           onClose={() => setWatching(null)}
+          onEdited={load}
           onRemove={
             clipSeq.length > 1
               ? () => setClipSeq((prev) => prev.filter((_, j) => j !== watching.index))

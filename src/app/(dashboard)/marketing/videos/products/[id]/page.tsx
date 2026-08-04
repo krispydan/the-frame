@@ -254,6 +254,7 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
             saving={saving}
             saveLabel="Save & rebuild"
             savingLabel="Rebuilding…"
+            onClipEdited={load}
             subtitle="trim · reframe · add effects · reorder — this is the product video, in order"
             emptyHint="No clips yet — add some from below."
             warning={
@@ -355,6 +356,7 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
         <ClipPreviewDialog
           clip={watching.clip}
           onClose={() => setWatching(null)}
+          onEdited={load}
           onAdd={watching.inVideo ? undefined : () => setSeq((prev) => [...prev, watching.clip])}
           onRemove={
             watching.inVideo && watching.index !== undefined
