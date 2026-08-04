@@ -61,14 +61,34 @@ export interface BridgeResult {
 }
 
 /**
- * A settlement is closed — and therefore safe to bridge — once its period
- * end has passed. Amazon keeps adding lines to an open settlement, so
- * bridging early would produce figures that shift under any journal built
- * from them.
+ * Days a settlement must go without new rows before we treat it as closed.
+ *
+ * Amazon keeps adding lines to an open settlement, so bridging early produces
+ * figures that shift under any journal built from them. Two days is enough to
+ * cover a late-posting row without holding the close back a full cycle.
+ */
+export const SETTLEMENT_QUIET_DAYS = 2;
+
+/**
+ * A settlement is closed — and therefore safe to bridge — once Amazon has
+ * stopped adding rows to it.
+ *
+ * The obvious signal would be `settlement_end_date`, but **Windsor returns
+ * that column empty on every row** (along with `settlement_start_date` and
+ * `deposit_date`) — verified against all 288 rows on the live account. Keying
+ * on it meant every settlement stayed permanently "open", silently blocking
+ * the bridge, Xero posting and Amazon revenue recognition with no error
+ * anywhere.
+ *
+ * So the period is derived from the `posted_date` range instead, which is
+ * always populated, and a settlement counts as closed once its newest row is
+ * SETTLEMENT_QUIET_DAYS old. Falls back to the header date when Amazon does
+ * supply one.
  */
 export function isSettlementClosed(endDate: string | null, today: string): boolean {
   if (!endDate) return false;
-  return endDate.slice(0, 10) <= today;
+  const cutoffMs = Date.parse(`${today}T00:00:00Z`) - SETTLEMENT_QUIET_DAYS * 86_400_000;
+  return Date.parse(`${endDate.slice(0, 10)}T00:00:00Z`) <= cutoffMs;
 }
 
 /**
@@ -108,7 +128,20 @@ export function bridgeAmazonSettlements(
   result.settlementsConsidered = grouped.size;
 
   for (const [settlementId, group] of grouped) {
-    const endDate = group.find((r) => r.settlement_end_date)?.settlement_end_date ?? null;
+    // Derive the period from posted_date, because Amazon's own
+    // settlement_start_date / settlement_end_date arrive empty through
+    // Windsor. Header dates are preferred when present.
+    const postedDates = group
+      .map((r) => r.posted_date)
+      .filter((d): d is string => !!d)
+      .map((d) => d.slice(0, 10))
+      .sort();
+
+    const endDate =
+      group.find((r) => r.settlement_end_date)?.settlement_end_date?.slice(0, 10)
+      ?? postedDates.at(-1)
+      ?? null;
+
     if (!isSettlementClosed(endDate, today)) {
       result.skippedOpen++;
       continue;
@@ -130,8 +163,13 @@ export function bridgeAmazonSettlements(
       result.taxResiduals.push({ settlementId, residual: summary.taxResidual });
     }
 
-    const startDate = group.find((r) => r.settlement_start_date)?.settlement_start_date ?? endDate;
-    const depositDate = group.find((r) => r.deposit_date)?.deposit_date ?? endDate;
+    const startDate =
+      group.find((r) => r.settlement_start_date)?.settlement_start_date?.slice(0, 10)
+      ?? postedDates[0]
+      ?? endDate;
+    // Amazon deposits shortly after the period closes; with deposit_date
+    // empty upstream, the period end is the best available proxy.
+    const depositDate = group.find((r) => r.deposit_date)?.deposit_date?.slice(0, 10) ?? endDate;
     const currency = group.find((r) => r.currency)?.currency ?? "USD";
     const externalId = amazonSettlementExternalId(settlementId);
 

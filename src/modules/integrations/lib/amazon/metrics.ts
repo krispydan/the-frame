@@ -99,7 +99,17 @@ export interface AmazonSyncHealthRow {
   lastSyncedThrough: string | null;
   consecutiveFailures: number;
   lastError: string | null;
+  /**
+   * True when a report has been "running" far longer than any real run takes.
+   * A process killed mid-sync — an edge timeout, a container restart — leaves
+   * the state at "running" forever, and without this the health panel would
+   * report a dead sync as healthy indefinitely.
+   */
+  stale: boolean;
 }
+
+/** Longer than the slowest observed report (~75s) by a wide margin. */
+const STALE_RUNNING_MINUTES = 30;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const pct = (num: number, den: number): number | null =>
@@ -342,9 +352,18 @@ export function getAmazonSyncHealth(): AmazonSyncHealthRow[] {
   return sqlite.prepare(`
     SELECT report_name AS reportName, last_status AS lastStatus,
            last_success_at AS lastSuccessAt, last_synced_through AS lastSyncedThrough,
-           consecutive_failures AS consecutiveFailures, last_error AS lastError
+           consecutive_failures AS consecutiveFailures, last_error AS lastError,
+           CASE
+             WHEN last_status = 'running'
+              AND last_run_at IS NOT NULL
+              AND last_run_at < datetime('now', '-${STALE_RUNNING_MINUTES} minutes')
+             THEN 1 ELSE 0
+           END AS stale
     FROM amazon_sync_state ORDER BY report_name
-  `).all() as AmazonSyncHealthRow[];
+  `).all().map((r) => {
+    const row = r as Record<string, unknown>;
+    return { ...row, stale: row.stale === 1 } as AmazonSyncHealthRow;
+  });
 }
 
 /** SKUs sold on Amazon that do not resolve to a catalog SKU, so cannot be costed. */

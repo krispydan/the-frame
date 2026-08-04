@@ -60,7 +60,7 @@ const lineItems = () =>
   sqlite.prepare("SELECT * FROM settlement_line_items ORDER BY type, description").all() as Array<Record<string, unknown>>;
 
 describe("isSettlementClosed", () => {
-  it("treats a past period end as closed", () => {
+  it("treats a long-past period end as closed", () => {
     expect(isSettlementClosed("2026-07-06", TODAY)).toBe(true);
   });
 
@@ -68,8 +68,48 @@ describe("isSettlementClosed", () => {
     expect(isSettlementClosed("2026-08-20", TODAY)).toBe(false);
   });
 
+  it("holds a settlement open until it has been quiet for a couple of days", () => {
+    // Guards against bridging a settlement Amazon is still writing to, which
+    // would produce figures that shift under an already-posted journal.
+    expect(isSettlementClosed(TODAY, TODAY)).toBe(false);
+    expect(isSettlementClosed("2026-08-03", TODAY)).toBe(false);
+    expect(isSettlementClosed("2026-08-02", TODAY)).toBe(true);
+  });
+
   it("treats a missing period end as open", () => {
     expect(isSettlementClosed(null, TODAY)).toBe(false);
+  });
+});
+
+describe("period derivation when Amazon's header dates are empty", () => {
+  it("derives the period from posted_date, which is how the live data actually arrives", () => {
+    // Verified against all 288 rows on the live account: Windsor returns
+    // settlement_start_date, settlement_end_date and deposit_date empty.
+    // Keying the close check on the end date left every settlement
+    // permanently "open", silently blocking the bridge and all Xero posting.
+    settlementRow({ settlement_start_date: "", settlement_end_date: "", deposit_date: "", posted_date: "2026-06-22", amount: 100 });
+    settlementRow({ settlement_start_date: "", settlement_end_date: "", deposit_date: "", posted_date: "2026-07-06", amount: 50, sku: "JX2-BLK-FBA" });
+
+    const res = bridgeAmazonSettlements({ today: TODAY });
+    expect(res.created).toBe(1);
+    expect(res.skippedOpen).toBe(0);
+
+    const s = getSettlement();
+    expect(s.period_start).toBe("2026-06-22");
+    expect(s.period_end).toBe("2026-07-06");
+  });
+
+  it("still holds a recently-active settlement open even with no header dates", () => {
+    settlementRow({ settlement_start_date: "", settlement_end_date: "", posted_date: TODAY });
+    expect(bridgeAmazonSettlements({ today: TODAY }).skippedOpen).toBe(1);
+  });
+
+  it("prefers Amazon's header dates when it does supply them", () => {
+    settlementRow({ settlement_start_date: "2026-06-01", settlement_end_date: "2026-06-15", posted_date: "2026-06-10" });
+    bridgeAmazonSettlements({ today: TODAY });
+    const s = getSettlement();
+    expect(s.period_start).toBe("2026-06-01");
+    expect(s.period_end).toBe("2026-06-15");
   });
 });
 

@@ -46,6 +46,7 @@ interface InventoryRow {
 interface SyncHealthRow {
   reportName: string; lastStatus: string | null; lastSuccessAt: string | null;
   lastSyncedThrough: string | null; consecutiveFailures: number; lastError: string | null;
+  stale: boolean;
 }
 interface MonthEndCheck {
   id: string; title: string; status: "ok" | "attention" | "blocked";
@@ -337,10 +338,17 @@ export default function AmazonDashboardPage() {
           <div className="space-y-2">
             {data.syncHealth.map((s) => (
               <div key={s.reportName} className="flex flex-wrap items-center gap-3 rounded border px-3 py-2 text-sm">
-                {s.lastStatus === "ok"
-                  ? <CheckCircle className="h-4 w-4 shrink-0 text-green-600" />
-                  : <AlertTriangle className={`h-4 w-4 shrink-0 ${s.consecutiveFailures >= 3 ? "text-red-600" : "text-amber-500"}`} />}
+                {s.stale
+                  ? <AlertTriangle className="h-4 w-4 shrink-0 text-red-600" />
+                  : s.lastStatus === "ok"
+                    ? <CheckCircle className="h-4 w-4 shrink-0 text-green-600" />
+                    : <AlertTriangle className={`h-4 w-4 shrink-0 ${s.consecutiveFailures >= 3 ? "text-red-600" : "text-amber-500"}`} />}
                 <span className="font-medium">{s.reportName}</span>
+                {s.stale && (
+                  <span className="text-red-600">
+                    stuck &mdash; started but never finished (process killed mid-sync); re-run it
+                  </span>
+                )}
                 <span className="text-muted-foreground">
                   through {s.lastSyncedThrough ?? "—"} · last ok {s.lastSuccessAt?.slice(0, 16) ?? "never"}
                 </span>
