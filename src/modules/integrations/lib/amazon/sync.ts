@@ -21,6 +21,7 @@ import {
   type WindsorRow,
 } from "@/modules/integrations/lib/windsor/client";
 import { notifyIntegrationFailure } from "@/modules/integrations/lib/slack/notifications";
+import { sqlite } from "@/lib/db";
 import {
   ORDERS_BY_ORDER_DATE,
   ORDERS_BY_LAST_UPDATE,
@@ -266,7 +267,7 @@ export async function syncAmazonSettlements(
  */
 export async function syncAndBridgeAmazonSettlements(
   opts: { dateFrom?: string; dateTo?: string; days?: number; today?: string } = {},
-): Promise<{ fetch: SyncOutcome; bridge: unknown }> {
+): Promise<{ fetch: SyncOutcome; bridge: unknown; posted: unknown }> {
   const fetchOutcome = await syncAmazonSettlements(opts);
 
   const { bridgeAmazonSettlements } = await import("./settlement-bridge");
@@ -296,7 +297,40 @@ export async function syncAndBridgeAmazonSettlements(
     } catch { /* alerting is best-effort */ }
   }
 
-  return { fetch: fetchOutcome, bridge };
+  // Post to Xero last, once the archive and bridge are settled. Gated on a
+  // setting so the first live run can be a deliberate act rather than
+  // something that happens overnight: `amazon_xero_posting` must be
+  // "draft" or "posted". Unset means build-and-check only.
+  let posted: unknown = null;
+  const mode = readPostingMode();
+  if (mode !== "off") {
+    const { syncAmazonSettlementsToXero } = await import("./payout-sync");
+    posted = await syncAmazonSettlementsToXero({
+      status: mode === "draft" ? "DRAFT" : "POSTED",
+    });
+  }
+
+  return { fetch: fetchOutcome, bridge, posted };
+}
+
+/**
+ * Whether settlements post to Xero, and how.
+ *
+ * Deliberately opt-in. Journals are hard to unpick once posted, so the first
+ * live run should be a decision someone makes, not a side effect of the
+ * nightly cron. Set `amazon_xero_posting` in settings to "draft" (posts
+ * unapproved journals for review) or "posted" (live).
+ */
+function readPostingMode(): "off" | "draft" | "posted" {
+  try {
+    const row = sqlite
+      .prepare("SELECT value FROM settings WHERE key = 'amazon_xero_posting' LIMIT 1")
+      .get() as { value: string } | undefined;
+    const v = (row?.value ?? "").trim().toLowerCase();
+    return v === "draft" || v === "posted" ? v : "off";
+  } catch {
+    return "off";
+  }
 }
 
 /** Pull daily sales + traffic metrics (dashboard analytics). */
