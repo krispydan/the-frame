@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { requireOpsToken } from "@/lib/ops-auth";
 import { sqlite } from "@/lib/db";
+import { PLATFORM_CATEGORY_SUGGESTIONS, SHARED_PLATFORM_KEY } from "@/modules/integrations/schema/xero";
 import {
   syncAndImportAmazonOrders,
   syncAndBridgeAmazonSettlements,
@@ -226,6 +227,75 @@ export async function POST(req: NextRequest) {
       case "bridge-only":
         return NextResponse.json({ ok: true, action, result: bridgeAmazonSettlements({}) });
 
+      /**
+       * Seed the Amazon Xero account mappings from the suggested defaults.
+       *
+       * The same thing the "Apply suggested defaults" button does in
+       * Settings → Integrations → Xero, exposed here because that page needs
+       * a browser session. Existing rows are left alone unless `overwrite` is
+       * set — a mapping someone deliberately changed should not be silently
+       * reverted by an ops call.
+       *
+       * Also seeds the two `_shared` accrual accounts the deferred revenue
+       * model requires, which are not in the per-platform suggestion catalog.
+       */
+      case "apply-xero-defaults": {
+        const { overwrite } = body as { overwrite?: boolean };
+        const suggestions = PLATFORM_CATEGORY_SUGGESTIONS.amazon ?? [];
+
+        const shared: Array<{ category: string; code: string; name: string }> = [
+          { category: "deferred_revenue", code: "2050", name: "Deferred Revenue" },
+          { category: "receivables_holding", code: "1100", name: "Receivables Holding" },
+        ];
+
+        const existing = sqlite.prepare(
+          "SELECT source_platform AS p, category AS c FROM xero_account_mappings WHERE source_platform IN ('amazon', ?)",
+        ).all(SHARED_PLATFORM_KEY) as Array<{ p: string; c: string }>;
+        const have = new Set(existing.map((r) => `${r.p}|${r.c}`));
+
+        const insert = sqlite.prepare(`
+          INSERT INTO xero_account_mappings (id, source_platform, category, xero_account_code, xero_account_name, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+        `);
+        const update = sqlite.prepare(`
+          UPDATE xero_account_mappings SET xero_account_code = ?, xero_account_name = ?, updated_at = datetime('now')
+          WHERE source_platform = ? AND category = ?
+        `);
+
+        const created: string[] = [];
+        const updated: string[] = [];
+        const skipped: string[] = [];
+
+        const run = sqlite.transaction(() => {
+          for (const s of suggestions) {
+            if (!s.defaultAccountCode) continue;
+            const key = `amazon|${s.category}`;
+            if (have.has(key)) {
+              if (overwrite) {
+                update.run(s.defaultAccountCode, s.defaultAccountName ?? null, "amazon", s.category);
+                updated.push(s.category);
+              } else skipped.push(s.category);
+              continue;
+            }
+            insert.run(crypto.randomUUID(), "amazon", s.category, s.defaultAccountCode, s.defaultAccountName ?? null);
+            created.push(s.category);
+          }
+          for (const sh of shared) {
+            const key = `${SHARED_PLATFORM_KEY}|${sh.category}`;
+            if (have.has(key)) { skipped.push(`_shared:${sh.category}`); continue; }
+            insert.run(crypto.randomUUID(), SHARED_PLATFORM_KEY, sh.category, sh.code, sh.name);
+            created.push(`_shared:${sh.category}`);
+          }
+        });
+        run();
+
+        // Report readiness straight back, so one call answers "did it work".
+        let ready = true; let error: string | undefined;
+        try { await loadAmazonXeroConfig(); } catch (e) { ready = false; error = (e as Error).message; }
+
+        return NextResponse.json({ ok: true, action, created, updated, skipped, ready, error });
+      }
+
       case "post-xero": {
         const { dryRun, status, settlementIds, limit } = body as {
           dryRun?: boolean; status?: string; settlementIds?: string[]; limit?: number;
@@ -249,7 +319,7 @@ export async function POST(req: NextRequest) {
           error: `Unknown action "${action ?? ""}".`,
           actions: [
             "backfill", "sync-orders", "sync-settlements", "sync-traffic",
-            "sync-inventory", "import-only", "bridge-only", "post-xero",
+            "sync-inventory", "import-only", "bridge-only", "apply-xero-defaults", "post-xero",
           ],
         }, { status: 400 });
     }

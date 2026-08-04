@@ -99,6 +99,7 @@ export interface AmazonSyncHealthRow {
   lastSyncedThrough: string | null;
   consecutiveFailures: number;
   lastError: string | null;
+  rowsIngested: number;
   /**
    * True when a report has been "running" far longer than any real run takes.
    * A process killed mid-sync — an edge timeout, a container restart — leaves
@@ -353,6 +354,7 @@ export function getAmazonSyncHealth(): AmazonSyncHealthRow[] {
     SELECT report_name AS reportName, last_status AS lastStatus,
            last_success_at AS lastSuccessAt, last_synced_through AS lastSyncedThrough,
            consecutive_failures AS consecutiveFailures, last_error AS lastError,
+           rows_ingested AS rowsIngested,
            CASE
              WHEN last_status = 'running'
               AND last_run_at IS NOT NULL

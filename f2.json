@@ -1,0 +1,1 @@
+{"ok":true,"ready":false,"error":"Amazon settlement sync needs Xero account mappings for: discounts, fba_fulfillment, fba_storage, subscription, inbound_freight, unclassified, shipping. Add them under Settings → Integrations → Xero (the \"Apply suggested defaults\" button fills in the recommended accounts)."}
