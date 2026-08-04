@@ -136,19 +136,31 @@ export function XeroAccountMapping() {
   const [mappings, setMappings] = useState<Record<string, Mapping[]>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  async function loadAccounts() {
-    const res = await fetch("/api/v1/integrations/xero/accounts");
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const msg = data?.hint
-        ? `${data.error || "Failed to load Xero accounts"} — ${data.hint}`
-        : data?.error || "Failed to load Xero accounts";
-      toast.error(msg);
-      setAccounts([]);
-      return;
+  async function loadAccounts(opts: { announce?: boolean } = {}) {
+    // announce: called from the Refresh button — show progress + a result
+    // toast even on success, so the click visibly does something.
+    if (opts.announce) setRefreshing(true);
+    try {
+      const res = await fetch("/api/v1/integrations/xero/accounts");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = data?.hint
+          ? `${data.error || "Failed to load Xero accounts"} — ${data.hint}`
+          : data?.error || "Failed to load Xero accounts";
+        toast.error(msg);
+        setAccounts([]);
+        return;
+      }
+      const list = data.accounts || [];
+      setAccounts(list);
+      if (opts.announce) toast.success(`Refreshed from Xero — ${list.length} active accounts`);
+    } catch {
+      toast.error("Couldn't reach the server — check your connection and try again.");
+    } finally {
+      if (opts.announce) setRefreshing(false);
     }
-    setAccounts(data.accounts || []);
   }
 
   async function loadMappings(platform: string) {
@@ -255,8 +267,11 @@ export function XeroAccountMapping() {
           <div className="text-xs text-muted-foreground">
             {accounts?.length ?? 0} active Xero accounts loaded
           </div>
-          <Button variant="ghost" size="sm" onClick={loadAccounts} disabled={loading}>
-            <RefreshCw className="h-3 w-3 mr-1" />Refresh accounts
+          <Button variant="ghost" size="sm" onClick={() => loadAccounts({ announce: true })} disabled={loading || refreshing}>
+            {refreshing
+              ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              : <RefreshCw className="h-3 w-3 mr-1" />}
+            {refreshing ? "Refreshing…" : "Refresh accounts"}
           </Button>
         </div>
 
