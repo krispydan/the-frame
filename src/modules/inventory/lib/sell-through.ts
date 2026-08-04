@@ -50,6 +50,13 @@ export function calculateSellThrough(windowDays: number = 30): SellThroughResult
     JOIN orders o ON oi.order_id = o.id
     WHERE o.placed_at >= ${cutoffStr}
       AND o.status NOT IN ('cancelled', 'returned')
+      -- Amazon FBA units ship from Amazon's warehouse, not ShipHero's. This
+      -- table drives ShipHero warehouse velocity and the reorder flags built
+      -- on it, so counting FBA sales here would inflate apparent consumption
+      -- of stock that is not actually leaving ShipHero, and trip reorders for
+      -- inventory we already hold. FBA stock is tracked separately in
+      -- amazon_fba_inventory.
+      AND o.channel != 'amazon'
   `) as Array<{ sku: string | null; sku_id: string | null; quantity: number }>;
 
   const soldMap = new Map<string, number>();

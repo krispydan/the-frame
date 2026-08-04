@@ -176,6 +176,46 @@ export async function syncAmazonOrders(
 }
 
 /**
+ * The cron entry point: pull orders into the archive, then normalise them
+ * into `orders` / `order_items`.
+ *
+ * The import runs even when a fetch failed. The archive still holds
+ * everything earlier runs landed, and importing that is strictly better than
+ * skipping a night's normalisation because Windsor had a slow report.
+ *
+ * Imported here rather than at module scope to keep the orders module out of
+ * the integrations module's import graph at load time — the cron registry
+ * imports this file, and a cycle would surface as an undefined handler.
+ */
+export async function syncAndImportAmazonOrders(
+  opts: { dateFrom?: string; dateTo?: string; days?: number; today?: string } = {},
+): Promise<{ fetch: SyncOutcome[]; imported: unknown }> {
+  const fetchOutcomes = await syncAmazonOrders(opts);
+
+  const { importAmazonOrders } = await import("@/modules/orders/lib/amazon-sync");
+  const imported = importAmazonOrders({ since: opts.dateFrom, until: opts.dateTo });
+
+  // An unmapped SKU means a line that cannot be costed, so it becomes a COGS
+  // exception later. Surfacing it at import time is much cheaper to act on
+  // than discovering it in a month-end reconciliation.
+  if (imported.unmappedSkus.length > 0) {
+    try {
+      await notifyIntegrationFailure({
+        service: "Amazon — SKU mapping",
+        detail:
+          `${imported.unmappedSkus.length} Amazon SKU(s) do not resolve to a catalog SKU and cannot be costed: ` +
+          `${imported.unmappedSkus.slice(0, 10).join(", ")}${imported.unmappedSkus.length > 10 ? ", …" : ""}. ` +
+          `Add them to catalog_sku_aliases, or correct the listing SKU in Seller Central.`,
+      });
+    } catch {
+      // Alerting is best-effort; never fail the sync over it.
+    }
+  }
+
+  return { fetch: fetchOutcomes, imported };
+}
+
+/**
  * Pull settlement rows into the permanent archive.
  *
  * Clamps to Amazon's 90-day retention and reports when it had to, so an

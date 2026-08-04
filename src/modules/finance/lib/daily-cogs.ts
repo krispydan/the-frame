@@ -331,6 +331,7 @@ function channelLabel(channel: string): string {
     case "shopify_dtc": return "Shopify Retail";
     case "shopify_wholesale": return "Shopify Wholesale";
     case "faire": return "Faire";
+    case "amazon": return "Amazon";
     case "unknown": return "Unattributed";
     default: return channel;
   }

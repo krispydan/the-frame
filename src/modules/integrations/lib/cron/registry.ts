@@ -36,7 +36,7 @@ import { runShipmentRevenueRecognition } from "@/modules/finance/lib/shipment-re
 import { runDailyCogsPosting } from "@/modules/finance/lib/daily-cogs";
 import { syncFairePayouts } from "@/modules/integrations/lib/faire/payout-sync";
 import {
-  syncAmazonOrders,
+  syncAndImportAmazonOrders,
   syncAmazonSalesTraffic,
   syncAmazonSettlements,
   syncAmazonFbaInventory,
@@ -328,8 +328,8 @@ export const CRON_JOBS: CronJob[] = [
   {
     id: "amazon-orders-sync",
     schedule: "10 14 * * *",  // 14:10 UTC ≈ 7:10am PT
-    description: "Pull Amazon orders (by order date + by last update) from Windsor into the raw archive",
-    handler: () => syncAmazonOrders({}),
+    description: "Pull Amazon orders from Windsor into the raw archive, then import them into orders/order_items",
+    handler: () => syncAndImportAmazonOrders({}),
     guard: () => Boolean(process.env.WINDSOR_API_KEY),
   },
   {

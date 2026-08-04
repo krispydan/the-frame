@@ -48,15 +48,23 @@ export function findLocalOrderIdByShipHeroSignals(opts: {
   // Try the most-specific signal first. shiphero_order_id is unique once
   // we've recorded it; order_number is also unique within a shop;
   // external_id is the Shopify order id.
+  //
+  // Every lookup excludes channel='amazon'. Amazon orders are fulfilled by
+  // Amazon and never exist in ShipHero, so any match here would be a false
+  // positive — and this function's last resort is a fuzzy order_number match
+  // with `ORDER BY created_at DESC LIMIT 1`, which would happily bind an
+  // inbound ShipHero shipment to an unrelated Amazon row and mark it shipped.
+  // The AMZ- order_number prefix makes that collision implausible already;
+  // this guard makes it impossible.
   if (shipheroOrderId) {
     const row = sqlite
-      .prepare(`SELECT id FROM orders WHERE shiphero_order_id = ? LIMIT 1`)
+      .prepare(`SELECT id FROM orders WHERE shiphero_order_id = ? AND channel != 'amazon' LIMIT 1`)
       .get(shipheroOrderId) as { id: string } | undefined;
     if (row) return row.id;
   }
   if (externalId) {
     const row = sqlite
-      .prepare(`SELECT id FROM orders WHERE external_id = ? LIMIT 1`)
+      .prepare(`SELECT id FROM orders WHERE external_id = ? AND channel != 'amazon' LIMIT 1`)
       .get(externalId) as { id: string } | undefined;
     if (row) return row.id;
   }
@@ -64,7 +72,8 @@ export function findLocalOrderIdByShipHeroSignals(opts: {
     const row = sqlite
       .prepare(
         `SELECT id FROM orders
-         WHERE order_number = ? OR order_number = ?
+         WHERE (order_number = ? OR order_number = ?)
+           AND channel != 'amazon'
          ORDER BY created_at DESC LIMIT 1`,
       )
       .get(orderNumber, orderNumberHashed) as { id: string } | undefined;

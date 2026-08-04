@@ -13,8 +13,13 @@ export const orders = sqliteTable("orders", {
   companyId: text("company_id").references(() => companies.id),
   storeId: text("store_id").references(() => stores.id),
   contactId: text("contact_id").references(() => contacts.id),
+  /**
+   * `amazon` rows are imported for finance (revenue, COGS, reporting) but are
+   * NEVER pushed outward — Amazon fulfils them itself, so any downstream push
+   * would double-ship. See docs/amazon-channel-plan.md §3 for the guard list.
+   */
   channel: text("channel", {
-    enum: ["shopify_dtc", "shopify_wholesale", "faire", "direct", "phone"],
+    enum: ["shopify_dtc", "shopify_wholesale", "faire", "direct", "phone", "amazon"],
   }).notNull(),
   status: text("status", {
     enum: ["pending", "confirmed", "picking", "packed", "shipped", "delivered", "returned", "cancelled"],

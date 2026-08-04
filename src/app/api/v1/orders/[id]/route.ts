@@ -96,6 +96,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       }
     } else if (order.channel === "faire") {
       externalUrl = `https://www.faire.com/brand-portal/orders/${order.externalId}`;
+    } else if (order.channel === "amazon") {
+      // external_id is stored prefixed ("amazon:111-…") so it can never
+      // collide with a Shopify id in the ShipHero matcher; strip it for the
+      // Seller Central URL.
+      const amazonOrderId = order.externalId.replace(/^amazon:/, "");
+      externalUrl = `https://sellercentral.amazon.com/orders-v3/order/${amazonOrderId}`;
     }
   }
 

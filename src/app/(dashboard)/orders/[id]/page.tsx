@@ -378,7 +378,11 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-background hover:bg-muted text-sm font-medium"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
-                  {order.channel === "faire" ? "View in Faire" : "View in Shopify"}
+                  {order.channel === "faire"
+                    ? "View in Faire"
+                    : order.channel === "amazon"
+                      ? "View in Seller Central"
+                      : "View in Shopify"}
                 </a>
               )}
               {order.shipheroUrl && (

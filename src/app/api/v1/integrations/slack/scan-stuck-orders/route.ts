@@ -40,6 +40,9 @@ async function runScan() {
       AND placed_at IS NOT NULL
       AND placed_at < ?
       AND slack_stuck_alerted_at IS NULL
+      -- Amazon fulfils its own orders; a "stuck" Amazon order is not
+      -- something anyone here can act on, so alerting would be pure noise.
+      AND channel != 'amazon'
   `).all(cutoff) as Row[];
 
   let alerted = 0;
