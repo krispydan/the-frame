@@ -93,7 +93,9 @@ describe("resolveShopifyProductId", () => {
 
   it("returns null when the product has no SKUs", async () => {
     const client = { graphql: async <T,>(): Promise<T> => ({}) as T };
-    expect(await resolveShopifyProductId(client, "p1")).toBeNull();
+    const r = await resolveShopifyProductId(client, "p1");
+    expect(r.id).toBeNull();
+    expect(r.tried).toEqual([]);
   });
 
   it("matches a Shopify product by SKU", async () => {
@@ -105,8 +107,69 @@ describe("resolveShopifyProductId", () => {
         return { productVariants: { edges: [{ node: { product: { id: "gid://shopify/Product/42" } } }] } } as T;
       },
     };
-    expect(await resolveShopifyProductId(client, "p1")).toBe("gid://shopify/Product/42");
+    const r = await resolveShopifyProductId(client, "p1");
+    expect(r.id).toBe("gid://shopify/Product/42");
     expect(seen[0]).toContain("JX-CAN-BLK");
+  });
+
+  it("falls back to the legacy spelling — JX4011-S-BLK is JX4011-BLK on Shopify", async () => {
+    // The exact reason a publish failed in prod: the catalog carries the
+    // product-type segment, the storefront doesn't.
+    getTestDb().prepare(`INSERT INTO catalog_skus (id, product_id, sku) VALUES ('s1','p1','JX4011-S-BLK')`).run();
+    const seen: string[] = [];
+    const client = {
+      graphql: async <T,>(_q: string, v?: Record<string, unknown>): Promise<T> => {
+        const q = String(v?.q);
+        seen.push(q);
+        // Only the legacy spelling exists on the store.
+        return (q.includes("JX4011-BLK")
+          ? { productVariants: { edges: [{ node: { product: { id: "gid://shopify/Product/7" } } }] } }
+          : { productVariants: { edges: [] } }) as T;
+      },
+    };
+    const r = await resolveShopifyProductId(client, "p1");
+    expect(r.id).toBe("gid://shopify/Product/7");
+    expect(seen[0]).toContain("JX4011-S-BLK"); // exact first
+    expect(seen[1]).toContain("JX4011-BLK");   // then the legacy form
+  });
+
+  it("uses an explicit alias when someone has mapped one", async () => {
+    const d = getTestDb();
+    d.prepare(`INSERT INTO catalog_skus (id, product_id, sku) VALUES ('s1','p1','JX4011-S-BLK')`).run();
+    d.prepare(`INSERT INTO catalog_sku_aliases (alias, sku_id) VALUES ('SHOPIFY-ODDBALL-1','s1')`).run();
+    const client = {
+      graphql: async <T,>(_q: string, v?: Record<string, unknown>): Promise<T> =>
+        (String(v?.q).includes("SHOPIFY-ODDBALL-1")
+          ? { productVariants: { edges: [{ node: { product: { id: "gid://shopify/Product/9" } } }] } }
+          : { productVariants: { edges: [] } }) as T,
+    };
+    const r = await resolveShopifyProductId(client, "p1");
+    expect(r.id).toBe("gid://shopify/Product/9");
+  });
+
+  it("reports every spelling it tried so a miss is diagnosable", async () => {
+    getTestDb().prepare(`INSERT INTO catalog_skus (id, product_id, sku) VALUES ('s1','p1','JX4011-S-BLK')`).run();
+    const client = { graphql: async <T,>(): Promise<T> => ({ productVariants: { edges: [] } }) as T };
+    const r = await resolveShopifyProductId(client, "p1");
+    expect(r.id).toBeNull();
+    expect(r.tried).toContain("JX4011-S-BLK");
+    expect(r.tried).toContain("JX4011-BLK");
+  });
+
+  it("never searches the same spelling twice", async () => {
+    const d = getTestDb();
+    d.prepare(`INSERT INTO catalog_skus (id, product_id, sku) VALUES ('s1','p1','JX4011-BLK')`).run();
+    // The legacy transform is a no-op here, so it must not double up.
+    let calls = 0;
+    const client = {
+      graphql: async <T,>(): Promise<T> => {
+        calls++;
+        return { productVariants: { edges: [] } } as T;
+      },
+    };
+    const r = await resolveShopifyProductId(client, "p1");
+    expect(calls).toBe(1);
+    expect(r.tried).toEqual(["JX4011-BLK"]);
   });
 
   it("tries every SKU before giving up", async () => {
@@ -120,7 +183,8 @@ describe("resolveShopifyProductId", () => {
         return { productVariants: { edges: [] } } as T;
       },
     };
-    expect(await resolveShopifyProductId(client, "p1")).toBeNull();
+    const r = await resolveShopifyProductId(client, "p1");
+    expect(r.id).toBeNull();
     expect(calls).toBe(2);
   });
 });

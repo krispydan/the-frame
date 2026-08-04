@@ -18,6 +18,7 @@ import { sqlite } from "@/lib/db";
 import { getShopifyClientByChannel } from "@/modules/integrations/lib/shopify/admin-api";
 import { materializeVideo } from "@/lib/storage/videos";
 import { readFile } from "fs/promises";
+import { externalSkuCandidates } from "@/modules/catalog/lib/sku-resolve";
 
 /** Jaxy runs two Shopify stores — the video belongs on both. */
 export type ShopifyChannel = "retail" | "wholesale";
@@ -50,25 +51,35 @@ interface Client {
 export async function resolveShopifyProductId(
   client: Client,
   productId: string,
-): Promise<string | null> {
-  const skus = (sqlite
-    .prepare(`SELECT sku FROM catalog_skus WHERE product_id = ? AND sku IS NOT NULL AND sku != ''`)
-    .all(productId) as Array<{ sku: string }>).map((r) => r.sku);
-  if (skus.length === 0) return null;
+): Promise<{ id: string | null; tried: string[] }> {
+  const rows = sqlite
+    .prepare(`SELECT id, sku FROM catalog_skus WHERE product_id = ? AND sku IS NOT NULL AND sku != ''`)
+    .all(productId) as Array<{ id: string; sku: string }>;
+  if (rows.length === 0) return { id: null, tried: [] };
 
-  for (const sku of skus) {
-    const data = await client.graphql<{
-      productVariants: { edges: Array<{ node: { product: { id: string } } }> };
-    }>(
-      `query FindBySku($q: String!) {
-         productVariants(first: 1, query: $q) { edges { node { product { id } } } }
-       }`,
-      { q: `sku:${JSON.stringify(sku)}` },
-    );
-    const id = data?.productVariants?.edges?.[0]?.node?.product?.id;
-    if (id) return id;
+  // The catalog and the storefront don't always spell a SKU the same way
+  // — JX4011-S-BLK here is often JX4011-BLK on Shopify — so try every
+  // known spelling (legacy form, power-stripped, explicit aliases) rather
+  // than only the catalog's.
+  const tried: string[] = [];
+  for (const row of rows) {
+    for (const candidate of externalSkuCandidates(row.sku, row.id)) {
+      if (tried.some((t) => t.toUpperCase() === candidate.toUpperCase())) continue;
+      tried.push(candidate);
+
+      const data = await client.graphql<{
+        productVariants: { edges: Array<{ node: { product: { id: string } } }> };
+      }>(
+        `query FindBySku($q: String!) {
+           productVariants(first: 1, query: $q) { edges { node { product { id } } } }
+         }`,
+        { q: `sku:${JSON.stringify(candidate)}` },
+      );
+      const id = data?.productVariants?.edges?.[0]?.node?.product?.id;
+      if (id) return { id, tried };
+    }
   }
-  return null;
+  return { id: null, tried };
 }
 
 /**
@@ -162,9 +173,19 @@ async function publishToChannel(
   filename: string,
 ): Promise<ChannelResult> {
   const client = await getShopifyClientByChannel(channel);
-  const shopifyProductId = await resolveShopifyProductId(client, productId);
+  const { id: shopifyProductId, tried } = await resolveShopifyProductId(client, productId);
   if (!shopifyProductId) {
-    return { channel, ok: false, error: `No product on the ${channel} store matches these SKUs` };
+    // Name what was searched — otherwise the only way to work out why a
+    // publish failed is to guess at the storefront's SKU spelling.
+    return {
+      channel,
+      ok: false,
+      error:
+        tried.length === 0
+          ? `This product has no SKUs in the catalog, so there's nothing to match on the ${channel} store`
+          : `No product on the ${channel} store has any of these SKUs: ${tried.join(", ")}. ` +
+            `Add the storefront's spelling as a SKU alias if it differs.`,
+    };
   }
 
   {
