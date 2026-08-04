@@ -42,6 +42,7 @@ import { ingestOneCall } from "./phoneburner-sync";
 import {
   resolveByCampaignLeadId,
   resolveByCompanyId,
+  resolveByEmail,
   resolveByPbContactId,
   resolveByPhone,
   type ResolveResult,
@@ -241,6 +242,11 @@ function resolveEvent(body: PbWebhookPayload): ResolveResult | null {
   if (r2) return r2;
   const r3 = resolveByPbContactId(pbContactUserId(body));
   if (r3) return r3;
+  // Email fallback — hits campaign_leads.email → contacts.email → companies
+  // legacy email. Catches AJM reactivation leads that were imported before we
+  // stamped Company ID / Frame Lead ID custom fields on the PB contact.
+  const r4 = resolveByEmail({ leadEmail: pbContactEmail(body) });
+  if (r4) return r4;
   return resolveByPhone(pbContactPhone(body));
 }
 
