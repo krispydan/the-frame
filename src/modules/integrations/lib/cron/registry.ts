@@ -87,6 +87,19 @@ export type CronJob = {
   fireAndForget?: boolean;
 };
 
+// ─────────────────────────────────────────────────────────────────────────
+// TEMPORARILY PAUSED — 2026-08-04 production OOM incident.
+// The Apify / Google-Maps scraping and Meta lead jobs below balloon container
+// memory past the plan's limit on their frequent schedules, OOM-killing the app
+// in a restart loop (clean boot → memory sawtooth to the ceiling → SIGTERM →
+// respawn). `guard: () => false` makes runJob() skip them REGARDLESS of
+// cron_job_state.enabled — the DB toggle we can't reach while the app is down.
+// To re-enable (ideally after bounding their memory use, and one at a time):
+// remove the `guard: PAUSED_OOM` line from the job. None of these had a prior
+// guard, so removal fully restores the original behavior.
+// ─────────────────────────────────────────────────────────────────────────
+const PAUSED_OOM = () => false;
+
 export const CRON_JOBS: CronJob[] = [
   // ── Customer lifecycle refresh ──
   // Keep customer health scores and reorder estimates current. Both are quick
@@ -127,6 +140,7 @@ export const CRON_JOBS: CronJob[] = [
   // - reconcile: hourly re-poll of known forms to catch any dropped webhook.
   {
     id: "meta-leads-drain",
+    guard: PAUSED_OOM,  // paused: OOM incident 2026-08-04
     schedule: "*/3 * * * *",  // every 3 min
     description: "Process any pending/errored Facebook Lead Ads leads (webhook safety net) → frame + Pipedrive + Slack",
     handler: () => drainMetaLeads(25),
@@ -134,6 +148,7 @@ export const CRON_JOBS: CronJob[] = [
   },
   {
     id: "meta-capi-sync",
+    guard: PAUSED_OOM,  // paused: OOM incident 2026-08-04
     schedule: "*/10 * * * *",  // every 10 min
     description: "Derive Facebook lead funnel-stage events from CRM state and push them to Meta's Conversions API",
     handler: () => runCapiSyncAndDrain(),
@@ -141,6 +156,7 @@ export const CRON_JOBS: CronJob[] = [
   },
   {
     id: "meta-leads-reconcile",
+    guard: PAUSED_OOM,  // paused: OOM incident 2026-08-04
     schedule: "17 * * * *",  // hourly at :17
     description: "Re-poll known Facebook lead forms for any submissions the webhook dropped (safety net)",
     handler: () => reconcileMetaLeads(50),
@@ -153,6 +169,7 @@ export const CRON_JOBS: CronJob[] = [
   // landing it sends one "you can stop" note and then goes quiet.
   {
     id: "meta-leads-csv-reminder",
+    guard: PAUSED_OOM,  // paused: OOM incident 2026-08-04 (low-memory email job — safe to re-enable first)
     schedule: "0 15 * * *",  // 15:00 UTC ≈ 8am PT — start of the sales day
     description: "Email the daily reminder to download Facebook leads from Meta and upload the CSV (stops itself once the leadgen webhook is live)",
     handler: runMetaLeadCsvReminder,
@@ -189,6 +206,7 @@ export const CRON_JOBS: CronJob[] = [
   // baseline share of every category, and the next 2,700 would just be spend.
   {
     id: "gmaps-profile-backfill",
+    guard: PAUSED_OOM,  // paused: OOM incident 2026-08-04 (Apify captureListings — memory-heavy)
     // */5, not */3, because the Railway cron service ticks every FIVE minutes
     // despite what docs/scheduled-jobs.md says. A "*/3" schedule only fires on
     // the ticks whose minute is also divisible by 3 — :00, :15, :30, :45 — so
@@ -380,6 +398,7 @@ export const CRON_JOBS: CronJob[] = [
     //   curl -X POST .../api/admin/cron/jobs/apify-gmaps-enrichment \
     //        -H "x-admin-key: jaxy2026" -d '{"enabled": false}'
     id: "apify-gmaps-enrichment",
+    guard: PAUSED_OOM,  // paused: OOM incident 2026-08-04 (Apify enrichment — prime suspect, */10 matches restart cadence)
     schedule: "*/10 * * * *",  // every 10 min
     description: "Enrich phone-less prospects via Apify Google Maps in chunks of 50",
     handler: () => enrichViaGoogleMaps({ limit: 50 }),
