@@ -43,10 +43,14 @@ export async function syncShipHeroOrders(): Promise<OrderSyncResult> {
     // Build a map of external_id → local order snapshot for matching.
     // We snapshot channel + prior fulfillment status so we can detect the
     // "just shipped" transition below and trigger the Faire mark.
+    // channel != 'amazon': Amazon orders are fulfilled by Amazon and have no
+    // ShipHero counterpart, so including them could only ever produce a false
+    // match against an unrelated ShipHero partner_order_id.
     const localOrders = sqlite.prepare(
       `SELECT id, external_id, channel, shiphero_fulfillment_status
          FROM orders
-        WHERE external_id IS NOT NULL`,
+        WHERE external_id IS NOT NULL
+          AND channel != 'amazon'`,
     ).all() as Array<{
       id: string;
       external_id: string;

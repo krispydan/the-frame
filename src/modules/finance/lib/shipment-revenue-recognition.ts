@@ -71,7 +71,11 @@ const HUMAN_PLATFORM: Record<string, string> = {
   tiktok_shop: "TikTok Shop",
 };
 
-const SUPPORTED_CHANNELS = ["shopify_dtc", "shopify_wholesale"];
+// `amazon` is included deliberately, not incidentally: Amazon orders are
+// imported for finance and their revenue must be recognised at shipment like
+// any other channel. They reach this query through the settlement bridge,
+// which writes settlement_line_items keyed by the prefixed external id.
+const SUPPORTED_CHANNELS = ["shopify_dtc", "shopify_wholesale", "amazon"];
 
 /**
  * Main entry point — invoked by cron registry.
@@ -116,11 +120,16 @@ export async function runShipmentRevenueRecognition(): Promise<RecognitionRunRes
       s.external_id         AS payoutExternalId,
       xps.source_platform   AS payoutPlatform
     FROM orders o
-    INNER JOIN settlement_line_items sli ON sli.order_id = o.id
+    -- Dual key: Shopify/Faire write the local order UUID, Amazon writes the
+    -- prefixed external id (amazon:<order id>) because its settlement rows
+    -- only ever carry Amazon's own order identifier. Matching both is what
+    -- the reconciliation view already does for the same reason.
+    INNER JOIN settlement_line_items sli ON (sli.order_id = o.id OR sli.order_id = o.external_id)
     INNER JOIN settlements s             ON s.id          = sli.settlement_id
     INNER JOIN xero_payout_syncs xps     ON xps.source_payout_id IN (
         REPLACE(s.external_id, 'shopify_payout_', ''),
-        REPLACE(s.external_id, 'faire_payout_', '')
+        REPLACE(s.external_id, 'faire_payout_', ''),
+        REPLACE(s.external_id, 'amazon_settlement_', '')
       )
     WHERE o.shipped_at IS NOT NULL
       AND (o.status IS NULL OR o.status != 'cancelled')

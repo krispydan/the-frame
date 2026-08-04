@@ -808,13 +808,14 @@ export async function notifyCogsRunFailed(opts: { date: string; errorMessage: st
 }
 
 export async function notifyCogsException(opts: {
-  type: "shortfall" | "zero_cost" | "implausible_cost" | "unmapped_sku";
+  type: "shortfall" | "zero_cost" | "implausible_cost" | "unmapped_sku" | "suspected_transfer";
   count: number;
   date: string;
   examples: string[]; // e.g. "#1042 JX1001-BLK ×12"
   orderUrl?: string;
 }) {
   const label: Record<string, string> = {
+    suspected_transfer: "Zero-value bulk order — costed, but check it is not a transfer",
     shortfall: "No inventory cost layer (shortfall)",
     zero_cost: "Zero / implausible cost",
     implausible_cost: "Implausible cost",
@@ -822,6 +823,8 @@ export async function notifyCogsException(opts: {
   };
   const emoji = opts.type === "zero_cost" || opts.type === "implausible_cost" ? "🔴" : "🟠";
   const FIX_HINT: Record<string, string> = {
+    suspected_transfer:
+      "*These lines HAVE been costed* — this is a heads-up, not a blocked run. A $0 order carrying bulk units may be an inventory *transfer* raised as an order (most likely a replenishment to Amazon FBA), and a transfer costed here will be counted again when the units actually sell. *How to check:* if it is a transfer, raise it in ShipHero instead (The Frame never sees those) and correct this day with the Backfill controls under <https://theframe.getjaxy.com/finance/cogs|Finance → COGS>. If it is genuine free goods — influencer gifting, a warranty replacement — no action is needed.",
     unmapped_sku:
       "*How to fix:* if these are variants of an existing catalog SKU (a Faire duplicate listing like `JX3003-F1-BLK`, a size variant like `JX4004-S-BLK`), add an alias mapping them to the canonical SKU under <https://theframe.getjaxy.com/finance/cogs#sku-aliases|Finance → COGS → SKU Aliases>, then re-cost the day with the Backfill controls on the same page. If it's a genuinely new product, add it to the catalog + seed cost layers instead.",
     shortfall:

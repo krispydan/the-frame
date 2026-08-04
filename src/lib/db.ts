@@ -2593,4 +2593,116 @@ try {
   `);
 } catch (e) { console.error("[db] Segment sync error:", e); }
 
+// ── Amazon sales channel (Windsor AI `amazon_sp`) ─────────────────────────
+// Raw landing tables. Amazon serves settlements for 90 days only, so these
+// are the permanent archive everything downstream is derived from — see
+// src/modules/integrations/schema/amazon.ts and docs/amazon-channel-plan.md.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS amazon_order_rows (
+    id TEXT PRIMARY KEY NOT NULL,
+    amazon_order_id TEXT NOT NULL,
+    sku TEXT NOT NULL,
+    asin TEXT,
+    quantity INTEGER NOT NULL DEFAULT 0,
+    item_price REAL NOT NULL DEFAULT 0,
+    item_tax REAL NOT NULL DEFAULT 0,
+    item_promotion_discount REAL NOT NULL DEFAULT 0,
+    ship_promotion_discount REAL NOT NULL DEFAULT 0,
+    shipping_price REAL NOT NULL DEFAULT 0,
+    shipping_tax REAL NOT NULL DEFAULT 0,
+    order_status TEXT,
+    item_status TEXT,
+    fulfillment_channel TEXT,
+    sales_channel TEXT,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    purchase_date TEXT,
+    last_updated_date TEXT,
+    ship_city TEXT,
+    ship_state TEXT,
+    ship_postal_code TEXT,
+    ship_country TEXT,
+    is_business_order TEXT,
+    raw_json TEXT,
+    ingested_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_amazon_order_rows_key ON amazon_order_rows(amazon_order_id, sku)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_amazon_order_rows_purchase ON amazon_order_rows(purchase_date)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_amazon_order_rows_updated ON amazon_order_rows(last_updated_date)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_amazon_order_rows_status ON amazon_order_rows(item_status)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS amazon_settlement_rows (
+    id TEXT PRIMARY KEY NOT NULL,
+    settlement_id TEXT NOT NULL,
+    posted_date TEXT,
+    transaction_type TEXT,
+    amount_type TEXT,
+    amount_description TEXT,
+    amount REAL NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    sku TEXT,
+    order_id TEXT,
+    quantity_purchased INTEGER,
+    marketplace_name TEXT,
+    settlement_start_date TEXT,
+    settlement_end_date TEXT,
+    deposit_date TEXT,
+    total_amount REAL,
+    raw_json TEXT,
+    ingested_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_amazon_settlement_rows_settlement ON amazon_settlement_rows(settlement_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_amazon_settlement_rows_posted ON amazon_settlement_rows(posted_date)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_amazon_settlement_rows_order ON amazon_settlement_rows(order_id)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_amazon_settlement_rows_sku ON amazon_settlement_rows(sku)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS amazon_sales_traffic_daily (
+    id TEXT PRIMARY KEY NOT NULL,
+    date TEXT NOT NULL,
+    gross_sales REAL NOT NULL DEFAULT 0,
+    units_ordered INTEGER NOT NULL DEFAULT 0,
+    units_shipped INTEGER NOT NULL DEFAULT 0,
+    total_order_items INTEGER NOT NULL DEFAULT 0,
+    refund_rate REAL,
+    sessions INTEGER,
+    page_views INTEGER,
+    buy_box_pct REAL,
+    conversion_rate REAL,
+    avg_selling_price REAL,
+    ingested_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_amazon_sales_traffic_date ON amazon_sales_traffic_daily(date)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS amazon_fba_inventory (
+    id TEXT PRIMARY KEY NOT NULL,
+    snapshot_date TEXT NOT NULL,
+    sku TEXT NOT NULL,
+    internal_sku TEXT,
+    asin TEXT,
+    fulfillable_qty INTEGER NOT NULL DEFAULT 0,
+    inbound_working_qty INTEGER NOT NULL DEFAULT 0,
+    inbound_shipped_qty INTEGER NOT NULL DEFAULT 0,
+    inbound_receiving_qty INTEGER NOT NULL DEFAULT 0,
+    reserved_qty INTEGER NOT NULL DEFAULT 0,
+    unsellable_qty INTEGER NOT NULL DEFAULT 0,
+    total_qty INTEGER NOT NULL DEFAULT 0,
+    ingested_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_amazon_fba_inventory_key ON amazon_fba_inventory(snapshot_date, sku)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_amazon_fba_inventory_sku ON amazon_fba_inventory(sku)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS amazon_sync_state (
+    report_name TEXT PRIMARY KEY NOT NULL,
+    last_synced_through TEXT,
+    last_run_at TEXT,
+    last_success_at TEXT,
+    last_status TEXT,
+    last_error TEXT,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    rows_ingested INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+} catch (e) { console.error("[db] Amazon channel tables error:", e); }
+
 }  // end if (!IS_BUILD_PHASE)

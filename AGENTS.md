@@ -68,26 +68,30 @@ checks against). It is available in your shell — reference it as `$OPS_TOKEN`;
 wc -c` is 0, it isn't set for this session — ask the user to add it to the
 environment's variables.
 
-## Reachability (important)
+## Reachability (solved — Aug 2026)
 
-The sandbox has open outbound internet (Shopify, Faire, Nominatim, Railway API,
-GitHub all reachable). The **one** unreachable target is the app's **custom
-domain** `theframe.getjaxy.com`: it resolves straight to Railway (69.46.46.67,
-not Cloudflare) and requests to that Host **hang** (TLS completes, then zero
-response bytes). The proxy IP is NOT edge-blocked — requests to a
-`*.up.railway.app` Host on the same IP get a fast response — so the hang is
-specific to how Railway routes that custom domain. To reach the ops endpoints,
-use ONE of:
+The sandbox has open outbound internet. Production **is reachable** for
+token-guarded ops endpoints, via either:
 
-- **R2 (preferred):** the service's Railway-generated `*.up.railway.app` public
-  domain (Railway → service → Settings → Networking → Public Networking; the
-  correct one for THIS service — a stale/wrong one returns `{"message":"Application not found"}`).
-  Hit that origin directly; it doesn't go through the custom-domain path that hangs.
-- **R3:** a Railway project token for server-side execution (`railway run`),
-  bypassing the edge entirely.
+- **Preferred:** `https://the-frame-production.up.railway.app` — the service's
+  Railway-generated domain. If you need to rediscover it, the `RAILWAY_TOKEN`
+  in this environment is a **project token**: authenticate to
+  `https://backboard.railway.app/graphql/v2` with a `Project-Access-Token`
+  header (NOT `Bearer`, which returns "Not Authorized"), then query
+  `domains(projectId:, serviceId:, environmentId:)`.
+- `theframe.getjaxy.com` also responds now. It previously hung (TLS completed,
+  zero response bytes); that has resolved. The Railway domain is still
+  preferred since it skips the custom-domain path entirely.
 
-(There is no Cloudflare in front of this domain — a Cloudflare/WAF rule is NOT
-the fix.)
+**What this does NOT give you:** the production database. It lives on a Railway
+volume as a SQLite file, so it is reachable only through deployed HTTP
+endpoints — and only endpoints under `/api/admin/ops/*`, since everything under
+`/api/v1/*` sits behind the login middleware. If you need to drive something
+from tooling, it needs an ops endpoint.
+
+**And note:** an ops endpoint only exists in production once the code is on
+`main` and deployed. Railway deploys from `main`, so work sitting on a feature
+branch is not reachable no matter what URL you use.
 
 Always route curl through the agent proxy's CA bundle:
 `curl --cacert /root/.ccr/ca-bundle.crt -H "x-ops-key: $OPS_TOKEN" <url>`.

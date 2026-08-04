@@ -19,6 +19,8 @@ export async function GET(req: NextRequest) {
       "GET  /api/admin/ops/order-lookup?number=&accountId=": "where an order actually lives vs. the account",
       "GET  /api/admin/ops/db-backup": "list DB backups in the private R2 bucket",
       "POST /api/admin/ops/db-backup?confirm=1": "run a DB backup now (snapshot → gzip → private R2 → prune)",
+      "GET  /api/admin/ops/amazon?view=status|health|month-end|xero|settlements": "Amazon channel diagnostics (read-only)",
+      "POST /api/admin/ops/amazon?confirm=1": "Amazon operations { action: backfill | sync-orders | sync-settlements | sync-traffic | sync-inventory | import-only | bridge-only | post-xero }",
     },
     auth: "x-ops-key: <OPS_TOKEN>  (mutations also require ?confirm=1)",
   });
