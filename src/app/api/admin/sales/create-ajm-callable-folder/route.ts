@@ -38,6 +38,10 @@ interface Callable {
   first_order?: string;
   last_order?: string;
   category?: string;
+  // If provided, use as-is (verbatim) as the PB note. Overrides the
+  // built-in thin template. The caller — usually a Python generator
+  // that has all AJM columns handy — builds the rich note.
+  notes?: string;
 }
 
 async function runWithConcurrency<T>(items: T[], limit: number, task: (item: T) => Promise<void>): Promise<void> {
@@ -124,12 +128,18 @@ async function handle(req: NextRequest) {
 
   await runWithConcurrency(callable, 6, async (r) => {
     try {
-      const noteLines: string[] = [
-        `AJM callable: ${r.company || ""}${r.city ? ` — ${r.city}, ${r.state || ""}` : ""}`,
-      ];
-      if (r.total_orders) noteLines.push(`${r.total_orders} orders / ${r.total_spend || "-"} lifetime`);
-      if (r.first_order || r.last_order) noteLines.push(`first ${r.first_order || "-"} last ${r.last_order || "-"}`);
-      if (r.category) noteLines.push(`AJM cat: ${r.category}`);
+      let noteBody: string;
+      if (r.notes && r.notes.trim().length > 0) {
+        noteBody = r.notes;
+      } else {
+        const noteLines: string[] = [
+          `AJM callable: ${r.company || ""}${r.city ? ` — ${r.city}, ${r.state || ""}` : ""}`,
+        ];
+        if (r.total_orders) noteLines.push(`${r.total_orders} orders / ${r.total_spend || "-"} lifetime`);
+        if (r.first_order || r.last_order) noteLines.push(`first ${r.first_order || "-"} last ${r.last_order || "-"}`);
+        if (r.category) noteLines.push(`AJM cat: ${r.category}`);
+        noteBody = noteLines.join("\n");
+      }
 
       const { id } = await phoneBurnerClient.createOrGetContact({
         owner_id: ownerId,
@@ -138,7 +148,7 @@ async function handle(req: NextRequest) {
         email: r.email,
         phone: r.phone || undefined,
         category_id: folderId,
-        notes: noteLines.join("\n"),
+        notes: noteBody,
         on_duplicate: "update",
       });
       if (!id) throw new Error("createOrGetContact returned no id");
