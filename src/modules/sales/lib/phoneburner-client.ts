@@ -297,6 +297,18 @@ export class PhoneBurnerClient {
     return await this.request<unknown>("GET", path, undefined, query);
   }
 
+  async rawDelete(path: string, body?: unknown): Promise<unknown> {
+    return await this.request<unknown>("DELETE", path, body);
+  }
+
+  async rawPut(path: string, body?: unknown): Promise<unknown> {
+    return await this.request<unknown>("PUT", path, body);
+  }
+
+  async rawPost(path: string, body?: unknown): Promise<unknown> {
+    return await this.request<unknown>("POST", path, body);
+  }
+
   /**
    * Page contacts ordered by most-recently-updated. Used by the contact-edit
    * reconciliation poller to catch agent-side field edits (PB has no

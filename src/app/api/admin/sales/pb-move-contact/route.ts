@@ -75,41 +75,50 @@ export async function POST(req: NextRequest) {
         archived: rec.archived ?? null,
         trashed: rec.trashed ?? null,
         removed: rec.removed ?? null,
+        // HATEOAS links from the raw response — PB often advertises
+        // available operations here.
+        _links: (raw as Record<string, unknown>)?._links ?? null,
       };
       if (body.move_out) {
-        // Try several mutation payloads — PB's remove-from-folder shape
-        // isn't documented in what we have. Each attempt is followed by
-        // a fresh getContact to check whether nested category cleared.
-        const attempts_shape: Array<[string, Record<string, unknown>]> = [
-          ["category_null", { category: null }],
-          ["category_id_zero", { category_id: 0 }],
-          ["category_id_empty", { category_id: "" }],
-          ["category_id_null_str", { category_id: null }],
+        // Probe several endpoints/verbs — PUT /contacts/{id} with
+        // any category shape didn't clear the nested category. Try
+        // folder-scoped delete + category-scoped delete + POST actions.
+        type Attempt = { label: string; method: string; path: string; body?: unknown };
+        const attempts_shape: Attempt[] = [
+          { label: "delete_folder_contact",   method: "DELETE", path: `/folders/66249536/contacts/${contactId}` },
+          { label: "delete_contact_category", method: "DELETE", path: `/contacts/${contactId}/category` },
+          { label: "delete_category_scope",   method: "DELETE", path: `/categories/66249536/contacts/${contactId}` },
+          { label: "put_contact_category_null", method: "PUT", path: `/contacts/${contactId}/category`, body: {} },
+          { label: "post_folder_remove", method: "POST", path: `/folders/66249536/contacts/remove`, body: { contact_ids: [contactId] } },
         ];
         const results: Array<Record<string, unknown>> = [];
-        for (const [label, payload] of attempts_shape) {
+        for (const a of attempts_shape) {
+          const r: Record<string, unknown> = { label: a.label, method: a.method, path: a.path };
           try {
-            await acct.client.updateContact(contactId, payload as never);
+            const resp = await (
+              a.method === "DELETE" ? acct.client.rawDelete(a.path, a.body)
+              : a.method === "POST" ? acct.client.rawPost(a.path, a.body)
+              : a.method === "PUT"  ? acct.client.rawPut(a.path, a.body)
+              : acct.client.rawGet(a.path)
+            );
+            r.status_shape = shapeOnly(resp);
           } catch (e) {
-            results.push({ label, error: (e instanceof Error ? e.message : String(e)).slice(0, 120) });
-            continue;
+            r.error = (e instanceof Error ? e.message : String(e)).slice(0, 200);
           }
-          // Re-fetch to see if nested category cleared.
-          const afterRaw = await acct.client.getContact(contactId);
-          let ac = afterRaw as Record<string, unknown>;
-          if (ac?.contacts && typeof ac.contacts === "object") ac = ac.contacts as Record<string, unknown>;
-          const ai = ac.contacts;
-          if (Array.isArray(ai)) ac = (ai[0] as Record<string, unknown>) || {};
-          else if (ai && typeof ai === "object") ac = ai as Record<string, unknown>;
-          const nestedCategory = (ac.category as { category_id?: unknown } | null | undefined)?.category_id ?? null;
-          results.push({
-            label,
-            payload,
-            nested_category_id_after: nestedCategory,
-            top_category_id_after: ac.category_id ?? null,
-            success: nestedCategory == null,
-          });
-          if (nestedCategory == null) break; // first success stops
+          // Re-check nested category
+          try {
+            const afterRaw = await acct.client.getContact(contactId);
+            let ac = afterRaw as Record<string, unknown>;
+            if (ac?.contacts && typeof ac.contacts === "object") ac = ac.contacts as Record<string, unknown>;
+            const ai = ac.contacts;
+            if (Array.isArray(ai)) ac = (ai[0] as Record<string, unknown>) || {};
+            else if (ai && typeof ai === "object") ac = ai as Record<string, unknown>;
+            const nestedCategory = (ac.category as { category_id?: unknown } | null | undefined)?.category_id ?? null;
+            r.nested_after = nestedCategory;
+            r.success = nestedCategory == null;
+          } catch { /* ignore */ }
+          results.push(r);
+          if (r.success) break;
         }
         attempt.after = results;
       }
