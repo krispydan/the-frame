@@ -61,3 +61,12 @@ ajm_push.jsonl
 ajm_part_*
 Sheet4*.csv
 *WHOLESALE*LIST*.csv
+
+# Scratch curl output from driving ops endpoints. Real config files
+# (package.json, components.json, tsconfig.json) are matched explicitly
+# below so this rule cannot swallow them.
+/*.json
+!/package.json
+!/package-lock.json
+!/components.json
+!/tsconfig.json
