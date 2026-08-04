@@ -186,13 +186,29 @@ export const PLATFORM_CATEGORY_SUGGESTIONS: Record<string, CategorySuggestion[]>
     { category: "shipping_labels",label: "Shipping labels",          hint: "Only when brand pays — see Insider shipping logic", defaultAccountCode: "5460", defaultAccountName: "Faire Fees - Shipping Labels", side: "debit" },
     { category: "clearing",       label: "Faire clearing",           hint: 'CSV column "Payout Amount"', defaultAccountCode: "1020", defaultAccountName: "Faire Payments Clearing", side: "debit" },
   ],
+  // Amazon's settlement report itemises far more than a Shopify payout, so
+  // the categories are correspondingly finer. Each maps to one output of
+  // classifySettlementRow() — see integrations/lib/amazon/settlement-classify.ts,
+  // whose mapping was derived from the 288 settlement rows actually observed
+  // on this account rather than from Amazon's documentation.
+  //
+  // Note there is no `tax` category: Amazon collects and remits marketplace
+  // facilitator tax itself, and the collected/withheld legs cancel exactly,
+  // so booking them would create a liability we do not owe. The classifier
+  // nets them and alerts if they ever stop cancelling.
   amazon: [
-    { category: "sales",          label: "Sales (gross)",           hint: "Settlement report gross sales", defaultAccountCode: "4010", defaultAccountName: "Sales - Amazon", side: "credit" },
-    { category: "tax",            label: "Sales tax collected",      hint: "Settlement report tax column", defaultAccountCode: "2230", defaultAccountName: "Sales Tax", side: "credit" },
-    { category: "refunds",        label: "Refunds & returns",        hint: "Settlement report refund rows", defaultAccountCode: "4300", defaultAccountName: "Sales Returns & Allowances", side: "debit" },
-    { category: "fees",           label: "Referral + FBA fees",      hint: "All Amazon-side fees combined", defaultAccountCode: "5410", defaultAccountName: "Merchant Fees - Amazon", side: "debit" },
-    { category: "outbound_shipping", label: "Outbound shipping (FBA)", hint: "FBA shipping & fulfillment fees", defaultAccountCode: "5300", defaultAccountName: "Outbound Shipping & Postage", side: "debit" },
-    { category: "clearing",       label: "Amazon clearing",          hint: "Settlement total", defaultAccountCode: "1030", defaultAccountName: "Amazon Clearing", side: "debit" },
+    { category: "sales",             label: "Sales (gross)",            hint: "Settlement Principal rows, before promotions", defaultAccountCode: "4010", defaultAccountName: "Sales - Amazon", side: "credit" },
+    { category: "shipping",          label: "Shipping income",          hint: "Shipping charged to the buyer", defaultAccountCode: "4060", defaultAccountName: "Shipping Income", side: "credit" },
+    { category: "discounts",         label: "Promotions & discounts",   hint: "Coupons, Vine and launch discounts — ran at 71% of gross during launch, so kept off the revenue line", defaultAccountCode: "4310", defaultAccountName: "Sales Discounts & Promotions", side: "debit" },
+    { category: "refunds",           label: "Refunds & returns",        hint: "Refunded principal", defaultAccountCode: "4300", defaultAccountName: "Sales Returns & Allowances", side: "debit" },
+    { category: "fees",              label: "Referral commission",      hint: "Amazon's percentage referral fee, plus refund admin fees", defaultAccountCode: "5410", defaultAccountName: "Merchant Fees - Amazon", side: "debit" },
+    { category: "fba_fulfillment",   label: "FBA fulfilment fees",      hint: "Per-unit pick/pack/ship. Deliberately separate from 3PL - Fulfillment & Pick-Pack, which is ShipHero — mixing them makes both channels' unit economics unreadable", defaultAccountCode: "5415", defaultAccountName: "Amazon Fees - FBA Fulfillment", side: "debit" },
+    { category: "fba_storage",       label: "FBA storage fees",         hint: "Monthly storage at Amazon. Separate from 3PL - Storage (ShipHero)", defaultAccountCode: "5416", defaultAccountName: "Amazon Fees - FBA Storage", side: "debit" },
+    { category: "subscription",      label: "Selling plan subscription", hint: "Professional selling plan, ~$39.99/mo", defaultAccountCode: "5417", defaultAccountName: "Amazon Fees - Subscription", side: "debit" },
+    { category: "inbound_freight",   label: "Inbound freight to FBA",   hint: "Amazon-partnered carrier and inbound transportation fees", defaultAccountCode: "5010", defaultAccountName: "COGS - Inbound Freight", side: "debit" },
+    { category: "outbound_shipping", label: "Return shipping labels",   hint: "Return labels we pay for", defaultAccountCode: "5300", defaultAccountName: "Outbound Shipping & Postage", side: "debit" },
+    { category: "unclassified",      label: "Unclassified (suspense)",  hint: "Amazon fee types we have not seen before land here AND raise a Slack alert — never silently absorbed into another bucket", defaultAccountCode: "5490", defaultAccountName: "Merchant Fees - Other", side: "debit" },
+    { category: "clearing",          label: "Amazon clearing",          hint: "Net settlement deposit. Must be a BANK-type account — Xero forbids manual journals touching bank accounts, so the flow is journal → Receivables Holding → BankTransaction → here", defaultAccountCode: "1030", defaultAccountName: "Amazon Clearing", side: "debit" },
   ],
   tiktok_shop: [
     { category: "sales",          label: "Sales (gross)",           hint: "Settlement report gross sales", defaultAccountCode: "4020", defaultAccountName: "Sales - TikTok Shop", side: "credit" },

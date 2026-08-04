@@ -251,6 +251,54 @@ export async function syncAmazonSettlements(
   });
 }
 
+/**
+ * The settlement cron entry point: archive settlement rows, then bridge the
+ * closed ones into `settlements` / `settlement_line_items`.
+ *
+ * Bridging runs even when the fetch failed — the archive already holds
+ * earlier settlements, and a settlement that closed yesterday should be
+ * bridged tonight regardless of whether Windsor answered.
+ *
+ * Two conditions raise alerts because both mean money is being booked on an
+ * assumption that no longer holds: an unrecognised fee type (which would
+ * otherwise land in suspense unnoticed) and facilitator-tax legs that stop
+ * cancelling (which would mean we owe tax we are not recording).
+ */
+export async function syncAndBridgeAmazonSettlements(
+  opts: { dateFrom?: string; dateTo?: string; days?: number; today?: string } = {},
+): Promise<{ fetch: SyncOutcome; bridge: unknown }> {
+  const fetchOutcome = await syncAmazonSettlements(opts);
+
+  const { bridgeAmazonSettlements } = await import("./settlement-bridge");
+  const bridge = bridgeAmazonSettlements({ today: opts.today });
+
+  if (bridge.unclassified.length > 0) {
+    const lines = bridge.unclassified.slice(0, 5).map((u) => `• ${u.reason} (${u.amount})`).join("\n");
+    try {
+      await notifyIntegrationFailure({
+        service: "Amazon — unclassified settlement lines",
+        detail:
+          `${bridge.unclassified.length} settlement line(s) did not match any known fee type and have been booked to the suspense account:\n${lines}\n` +
+          `Add the mapping in settlement-classify.ts, then re-bridge to reclassify.`,
+      });
+    } catch { /* alerting is best-effort */ }
+  }
+
+  if (bridge.taxResiduals.length > 0) {
+    const lines = bridge.taxResiduals.map((t) => `• ${t.settlementId}: ${t.residual}`).join("\n");
+    try {
+      await notifyIntegrationFailure({
+        service: "Amazon — marketplace tax no longer nets to zero",
+        detail:
+          `We net Amazon's collected and withheld facilitator tax on the basis that they cancel exactly. ` +
+          `These settlements break that assumption, which means a real tax liability may be going unrecorded:\n${lines}`,
+      });
+    } catch { /* alerting is best-effort */ }
+  }
+
+  return { fetch: fetchOutcome, bridge };
+}
+
 /** Pull daily sales + traffic metrics (dashboard analytics). */
 export async function syncAmazonSalesTraffic(
   opts: { dateFrom?: string; dateTo?: string; days?: number; today?: string } = {},

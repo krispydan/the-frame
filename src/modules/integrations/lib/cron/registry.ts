@@ -38,7 +38,7 @@ import { syncFairePayouts } from "@/modules/integrations/lib/faire/payout-sync";
 import {
   syncAndImportAmazonOrders,
   syncAmazonSalesTraffic,
-  syncAmazonSettlements,
+  syncAndBridgeAmazonSettlements,
   syncAmazonFbaInventory,
 } from "@/modules/integrations/lib/amazon/sync";
 import { runOrderDealSweep, runActivitySweep } from "@/modules/sales/lib/pipedrive-sync";
@@ -349,8 +349,8 @@ export const CRON_JOBS: CronJob[] = [
   {
     id: "amazon-settlement-sync",
     schedule: "20 16 * * *",  // 16:20 UTC ≈ 9:20am PT
-    description: "Archive Amazon settlement rows (Windsor serves only 90 days — this is the permanent copy)",
-    handler: () => syncAmazonSettlements({}),
+    description: "Archive Amazon settlement rows (Windsor serves only 90 days) and bridge closed settlements for reconciliation",
+    handler: () => syncAndBridgeAmazonSettlements({}),
     guard: () => Boolean(process.env.WINDSOR_API_KEY),
   },
 
