@@ -44,10 +44,15 @@ export async function POST(req: NextRequest) {
     try {
       const raw = await acct.client.getContact(contactId);
       attempt.found = true;
-      // PB wraps single-contact responses in various envelopes; unwrap.
-      const rec = ((raw as Record<string, unknown>)?.contact
-        ?? (raw as Record<string, unknown>)?.data
-        ?? raw) as Record<string, unknown>;
+      // PB wraps single-contact responses as {..., contacts: {actual fields}}.
+      // The `contacts` key holds the record (same key used by the LIST endpoint
+      // for the array — asymmetric but consistent).
+      let rec = raw as Record<string, unknown>;
+      if (rec?.contacts && typeof rec.contacts === "object") rec = rec.contacts as Record<string, unknown>;
+      // Second-level unwrap if PB nested even further.
+      if (rec?.contacts && typeof rec.contacts === "object" && !Array.isArray(rec.contacts)) {
+        rec = rec.contacts as Record<string, unknown>;
+      }
       const pe = rec.primary_email as { email_address?: unknown } | string | undefined;
       const email = typeof pe === "string" ? pe : (pe?.email_address as string) || null;
       attempt.before = {
