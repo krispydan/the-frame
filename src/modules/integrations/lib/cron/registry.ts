@@ -47,7 +47,14 @@ import { drainMetaLeads, reconcileMetaLeads } from "@/modules/integrations/lib/m
 import { runCapiSyncAndDrain } from "@/modules/integrations/lib/meta/capi";
 import { runMetaLeadCsvReminder } from "@/modules/integrations/lib/meta/daily-reminder";
 import { suppressBuyersFromMail } from "@/modules/sales/lib/shopify-wholesale-customer";
-import { refreshStaleCustomerListings } from "@/modules/sales/lib/gmaps-profile";
+import { refreshStaleCustomerListings, captureListings, countRemaining, countControlListings } from "@/modules/sales/lib/gmaps-profile";
+
+/**
+ * How many "called, never ordered" listings to capture as the control group.
+ * Enough to stabilise a baseline share for every common category; past that
+ * it's Apify spend buying a third decimal place we won't act on.
+ */
+const CONTROL_SAMPLE_TARGET = 400;
 
 export type CronJob = {
   id: string;                         // stable, kebab-case
@@ -170,6 +177,29 @@ export const CRON_JOBS: CronJob[] = [
     schedule: "30 12 * * *",  // 12:30 UTC ≈ 5:30am PT
     description: "Refresh Google Maps listings for customers whose data is over 120 days old (rating, reviews, hours, closure)",
     handler: () => refreshStaleCustomerListings(20, 120),
+    fireAndForget: true,
+  },
+  // Initial backfill of the profiling cohorts. This used to run as a long
+  // admin POST and kept tripping Railway's proxy timeout — one Apify run for
+  // five stores is minutes, and a 20-store request is not a request. So it
+  // drains here instead, five at a time, and no-ops once both cohorts are in.
+  //
+  // Customers first: they're the signal. Controls (called, never ordered) are
+  // capped because they're only the denominator — a few hundred pins down the
+  // baseline share of every category, and the next 2,700 would just be spend.
+  {
+    id: "gmaps-profile-backfill",
+    schedule: "*/3 * * * *",
+    description: "Backfill Google Maps listings for the profiling cohorts — customers first, then a capped control sample",
+    handler: async () => {
+      if (countRemaining("customers") > 0) {
+        return { cohort: "customers", ...(await captureListings({ cohort: "customers", limit: 5 })) };
+      }
+      if (countControlListings() < CONTROL_SAMPLE_TARGET) {
+        return { cohort: "called-no-order", ...(await captureListings({ cohort: "called-no-order", limit: 5 })) };
+      }
+      return { done: true, controls: countControlListings() };
+    },
     fireAndForget: true,
   },
   {
