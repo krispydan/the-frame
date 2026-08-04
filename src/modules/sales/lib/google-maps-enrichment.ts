@@ -134,7 +134,18 @@ function loadCohort(opts: {
   status?: string[];
   force?: boolean;
   ajm?: boolean;
+  companyId?: string;
 }): CandidateCompany[] {
+  // Someone clicking Enrich on one record has already made every targeting
+  // decision the cohort filters exist to make — including "yes, even though
+  // we tried before". Honour the click; don't re-litigate it.
+  if (opts.companyId) {
+    const row = sqlite
+      .prepare(`SELECT id, name, city, state, address FROM companies WHERE id = ?`)
+      .get(opts.companyId) as CandidateCompany | undefined;
+    return row ? [row] : [];
+  }
+
   const wheres: string[] = opts.ajm
     ? [
         // AJM cohort: tagged ajm_2025 (or imported from AJM). Enrich website /
@@ -466,6 +477,8 @@ export async function enrichViaGoogleMaps(opts: {
   force?: boolean;
   dryRun?: boolean;
   ajm?: boolean;
+  /** Enrich exactly this company, bypassing cohort filters. Manual Enrich button. */
+  companyId?: string;
 }): Promise<EnrichmentResult> {
   const cohort = loadCohort({
     limit: opts.limit,
@@ -473,6 +486,7 @@ export async function enrichViaGoogleMaps(opts: {
     status: opts.status,
     force: opts.force,
     ajm: opts.ajm,
+    companyId: opts.companyId,
   });
 
   const result: EnrichmentResult = {
