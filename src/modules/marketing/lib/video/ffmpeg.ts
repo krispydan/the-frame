@@ -24,12 +24,13 @@ function run(
   bin: string,
   args: string[],
   timeoutMs: number,
+  maxBuffer = 32 * 1024 * 1024,
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     execFile(
       bin,
       args,
-      { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 },
+      { timeout: timeoutMs, maxBuffer },
       (err, stdout, stderr) => {
         if (err) {
           reject(new FfmpegError(`${bin} failed: ${err.message}`, String(stderr).slice(-4000)));
@@ -41,8 +42,62 @@ function run(
   });
 }
 
+/**
+ * Transcodes run ONE AT A TIME, process-wide.
+ *
+ * A 1080x1920 libx264 encode is roughly 800MB resident. Nothing upstream
+ * limited how many could run together — the job worker took three jobs per
+ * five-second tick with no guard, and the upload/trim routes invoke ffmpeg
+ * straight off the request — so three concurrent renders reached ~2.4GB and
+ * the container was OOM-killed, restarted, picked the same jobs back up, and
+ * did it again. That restart loop took production down on 2026-08-04.
+ *
+ * The gate lives here rather than in the job handlers because handlers are not
+ * the only caller: serialising at the binary means every path is covered,
+ * including the next one someone adds.
+ *
+ * Waiting for the gate is deliberately NOT inside the execFile timeout — the
+ * clock starts when the process actually launches, so a queued render can't
+ * fail merely for having waited its turn.
+ *
+ * Note this is per-process. It bounds one container; if replicas are ever
+ * scaled past one, memory headroom needs revisiting.
+ */
+let transcodeChain: Promise<unknown> = Promise.resolve();
+
+function serializeTranscode<T>(fn: () => Promise<T>): Promise<T> {
+  // Chain on both settle paths — a failed render must not wedge the queue.
+  const result = transcodeChain.then(fn, fn);
+  transcodeChain = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
 export async function runFfmpeg(args: string[], opts: { timeoutMs?: number } = {}): Promise<void> {
-  await run(FFMPEG, ["-hide_banner", "-loglevel", "error", ...args], opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  await serializeTranscode(() =>
+    run(FFMPEG, ["-hide_banner", "-loglevel", "error", ...args], opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+  );
+}
+
+/**
+ * Run ffmpeg and hand back stderr, through the same one-at-a-time gate.
+ *
+ * Exists for analysis passes that read ffmpeg's diagnostic output rather than
+ * writing a file — scene detection being the one that matters, since it
+ * decodes the whole source and is the single most expensive thing this module
+ * does. It used to call execFile directly and so ran outside the gate, which
+ * made it the likeliest way to stack decodes on top of an in-flight render.
+ */
+export async function runFfmpegCapture(
+  args: string[],
+  opts: { timeoutMs?: number; maxBuffer?: number } = {},
+): Promise<string> {
+  const { stderr } = await serializeTranscode(() =>
+    run(FFMPEG, ["-hide_banner", ...args], opts.timeoutMs ?? DEFAULT_TIMEOUT_MS, opts.maxBuffer),
+  );
+  return stderr;
 }
 
 export interface ProbeResult {

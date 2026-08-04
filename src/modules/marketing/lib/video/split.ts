@@ -19,7 +19,6 @@
  */
 import { createHash } from "crypto";
 import { readFile, unlink } from "fs/promises";
-import { execFile } from "child_process";
 import { eq } from "drizzle-orm";
 import { db, sqlite } from "@/lib/db";
 import { videoClips, videoSources } from "@/modules/marketing/schema";
@@ -30,12 +29,11 @@ import {
   saveVideo,
   deleteVideo,
 } from "@/lib/storage/videos";
-import { runFfmpeg, ffprobe, seekFriendlyFlags } from "./ffmpeg";
+import { runFfmpeg, runFfmpegCapture, ffprobe, seekFriendlyFlags } from "./ffmpeg";
 import { jobQueue } from "@/modules/core/lib/job-queue";
 
 // ── Scene detection ──
 
-const FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
 /** Scene-change score threshold. 0.3 is the ffmpeg folk default —
  *  catches hard cuts without firing on hand-held wobble. */
 const SCENE_THRESHOLD = 0.3;
@@ -46,22 +44,18 @@ const SCENE_THRESHOLD = 0.3;
  * threshold and parse their pts_time from showinfo's stderr output.
  */
 export async function detectScenes(fullPath: string): Promise<number[]> {
-  const stderr = await new Promise<string>((resolve, reject) => {
-    execFile(
-      FFMPEG,
-      [
-        "-hide_banner",
-        "-i", fullPath,
-        "-vf", `select='gt(scene,${SCENE_THRESHOLD})',showinfo`,
-        "-f", "null", "-",
-      ],
-      { timeout: 10 * 60_000, maxBuffer: 64 * 1024 * 1024 },
-      (err, _stdout, stderrOut) => {
-        // ffmpeg writes showinfo to stderr and exits 0 on success.
-        if (err) reject(new Error(`scene detection failed: ${err.message}`));
-        else resolve(String(stderrOut));
-      },
-    );
+  // Routed through runFfmpegCapture so this shares the one-at-a-time gate.
+  // This decodes the ENTIRE source file — the heaviest call in the module —
+  // and it previously ran via a direct execFile, outside any limit.
+  const stderr = await runFfmpegCapture(
+    [
+      "-i", fullPath,
+      "-vf", `select='gt(scene,${SCENE_THRESHOLD})',showinfo`,
+      "-f", "null", "-",
+    ],
+    { timeoutMs: 10 * 60_000, maxBuffer: 64 * 1024 * 1024 },
+  ).catch((e: unknown) => {
+    throw new Error(`scene detection failed: ${e instanceof Error ? e.message : String(e)}`);
   });
 
   const times: number[] = [];
