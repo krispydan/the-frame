@@ -47,6 +47,7 @@ import { drainMetaLeads, reconcileMetaLeads } from "@/modules/integrations/lib/m
 import { runCapiSyncAndDrain } from "@/modules/integrations/lib/meta/capi";
 import { runMetaLeadCsvReminder } from "@/modules/integrations/lib/meta/daily-reminder";
 import { suppressBuyersFromMail } from "@/modules/sales/lib/shopify-wholesale-customer";
+import { refreshStaleCustomerListings } from "@/modules/sales/lib/gmaps-profile";
 
 export type CronJob = {
   id: string;                         // stable, kebab-case
@@ -159,6 +160,17 @@ export const CRON_JOBS: CronJob[] = [
     schedule: "40 14 * * *",  // 14:40 UTC ~ 7:40am PT, after the orders sync
     description: "Remove the postpilot-mail tag from wholesale customers who have now ordered, so direct mail stops",
     handler: () => suppressBuyersFromMail(200),
+  },
+  // Google Maps data ages: ratings and review counts drift, hours change, and
+  // a permanently-closed flag we never re-check is how a rep ends up calling a
+  // shut store. Small nightly slice rather than a big periodic sweep, so Apify
+  // spend stays flat and predictable.
+  {
+    id: "gmaps-refresh-customer-listings",
+    schedule: "30 12 * * *",  // 12:30 UTC ≈ 5:30am PT
+    description: "Refresh Google Maps listings for customers whose data is over 120 days old (rating, reviews, hours, closure)",
+    handler: () => refreshStaleCustomerListings(20, 120),
+    fireAndForget: true,
   },
   {
     id: "faire-interested-export",
