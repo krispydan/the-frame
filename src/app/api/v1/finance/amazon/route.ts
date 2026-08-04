@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
+import { buildAmazonMonthEnd } from "@/modules/integrations/lib/amazon/month-end";
 import {
   getAmazonHeadline,
   getAmazonDaily,
@@ -61,6 +62,9 @@ export async function GET(req: NextRequest) {
       inventory: getAmazonInventory(),
       syncHealth: getAmazonSyncHealth(),
       unmappedSkus: getAmazonUnmappedSkus(),
+      // Month-end is scoped to the month containing the range end, which is
+      // what someone closing the books actually wants to see.
+      monthEnd: buildAmazonMonthEnd(to.slice(0, 7)),
     });
   } catch (err) {
     return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
