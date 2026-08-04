@@ -204,10 +204,15 @@ export const CRON_JOBS: CronJob[] = [
           : null;
       if (!cohort) return { done: true, controls: countControlListings() };
 
-      // detail: false — the detail-page crawl is what makes the actor time out
-      // on multi-place batches, and it only supplies hours and description.
-      // Everything the profile is built from comes back without it.
-      const res = await captureListings({ cohort, limit: 6, detail: false });
+      // detail: false — the detail-page crawl only supplies hours and
+      // description; everything the profile is built from comes back without
+      // it. batchSize: 1 because Apify has been overrunning its own 300s
+      // ceiling for hours, and a batch loses every store in it when that
+      // happens — three-at-a-time turned one slow store into three lost ones
+      // and captured 5 listings in nine hours. One at a time is slower when
+      // Apify is healthy and is the difference between progress and none when
+      // it isn't. The salvage pass then doubles as a retry of that one store.
+      const res = await captureListings({ cohort, limit: 6, detail: false, batchSize: 1 });
       // A tick that captured nothing because Apify timed out is a failure, and
       // cron_runs is the only place anyone will look. Reporting "ok" here is
       // how a backfill sits at zero for an hour without anyone noticing.
