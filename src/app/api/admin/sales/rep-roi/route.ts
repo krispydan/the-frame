@@ -23,6 +23,46 @@ export async function GET(req: NextRequest) {
   }
   const p = new URL(req.url).searchParams;
 
+  // Coverage of Google Maps data across the CUSTOMER base — the input to any
+  // "find more stores like our customers" exercise. Reported before proposing
+  // a scrape so the plan is sized against the real gap, not a guess.
+  if (p.get("gmapsCoverage") === "1") {
+    const n = (sql: string) => (sqlite.prepare(sql).get() as { n: number }).n;
+    const CUSTOMER = `EXISTS (SELECT 1 FROM orders o WHERE o.company_id = c.id AND o.status NOT IN ('cancelled','returned'))`;
+    return NextResponse.json({
+      ok: true,
+      customers: {
+        total: n(`SELECT COUNT(*) n FROM companies c WHERE ${CUSTOMER}`),
+        withPlaceId: n(`SELECT COUNT(*) n FROM companies c WHERE ${CUSTOMER} AND c.google_place_id IS NOT NULL`),
+        withRating: n(`SELECT COUNT(*) n FROM companies c WHERE ${CUSTOMER} AND c.google_rating IS NOT NULL`),
+        withSubtypes: n(`SELECT COUNT(*) n FROM companies c WHERE ${CUSTOMER} AND TRIM(COALESCE(c.gmaps_subtypes,'')) <> ''`),
+        withAddress: n(`SELECT COUNT(*) n FROM companies c WHERE ${CUSTOMER} AND TRIM(COALESCE(c.city,'')) <> ''`),
+        attemptedNoMatch: n(`SELECT COUNT(*) n FROM companies c WHERE ${CUSTOMER} AND c.gmaps_enrichment_attempted_at IS NOT NULL AND c.google_place_id IS NULL`),
+      },
+      allCompanies: {
+        total: n(`SELECT COUNT(*) n FROM companies c`),
+        withPlaceId: n(`SELECT COUNT(*) n FROM companies c WHERE c.google_place_id IS NOT NULL`),
+        withSubtypes: n(`SELECT COUNT(*) n FROM companies c WHERE TRIM(COALESCE(c.gmaps_subtypes,'')) <> ''`),
+      },
+      // What we already know about how customers describe themselves.
+      topSubtypesAmongCustomers: sqlite.prepare(
+        `SELECT c.gmaps_subtypes, COUNT(*) n FROM companies c
+          WHERE ${CUSTOMER} AND TRIM(COALESCE(c.gmaps_subtypes,'')) <> ''
+          GROUP BY c.gmaps_subtypes ORDER BY n DESC LIMIT 15`,
+      ).all(),
+      ratingBands: sqlite.prepare(
+        `SELECT CASE
+                  WHEN c.google_review_count IS NULL THEN 'unknown'
+                  WHEN c.google_review_count < 25 THEN '0-24'
+                  WHEN c.google_review_count < 100 THEN '25-99'
+                  WHEN c.google_review_count < 500 THEN '100-499'
+                  ELSE '500+' END band,
+                COUNT(*) n, ROUND(AVG(c.google_rating),2) avgRating
+           FROM companies c WHERE ${CUSTOMER} GROUP BY band ORDER BY n DESC`,
+      ).all(),
+    });
+  }
+
   // Attribution hinges entirely on matching the right agent, so make the
   // roster inspectable rather than assuming the name pattern is right.
   if (p.get("agents") === "1") {
