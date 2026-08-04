@@ -35,6 +35,54 @@ interface PageInfo {
   endCursor: string | null;
 }
 
+/**
+ * Hard ceiling on pages per pull. 100/page for products, 50 for orders —
+ * far above any real Jaxy catalogue or order window, so hitting this means
+ * the cursor is misbehaving, not that we have a million records.
+ */
+const MAX_PAGES = 500;
+
+/**
+ * Decide whether to fetch another page, given what the last one returned.
+ *
+ * `while (pageInfo.hasNextPage)` on its own is a trapdoor: it trusts the
+ * server to eventually say no. On 2026-08-04 it didn't. ShipHero kept
+ * answering 200 with hasNextPage true and a cursor that never moved, so the
+ * loop refetched the same page forever — a tight fetch-and-parse spin that
+ * pinned the single vCPU and grew the results array without bound. Node's
+ * event loop got no slice, so every HTTP request to the app hung and the
+ * whole site went 502 while a background sync span.
+ *
+ * Three independent ways out, because any one of them alone can be defeated:
+ * the server says stop, the cursor stops advancing, or we simply refuse to
+ * go further. A stall is logged rather than thrown — a partial pull is worth
+ * keeping, and the inventory reconcile has its own completeness floor before
+ * it will zero anything.
+ */
+function shouldFetchNextPage(
+  label: string,
+  pageInfo: PageInfo,
+  previousCursor: string | null,
+  edgeCount: number,
+  page: number,
+): boolean {
+  if (!pageInfo.hasNextPage) return false;
+
+  if (edgeCount === 0) {
+    console.warn(`[shiphero] ${label}: hasNextPage with an empty page — stopping at page ${page}`);
+    return false;
+  }
+  if (!pageInfo.endCursor || pageInfo.endCursor === previousCursor) {
+    console.warn(`[shiphero] ${label}: cursor stopped advancing at page ${page} — stopping`);
+    return false;
+  }
+  if (page >= MAX_PAGES) {
+    console.warn(`[shiphero] ${label}: hit the ${MAX_PAGES}-page ceiling — stopping`);
+    return false;
+  }
+  return true;
+}
+
 interface WarehouseProductsResponse {
   data: {
     warehouse_products: {
@@ -106,6 +154,7 @@ export async function getInventoryLevels(opts?: {
   const all: ShipHeroInventoryItem[] = [];
   let cursor: string | null = null;
   let hasNext = true;
+  let page = 0;
 
   while (hasNext) {
     const afterClause: string = cursor ? `, after: "${cursor}"` : "";
@@ -148,7 +197,8 @@ export async function getInventoryLevels(opts?: {
       });
     }
 
-    hasNext = pageInfo.hasNextPage;
+    page++;
+    hasNext = shouldFetchNextPage("warehouse_products", pageInfo, cursor, edges.length, page);
     cursor = pageInfo.endCursor;
   }
 
@@ -217,6 +267,7 @@ export async function getOrders(opts?: {
   const all: ShipHeroOrder[] = [];
   let cursor: string | null = null;
   let hasNext = true;
+  let page = 0;
 
   const filters: string[] = [];
   if (opts?.updatedFrom) filters.push(`updated_from: "${opts.updatedFrom}"`);
@@ -273,7 +324,8 @@ export async function getOrders(opts?: {
       all.push(node);
     }
 
-    hasNext = pageInfo.hasNextPage;
+    page++;
+    hasNext = shouldFetchNextPage("orders", pageInfo, cursor, edges.length, page);
     cursor = pageInfo.endCursor;
   }
 
