@@ -30,7 +30,7 @@ import {
   saveVideo,
   deleteVideo,
 } from "@/lib/storage/videos";
-import { runFfmpeg, ffprobe } from "./ffmpeg";
+import { runFfmpeg, ffprobe, seekFriendlyFlags } from "./ffmpeg";
 import { jobQueue } from "@/modules/core/lib/job-queue";
 
 // ── Scene detection ──
@@ -203,6 +203,7 @@ export async function splitSource(sourceId: string): Promise<SplitResult> {
         "-i", fullPath,
         "-t", window.duration.toFixed(3),
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+        ...seekFriendlyFlags(),
         "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "160k",
         "-movflags", "+faststart",

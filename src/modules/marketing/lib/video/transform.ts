@@ -22,7 +22,7 @@ import { eq } from "drizzle-orm";
 import { db, sqlite } from "@/lib/db";
 import { videoClips, type VideoClip } from "@/modules/marketing/schema";
 import { materializeVideo, videoScratchPath, rawClipPath, saveVideo } from "@/lib/storage/videos";
-import { runFfmpeg, ffprobe } from "./ffmpeg";
+import { runFfmpeg, ffprobe, seekFriendlyFlags } from "./ffmpeg";
 import { normalizeClip } from "./normalize";
 
 export type ClipTransform =
@@ -44,7 +44,7 @@ const even = (v: number) => Math.max(2, Math.round(v / 2) * 2);
 
 /** A short, human-readable suffix + the ffmpeg args for a transform. */
 function planTransform(t: ClipTransform, w: number, h: number): { suffix: string; args: string[] } {
-  const enc = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"];
+  const enc = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", ...seekFriendlyFlags()];
   const tail = ["-movflags", "+faststart"];
 
   if (t.kind === "reframe") {

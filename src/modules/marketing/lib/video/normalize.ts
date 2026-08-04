@@ -26,19 +26,31 @@ import {
   mutedClipPath,
   clipPosterPath,
 } from "@/lib/storage/videos";
-import { runFfmpeg, ffprobe } from "./ffmpeg";
+import { runFfmpeg, ffprobe, seekFriendlyFlags, faststartFlags } from "./ffmpeg";
 
 export const NORM_VERSION = 1;
 
-const ENCODE_FLAGS = [
-  "-c:v", "libx264",
-  "-profile:v", "high",
-  "-level", "4.1",
-  "-preset", "medium",
-  "-crf", "20",
-  "-pix_fmt", "yuv420p",
-  "-video_track_timescale", "15360",
-];
+/**
+ * A function, not a const: the seek/faststart flags are imported, and
+ * spreading them into a module-level array had them arriving
+ * uninitialised depending on evaluation order.
+ */
+function encodeFlags(): string[] {
+  return [
+    "-c:v", "libx264",
+    "-profile:v", "high",
+    "-level", "4.1",
+    "-preset", "medium",
+    "-crf", "20",
+    "-pix_fmt", "yuv420p",
+    "-video_track_timescale", "15360",
+    // The normalized file is what the clip editor scrubs, so it has to be
+    // seekable, not merely playable — and it was the only encoder in the
+    // pipeline missing faststart too.
+    ...seekFriendlyFlags(),
+    ...faststartFlags(),
+  ];
+}
 
 const AUDIO_FLAGS = ["-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "128k"];
 
@@ -113,7 +125,7 @@ export async function normalizeClip(clipId: string): Promise<{
         "-y",
         ...inputArgs,
         "-vf", SCALE_FILTER,
-        ...ENCODE_FLAGS,
+        ...encodeFlags(),
         ...AUDIO_FLAGS,
         "-movflags", "+faststart",
         normLocal,
