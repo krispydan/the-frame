@@ -297,10 +297,23 @@ export default function CompanyDetailPage() {
         headers: { "Content-Type": "application/json" },
       });
       const result = await res.json();
-      if (result.newFields) {
+      if (!res.ok) {
+        toast.error("Google Maps enrichment failed", { description: result.error });
+      } else if (result.newFields?.length) {
         setNewlyEnrichedFields(result.newFields);
         // Auto-clear badges after 30s
         setTimeout(() => setNewlyEnrichedFields([]), 30000);
+        toast.success(`Enriched ${result.newFields.length} field${result.newFields.length === 1 ? "" : "s"} from Google Maps`, {
+          description: result.newFields.join(", "),
+        });
+      } else if (res.ok) {
+        toast.info("Matched on Google Maps — nothing new to fill in");
+      }
+      // Both of these silently flip the prospect to not_qualified, so say so.
+      if (result.permanentlyClosed) {
+        toast.warning("Google says this business is permanently closed — marked not qualified");
+      } else if (result.disqualified) {
+        toast.warning(`Out of scope per Google's categories — marked not qualified (${result.disqualified})`);
       }
       // Refresh company data
       const data = await (await fetch(`/api/v1/sales/prospects/${id}`)).json();
@@ -842,28 +855,33 @@ export default function CompanyDetailPage() {
             </DialogContent>
           </Dialog>
 
-          {/* Enrichment — single button. When already enriched, the
-              button still works as a Re-enrich affordance but shows a
-              small green dot to signal current state without a full
-              status pill competing with the action toolbar. */}
+          {/* Enrichment — Apify Google Maps, the same pipeline the nightly
+              sweeps run. When already enriched, the button still works as a
+              Re-enrich affordance but shows a small green dot to signal
+              current state without a full status pill competing with the
+              action toolbar. */}
           <Button
             variant="outline"
             size="sm"
             onClick={enrichCompany}
             disabled={enriching || company.enrichment_status === "queued"}
-            title={company.enrichment_status === "enriched" ? "Enriched — click to re-enrich" : "Run AI enrichment"}
+            title={
+              company.enrichment_status === "enriched"
+                ? "Enriched from Google Maps — click to re-enrich"
+                : "Pull phone, hours, rating and categories from Google Maps"
+            }
           >
             {enriching || company.enrichment_status === "queued" ? (
               <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Enriching...</>
             ) : company.enrichment_status === "failed" ? (
-              <><AlertCircle className="w-4 h-4 mr-1 text-red-500" /> Retry Enrich</>
+              <><AlertCircle className="w-4 h-4 mr-1 text-red-500" /> Retry Google Maps</>
             ) : company.enrichment_status === "enriched" ? (
               <>
                 <span className="w-2 h-2 rounded-full bg-green-500 mr-1.5 inline-block" />
-                Enrich
+                Google Maps
               </>
             ) : (
-              <><Sparkles className="w-4 h-4 mr-1" /> Enrich</>
+              <><MapPin className="w-4 h-4 mr-1" /> Google Maps</>
             )}
           </Button>
 
