@@ -377,10 +377,25 @@ export default function CompanyDetailPage() {
   }, [adjacent, searchParams, router]);
 
   const updateCompany = async (fields: Record<string, unknown>) => {
-    await fetch(`/api/v1/sales/prospects/${id}`, {
+    const res = await fetch(`/api/v1/sales/prospects/${id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(fields),
     });
+    const result = await res.json().catch(() => ({}));
+    // A status change the server declined used to come back as a plain
+    // success and the page simply redrew the old value — which is how
+    // "Not Qualified" looked like a dead button for weeks. Never let a
+    // refused write look like an applied one.
+    if (!res.ok) {
+      toast.error("Update failed", { description: result?.error });
+    } else if (result?.status && result.status.updated === false && fields.status) {
+      toast.warning(
+        `Status stayed ${COMPANY_STATUS_LABELS[result.status.from as keyof typeof COMPANY_STATUS_LABELS] || result.status.from}`,
+        { description: `The server declined the move to ${COMPANY_STATUS_LABELS[fields.status as keyof typeof COMPANY_STATUS_LABELS] || String(fields.status)}.` },
+      );
+    } else if (result?.status?.updated) {
+      toast.success(`Status set to ${COMPANY_STATUS_LABELS[result.status.to as keyof typeof COMPANY_STATUS_LABELS] || result.status.to}`);
+    }
     // Refresh
     const data = await (await fetch(`/api/v1/sales/prospects/${id}`)).json();
     setCompany(data.company);
@@ -417,7 +432,9 @@ export default function CompanyDetailPage() {
   };
 
   const changeStatus = async (status: string) => {
-    if (status === "rejected") {
+    // Disqualifying asks for a reason — an unexplained not_qualified is
+    // indistinguishable from a mis-click when someone reviews it later.
+    if (status === "not_qualified") {
       setStatusDropdown(false);
       setShowDisqualifyDialog(true);
       return;
@@ -427,7 +444,10 @@ export default function CompanyDetailPage() {
   };
 
   const confirmDisqualify = async () => {
-    await updateCompany({ status: "rejected", disqualify_reason: disqualifyReason || null });
+    // "rejected" is not a value in the CompanyStatus enum — it ranked as an
+    // unknown status, which shouldProgress() waves straight through, so this
+    // wrote a status nothing else in the system understands.
+    await updateCompany({ status: "not_qualified", disqualify_reason: disqualifyReason || null });
     setShowDisqualifyDialog(false);
     setDisqualifyReason("");
   };

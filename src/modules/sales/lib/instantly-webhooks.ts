@@ -320,8 +320,29 @@ async function handleInstantlyWebhook(
   const progression = companyStatusFor(eventType, match.companyId);
   let progressionMsg = "";
   if (progression) {
-    const r = progressCompanyStatus(match.companyId, progression, { source: "instantly" });
-    if (r.updated) progressionMsg = ` status:${r.from}→${r.to}`;
+    // A bounce forces: not_qualified ranks below qualified_lead, so the
+    // forward-only rule would otherwise discard exactly the signal we most
+    // want to record. companyStatusFor has already refused to disqualify
+    // anyone past outreach, so forcing here can only affect leads that never
+    // got a reply.
+    const force = eventType === "email_bounced";
+    const r = progressCompanyStatus(match.companyId, progression, { source: "instantly", force });
+    if (r.updated) {
+      progressionMsg = ` status:${r.from}→${r.to}`;
+      if (eventType === "email_bounced") {
+        // Record WHY. A not_qualified with no reason is indistinguishable
+        // from a mis-click when someone reviews the list later.
+        const reason = `Email bounced in Instantly${leadEmail ? ` (${leadEmail})` : ""}`;
+        sqlite
+          .prepare(
+            `UPDATE companies
+                SET disqualify_reason = COALESCE(NULLIF(disqualify_reason, ''), ?),
+                    updated_at = datetime('now')
+              WHERE id = ?`,
+          )
+          .run(reason, match.companyId);
+      }
+    }
   }
 
   // 7. Mark the audit row green.
@@ -356,6 +377,21 @@ function companyStatusFor(eventType: string, companyId: string): CompanyStatus |
       // Effectively a hard no — treat as not_interested. The
       // unsubscribe flag itself lives on contacts.opted_out / similar.
       return "not_interested";
+    case "email_bounced": {
+      // A bounce means the address is dead, so the lead can't be worked
+      // through email and shouldn't sit in the qualified pool being counted
+      // as reachable.
+      //
+      // But it disqualifies the ADDRESS, not the business: if someone already
+      // replied interested, or has bought, a later bounce on a stale address
+      // must not drag them backwards. So only disqualify leads that never got
+      // past outreach.
+      const current = (sqlite
+        .prepare("SELECT status FROM companies WHERE id = ?")
+        .get(companyId) as { status: string | null } | undefined)?.status ?? null;
+      const preOutreach = current === null || current === "prospect" || current === "qualified_lead";
+      return preOutreach ? "not_qualified" : null;
+    }
     case "campaign_completed": {
       // Ghosted ONLY if no reply ever landed for this company.
       const hasReply = sqlite
@@ -376,6 +412,52 @@ function companyStatusFor(eventType: string, companyId: string): CompanyStatus |
     default:
       return null;
   }
+}
+
+/**
+ * Backfill: disqualify leads that already bounced before the rule existed.
+ *
+ * Bounces have been recorded in campaign_leads.status and in the webhook
+ * audit table all along — they just never moved the company's status, so
+ * dead addresses have been sitting in the qualified pool counting as
+ * reachable. Same guard as the live path: only leads that never got past
+ * outreach, and an existing disqualify_reason is never overwritten.
+ */
+export function disqualifyBouncedLeads(limit = 500): {
+  scanned: number;
+  disqualified: Array<{ companyId: string; name: string; from: string | null }>;
+} {
+  const rows = sqlite
+    .prepare(
+      `SELECT c.id, c.name, c.status
+         FROM companies c
+        WHERE c.status IN ('prospect', 'qualified_lead')
+          AND (
+            EXISTS (SELECT 1 FROM campaign_leads cl
+                     WHERE cl.company_id = c.id AND cl.status = 'bounced')
+            OR EXISTS (SELECT 1 FROM activity_feed af
+                        WHERE af.entity_type = 'company' AND af.entity_id = c.id
+                          AND af.event_type = 'instantly_email_bounced')
+          )
+        LIMIT ?`,
+    )
+    .all(limit) as Array<{ id: string; name: string; status: string | null }>;
+
+  const disqualified: Array<{ companyId: string; name: string; from: string | null }> = [];
+  for (const r of rows) {
+    const res = progressCompanyStatus(r.id, "not_qualified", { source: "instantly", force: true });
+    if (!res.updated) continue;
+    sqlite
+      .prepare(
+        `UPDATE companies
+            SET disqualify_reason = COALESCE(NULLIF(disqualify_reason, ''), 'Email bounced in Instantly'),
+                updated_at = datetime('now')
+          WHERE id = ?`,
+      )
+      .run(r.id);
+    disqualified.push({ companyId: r.id, name: r.name, from: r.status });
+  }
+  return { scanned: rows.length, disqualified };
 }
 
 // Self-register at module load. The generic dispatcher route
