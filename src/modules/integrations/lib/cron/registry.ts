@@ -36,7 +36,6 @@ import { runShipmentRevenueRecognition } from "@/modules/finance/lib/shipment-re
 import { runDailyCogsPosting } from "@/modules/finance/lib/daily-cogs";
 import { syncFairePayouts } from "@/modules/integrations/lib/faire/payout-sync";
 import { runOrderDealSweep, runActivitySweep } from "@/modules/sales/lib/pipedrive-sync";
-import { enrichViaGoogleMaps } from "@/modules/sales/lib/google-maps-enrichment";
 import { recalculateAllHealthScores } from "@/modules/customers/lib/health-scoring";
 import { refreshReorderEstimates } from "@/modules/customers/lib/reorder-engine";
 import { calculateSellThrough } from "@/modules/inventory/lib/sell-through";
@@ -47,14 +46,6 @@ import { drainMetaLeads, reconcileMetaLeads } from "@/modules/integrations/lib/m
 import { runCapiSyncAndDrain } from "@/modules/integrations/lib/meta/capi";
 import { runMetaLeadCsvReminder } from "@/modules/integrations/lib/meta/daily-reminder";
 import { suppressBuyersFromMail } from "@/modules/sales/lib/shopify-wholesale-customer";
-import { captureListings, countRemaining, countControlListings } from "@/modules/sales/lib/gmaps-profile";
-
-/**
- * How many "called, never ordered" listings to capture as the control group.
- * Enough to stabilise a baseline share for every common category; past that
- * it's Apify spend buying a third decimal place we won't act on.
- */
-const CONTROL_SAMPLE_TARGET = 400;
 
 export type CronJob = {
   id: string;                         // stable, kebab-case
@@ -177,50 +168,27 @@ export const CRON_JOBS: CronJob[] = [
   // should wait until match quality is fixed and verified.
   //
   // refreshStaleCustomerListings() is still exported and can be run by hand.
-  // Initial backfill of the profiling cohorts. This used to run as a long
-  // admin POST and kept tripping Railway's proxy timeout — one Apify run for
-  // five stores is minutes, and a 20-store request is not a request. So it
-  // drains here instead, five at a time, and no-ops once both cohorts are in.
+  // ── Google Maps scraping: ALL automated paths are paused (2026-08-04) ──
   //
-  // Customers first: they're the signal. Controls (called, never ordered) are
-  // capped because they're only the denominator — a few hundred pins down the
-  // baseline share of every category, and the next 2,700 would just be spend.
-  {
-    id: "gmaps-profile-backfill",
-    // */5, not */3, because the Railway cron service ticks every FIVE minutes
-    // despite what docs/scheduled-jobs.md says. A "*/3" schedule only fires on
-    // the ticks whose minute is also divisible by 3 — :00, :15, :30, :45 — so
-    // it silently means "every 15 minutes". Match the tick cadence or the
-    // schedule you wrote is not the schedule you get.
-    schedule: "*/5 * * * *",
-    description: "Backfill Google Maps listings for the profiling cohorts — customers first, then a capped control sample",
-    handler: async () => {
-      const cohort = countRemaining("customers") > 0
-        ? "customers" as const
-        : countControlListings() < CONTROL_SAMPLE_TARGET
-          ? "called-no-order" as const
-          : null;
-      if (!cohort) return { done: true, controls: countControlListings() };
+  // Paused on Daniel's instruction after these jobs took production down.
+  // Each tick opened a 600-second Apify connection and held it; with the
+  // scheduler ticking every five minutes and Apify overrunning its own
+  // ceiling, runs stacked up against a container that never got a quiet
+  // moment. Eighteen hours of that produced five listings and an outage.
+  //
+  // Paused here:
+  //   gmaps-profile-backfill          (cohort backfill — this entry)
+  //   gmaps-refresh-customer-listings (periodic re-scrape — above)
+  //   apify-gmaps-enrichment          (prospect phone sweep — below)
+  //
+  // Still live, deliberately: the manual Enrich button on the prospect page.
+  // It's one call, a person is watching it, and it's how you check whether
+  // Apify has recovered without putting a scheduler behind it.
+  //
+  // Before re-enabling ANY of these: confirm Apify completes a single-store
+  // run in reasonable time, and fix the matcher returning wrong businesses.
+  // captureListings() and countRemaining() are still exported for manual runs.
 
-      // detail: false — the detail-page crawl only supplies hours and
-      // description; everything the profile is built from comes back without
-      // it. batchSize: 1 because Apify has been overrunning its own 300s
-      // ceiling for hours, and a batch loses every store in it when that
-      // happens — three-at-a-time turned one slow store into three lost ones
-      // and captured 5 listings in nine hours. One at a time is slower when
-      // Apify is healthy and is the difference between progress and none when
-      // it isn't. The salvage pass then doubles as a retry of that one store.
-      const res = await captureListings({ cohort, limit: 6, detail: false, batchSize: 1 });
-      // A tick that captured nothing because Apify timed out is a failure, and
-      // cron_runs is the only place anyone will look. Reporting "ok" here is
-      // how a backfill sits at zero for an hour without anyone noticing.
-      if (res.captured === 0 && res.errors.length > 0) {
-        throw new Error(`captured 0 of ${res.attempted}: ${res.errors[0].reason}`);
-      }
-      return { cohort, ...res };
-    },
-    fireAndForget: true,
-  },
   {
     id: "faire-interested-export",
     schedule: "0 14 * * 1",  // Mondays 14:00 UTC ≈ 7am PT
@@ -361,30 +329,14 @@ export const CRON_JOBS: CronJob[] = [
     // Bounded to 60/run so a daily tick stays well under Nominatim limits.
     handler: () => geocodeCompanies({ limit: 60, customersOnly: true }),
   },
-  {
-    // Drains the phone-less qualified-in-Instantly cohort overnight
-    // (or whenever this runs). Each tick processes a small batch via
-    // the Apify Google Maps actor — phones, hours, ratings, and
-    // permanently-closed status. Cohort filter already excludes
-    // dead-end statuses (not_interested / rejected / etc.) and any
-    // company already enriched, so this stops being a no-op when the
-    // cohort drains.
-    //
-    // Cost: ~$0.05-0.10 per tick. Bounded by total cohort size, not
-    // by tick count.
-    //
-    // Disable by toggling `enabled` to false in cron_job_state once
-    // we're satisfied with the cohort coverage:
-    //   curl -X POST .../api/admin/cron/jobs/apify-gmaps-enrichment \
-    //        -H "x-admin-key: jaxy2026" -d '{"enabled": false}'
-    id: "apify-gmaps-enrichment",
-    schedule: "*/10 * * * *",  // every 10 min
-    description: "Enrich phone-less prospects via Apify Google Maps in chunks of 50",
-    handler: () => enrichViaGoogleMaps({ limit: 50 }),
-    // fire-and-forget — each batch takes ~30-90s × up to 2 batches = 1-3 min
-    // server-side, well under cron-tick's CF timeout when async-dispatched.
-    fireAndForget: true,
-  },
+  // apify-gmaps-enrichment (the phone-less prospect sweep) is paused —
+  // 2026-08-04, same outage as the other Google Maps jobs. It is the third
+  // scheduled caller of the same Apify actor, and leaving it running would
+  // reintroduce exactly the load we just removed. Its cohort is currently
+  // empty anyway, so pausing costs nothing today.
+  //
+  // enrichViaGoogleMaps() is still used by the manual Enrich button and the
+  // AJM export, and remains callable from /api/admin/sales/enrich-via-apify.
 
   // ── PhoneBurner ──
   // We discovered PB DOES expose workspace-wide webhooks via the
@@ -472,14 +424,11 @@ export const CRON_JOBS: CronJob[] = [
     // cron settings UI when ready.
     defaultEnabled: false,
   },
-  {
-    id: "ajm-gmaps-enrich",
-    schedule: "*/10 * * * *",  // every 10 min during business hours
-    description: "Enrich the AJM cohort (ajm_2025) via Apify Google Maps — website, hours, rating, permanently-closed. Chips away ~40/run. Opt-in (Apify cost ~$2-3/1000).",
-    handler: () => enrichViaGoogleMaps({ ajm: true, limit: 40 }) as Promise<unknown>,
-    guard: () => isDuringBusinessHours(),
-    defaultEnabled: false,
-  },
+  // ajm-gmaps-enrich is paused too — 2026-08-04, same outage. It was already
+  // opt-in via defaultEnabled, but defaultEnabled only applies when no
+  // cron_job_state row exists, so "off by default" is not the same as off.
+  // Removing the entry is the only way to be sure it can't fire.
+
   {
     id: "pipedrive-activity-sweep",
     schedule: "*/20 * * * *",  // every 20 min during business hours
