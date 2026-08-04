@@ -287,6 +287,55 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN original_name TEXT"); } catc
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN gmaps_url TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN gmaps_subtypes TEXT"); } catch { /* exists */ } // JSON array
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN gmaps_description TEXT"); } catch { /* exists */ }
+
+// Full Google Maps listing per company, raw payload included.
+//
+// The existing enrichment keeps ten fields and discards the rest, which is
+// fine for filling a phone gap but useless for profiling: re-analysing a new
+// dimension would mean paying Apify again. Storing the raw JSON makes every
+// future question free.
+//
+// Columns mirror the compass~crawler-google-places SEARCH inputs
+// (categoryName, rating, review count, website presence, closure, geo) because
+// those are the knobs a lookalike search actually turns — profiling on
+// anything else produces insight that can't be acted on.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS gmaps_listings (
+    id TEXT PRIMARY KEY NOT NULL,
+    company_id TEXT NOT NULL,
+    place_id TEXT,
+    title TEXT,
+    category_name TEXT,
+    categories TEXT,          -- JSON array
+    sub_types TEXT,           -- JSON array
+    rating REAL,
+    review_count INTEGER,
+    price TEXT,
+    website TEXT,
+    has_website INTEGER,
+    phone TEXT,
+    address TEXT,
+    city TEXT,
+    state TEXT,
+    postal_code TEXT,
+    lat REAL,
+    lng REAL,
+    permanently_closed INTEGER,
+    temporarily_closed INTEGER,
+    opening_hours TEXT,       -- JSON
+    description TEXT,
+    maps_url TEXT,
+    image_count INTEGER,
+    raw TEXT,                 -- the whole actor payload
+    match_decision TEXT,      -- yes | no | uncertain
+    match_reason TEXT,
+    scraped_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_gmaps_listings_company ON gmaps_listings(company_id)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_gmaps_listings_place ON gmaps_listings(place_id)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_gmaps_listings_reviews ON gmaps_listings(review_count)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_gmaps_listings_category ON gmaps_listings(category_name)");
+} catch (e) { console.error("[db] gmaps_listings table error:", e); }
 // Run-by-run history of Apify enrichment batches. The work runs
 // fire-and-forget for batches > 100, so the operator can't read the
 // HTTP response — they read these rows instead. One row per
