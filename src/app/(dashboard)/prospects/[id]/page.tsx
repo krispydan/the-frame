@@ -35,6 +35,7 @@ import {
 } from "@/modules/sales/lib/company-status-display";
 import { ProspectActivityTimeline } from "@/modules/sales/components/prospect-activity-timeline";
 import { PipedrivePanel } from "@/modules/sales/components/pipedrive-panel";
+import { GmapsPanel } from "@/modules/sales/components/gmaps-panel";
 
 interface Company {
   id: string; name: string; type: string; website: string; domain: string;
@@ -1621,6 +1622,9 @@ export default function CompanyDetailPage() {
 
           {/* Pipedrive — deal system of record: live org/deals/activities + push + create-deal */}
           <PipedrivePanel companyId={company.id} companyName={company.name} />
+
+          {/* Google Maps — what kind of store this is, before anyone calls it */}
+          <GmapsPanel companyId={company.id} />
         </div>
 
         {/* Right sidebar — Activity dominant on top, then Notes, then Lead Source. */}

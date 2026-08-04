@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import { TIER_LABELS, TIER_COLORS, HEALTH_COLORS, type CustomerTier, type HealthStatus } from "@/modules/customers/schema";
 import { PipedrivePanel } from "@/modules/sales/components/pipedrive-panel";
+import { GmapsPanel } from "@/modules/sales/components/gmaps-panel";
 
 interface AccountData {
   id: string;
@@ -311,6 +312,9 @@ export function CustomerDetail({
 
       {/* Pipedrive — live CRM record (keyed by the underlying company id) */}
       <PipedrivePanel companyId={account.company_id} companyName={account.company_name} />
+
+      {/* What Google says the store actually is — captured on conversion */}
+      <GmapsPanel companyId={account.company_id} />
 
       {/* Reorder Prediction */}
       {reorderPrediction && reorderPrediction.avgDaysBetweenOrders && (
