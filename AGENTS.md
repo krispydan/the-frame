@@ -8,7 +8,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 **Always use the centralized scheduler**, not per-job Railway cron services.
 
-- One Railway cron service hits `/api/v1/cron/tick` every minute.
+- One Railway cron service hits `/api/v1/cron/tick` **every 5 minutes** (Railway's
+  floor — not every minute, whatever its config says). Schedules are only
+  evaluated on ticks, so `*/3` really means every 15 minutes. Write `*/5` when
+  you want frequent.
 - Add jobs by editing `src/modules/integrations/lib/cron/registry.ts` — one entry per job.
 - Full guide: [`docs/scheduled-jobs.md`](docs/scheduled-jobs.md).
 
