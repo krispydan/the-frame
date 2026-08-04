@@ -17,7 +17,7 @@ import { eq } from "drizzle-orm";
 import { db, sqlite } from "@/lib/db";
 import { videoClips, type VideoClip } from "@/modules/marketing/schema";
 import { materializeVideo, videoScratchPath, rawClipPath, saveVideo } from "@/lib/storage/videos";
-import { runFfmpeg } from "./ffmpeg";
+import { runFfmpeg, seekFriendlyFlags } from "./ffmpeg";
 import { normalizeClip } from "./normalize";
 
 export interface TrimResult {
@@ -60,6 +60,7 @@ export async function trimClip(clipId: string, startSec: number, endSec: number)
       "-i", src.path,
       "-t", (endSec - startSec).toFixed(3),
       "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+      ...seekFriendlyFlags(),
       "-pix_fmt", "yuv420p",
       "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "160k",
       "-movflags", "+faststart",
