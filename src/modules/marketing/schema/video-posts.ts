@@ -61,6 +61,12 @@ export const videoPosts = sqliteTable("marketing_video_posts", {
   recipeId: text("recipe_id"),
   /** JSON string[] of clip ids — ORDER MATTERS (it's the edit). */
   clipIds: text("clip_ids").notNull(),
+  /**
+   * Per-POSITION trims, index-parallel to clipIds: JSON array of
+   * null | {inSec,outSec}. Keyed by position, not clip id, because one
+   * clip can appear twice in a sequence with different in/out points.
+   */
+  clipTrims: text("clip_trims"),
   status: text("status", {
     enum: ["queued", "rendering", "rendered", "ready", "posted", "failed", "discarded"],
   }).notNull().default("queued"),

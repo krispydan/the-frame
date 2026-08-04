@@ -25,6 +25,7 @@ import { ClipPreviewDialog } from "@/modules/marketing/components/videos/clip-pr
 import { ClipEditor } from "@/modules/marketing/components/videos/clip-editor";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import { lintRetention, RETENTION_OPTIMIZER_FEEDBACK } from "@/modules/marketing/lib/video/retention-lint";
+import { effectiveDuration } from "@/modules/marketing/lib/video/clip-trims";
 import {
   ArrowLeft, Clapperboard, Gauge, Loader2, MessageSquare, Plus, RefreshCw, Send, X,
 } from "lucide-react";
@@ -49,6 +50,8 @@ type PostClip = {
   posterUrl?: string | null;
   previewUrl?: string | null;
   category?: string | null;
+  /** Non-destructive in/out for this position, applied at render. */
+  trim?: { inSec: number; outSec: number } | null;
 };
 
 type Post = {
@@ -192,14 +195,22 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
 
   const clipsDirty = useMemo(() => {
     if (!post) return false;
-    const a = post.clips.map((c) => c.id).join("|");
-    const b = clipSeq.map((c) => c.id).join("|");
-    return a !== b;
+    // Signature covers the trim as well as identity/order — a changed
+    // in/out point is an unsaved edit just as much as a reorder is.
+    const sig = (c: PostClip) =>
+      `${c.id}@${c.trim ? `${c.trim.inSec}-${c.trim.outSec}` : "full"}`;
+    return post.clips.map(sig).join("|") !== clipSeq.map(sig).join("|");
   }, [post, clipSeq]);
 
-  const totalDuration = useMemo(
-    () => clipSeq.reduce((s, c) => s + (c.durationSec ?? 0), 0),
+  // Trimmed length, not raw length — the retention lint and the header
+  // readout describe the video that will actually render.
+  const clipDurations = useMemo(
+    () => clipSeq.map((c) => effectiveDuration(c.durationSec ?? null, c.trim ?? null)),
     [clipSeq],
+  );
+  const totalDuration = useMemo(
+    () => clipDurations.reduce((s, d) => s + d, 0),
+    [clipDurations],
   );
 
   // Deterministic retention checks on the live edit (engine #5).
@@ -209,15 +220,23 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
         hook: instr.hook,
         captionLength: caption.length,
         onScreenTextCount: instr.onScreenText?.length ?? 0,
-        clipDurations: clipSeq.map((c) => c.durationSec ?? 0),
+        clipDurations,
         totalDurationSec: totalDuration,
       }),
-    [instr.hook, instr.onScreenText, caption, clipSeq, totalDuration],
+    [instr.hook, instr.onScreenText, caption, clipDurations, totalDuration],
   );
 
   const saveClips = async () => {
     if (!clipsDirty || clipSeq.length === 0) return;
-    const ok = await patch({ clipIds: clipSeq.map((c) => c.id) }, "Clip sequence saved — re-rendering in the background");
+    // Trims travel WITH the sequence, index-parallel — sent apart they
+    // could drift and cut the wrong position.
+    const ok = await patch(
+      {
+        clipIds: clipSeq.map((c) => c.id),
+        clipTrims: clipSeq.map((c) => c.trim ?? null),
+      },
+      "Clip sequence saved — re-rendering in the background",
+    );
     if (ok) setPickerOpen(false);
   };
 

@@ -23,8 +23,9 @@ import {
   videoStat,
   renderPath,
 } from "@/lib/storage/videos";
-import { runFfmpeg, ffprobe } from "./ffmpeg";
+import { runFfmpeg, ffprobe, cutAccurate } from "./ffmpeg";
 import { NORM_VERSION } from "./normalize";
+import { parseClipTrims, isNoOpTrim, effectiveDuration } from "./clip-trims";
 
 /** Renders bigger than this are almost certainly a bug (30s @ ~12MB typical). */
 const SIZE_WARN_BYTES = 50 * 1024 * 1024;
@@ -117,22 +118,42 @@ export async function renderPost(postId: string): Promise<RenderResult> {
       clipsById.set(id, clip);
     }
 
+    // Per-position trims (see clip-trims.ts). Index-parallel to clipIds,
+    // so the same clip can appear twice with different in/out points.
+    const trims = parseClipTrims(post.clipTrims, clipIds.length);
+
     // Pull each segment (audible or muted variant) to local disk for the
     // concat demuxer. Materialize is a no-op copy on the volume; a download
     // on R2. Runs sequentially so the concat list order is deterministic.
+    //
+    // A TRIMMED position is cut to its own scratch file first. The concat
+    // demuxer does support inpoint/outpoint, but under -c:v copy those
+    // snap to the nearest keyframe — up to half a second off, which makes
+    // a deliberate trim land somewhere the operator didn't choose. Cutting
+    // with an explicit re-encode is frame-accurate. Untrimmed positions
+    // are untouched, so the common case keeps its fast stream-copy path
+    // and only trimmed clips pay for an encode.
     const sources: string[] = [];
-    for (const id of clipIds) {
+    for (const [i, id] of clipIds.entries()) {
       const clip = clipsById.get(id)!;
       const useOriginalAudio = audibleIds.has(id) && clip.audioMode === "keep";
       const m = await materializeVideo(useOriginalAudio ? clip.normalizedPath! : clip.mutedPath!);
       cleanups.push(m.cleanup);
-      sources.push(m.path);
+
+      const trim = trims[i];
+      if (trim && !isNoOpTrim(trim, clip.durationSec)) {
+        const cut = scratch(`${postId}-trim-${i}.mp4`);
+        await cutAccurate(m.path, cut, trim.inSec, trim.outSec);
+        sources.push(cut);
+      } else {
+        sources.push(m.path);
+      }
     }
     const fullySilent = clipIds.every(
       (id) => !(audibleIds.has(id) && clipsById.get(id)!.audioMode === "keep"),
     );
     const expectedDuration = clipIds.reduce(
-      (sum, id) => sum + (clipsById.get(id)!.durationSec ?? 0),
+      (sum, id, i) => sum + effectiveDuration(clipsById.get(id)!.durationSec, trims[i]),
       0,
     );
 
