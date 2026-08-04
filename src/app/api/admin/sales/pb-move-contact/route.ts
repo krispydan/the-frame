@@ -42,16 +42,20 @@ export async function POST(req: NextRequest) {
   for (const acct of accounts) {
     const attempt: (typeof attempts)[number] = { rep: acct.rep, found: false };
     try {
-      const before = await acct.client.getContact(contactId);
+      const raw = await acct.client.getContact(contactId);
       attempt.found = true;
-      // Compact useful fields for the response.
-      const rec = before as Record<string, unknown>;
+      // PB wraps single-contact responses in various envelopes; unwrap.
+      const rec = ((raw as Record<string, unknown>)?.contact
+        ?? (raw as Record<string, unknown>)?.data
+        ?? raw) as Record<string, unknown>;
       const pe = rec.primary_email as { email_address?: unknown } | string | undefined;
       const email = typeof pe === "string" ? pe : (pe?.email_address as string) || null;
       attempt.before = {
-        user_id: rec.user_id ?? rec.id,
-        first_name: rec.first_name,
-        last_name: rec.last_name,
+        top_level_keys: Object.keys((raw as Record<string, unknown>) || {}),
+        unwrapped_keys: Object.keys(rec || {}),
+        user_id: rec.user_id ?? rec.id ?? null,
+        first_name: rec.first_name ?? null,
+        last_name: rec.last_name ?? null,
         email,
         category_id: rec.category_id ?? null,
         owner_id: rec.owner_id ?? null,
