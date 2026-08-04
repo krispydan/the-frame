@@ -243,6 +243,74 @@ export async function geocodeDiagnostic(): Promise<{
   }
 }
 
+export interface GeocodeFailureBreakdown {
+  totalUnmapped: number;
+  summary: Array<{ reason: string; label: string; count: number }>;
+  examples: Record<string, Array<Record<string, string | null>>>;
+}
+
+/**
+ * Explain WHY the still-unmapped customer companies (latitude IS NULL) couldn't
+ * be geocoded, by inspecting the address data actually on file. Buckets mirror
+ * buildQuery / buildCoarseQuery above.
+ */
+export function getGeocodeFailureBreakdown(): GeocodeFailureBreakdown {
+  const rows = sqlite.prepare(`
+    SELECT c.id, c.name, c.address, c.city, c.state, c.zip, c.country,
+           c.geocoded_at AS geocodedAt
+    FROM companies c
+    JOIN customer_accounts ca ON ca.company_id = c.id
+    WHERE c.latitude IS NULL
+    ORDER BY ca.lifetime_value DESC
+  `).all() as Array<{
+    id: string; name: string;
+    address: string | null; city: string | null; state: string | null;
+    zip: string | null; country: string | null; geocodedAt: string | null;
+  }>;
+
+  const t = (v: string | null) => (v ? v.trim() : "");
+  const classify = (r: (typeof rows)[number]): string => {
+    if (!r.geocodedAt) return "not_attempted";
+    const hasAddress = !!t(r.address);
+    const hasCity = !!t(r.city);
+    const hasState = !!t(r.state);
+    const hasAny = hasAddress || hasCity || hasState || !!t(r.zip) || !!t(r.country);
+    if (!hasAny) return "no_location_data";
+    const queryable = hasAddress || hasCity || hasState;
+    if (!queryable) return "insufficient";
+    return "unresolved";
+  };
+
+  const REASON_LABELS: Record<string, string> = {
+    not_attempted: "Not geocoded yet — click Geocode/Retry",
+    no_location_data: "No address on file at all",
+    insufficient: "Only partial data (e.g. zip or country only) — not enough to place",
+    unresolved: "Address exists but the geocoder couldn't match it (bad/freeform/international)",
+  };
+
+  const summaryMap: Record<string, number> = {};
+  const examples: Record<string, Array<Record<string, string | null>>> = {};
+  for (const r of rows) {
+    const reason = classify(r);
+    summaryMap[reason] = (summaryMap[reason] ?? 0) + 1;
+    (examples[reason] ??= []);
+    if (examples[reason].length < 10) {
+      examples[reason].push({
+        name: r.name,
+        address: r.address, city: r.city, state: r.state, zip: r.zip, country: r.country,
+      });
+    }
+  }
+
+  return {
+    totalUnmapped: rows.length,
+    summary: Object.entries(summaryMap)
+      .map(([reason, count]) => ({ reason, label: REASON_LABELS[reason] ?? reason, count }))
+      .sort((a, b) => b.count - a.count),
+    examples,
+  };
+}
+
 /** Count of customer companies still needing geocoding (for progress UI). */
 export function countUngeocodedCustomers(): number {
   return (sqlite.prepare(`
