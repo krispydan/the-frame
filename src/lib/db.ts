@@ -194,6 +194,11 @@ try { sqlite.exec("ALTER TABLE marketing_video_clips ADD COLUMN split_reviewed_a
 try { sqlite.exec("ALTER TABLE marketing_video_clips ADD COLUMN scene_cuts_json TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX IF NOT EXISTS idx_video_clip_duration ON marketing_video_clips (duration_sec)"); } catch { /* exists */ }
 
+// Non-destructive trims: JSON array index-parallel to a post's clip_ids,
+// each entry null or {inSec,outSec}. Applied at render rather than baked
+// into a new clip file, so trimming is instant and reversible.
+try { sqlite.exec("ALTER TABLE marketing_video_posts ADD COLUMN clip_trims TEXT"); } catch { /* exists */ }
+
 // Reviewer notes on catalog images (SKU identifier) — separate from
 // alt_text, which feeds marketplace exports and must stay clean.
 try { sqlite.exec("ALTER TABLE catalog_images ADD COLUMN notes TEXT"); } catch { /* exists */ }

@@ -174,3 +174,41 @@ export function seekFriendlyFlags(): string[] {
 export function faststartFlags(): string[] {
   return ["-movflags", "+faststart"];
 }
+
+/**
+ * Cut `[inSec, outSec)` out of an already-normalized clip, frame-accurately.
+ *
+ * Both concat pipelines (social posts and product videos) apply
+ * non-destructive trims this way, so the cut lives here rather than being
+ * written twice.
+ *
+ * Why re-encode rather than lean on the concat demuxer's inpoint/outpoint:
+ * under `-c:v copy` those snap to the nearest keyframe, up to half a
+ * second away, so a deliberate in-point lands somewhere the operator
+ * didn't choose. `-ss` BEFORE `-i` still seeks fast (ffmpeg jumps to the
+ * preceding keyframe and decodes forward, discarding); the re-encode is
+ * what makes the boundary exact.
+ *
+ * The output profile matches normalize.ts exactly, so the cut still
+ * stream-copy concats with its untrimmed neighbours.
+ */
+export async function cutAccurate(
+  srcPath: string,
+  outPath: string,
+  inSec: number,
+  outSec: number,
+): Promise<void> {
+  await runFfmpeg([
+    "-y",
+    "-ss", inSec.toFixed(3),
+    "-i", srcPath,
+    "-t", (outSec - inSec).toFixed(3),
+    "-c:v", "libx264", "-profile:v", "high", "-level", "4.1",
+    "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+    "-video_track_timescale", "15360",
+    ...seekFriendlyFlags(),
+    "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "128k",
+    ...faststartFlags(),
+    outPath,
+  ]);
+}

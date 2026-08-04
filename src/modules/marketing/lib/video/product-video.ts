@@ -25,7 +25,13 @@ import {
   videoScratchPath,
   videoUrl,
 } from "@/lib/storage/videos";
-import { runFfmpeg, ffprobe } from "./ffmpeg";
+import { runFfmpeg, ffprobe, cutAccurate } from "./ffmpeg";
+import {
+  parseClipTrims,
+  serializeClipTrims,
+  isNoOpTrim,
+  type ClipTrim,
+} from "./clip-trims";
 
 /** Keep PDP videos tight — shoppers bounce, and Faire tiles are small. */
 export const MAX_CLIPS = 5;
@@ -37,6 +43,8 @@ export interface ProductVideoRow {
   productId: string;
   productName: string;
   clipIds: string[];
+  /** Index-parallel to clipIds; null where the clip runs in full. */
+  clipTrims: Array<ClipTrim | null>;
   status: ProductVideoStatus;
   filePath: string | null;
   posterPath: string | null;
@@ -80,6 +88,10 @@ function ensureTable(): void {
       sqlite.exec(`ALTER TABLE marketing_product_videos ADD COLUMN ${col} TEXT`);
     } catch { /* already there */ }
   }
+  // Non-destructive trims, index-parallel to clip_ids (see clip-trims.ts).
+  try {
+    sqlite.exec(`ALTER TABLE marketing_product_videos ADD COLUMN clip_trims TEXT`);
+  } catch { /* already there */ }
   ensured = true;
 }
 
@@ -228,6 +240,8 @@ export interface ClipDetail {
   isProductShot: boolean;
   posterUrl: string | null;
   previewUrl: string | null;
+  /** Set only on clips already in the sequence — the saved in/out points. */
+  trim?: { inSec: number; outSec: number } | null;
 }
 
 /**
@@ -288,8 +302,14 @@ export function getProductVideo(productId: string): {
   const video = listProductVideos().find((v) => v.productId === productId) ?? null;
   const available = availableClipsForProduct(productId);
   const byId = new Map(available.map((c) => [c.id, c]));
-  // The sequence as saved — order matters, it IS the edit.
-  const inVideo = (video?.clipIds ?? []).map((id) => byId.get(id)).filter((c): c is ClipDetail => Boolean(c));
+  // The sequence as saved — order matters, it IS the edit. Each entry
+  // carries its own trim, so the same clip can sit in the sequence twice
+  // with different in/out points.
+  const inVideo: ClipDetail[] = [];
+  (video?.clipIds ?? []).forEach((id, i) => {
+    const clip = byId.get(id);
+    if (clip) inVideo.push({ ...clip, trim: video?.clipTrims[i] ?? null });
+  });
   // Suggest a sequence for a product that hasn't been built yet.
   const clips = inVideo.length > 0
     ? inVideo
@@ -305,8 +325,16 @@ export function getProductVideo(productId: string): {
  *
  * `clipIdsOverride` builds a hand-edited sequence exactly as given (the
  * edit page); omitted, the deterministic selector chooses.
+ *
+ * `trimsOverride` is index-parallel to `clipIdsOverride` — the same
+ * non-destructive in/out points the social renderer applies. It's only
+ * meaningful alongside an explicit sequence; the selector never trims.
  */
-export async function buildProductVideo(productId: string, clipIdsOverride?: string[]): Promise<BuildResult> {
+export async function buildProductVideo(
+  productId: string,
+  clipIdsOverride?: string[],
+  trimsOverride?: Array<ClipTrim | null>,
+): Promise<BuildResult> {
   ensureTable();
   const product = sqlite
     .prepare(`SELECT id, name FROM catalog_products WHERE id = ?`)
@@ -330,7 +358,12 @@ export async function buildProductVideo(productId: string, clipIdsOverride?: str
   }
 
   const clipIds = picked.map((c) => c.id);
-  upsert(productId, { clipIds, status: "rendering", error: null });
+  // resolveOverride drops ids that aren't valid for this product, so the
+  // surviving sequence can be shorter than what the caller sent. Re-align
+  // the trims by id-and-order rather than reusing the caller's indices,
+  // which would otherwise slide onto the wrong clips.
+  const trims = alignTrims(clipIdsOverride, trimsOverride, clipIds);
+  upsert(productId, { clipIds, clipTrims: trims, status: "rendering", error: null });
 
   const cleanups: Array<() => Promise<void>> = [];
   const scratch = (name: string) => {
@@ -341,16 +374,26 @@ export async function buildProductVideo(productId: string, clipIdsOverride?: str
 
   try {
     // Always the MUTED variant — the master is silent by design.
+    // A trimmed position is cut to scratch first (frame-accurate, see
+    // cutAccurate); untrimmed ones keep the stream-copy fast path.
     const sources: string[] = [];
-    for (const id of clipIds) {
+    for (const [i, id] of clipIds.entries()) {
       const clip = sqlite
-        .prepare(`SELECT muted_path AS mutedPath, normalized_path AS normalizedPath, file_name AS fileName FROM marketing_video_clips WHERE id = ?`)
-        .get(id) as { mutedPath: string | null; normalizedPath: string | null; fileName: string } | undefined;
+        .prepare(`SELECT muted_path AS mutedPath, normalized_path AS normalizedPath, file_name AS fileName, duration_sec AS durationSec FROM marketing_video_clips WHERE id = ?`)
+        .get(id) as { mutedPath: string | null; normalizedPath: string | null; fileName: string; durationSec: number | null } | undefined;
       const rel = clip?.mutedPath || clip?.normalizedPath;
       if (!rel) throw new Error(`Clip ${clip?.fileName ?? id} has no normalized video`);
       const m = await materializeVideo(rel);
       cleanups.push(m.cleanup);
-      sources.push(m.path);
+
+      const trim = trims[i];
+      if (trim && !isNoOpTrim(trim, clip?.durationSec ?? null)) {
+        const cut = scratch(`pv-${productId}-trim-${i}.mp4`);
+        await cutAccurate(m.path, cut, trim.inSec, trim.outSec);
+        sources.push(cut);
+      } else {
+        sources.push(m.path);
+      }
     }
 
     const list = scratch(`pv-${productId}.txt`);
@@ -374,6 +417,7 @@ export async function buildProductVideo(productId: string, clipIdsOverride?: str
 
     upsert(productId, {
       clipIds,
+      clipTrims: trims,
       status: "ready",
       filePath: fileRel,
       posterPath: posterRel,
@@ -384,17 +428,48 @@ export async function buildProductVideo(productId: string, clipIdsOverride?: str
     return { ok: true, productId, clipIds, durationSec: probe.durationSec };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    upsert(productId, { clipIds, status: "failed", error: message.slice(0, 2000) });
+    upsert(productId, { clipIds, clipTrims: trims, status: "failed", error: message.slice(0, 2000) });
     throw e;
   } finally {
     for (const c of cleanups) await c();
   }
 }
 
+/**
+ * Re-key trims from the sequence the CALLER sent onto the sequence that
+ * actually survived validation.
+ *
+ * resolveOverride silently drops clips that aren't valid for this product,
+ * so positions shift. Matching by (id, nth occurrence of that id) keeps a
+ * trim with its clip even when an earlier one was dropped, and still lets
+ * the same clip appear twice with different in/out points.
+ */
+function alignTrims(
+  sentIds: string[] | undefined,
+  sentTrims: Array<ClipTrim | null> | undefined,
+  finalIds: string[],
+): Array<ClipTrim | null> {
+  const out = new Array<ClipTrim | null>(finalIds.length).fill(null);
+  if (!sentIds || !sentTrims || sentTrims.length !== sentIds.length) return out;
+
+  // id → the trims sent for it, in order.
+  const queued = new Map<string, Array<ClipTrim | null>>();
+  sentIds.forEach((id, i) => {
+    const list = queued.get(id) ?? [];
+    list.push(sentTrims[i] ?? null);
+    queued.set(id, list);
+  });
+  finalIds.forEach((id, i) => {
+    out[i] = queued.get(id)?.shift() ?? null;
+  });
+  return out;
+}
+
 function upsert(
   productId: string,
   v: {
     clipIds: string[];
+    clipTrims?: Array<ClipTrim | null>;
     status: ProductVideoStatus;
     filePath?: string | null;
     posterPath?: string | null;
@@ -407,10 +482,11 @@ function upsert(
   sqlite
     .prepare(
       `INSERT INTO marketing_product_videos
-         (product_id, clip_ids, status, file_path, poster_path, duration_sec, size_bytes, error, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+         (product_id, clip_ids, clip_trims, status, file_path, poster_path, duration_sec, size_bytes, error, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(product_id) DO UPDATE SET
          clip_ids = excluded.clip_ids,
+         clip_trims = excluded.clip_trims,
          status = excluded.status,
          file_path = COALESCE(excluded.file_path, marketing_product_videos.file_path),
          poster_path = COALESCE(excluded.poster_path, marketing_product_videos.poster_path),
@@ -422,6 +498,7 @@ function upsert(
     .run(
       productId,
       JSON.stringify(v.clipIds),
+      serializeClipTrims(v.clipTrims ?? []),
       v.status,
       v.filePath ?? null,
       v.posterPath ?? null,
@@ -516,10 +593,13 @@ export function listProductVideos(): ProductVideoRow[] {
      ORDER BY pv.updated_at DESC
   `).all() as Array<Record<string, unknown>>;
 
-  return rows.map((r) => ({
+  return rows.map((r) => {
+    const clipIds = JSON.parse(String(r.clip_ids || "[]")) as string[];
+    return {
     productId: String(r.product_id),
     productName: String(r.productName),
-    clipIds: JSON.parse(String(r.clip_ids || "[]")) as string[],
+    clipIds,
+    clipTrims: parseClipTrims(r.clip_trims as string | null, clipIds.length),
     status: (r.status as ProductVideoStatus) ?? "pending",
     filePath: (r.file_path as string) ?? null,
     posterPath: (r.poster_path as string) ?? null,
@@ -535,5 +615,6 @@ export function listProductVideos(): ProductVideoRow[] {
     shopifyWholesaleAt: (r.shopify_wholesale_at as string) ?? null,
     error: (r.error as string) ?? null,
     updatedAt: (r.updated_at as string) ?? null,
-  }));
+    };
+  });
 }

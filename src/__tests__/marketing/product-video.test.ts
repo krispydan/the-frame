@@ -171,4 +171,44 @@ describe("buildProductVideo", () => {
     expect(again.ok).toBe(true);
     expect(listProductVideos().filter((r) => r.productId === "p1")).toHaveLength(1);
   }, 120_000);
+
+  it("applies non-destructive trims at build time (real ffmpeg)", async () => {
+    addClip("show", "c-show", 2, ["s1"], "clips/muted/a.mp4");
+    addClip("det", "c-detail", 2, ["s1"], "clips/muted/b.mp4");
+
+    const full = await buildProductVideo("p1", ["show", "det"]);
+    expect(full.ok).toBe(true);
+    const fullDuration = listProductVideos().find((r) => r.productId === "p1")!.durationSec!;
+
+    // Cut a second out of the middle of the second clip.
+    const trimmed = await buildProductVideo("p1", ["show", "det"], [null, { inSec: 0.5, outSec: 1.5 }]);
+    expect(trimmed.ok).toBe(true);
+
+    const row = listProductVideos().find((r) => r.productId === "p1")!;
+    expect(row.status).toBe("ready");
+    // 2s + 2s → 2s + 1s. Generous tolerance: the point is that the trim
+    // reached ffmpeg at all, not the exact float.
+    expect(row.durationSec!).toBeLessThan(fullDuration - 0.5);
+    // Round-tripped so the editor reopens on the operator's cut.
+    expect(row.clipTrims).toEqual([null, { inSec: 0.5, outSec: 1.5 }]);
+  }, 180_000);
+
+  it("keeps a trim with its clip when an invalid one is dropped", async () => {
+    addClip("show", "c-show", 2, ["s1"], "clips/muted/a.mp4");
+    addClip("det", "c-detail", 2, ["s1"], "clips/muted/b.mp4");
+
+    // "ghost" belongs to no product, so resolveOverride drops it and every
+    // later position shifts left. The trim must follow "det", not slide
+    // onto whatever now sits at index 2.
+    const res = await buildProductVideo(
+      "p1",
+      ["show", "ghost", "det"],
+      [null, null, { inSec: 0.5, outSec: 1.5 }],
+    );
+    expect(res.ok).toBe(true);
+    expect(res.clipIds).toEqual(["show", "det"]);
+
+    const row = listProductVideos().find((r) => r.productId === "p1")!;
+    expect(row.clipTrims).toEqual([null, { inSec: 0.5, outSec: 1.5 }]);
+  }, 180_000);
 });

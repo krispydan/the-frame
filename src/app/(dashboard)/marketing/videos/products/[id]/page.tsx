@@ -33,6 +33,8 @@ type Clip = {
   isProductShot: boolean;
   posterUrl: string | null;
   previewUrl: string | null;
+  /** Non-destructive in/out points, applied when the video is built. */
+  trim?: { inSec: number; outSec: number } | null;
 };
 type Video = {
   productId: string;
@@ -101,8 +103,10 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
   }, [detail?.productName, setOverride]);
 
   const dirty = useMemo(() => {
-    const a = (detail?.clips ?? []).map((c) => c.id).join("|");
-    return a !== seq.map((c) => c.id).join("|");
+    // Signature covers the trim as well as identity/order — a moved in/out
+    // point is an unsaved edit just as much as a reorder is.
+    const sig = (c: Clip) => `${c.id}@${c.trim ? `${c.trim.inSec}-${c.trim.outSec}` : "full"}`;
+    return (detail?.clips ?? []).map(sig).join("|") !== seq.map(sig).join("|");
   }, [detail, seq]);
 
   const hasProductShot = useMemo(() => seq.some((c) => c.isProductShot), [seq]);
@@ -237,7 +241,15 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
           <ClipEditor
             clips={seq}
             onChange={setSeq}
-            onSave={() => patch({ clipIds: seq.map((c) => c.id) }, "Rebuilt")}
+            onSave={() =>
+              patch(
+                {
+                  clipIds: seq.map((c) => c.id),
+                  clipTrims: seq.map((c) => c.trim ?? null),
+                },
+                "Rebuilt",
+              )
+            }
             dirty={dirty}
             saving={saving}
             saveLabel="Save & rebuild"
