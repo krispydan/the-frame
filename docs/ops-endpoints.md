@@ -32,19 +32,42 @@ The shared logic behind these lives in libs (`address-backfill.ts`,
 ## Reachability from Claude Code's sandbox
 
 The sandbox has open outbound internet (Shopify, Faire, Nominatim, Railway API
-all reachable). The **only** blocked host is `theframe.getjaxy.com` —
-**Cloudflare in front of `getjaxy.com` drops the proxy's datacenter IP** (verified:
-tunnel + TLS complete, then zero response bytes; every other host answers). To
-let tooling reach these endpoints, do ONE of:
+all reachable). The **only** unreachable target is the app's custom domain
+`theframe.getjaxy.com`. It resolves straight to Railway (69.46.46.67 — **not
+Cloudflare**), and requests to that Host **hang** (TLS completes, then zero
+response bytes). The proxy IP is NOT edge-blocked: a request to a
+`*.up.railway.app` Host on the same IP returns instantly, so the hang is
+specific to Railway's routing of the custom domain — not a WAF/bot block. To let
+tooling reach these endpoints, do ONE of:
 
-- **R1 (recommended):** Cloudflare rule — requests to `/api/admin/ops/*` carrying
-  the `x-ops-key` header skip Bot Fight Mode / the IP filter.
-- **R2:** provide the service's real `*.up.railway.app` domain (Railway →
-  service → Settings → Domains) if it isn't Cloudflare-fronted.
-- **R3:** a project-scoped Railway token for server-side execution (broadest).
+- **R2 (preferred):** use the service's Railway-generated `*.up.railway.app`
+  public domain (Railway → service → Settings → Networking → Public Networking).
+  Use the domain for THIS service — a stale/wrong one returns
+  `{"message":"Application not found"}`. This origin skips the custom-domain path
+  that hangs.
+- **R3:** a project-scoped Railway token for server-side execution (`railway
+  run`), bypassing the edge entirely.
 
-## Setup checklist
+(There is no Cloudflare in front of this domain, so a Cloudflare rule is not the fix.)
 
-1. Generate a strong random `OPS_TOKEN`; set it as a Railway env var.
-2. Pick a reachability route (R1/R2/R3) above.
-3. Verify: `GET /api/admin/ops` with the header returns `{ ok: true, ... }`.
+## Setup checklist / status
+
+1. ✅ `OPS_TOKEN` is set as a **Railway env var** (server checks against it).
+2. ✅ `OPS_TOKEN` is set in the **Claude Code environment** variables, so it's
+   available to Claude sessions as `$OPS_TOKEN` (never printed/committed/chatted).
+3. ⏳ **Reachability route not yet chosen** (R2/R3 above). Until one is in
+   place, `theframe.getjaxy.com` times out from the sandbox and the endpoints
+   can only be driven from the browser. Preferred: R2 (the service's real
+   `*.up.railway.app` public domain).
+4. Verify once a route exists: from a Claude session,
+   `curl --cacert /root/.ccr/ca-bundle.crt -H "x-ops-key: $OPS_TOKEN" <origin>/api/admin/ops`
+   should return `{ ok: true, ... }`.
+
+## For future Claude sessions
+
+`AGENTS.md` → "Running things against production (ops endpoints)" is the
+canonical pointer. The short version: reference `$OPS_TOKEN` from the shell,
+call `/api/admin/ops/*` with `x-ops-key`, add `?confirm=1` for writes, and
+route curl through `/root/.ccr/ca-bundle.crt`. Put new ops logic in a lib and
+expose it from both the `/api/v1/*` (session) and `/api/admin/ops/*` (token)
+routes.
