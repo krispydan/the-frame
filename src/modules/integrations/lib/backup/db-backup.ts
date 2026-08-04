@@ -25,6 +25,7 @@ import { createGzip } from "zlib";
 import { pipeline } from "stream/promises";
 import { sqlite } from "@/lib/db";
 import { isR2Configured, r2PutFile, r2List, r2Delete } from "@/lib/storage/r2";
+import { notifyBackupFailed } from "@/modules/integrations/lib/slack/notifications";
 
 const BACKUP_PREFIX = "db/";
 const DEFAULT_RETENTION_DAYS = 30;
@@ -58,16 +59,15 @@ export interface BackupResult {
 export async function runDatabaseBackup(): Promise<BackupResult> {
   const days = retentionDays();
   if (!isR2Configured()) {
-    return { ok: false, retentionDays: days, pruned: [], skipped: "R2 not configured" };
+    const skipped = "R2 not configured";
+    await notifyBackupFailed({ detail: skipped }).catch(() => {});
+    return { ok: false, retentionDays: days, pruned: [], skipped };
   }
   const bucket = backupBucket();
   if (!bucket) {
-    return {
-      ok: false,
-      retentionDays: days,
-      pruned: [],
-      skipped: "R2_BACKUP_BUCKET not set — refusing to write a DB dump to the public media bucket. Create a private bucket (no public URL) and set R2_BACKUP_BUCKET.",
-    };
+    const skipped = "R2_BACKUP_BUCKET not set — refusing to write a DB dump to the public media bucket. Create a private bucket (no public URL) and set R2_BACKUP_BUCKET.";
+    await notifyBackupFailed({ detail: skipped }).catch(() => {});
+    return { ok: false, retentionDays: days, pruned: [], skipped };
   }
 
   const stamp = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
@@ -87,6 +87,11 @@ export async function runDatabaseBackup(): Promise<BackupResult> {
     // 4. prune old backups (same private bucket).
     const pruned = await pruneOldBackups(days, bucket);
     return { ok: true, key, bytes, retentionDays: days, pruned };
+  } catch (e) {
+    // A silently-failing nightly backup is the worst kind — alert loudly, then
+    // re-throw so cron_runs also records the failure.
+    await notifyBackupFailed({ detail: e instanceof Error ? e.message : String(e), retentionDays: days }).catch(() => {});
+    throw e;
   } finally {
     await unlink(snapPath).catch(() => {});
     await unlink(gzPath).catch(() => {});

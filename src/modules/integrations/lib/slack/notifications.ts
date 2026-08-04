@@ -343,6 +343,34 @@ export async function notifyIntegrationFailure(opts: {
 }
 
 /**
+ * The nightly database backup failed (or couldn't run). A silently-failing
+ * backup is the worst kind — you find out only when you need it — so this
+ * pings the ops channel. Routed on ops.integration_failure.
+ */
+export async function notifyBackupFailed(opts: { detail: string; retentionDays?: number }) {
+  await postSlack({
+    topic: "ops.integration_failure",
+    text: `🛑 Database backup FAILED: ${opts.detail}`,
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `🛑 *Database backup FAILED*\n${opts.detail}`,
+        },
+      },
+      {
+        type: "context",
+        elements: [{
+          type: "mrkdwn",
+          text: "No new backup was written. Check `R2_BACKUP_BUCKET` / R2 token access, then re-run `POST /api/admin/ops/db-backup?confirm=1`.",
+        }],
+      },
+    ],
+  });
+}
+
+/**
  * A Faire order arrived from an anonymized Shopify customer (relay email, no
  * real website). Nudge the team to map it to a real email/website on the
  * prospect page.
