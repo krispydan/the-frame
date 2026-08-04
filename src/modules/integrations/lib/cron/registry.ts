@@ -43,7 +43,6 @@ import { calculateSellThrough } from "@/modules/inventory/lib/sell-through";
 import { runWeeklyFaireExport } from "@/modules/sales/lib/faire-customer-export";
 import { topUpVideoQueue } from "@/modules/marketing/lib/video/scheduler";
 import { runVideoStorageHygiene } from "@/modules/marketing/lib/video/cleanup";
-import { enqueueSoundsSync } from "@/modules/marketing/lib/video/tiktok-sounds";
 import { drainMetaLeads, reconcileMetaLeads } from "@/modules/integrations/lib/meta/lead-ingest";
 import { runCapiSyncAndDrain } from "@/modules/integrations/lib/meta/capi";
 import { runMetaLeadCsvReminder } from "@/modules/integrations/lib/meta/daily-reminder";
@@ -459,16 +458,6 @@ export const CRON_JOBS: CronJob[] = [
     description: "Delete render files for posts posted >60d ago / discarded, sweep tmp/, report disk usage + permutation headroom per recipe",
     handler: () => runVideoStorageHygiene(),
   },
-  {
-    id: "tiktok-sounds-sync",
-    schedule: "30 12 * * *",  // 12:30 UTC ≈ 5:30am PT daily — fresh chart before the 6am queue top-up
-    description: "Pull TikTok trending sounds (US) via Apify so posting instructions can name real audio. One run, guarded against duplicates. Skips when APIFY_API_TOKEN is unset.",
-    // Enqueue the guarded background job rather than running the
-    // multi-minute Apify call inline (and never double-run a manual sync).
-    handler: async () => enqueueSoundsSync(),
-    guard: () => Boolean(process.env.APIFY_API_TOKEN),
-  },
-
   // ── Sales: Pipedrive call activities → PhoneBurner rep folders ──
   {
     id: "build-call-folders",

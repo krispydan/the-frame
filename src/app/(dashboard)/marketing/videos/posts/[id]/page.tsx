@@ -39,7 +39,6 @@ type Instructions = {
   tagProducts?: string[];
   coverSuggestion?: string;
   firstComment?: string;
-  suggestedSounds?: Array<{ id: string; title: string; author: string | null; tiktokLink: string | null }>;
 };
 
 type PostClip = {
@@ -716,11 +715,6 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
                 </label>
               </div>
 
-              {(instr.suggestedSounds?.length ?? 0) > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  Suggested sounds: {instr.suggestedSounds!.map((s) => s.title).join(" · ")}
-                </p>
-              )}
               <Button size="sm" onClick={saveInstructions} disabled={saving}>
                 Save instructions
               </Button>

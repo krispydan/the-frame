@@ -18,27 +18,12 @@ import { videoModel } from "../ai-model";
 import { getDocContent } from "../prompt-store";
 import { callClaude, extractPromptBody, fillTemplate } from "../email-ai";
 import { SLOT_TIMES, type Slot } from "./scheduler";
-import { getTrendingSounds } from "./tiktok-sounds";
-import type { TiktokSound } from "@/modules/marketing/schema";
-
-export interface SuggestedSound {
-  id: string;
-  title: string;
-  author: string | null;
-  tiktokLink: string | null;
-  rank: number | null;
-  rankType: string;
-  trendDirection: string | null;
-}
-
 export interface PostingInstructions {
   audio: string;
   onScreenText: Array<{ text: string; timing: string; placement: string }>;
   tagProducts: string[];
   coverSuggestion: string;
   firstComment?: string;
-  /** Concrete trending sounds to use, hydrated from the synced chart. */
-  suggestedSounds?: SuggestedSound[];
   /** Scroll-stopping first line (0–2s). Burned into the render + the
    *  spine of the caption. The single biggest retention lever. */
   hook?: string;
@@ -151,13 +136,6 @@ const SUBMIT_TOOL = {
             description: "Optional 3-beat retention spine: [hook, value, payoff/CTA]. Guides on-screen text + pacing.",
           },
           audio: { type: "string" },
-          suggestedSoundIds: {
-            type: "array",
-            items: { type: "string" },
-            maxItems: 3,
-            description:
-              "Up to 3 ids picked from the provided trendingSounds list, best fit first. Empty when the video keeps its original audio or the list is empty.",
-          },
           onScreenText: {
             type: "array",
             items: {
@@ -179,86 +157,26 @@ const SUBMIT_TOOL = {
   },
 };
 
-/** Slim, prompt-ready view of the current chart. */
-function soundsForPrompt(): { list: TiktokSound[]; promptJson: string } {
-  // One trending chart (the actor has no breakout/popular split), top 15.
-  const list = getTrendingSounds({ limit: 15 });
-  const promptJson = JSON.stringify(
-    list.map((s) => ({
-      id: s.id,
-      title: s.title,
-      author: s.author,
-      chart: s.rankType,
-      rank: s.rank,
-      trend: s.trendDirection,
-      durationSec: s.durationSec,
-    })),
-    null,
-    2,
-  );
-  return { list, promptJson };
-}
-
-function hydrateSuggestedSounds(ids: unknown, available: TiktokSound[]): SuggestedSound[] {
-  if (!Array.isArray(ids)) return [];
-  const byId = new Map(available.map((s) => [s.id, s]));
-  return ids
-    .map((id) => byId.get(String(id)))
-    .filter((s): s is TiktokSound => Boolean(s))
-    .slice(0, 3)
-    .map((s) => ({
-      id: s.id,
-      title: s.title,
-      author: s.author,
-      tiktokLink: s.tiktokLink,
-      rank: s.rank,
-      rankType: s.rankType,
-      trendDirection: s.trendDirection,
-    }));
-}
-
 /** Deterministic fallback when the API key is missing or the call fails. */
 function fallbackCopy(
   audioTreatment: string,
   focusProducts: Array<{ name: string; color: string | null }>,
-  sounds: TiktokSound[],
   allProductNames: string[],
 ): VideoCopy {
   const product = focusProducts[0];
   const caption = product
     ? `${product.name}${product.color ? ` in ${product.color}` : ""} — see it in motion.`
     : "New week, new frames.";
-  // Even without AI, hand the poster real options: rising sounds first.
-  const suggested =
-    audioTreatment === "silent"
-      ? [...sounds]
-          .sort((a, b) => {
-            const aRising = a.trendDirection === "up" || a.trendDirection === "new" ? 0 : 1;
-            const bRising = b.trendDirection === "up" || b.trendDirection === "new" ? 0 : 1;
-            return aRising - bRising || (a.rank ?? 99) - (b.rank ?? 99);
-          })
-          .slice(0, 3)
-          .map((s) => ({
-            id: s.id,
-            title: s.title,
-            author: s.author,
-            tiktokLink: s.tiktokLink,
-            rank: s.rank,
-            rankType: s.rankType,
-            trendDirection: s.trendDirection,
-          }))
-      : [];
   return {
     caption,
     hashtags: ["#sunglasses", "#eyewear", "#fyp"],
     postingInstructions: {
+      // Music is chosen by hand in the app — the licensing question is
+      // one only a person can answer, so nothing here names a track.
       audio:
         audioTreatment === "silent"
-          ? suggested.length > 0
-            ? "Video is silent — add one of the suggested trending sounds in the TikTok app before posting."
-            : "Video is silent — pick a current trending sound in the TikTok app before posting."
-          : "Original clip audio is included — post as-is or layer a trending sound at low volume.",
-      suggestedSounds: suggested,
+          ? "Video is silent — add your chosen sound in the app before posting."
+          : "Original clip audio is included — post as-is, or layer your chosen sound at low volume.",
       onScreenText: [],
       tagProducts: allProductNames.length > 0 ? allProductNames : focusProducts.map((p) => p.name),
       coverSuggestion: "Use the opening frame.",
@@ -290,7 +208,6 @@ export async function reviseVideoCopy(
     durationSec: c.durationSec ?? 0,
     products: c.products,
   }));
-  const { list: chartSounds, promptJson: trendingSoundsJson } = soundsForPrompt();
 
   const systemBase = extractPromptBody(getDocContent("system-prompt-base"))
     .replace(/\{\{?AUDIENCE\}?\}/g, "retail")
@@ -312,9 +229,6 @@ export async function reviseVideoCopy(
     JSON.stringify(clipSequence, null, 2),
     `Audio: ${post.audioTreatment}. Duration: ${(post.durationSec ?? 0).toFixed(1)}s.`,
     "",
-    "TRENDING SOUNDS (pick suggestedSoundIds from these ids only):",
-    chartSounds.length > 0 ? trendingSoundsJson : "(no chart synced)",
-    "",
     "OPERATOR FEEDBACK — apply this to the copy:",
     feedback,
     "",
@@ -334,7 +248,7 @@ export async function reviseVideoCopy(
   const instructions: PostingInstructions & { suggestedSoundIds?: unknown } = {
     ...(copy.postingInstructions ?? ({} as PostingInstructions)),
   };
-  instructions.suggestedSounds = hydrateSuggestedSounds(instructions.suggestedSoundIds, chartSounds);
+  // Sounds are chosen by hand in the app now — the AI never names one.
   delete instructions.suggestedSoundIds;
 
   db.update(videoPosts)
@@ -404,7 +318,6 @@ export async function generateVideoCopy(postId: string): Promise<{ ok: boolean; 
     title: string; type: string; dateStart: string; dateEnd: string; priority: number; description: string | null;
   }>;
 
-  const { list: chartSounds, promptJson: trendingSoundsJson } = soundsForPrompt();
 
   const promptDoc = getDocContent("video-caption-prompt");
   const systemBase = extractPromptBody(getDocContent("system-prompt-base"))
@@ -423,7 +336,7 @@ export async function generateVideoCopy(postId: string): Promise<{ ok: boolean; 
     productsInVideo: productsInVideo.length > 0 ? JSON.stringify(productsInVideo, null, 2) : "(no products tagged on these clips)",
     trendContext: (aiCtx.trendNotes ?? []).join("\n") || "(no trend data this week)",
     events: JSON.stringify(events, null, 2),
-    trendingSounds: chartSounds.length > 0 ? trendingSoundsJson : "(no chart synced yet — describe the vibe instead)",
+    trendingSounds: "(sounds are chosen by hand in the app — describe the vibe you want instead of naming a track)",
   });
 
   const result = await callClaude({
@@ -438,15 +351,11 @@ export async function generateVideoCopy(postId: string): Promise<{ ok: boolean; 
 
   if (result.ok) {
     const copy = result.output as unknown as VideoCopy;
-    // Swap the AI's picked sound ids for full hydrated records (title,
-    // author, link) so the UI needs no extra lookup.
+    // The model may still emit sound ids from an older prompt doc; drop
+    // them rather than persisting a track nobody cleared for use.
     const instructions: PostingInstructions & { suggestedSoundIds?: unknown } = {
       ...(copy.postingInstructions ?? ({} as PostingInstructions)),
     };
-    instructions.suggestedSounds = hydrateSuggestedSounds(
-      instructions.suggestedSoundIds,
-      chartSounds,
-    );
     delete instructions.suggestedSoundIds;
 
     db.update(videoPosts)
@@ -464,7 +373,7 @@ export async function generateVideoCopy(postId: string): Promise<{ ok: boolean; 
 
   // Fallback: usable placeholder copy, status stays `rendered`.
   const allProductLabels = productsInVideo.map((p) => (p.color ? `${p.name} (${p.color})` : p.name));
-  const fallback = fallbackCopy(post.audioTreatment, focusProducts, chartSounds, allProductLabels);
+  const fallback = fallbackCopy(post.audioTreatment, focusProducts, allProductLabels);
   db.update(videoPosts)
     .set({
       caption: post.caption ?? fallback.caption,
