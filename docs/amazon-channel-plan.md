@@ -1,33 +1,35 @@
 # Amazon Sales Channel — Integration Plan (via Windsor AI)
 
-**Status:** Rev 2 — for review before development starts.
+**Status:** Rev 3 — all open decisions resolved. Ready to build on approval.
 **Prepared:** 2026-08-04
-**Decision made in review:** Amazon orders **will be imported** into The Frame's `orders` table
-(`channel='amazon'`), but must **never** be pushed to Shopify or ShipHero — they are fulfilled by
-Amazon (FBA) or already reach ShipHero through Amazon's own channel, and a push from The Frame
-would double-ship. Rev 1's "aggregate-only" option is dropped.
 
-**Scope:** Connect to the Amazon Seller account through Windsor AI; replicate the Shopify
-channel's finance capabilities — daily journal entries, COGS, month-end reporting — and add a
-dashboard to monitor Amazon sales. Fulfilment stays entirely outside The Frame.
+**Decisions carried in from review:**
+- Amazon orders **are imported** into `orders` (`channel='amazon'`), but **never pushed** to
+  Shopify or ShipHero — they are fulfilled by Amazon (FBA) or from our warehouse via Amazon's
+  own channel. A push from The Frame would double-ship.
+- **Backfill everything** available.
+- **Amazon appears in all Slack alerts.**
+- Xero account recommendations are specified in §7 against the real chart of accounts.
+- FBA / FIFO handling is answered in §8.
+
+**Scope:** journal entries, COGS, month-end reporting, and a monitoring dashboard.
+Fulfilment stays entirely outside The Frame.
 
 ---
 
 ## 1. Account status — verified live, already selling
 
-Probed directly against the Windsor API (not assumed from docs):
-
 | Item | Value |
 |---|---|
 | Windsor account | `danielgetjaxycom` |
-| Connector slug | **`amazon_sp`** (`amazon`, `amazon_seller` etc. do not exist) |
-| Amazon seller account | `ANJN3RZT0R4T5-US`, Amazon.com (US only), USD only |
-| Field catalog | 899 fields across **24 reports** (`GET /amazon_sp/fields`) |
+| Connector slug | **`amazon_sp`** (`amazon`, `amazon_seller` do not exist) |
+| Amazon seller account | `ANJN3RZT0R4T5-US`, Amazon.com (US only), USD |
+| Field catalog | 899 fields across 24 reports (`GET /amazon_sp/fields`) |
 | Settlement data | 288 rows, 3 settlements, 4 Jun → 25 Jul 2026 |
-| Orders, last 7 days | 21 lines — 20 FBA, 1 Merchant-fulfilled |
-| Other connectors | **None connected** (`amazon_ads`, `shopify`, `facebook`, `tiktok_shop`, `google_ads`, `klaviyo` all return "no account") |
+| Orders, last 7 days | 21 lines — 20 FBA, 1 merchant-fulfilled |
+| Other connectors | **none connected** — `amazon_ads`, `shopify`, `facebook`, `tiktok_shop`, `google_ads`, `klaviyo` |
 
-### Trading results so far (settlements, 4 Jun – 25 Jul)
+### Trading results (settlements, 4 Jun – 25 Jul)
 
 | Line | Amount |
 |---|---|
@@ -40,174 +42,158 @@ Probed directly against the Windsor API (not assumed from docs):
 | Inbound transportation | −$21.30 |
 | **Net settled** | **$19.99** |
 
-The promotions ratio is the story of this channel right now, and the dashboard is designed
-around making it visible (gross vs promo vs net, per day and per SKU).
-
 ---
 
-## 2. Hard constraints (verified by probing)
+## 2. Constraints (verified by probing, not assumed)
 
-1. **Settlement history is capped at 90 days.** Older requests return an explicit error.
-   Windsor is *not* a system of record → every settlement row must be archived locally,
-   permanently, on first sight. **This makes Phase 1 time-sensitive: data older than the rolling
-   window is unrecoverable.**
-2. **One report per API call**; every field must use its report-prefixed name
+1. **Settlement history caps at 90 days.** Windsor is not a system of record → archive every
+   settlement row locally, permanently, on first sight. **Phase 1 is time-sensitive: anything
+   older than the rolling window is already unrecoverable.**
+2. **One report per API call**, fields must use report-prefixed names
    (`v2_settlement_report_data_flat_file_v2__amount`). Generic names don't resolve.
-3. **Reports are generated asynchronously on Amazon's side.** A 90-day all-orders request hung
-   past 5 minutes; the same request over 7 days returned in 1.8s. First-ever requests for a
-   report type can time out even on narrow windows while Amazon generates the report, then
-   succeed later from cache. → The client must use **≤7-day windows, long timeouts, and
-   retry-with-backoff that tolerates cold-report generation** (treat a timeout as "try again
-   next run", not as failure).
-4. **The current day has no data** (SP-API limitation) → T-1 is the newest day; always re-pull a
+3. **Reports generate asynchronously on Amazon's side and some never return.** Verified:
+   all-orders over 90 days hung >5 min; the same over 7 days returned in 1.8s.
+   **The `amazon_fulfilled_shipments_data_general` report timed out on every attempt** —
+   9 min, 5 min, 4 min, and even a single-day window at 2 min, across separate sessions.
+   Treat it as **unavailable**; §5 uses a working substitute.
+   → Client must use ≤7-day windows, long timeouts, and treat a timeout as "retry next run"
+   rather than a failure alert (alert only after 3 consecutive failures).
+4. **Current day returns no data** (SP-API limitation) → T-1 is newest; always re-pull a
    trailing window because Amazon restates recent days.
-5. **Dirty columns:** settlement `currency`, `deposit_date`, `marketplace_name` are often empty.
-   Default currency `USD`; derive dates from the settlement header rows.
-6. **SKU format:** ours plus optional `-FBA` (`JX1010-TOR-FBA`, `JX4006-BLK`). Strip suffix →
-   `catalog_skus`, fall back to `catalog_sku_aliases`; unmapped SKUs raise `cogs_exceptions`.
+5. **Dirty columns:** settlement `currency`, `deposit_date`, `marketplace_name` frequently
+   empty. Default `USD`; take dates from settlement header rows.
+6. **SKU convention (confirmed by you):** `-FBA` suffix = sent to Amazon FBA; no suffix =
+   shipped from our warehouse (FBM). Both are real listings for the same product.
+   Map to `catalog_skus` by stripping the suffix.
 
-### Reports we will use
+### Reports used
 
-| Windsor report (table prefix) | Purpose | Key fields |
+| Report (table prefix) | Purpose | Status |
 |---|---|---|
-| `flat_file_all_orders_data_by_order_date_general` | **Order import** | amazon_order_id, sku, asin, quantity, item_price, item_tax, item_promotion_discount, order_status, item_status, fulfillment_channel, purchase_date, last_updated_date, ship_city/state/postal/country, currency |
-| `amazon_fulfilled_shipments_data_general` | **shipped_at + tracking** for FBA lines | amazon_order_id, amazon_order_item_id, sku, quantity_shipped, shipment_date, tracking_number, fulfillment_center_id |
-| `v2_settlement_report_data_flat_file_v2` | **Journals / payouts** | settlement_id, posted_date, transaction_type, amount_type, amount_description, amount, sku, order_id, quantity_purchased, settlement_start/end_date, deposit_date, total_amount |
-| `sales_and_traffic_report_by_date` | **Dashboard analytics** | orderedProductSales, unitsOrdered/Shipped, sessions, pageViews, buyBoxPercentage, unitSessionPercentage, refundRate |
-| `flat_file_returns_data_by_return_date` | Returns detail (month-end) | order_id, merchant_sku, return_reason, refunded_amount, resolution |
-| `fba_reimbursements_data` | Amazon-lost/damaged inventory payouts (month-end income) | reimbursement_id, reason, sku, amount_total, quantity_reimbursed_* |
-| `fba_myi_unsuppressed_inventory_data` | FBA stock on hand (dashboard + inventory qn) | sku, afn_fulfillable/inbound/reserved/unsellable_quantity |
+| `flat_file_all_orders_data_by_order_date_general` | Order import (new orders by purchase date) | ✅ works (1.8s/7d) |
+| `flat_file_all_orders_data_by_last_update_general` | **Status changes + `shipped_at`** — carries `item_status`, `last_updated_date` | ✅ works (36s/7d) |
+| `v2_settlement_report_data_flat_file_v2` | Journals / payouts | ✅ works (90d cap) |
+| `sales_and_traffic_report_by_date` | Dashboard analytics — sessions, buy box, conversion | ✅ works |
+| `fba_myi_unsuppressed_inventory_data` | FBA stock on hand (§8 inventory truth) | to verify |
+| `flat_file_returns_data_by_return_date` | Returns detail (month-end) | to verify |
+| `fba_reimbursements_data` | Amazon-lost/damaged payouts (month-end income) | to verify |
+| ~~`amazon_fulfilled_shipments_data_general`~~ | ~~tracking + shipment_date~~ | ❌ **times out — dropped** |
 
-Not used initially: seller-performance, VAT, brand analytics, restock recommendations, ledger
-views, estimated-fees, open listings (available later if wanted).
+Dropping the shipments report costs us only the tracking number, which we don't need — we
+don't fulfil Amazon orders. `shipped_at` comes from the last-update report instead.
 
 ---
 
-## 3. Why "import but never push" is safe — verified, not assumed
+## 3. Why "import but never push" is safe — verified
 
-A full sweep of every side-effect path that reads `orders` found:
+A full sweep of every code path that reads `orders` and acts on it found:
 
 **The Frame has no code path that can create an order in ShipHero or Shopify.** The ShipHero
-client's only mutations are webhook management, packing notes, and attachments; the Shopify
-client's order surface is read-only plus fulfilment marking that is hard-gated to
-`shopify_dtc`/`shopify_wholesale` with a Shopify `external_id`. Orders reach ShipHero via the
-native Shopify↔ShipHero integration — The Frame is a passive observer on that leg. So
-double-shipping *from The Frame* is structurally impossible; what remains is preventing Amazon
-rows from being **mis-matched by inbound webhooks** or picked up by unfiltered scans/alerts.
+client's only mutations are webhook management, packing notes and attachments; the Shopify
+client's order surface is read-only plus a fulfilment-marker hard-gated to Shopify channels
+with a Shopify `external_id`. Orders reach ShipHero through the native Shopify↔ShipHero
+integration — The Frame is a passive observer. Double-shipping *from The Frame* is
+structurally impossible. The remaining risk is Amazon rows being **mis-matched** by inbound
+ShipHero webhooks or swept up by unfiltered scans.
 
-### 3a. Structural defence (cheap, covers unknown future code)
+### 3a. Structural defences (protect against future code too)
 
-- **`order_number = 'AMZ-' + amazon_order_id`** (e.g. `AMZ-111-9094194-1536224`) and
-  **`external_id = 'amazon:' + amazon_order_id`**. The most dangerous matcher —
-  `findLocalOrderIdByShipHeroSignals` (`src/modules/operations/lib/shiphero/activity-log.ts:51-72`),
-  which falls back to fuzzy `order_number` matching with `ORDER BY created_at DESC LIMIT 1` —
-  becomes structurally unable to hit an Amazon row, since no ShipHero `partner_order_id` will
-  ever carry those prefixes.
-- **`company_id = NULL`** on all Amazon orders. Amazon buyers are not CRM companies. This single
-  choice makes four unfiltered paths inert: customer-account LTV stats
-  (`account-sync.ts:47-79`), wholesale-conversion first-order counter
-  (`wholesale-conversion.ts:189`), mail-suppression scan
-  (`shopify-wholesale-customer.ts:680`), and Meta CAPI conversion events (`meta/capi.ts:118`).
-- **`shipped_alert_sent_at` pre-stamped** at import → the "order fulfilled" Slack alert's atomic
-  claim (`notify-fulfilled.ts:72-77`) can never fire for Amazon rows.
-- **Status mapping never lands on `confirmed`** (see §5), so the stuck-order scan
-  (`scan-stuck-orders/route.ts:39`, alerts on `confirmed` >48h) has nothing to match even
-  before its guard is added.
+- **`order_number = 'AMZ-' + amazon_order_id`**, **`external_id = 'amazon:' + amazon_order_id`**.
+  The most dangerous matcher — `findLocalOrderIdByShipHeroSignals`
+  (`operations/lib/shiphero/activity-log.ts:51-72`), which falls back to fuzzy order-number
+  matching with `ORDER BY created_at DESC LIMIT 1` and no channel filter — becomes structurally
+  unable to hit an Amazon row.
+- **`company_id = NULL`.** Amazon buyers aren't CRM companies. This alone neutralises four
+  unfiltered paths: customer-account LTV stats (`account-sync.ts:47-79`), wholesale-conversion
+  first-order counter (`wholesale-conversion.ts:189`), mail suppression
+  (`shopify-wholesale-customer.ts:680`), Meta CAPI conversions (`meta/capi.ts:118`).
+- **`shipped_alert_sent_at` pre-stamped** → the ShipHero-triggered "order fulfilled" Slack alert
+  (`notify-fulfilled.ts:72-77`) can never claim an Amazon row. Amazon gets its **own** purpose-built
+  alerts instead (§10) rather than piggybacking on ShipHero plumbing.
+- **Status never lands on `confirmed`** (§5) → the stuck-order scan has nothing to match.
 
-### 3b. Explicit channel guards (exact edit list)
+### 3b. Explicit channel guards
 
 | File:line | Change |
 |---|---|
-| `src/modules/operations/lib/shiphero/activity-log.ts:53,59,66` | `AND channel != 'amazon'` on all three lookups (webhook → local order matcher) |
-| `src/modules/operations/lib/shiphero/sync-orders.ts:48` | `AND channel != 'amazon'` (ShipHero order matching scan) |
-| `src/app/api/v1/integrations/slack/scan-stuck-orders/route.ts:39` | `AND channel != 'amazon'` |
-| `src/modules/inventory/lib/sell-through.ts:51` | `AND o.channel != 'amazon'` — FBA sales must not inflate ShipHero warehouse velocity / reorder flags |
-| `src/modules/orders/lib/fulfillment.ts` (via UI) | Hide manual "Mark shipped" actions for `channel='amazon'` in `/orders` UI — harmless today (pushes nothing) but confusing |
+| `operations/lib/shiphero/activity-log.ts:53,59,66` | `AND channel != 'amazon'` on all three lookups |
+| `operations/lib/shiphero/sync-orders.ts:48` | `AND channel != 'amazon'` |
+| `app/api/v1/integrations/slack/scan-stuck-orders/route.ts:39` | `AND channel != 'amazon'` — we can't action an Amazon order stuck at Amazon |
+| `inventory/lib/sell-through.ts:51` | `AND o.channel != 'amazon'` — FBA sales must not inflate ShipHero warehouse velocity/reorder flags (see §8) |
+| `orders/lib/fulfillment.ts` (UI) | Hide manual "Mark shipped" for `channel='amazon'` |
 
-Already safe, no change needed (verified gates): Faire ship-marking (`channel` gated), Faire
-backfill route, Shopify fulfilment push (`channel` + `external_id` gated), Pipedrive sync
-(regex-gated to wholesale/faire), Shopify webhooks (match on Shopify numeric `external_id`),
-revenue recognition (`SUPPORTED_CHANNELS` allowlist — amazon added deliberately in Phase 5),
-Faire/Shopify payout syncs.
+Verified already safe, no change: Faire ship-marking (channel-gated), Faire backfill route,
+Shopify fulfilment push (channel + external_id gated), Pipedrive sync (regex-gated to
+wholesale/faire), Shopify webhooks (match on Shopify numeric id), revenue recognition
+(allowlist — Amazon added deliberately in Phase 5), Faire/Shopify payout syncs.
 
-### 3c. Cosmetic/UI updates
+### 3c. Cosmetic
 
-`channelConfig` in `orders/page.tsx:87` and `[id]/page.tsx:123` (badge + filter option);
-`platformLabel` in `slack/digests.ts:218`; `channelLabel` in `daily-cogs.ts:329`; the
-"View in Shopify" link branch in `[id]/page.tsx:381` → "View in Seller Central"
-(`https://sellercentral.amazon.com/orders-v3/order/{amazon_order_id}`); the "Fulfilment is
-managed in ShipHero/Shopify" copy at `[id]/page.tsx:670` → "Fulfilled by Amazon (FBA)".
+`channelConfig` (`orders/page.tsx:87`, `[id]/page.tsx:123`); `platformLabel`
+(`slack/digests.ts:218`); `channelLabel` (`daily-cogs.ts:329`); "View in Shopify" →
+"View in Seller Central" (`sellercentral.amazon.com/orders-v3/order/{id}`) at
+`[id]/page.tsx:381`; fulfilment copy at `[id]/page.tsx:670` → "Fulfilled by Amazon (FBA)".
 
-### 3d. Schema facts that matter
+### 3d. Schema facts
 
-- `orders.channel` has **no DB CHECK constraint** (TypeScript enum only) — adding `"amazon"` to
-  the enum in `src/modules/orders/schema/index.ts:16-18` is a type-level change; no migration.
-- **No unique index on `order_number` or `external_id`** — import idempotency must be app-level
-  (`SELECT … WHERE external_id = ?` before insert, the same pattern as `shopify-webhooks.ts:377`).
-- `orders.status` enum already includes `pending` — used for Amazon's Pending state.
+- `orders.channel` has **no DB CHECK constraint** (TypeScript enum only) → adding `"amazon"` at
+  `orders/schema/index.ts:17` is a type-level change, no migration.
+- **No unique index on `order_number`/`external_id`** → import idempotency is app-level
+  (`SELECT … WHERE external_id = ?` before insert, as `shopify-webhooks.ts:377` does).
+- `orders.status` enum: `pending, confirmed, picking, packed, shipped, delivered, returned, cancelled`.
 
 ---
 
 ## 4. Architecture
 
 ```
-Windsor AI (amazon_sp connector; later: tiktok_shop, facebook, amazon_ads)
-        │  ≤7-day windows · 1 report/call · retry w/ cold-report tolerance
+Windsor AI (amazon_sp; later tiktok_shop, facebook, amazon_ads)
+        │  ≤7-day windows · 1 report/call · retry tolerant of cold reports
         ▼
-┌────────────────────────────────────────────────────────────────┐
-│ 1. Generic Windsor client (connector-agnostic)                 │
-│    src/modules/integrations/lib/windsor/client.ts              │
-├────────────────────────────────────────────────────────────────┤
-│ 2. RAW LANDING (append-only, permanent — beats the 90-day cap) │
-│    amazon_settlement_rows · amazon_order_rows ·                │
-│    amazon_shipment_rows · amazon_sales_traffic_daily           │
-├────────────────────────────────────────────────────────────────┤
-│ 3. NORMALISE                                                   │
-│    orders + order_items (channel='amazon', guarded)            │
-│    settlements + settlement_line_items (external bridge)       │
-├────────────────────────────────────────────────────────────────┤
-│ 4. EXISTING MACHINERY (rides for free once channel wired)      │
-│    daily-cogs (FIFO) · revenue recognition · Xero journals ·   │
-│    P&L · reconciliation · Slack digests                        │
-├────────────────────────────────────────────────────────────────┤
-│ 5. Dashboard  /finance/amazon  +  existing channel surfaces    │
-└────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ 1. Generic Windsor client (connector-agnostic)               │
+│    integrations/lib/windsor/client.ts                        │
+├──────────────────────────────────────────────────────────────┤
+│ 2. RAW LANDING (append-only, permanent — beats 90-day cap)   │
+│    amazon_order_rows · amazon_settlement_rows ·              │
+│    amazon_sales_traffic_daily · amazon_fba_inventory         │
+├──────────────────────────────────────────────────────────────┤
+│ 3. NORMALISE → orders + order_items (guarded)                │
+│                settlements + settlement_line_items (bridge)  │
+├──────────────────────────────────────────────────────────────┤
+│ 4. EXISTING MACHINERY: daily-cogs (FIFO) · revenue           │
+│    recognition · Xero journals · P&L · reconciliation        │
+├──────────────────────────────────────────────────────────────┤
+│ 5. Dashboard /finance/amazon + existing channel surfaces     │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-Principles:
-
-- **Normalise from our own tables, never from Windsor.** Raw rows land append-only with natural
-  idempotency keys; every downstream artefact (orders, journals, dashboards) is re-derivable
-  locally forever, even after Windsor's window closes.
-- **The Windsor client is connector-agnostic from day one** —
-  `fetchWindsorReport({ connector, fields, dateFrom, dateTo })` handling auth, prefixed fields,
-  window chunking, backoff, and cold-report timeouts. Amazon is the first caller; TikTok Shop /
-  Facebook ads later become a config entry + mapper, not a new integration.
-- `WINDSOR_API_KEY` as env var (Railway + local) — never committed. Fail loudly if unset.
+- **Normalise from our own tables, never from Windsor** — every artefact is re-derivable
+  locally forever, after Windsor's window closes.
+- **Connector-agnostic client from day one**:
+  `fetchWindsorReport({ connector, fields, dateFrom, dateTo })`. TikTok Shop / Facebook later
+  become a config entry + mapper, not a new integration.
+- `WINDSOR_API_KEY` in env (Railway + local), never committed; fail loudly if unset.
 
 ---
 
-## 5. Order import — detailed design
+## 5. Order import
 
-**New lib:** `src/modules/orders/lib/amazon-sync.ts` (mirrors `faire-sync.ts` in shape).
-**New route:** `src/app/api/v1/orders/amazon-sync/route.ts` (GET = status, POST = trigger),
-called by cron like `shopify-orders-sync` is.
+**New:** `orders/lib/amazon-sync.ts` (shaped like `faire-sync.ts`) and
+`app/api/v1/orders/amazon-sync/route.ts` (GET status, POST trigger).
 
-### Pipeline per run
+### Pipeline
 
-1. **Pull** `flat_file_all_orders_data_by_order_date_general` for a trailing window
-   (default 7 days; backfill mode accepts explicit ranges, chunked ≤7 days per call).
-2. **Land** rows into `amazon_order_rows` (upsert on `(amazon_order_id, sku)` — later pulls
-   update status/last_updated_date).
-3. **Pull** `amazon_fulfilled_shipments_data_general` for the same window → land into
-   `amazon_shipment_rows` (upsert on `(shipment_id, amazon_order_id, sku)`).
-4. **Normalise** into `orders` / `order_items`:
-   - Idempotency: `SELECT id FROM orders WHERE external_id = 'amazon:'+amazon_order_id`;
-     insert or update.
-   - One `orders` row per Amazon order; one `order_items` row per SKU line.
-5. **Set `shipped_at`**: FBA lines from `amazon_shipment_rows.shipment_date` (earliest shipment
-   for the order); Merchant-fulfilled lines fall back to `last_updated_date` when
-   `item_status='Shipped'`. Tracking number from the shipments report where present.
+1. Pull **all-orders by order date** for a trailing 7-day window (backfill: explicit ranges,
+   chunked ≤7 days) → upsert `amazon_order_rows` on `(amazon_order_id, sku)`.
+2. Pull **all-orders by last update** for the same window → upsert the same table, refreshing
+   `item_status` / `last_updated_date` (catches ships, cancels, and restatements of older orders).
+3. Normalise into `orders` / `order_items`, idempotent on
+   `external_id = 'amazon:' + amazon_order_id`.
+4. **`shipped_at`** = `last_updated_date` of the earliest line whose `item_status = 'Shipped'`.
+   (This replaces the unavailable shipments report. Slight imprecision — `last_updated_date`
+   is the update timestamp, not strictly the ship timestamp — but it is same-day accurate,
+   which is all daily COGS and revenue recognition need.)
 
 ### Field mapping
 
@@ -216,348 +202,379 @@ called by cron like `shopify-orders-sync` is.
 | `channel` | `'amazon'` (add to enum) |
 | `order_number` | `'AMZ-' + amazon_order_id` |
 | `external_id` | `'amazon:' + amazon_order_id` |
-| `company_id` / `contact_id` | **NULL** (deliberate — §3a) |
-| `status` | Pending→`pending` · Shipped (all lines)→`shipped` · partially→`shipped` when any line shipped · Cancelled→`cancelled`. **Never `confirmed`/`picking`/`packed`.** |
-| `subtotal` | Σ item_price (flat-file item_price is the line total, i.e. unit×qty — verify against a multi-qty line during dev) |
-| `discount` | Σ item_promotion_discount + ship_promotion_discount (stored positive) |
-| `shipping` | Σ shipping_price |
-| `tax` | Σ item_tax + shipping_tax (facilitator tax — Amazon remits; see §7) |
+| `company_id`, `contact_id` | **NULL** (deliberate, §3a) |
+| `status` | all lines Shipped → `shipped`; any line Shipped → `shipped`; Cancelled → `cancelled`; else `pending`. **Never `confirmed`/`picking`/`packed`.** |
+| `subtotal` | Σ `item_price` (flat-file `item_price` is the line total; verify on a multi-qty line in dev) |
+| `discount` | Σ `item_promotion_discount` + `ship_promotion_discount` (stored positive) |
+| `shipping` | Σ `shipping_price` |
+| `tax` | Σ `item_tax` + `shipping_tax` (facilitator tax — Amazon remits; §7) |
 | `total` | subtotal − discount + shipping + tax |
-| `currency` | `USD` default |
-| `source_name` | `'amazon'`; `ship_to_name` NULL; `ship_to_country` NULL (keeps intl-shipping email path inert); ship city/state kept on the raw row only |
-| `shiphero_order_id` | **NULL, always** |
-| `placed_at` | purchase_date · `shipped_at` per above · `shipped_alert_sent_at` pre-stamped at import |
+| `currency` | `USD` |
+| `source_name` | `'amazon'` · `ship_to_country` NULL (keeps intl-shipping email inert) · `ship_to_name` NULL |
+| `shiphero_order_id` | **NULL always** |
+| `placed_at` | `purchase_date` · `shipped_at` per above · `shipped_alert_sent_at` pre-stamped |
 
-| `order_items` column | Source |
+| `order_items` | Source |
 |---|---|
-| `sku` | Amazon SKU verbatim (e.g. `JX1010-TOR-FBA`) |
-| `sku_id`/`product_id` | resolve after stripping `-FBA`; alias fallback; NULL + exception if unmapped |
-| `quantity` | quantity (note: arrives as TEXT — parse) |
-| `unit_price` | item_price ÷ quantity |
-| `total_price` | item_price |
+| `sku` | Amazon SKU verbatim (`JX1010-TOR-FBA`) |
+| `sku_id`, `product_id` | resolve after stripping `-FBA`; alias fallback; NULL + exception if unmapped |
+| `quantity` | `quantity` (arrives as TEXT — parse) |
+| `unit_price` / `total_price` | `item_price ÷ quantity` / `item_price` |
 
-### What the importer must NOT do
+### The importer must NOT
 
-No `company_id` (no `findOrCreateCompany`), no `ensureCustomerAccount`, no
-`detectWholesaleConversion`, no `syncOrderToPipedrive`, no `createInventoryMovements`
-(FBA stock isn't in ShipHero's warehouse; the hourly `shiphero-inventory-sync` would overwrite
-any decrement anyway), no international-shipping email, no `order.created` Slack noise
-(emit the event-bus activity row only — there are zero registered listeners today, verified).
+Create companies/contacts, call `ensureCustomerAccount`, `detectWholesaleConversion`,
+`syncOrderToPipedrive`, `createInventoryMovements` (FBA stock isn't in ShipHero's warehouse,
+and the hourly ShipHero inventory sync would overwrite any decrement anyway), or the
+international-shipping email.
 
 ### Cancellations & refunds
 
-- Re-pulls flip `status` to `cancelled` when Amazon cancels (pending orders cancel often).
-- Refunds do **not** un-ship an order: financial effect arrives via the settlement journal
-  (§7) and the returns report feeds month-end reporting. If a refunded line was already
-  COGS-depleted, it stays depleted (goods are gone or come back via FBA returns — Amazon
-  restocks sellable returns into FBA; reflected in FBA inventory counts, not ShipHero).
+Re-pulls flip `status` to `cancelled` (pending Amazon orders cancel often). Refunds don't
+un-ship: the financial effect arrives via the settlement journal (§7); the returns report
+feeds month-end. An already-depleted refunded line stays depleted — Amazon restocks sellable
+returns into FBA, which shows up in FBA inventory counts (§8).
 
 ---
 
 ## 6. Schema — new tables
 
-All new tables must be added in **three** places: the Drizzle schema file
-(`src/modules/integrations/schema/amazon.ts`, new), the boot DDL in `src/lib/db.ts`, and the
-test DDL in `src/__tests__/setup.ts`. (Established repo constraint — tests fail otherwise.)
+Added in **three** places (repo constraint — tests fail otherwise): Drizzle schema
+(`integrations/schema/amazon.ts`, new), boot DDL (`src/lib/db.ts`), test DDL
+(`src/__tests__/setup.ts`).
 
 ```
-amazon_order_rows            -- raw all-orders report, permanent
+amazon_order_rows           -- raw all-orders (both report variants), permanent
   id, amazon_order_id, sku, asin, quantity, item_price, item_tax,
   item_promotion_discount, ship_promotion_discount, shipping_price, shipping_tax,
   order_status, item_status, fulfillment_channel, sales_channel, currency,
   purchase_date, last_updated_date, ship_city, ship_state, ship_postal_code,
   ship_country, is_business_order, raw_json, ingested_at, updated_at
-  UNIQUE app-level: (amazon_order_id, sku) — upsert
+  upsert key: (amazon_order_id, sku)
 
-amazon_shipment_rows         -- raw FBA shipments report, permanent
-  id, shipment_id, shipment_item_id, amazon_order_id, amazon_order_item_id, sku,
-  quantity_shipped, shipment_date, estimated_arrival_date, carrier, tracking_number,
-  fulfillment_center_id, item_price, item_promotion_discount, raw_json, ingested_at
-  UNIQUE app-level: (shipment_id, amazon_order_id, sku)
-
-amazon_settlement_rows       -- raw settlement report, permanent (the 90-day insurance)
+amazon_settlement_rows      -- raw settlements, permanent (the 90-day insurance)
   id, settlement_id, posted_date, transaction_type, amount_type, amount_description,
   amount, currency, sku, order_id, quantity_purchased, marketplace_name,
   settlement_start_date, settlement_end_date, deposit_date, total_amount,
   raw_json, ingested_at
-  UNIQUE app-level: (settlement_id, order_id, sku, amount_type, amount_description,
-                     posted_date, amount)  -- settlement re-pulls are append-skip, never update
+  append-skip key: (settlement_id, order_id, sku, amount_type, amount_description,
+                    posted_date, amount)   -- never updated
 
-amazon_sales_traffic_daily   -- sales & traffic analytics (dashboard)
-  id, date, gross_sales, units_ordered, units_shipped, total_order_items,
-  refund_rate, sessions, page_views, buy_box_pct, conversion_rate, avg_selling_price,
-  ingested_at, updated_at
-  UNIQUE: (date) — upsert (Amazon restates recent days)
+amazon_sales_traffic_daily  -- dashboard analytics
+  id, date, gross_sales, units_ordered, units_shipped, total_order_items, refund_rate,
+  sessions, page_views, buy_box_pct, conversion_rate, avg_selling_price,
+  ingested_at, updated_at        upsert key: (date)  -- Amazon restates recent days
 
-amazon_sync_state            -- per-report watermark
+amazon_fba_inventory        -- daily FBA stock snapshot (§8)
+  id, snapshot_date, sku, internal_sku, asin, fulfillable_qty, inbound_working_qty,
+  inbound_shipped_qty, inbound_receiving_qty, reserved_qty, unsellable_qty,
+  total_qty, ingested_at         upsert key: (snapshot_date, sku)
+
+amazon_sync_state           -- per-report watermark
   report_name PK, last_synced_through, last_run_at, last_status, last_error, rows_ingested
 ```
 
-Existing-table edits:
-- `orders.channel` enum += `"amazon"` (`src/modules/orders/schema/index.ts:17`)
-- `xero_account_mappings`: add `_shared` rows for `deferred_revenue` (2050) and
-  `receivables_holding` (1100) — required by loaders, absent from the suggestion catalog
-- `PLATFORM_CATEGORY_SUGGESTIONS.amazon` (`src/modules/integrations/schema/xero.ts:189`) +=
-  the new fee categories from §7 (promo contra, FBA fees, storage, subscription)
+Existing-table edits: `orders.channel` enum += `"amazon"`; `xero_account_mappings` gains the
+Amazon rows from §7 plus `_shared` `deferred_revenue` / `receivables_holding`;
+`PLATFORM_CATEGORY_SUGGESTIONS.amazon` (`integrations/schema/xero.ts:189`) updated to match §7.
 
 ---
 
-## 7. Daily journal entries — settlement pipeline & fee taxonomy
+## 7. Xero accounts — checked against your real chart of accounts
 
-**New lib:** `src/modules/integrations/lib/amazon/payout-sync.ts`, cloned from the Faire
-orchestrator (`faire/payout-sync.ts`) — the proven second-channel pattern:
+I pulled the live chart from Xero (Jaxy Eyewear LLC). It is in better shape than expected —
+most of what Amazon needs already exists and is sitting at $0.00, clearly pre-created.
 
-1. Open `xero_sync_runs` row (`kind:'amazon_settlements'`, `source_platform:'amazon'`).
-2. `loadAmazonConfig()` — resolve required account mappings from
-   `xero_account_mappings` (`['amazon','_shared']`, platform wins) + tracking option; throw a
-   helpful error listing missing categories ("add them under Settings → Integrations → Xero").
-3. Pull settlement rows (≤90-day window) → append-skip into `amazon_settlement_rows`.
-4. Group by `settlement_id`. A settlement is **postable when its period has closed**
-   (`settlement_end_date` past) and all rows are present (`total_amount` header row seen).
-5. Idempotency: `xero_payout_syncs (source_platform='amazon', source_payout_id=settlement_id)`
-   — checked before posting, inserted **only after** success, so failures retry next run.
-6. Build journal/invoice from the taxonomy below → post → `xero_journal_log` every attempt →
-   synthetic `settlements` + `settlement_line_items` bridge rows
-   (`external_id='amazon_settlement_'+id`, `channel='amazon'`, line items linked to local
-   orders via `external_id='amazon:'+order_id`) → Slack summary → 1.1s throttle between posts
-   (Xero ~60 req/min).
+### Already exist — no action needed
 
-### Fee taxonomy → account mapping (observed in our real data, all 288 rows classified)
+| Account | Used for |
+|---|---|
+| **Sales - Amazon** | Product sales (Principal) |
+| **Merchant Fees - Amazon** | Referral commission |
+| **Sales Discounts & Promotions** | Promotions — the −$1,176 line |
+| **Sales Returns & Allowances** | Refunds |
+| **Shipping Income** | Shipping charged to buyer |
+| **COGS - Inbound Freight** | Inbound transportation + partnered-carrier fees |
+| **Outbound Shipping & Postage** | Return shipping labels |
+| **Merchant Fees - Other** | Suspense for unclassified Amazon fee types |
+| **Inventory Adjustments & Shrinkage** | Settlement residual plug |
+| **COGS - Product / Customs & Duties** | Daily COGS journal (all channels) |
 
-| transaction_type | amount_type | amount_description | Meaning | Account |
-|---|---|---|---|---|
-| Order | ItemPrice | Principal | Gross product sales | 4010 Sales – Amazon (CR) |
-| Order | ItemPrice | Tax | Sales tax collected | 2230 Sales Tax (CR) |
-| Order | ItemWithheldTax | MarketplaceFacilitatorTax-Principal | Tax withheld/remitted by Amazon | 2230 (DR) — legs net to zero, post both |
-| Order | ItemPrice | Shipping | Shipping income | 4060 Shipping Income (CR) |
-| Order | Promotion | Principal | Launch/coupon discounts | **4020 Sales Discounts – Amazon (DR, contra-revenue — 71% of gross, must be its own line)** |
-| Order | Promotion | Shipping | Shipping promo | 4060 (DR) |
-| Order | ItemFees | Commission | Referral fee | 5410 Merchant Fees – Amazon (DR) |
-| Order | ItemFees | FBAPerUnitFulfillmentFee | FBA pick/pack/ship | **5415 FBA Fulfilment Fees (DR)** |
-| Refund | ItemPrice | Principal | Refunded sales | 4300 Sales Returns (DR) |
-| Refund | ItemPrice | Tax / ItemWithheldTax | Tax legs reversed | 2230 (net zero) |
-| Refund | ItemFees | Commission | Referral credited back | 5410 (CR) |
-| Refund | ItemFees | RefundCommission | Refund admin fee | 5410 (DR) |
-| FBAFees | FBA Amazon-Partnered Carrier Shipment Fee | Base fee / Discount | Inbound freight (currently nets to 0) | 5010 COGS Freight (DR) |
-| FBAFees | FBA Inventory Storage Fee | Base fee | Monthly storage | **5420 FBA Storage Fees (DR)** |
-| other-transaction | — | Subscription Fee | Pro seller subscription | **5430 Amazon Subscription (DR)** |
-| other-transaction | — | Inbound Transportation Fee | Freight to FBA | 5010 (DR) |
-| other-transaction | — | Shipping label purchase for return | Return label | 5300 Outbound Shipping (DR) |
-| other-transaction | — | Payable to Amazon / Successful charge | Card charge covering negative balance | 1030 Amazon Clearing (pair nets to 0) |
-| Transfers | Micro Deposit | Micro Deposit | Bank verification penny | 1030 Amazon Clearing |
+Note this corrects rev 2: I had proposed channel-specific discount accounts, but
+`Sales Discounts & Promotions` already exists as a shared account. Channel separation comes
+from the **tracking category**, not duplicated accounts — consistent with how Faire/Shopify
+already work.
 
-**Unknown-type handling:** Amazon will introduce descriptions we haven't seen (storage
-overage, LTSF, disposal, removal, Vine enrolment…). Unmapped rows post to a suspense line
-(5460-equivalent "Amazon – Unclassified", config category `unclassified`) **and raise a Slack
-alert**, never silently absorbed. The classifier is a pure function
-(`classifySettlementRow(row) → category`) with a unit test locking every known mapping.
+### Please create these three (Cost of Sales), following your `Faire Fees - *` convention
 
-**Accounts in bold need creating in Xero** (or mapping onto existing codes) — decision item.
+| Account to create | Type | Why not an existing account |
+|---|---|---|
+| **`Amazon Fees - FBA Fulfillment`** | Cost of Sales | Largest Amazon fee (−$205 so far). `3PL - Fulfillment & Pick-Pack` is ShipHero's fee — mixing them would make both channels' unit economics unreadable. |
+| **`Amazon Fees - FBA Storage`** | Cost of Sales | Distinct from `3PL - Storage` (ShipHero) for the same reason. Will grow as FBA stock grows. |
+| **`Amazon Fees - Subscription`** | Cost of Sales | $39.99/mo Professional plan. Could go to `Software & Subscriptions`, but keeping it in cost of sales makes Amazon channel contribution margin correct. |
 
-### Posting model — honour the existing `payout_revenue_model` switch
+### Please confirm these two exist (balance sheet — I could only see P&L accounts)
 
-- **`invoice` (settlement-date):** one ACCREC invoice per settlement, number
-  `AMZN-{settlement_id}` (prefix already reserved in `settlement-revenue.ts`), gross sales
-  positive lines, every fee negative, invoice total = deposit → 1-click bank match. Implemented
-  as a pure `amazonSettlementToComponents()` adapter in
-  `settlement-invoice-builder.ts`, unit-tested like the Shopify/Faire adapters. Net-negative
-  settlements (possible in launch months) → credit-note path, same guard the builder already has.
-- **`deferred`:** manual journal — CR 2050 deferred revenue gross, DR fee accounts, DR 1100
-  receivables holding net; then `postBankTransactionReceive` 1030 ← 1100 (Xero forbids manual
-  journals on BANK accounts). Stage-2 recognition then handles per-order sales posting (§8).
+| Account | Type | Why |
+|---|---|---|
+| **`Amazon Clearing`** | **Bank** | Required for the deposit sweep, mirroring the Shopify/Faire clearing accounts. **Must be Bank type** — Xero forbids manual journals touching bank accounts, so the flow is manual journal → `Receivables Holding` → BankTransaction → `Amazon Clearing`. |
+| **`Sales Tax Payable`** | Current Liability | Only used as a safety net if facilitator-tax legs ever fail to net to zero (see below). |
 
-Whichever model Shopify/Faire currently run is what Amazon uses — consistency across the P&L.
+Also confirm `_shared` accounts `Deferred Revenue` and `Receivables Holding` exist — the
+payout loaders require them and they aren't in the suggestion catalog.
+
+### Fee taxonomy → accounts (every one of our 288 settlement rows classified)
+
+| transaction_type | amount_type | amount_description | Account |
+|---|---|---|---|
+| Order | ItemPrice | Principal | Sales - Amazon (CR) |
+| Order | ItemPrice | Shipping | Shipping Income (CR) |
+| Order | Promotion | Principal / Shipping | Sales Discounts & Promotions (DR) |
+| Order | ItemFees | Commission | Merchant Fees - Amazon (DR) |
+| Order | ItemFees | FBAPerUnitFulfillmentFee | **Amazon Fees - FBA Fulfillment** (DR) |
+| Order | ItemPrice | Tax | *netted — see below* |
+| Order | ItemWithheldTax | MarketplaceFacilitatorTax-Principal | *netted — see below* |
+| Refund | ItemPrice | Principal | Sales Returns & Allowances (DR) |
+| Refund | ItemFees | Commission | Merchant Fees - Amazon (CR) |
+| Refund | ItemFees | RefundCommission | Merchant Fees - Amazon (DR) |
+| Refund | ItemPrice/ItemWithheldTax | Tax legs | *netted* |
+| FBAFees | FBA Amazon-Partnered Carrier Shipment Fee | Base fee / Discount on Fee | COGS - Inbound Freight (DR) |
+| FBAFees | FBA Inventory Storage Fee | Base fee | **Amazon Fees - FBA Storage** (DR) |
+| other-transaction | — | Subscription Fee | **Amazon Fees - Subscription** (DR) |
+| other-transaction | — | Inbound Transportation Fee | COGS - Inbound Freight (DR) |
+| other-transaction | — | Shipping label purchase for return | Outbound Shipping & Postage (DR) |
+| other-transaction | — | Payable to Amazon / Successful charge | Amazon Clearing (pair nets to zero) |
+| Transfers | Micro Deposit | Micro Deposit | Amazon Clearing |
+| *anything unrecognised* | | | **Merchant Fees - Other** + Slack alert |
+
+**Marketplace facilitator tax:** Amazon collects and remits sales tax itself; the money never
+reaches us. In our data the two legs cancel exactly (+$34.73 / −$34.73 on orders, −$8.93 /
++$8.93 on refunds). The design nets them per settlement and **asserts the residual is zero**;
+a non-zero residual posts to `Sales Tax Payable` and raises a Slack alert. This keeps a fake
+tax liability off the books while staying safe if Amazon's behaviour changes.
+
+**Unknown fee types:** Amazon will introduce descriptions we haven't seen (long-term storage,
+disposal, removal, Vine). Unrecognised rows post to `Merchant Fees - Other` **and raise a Slack
+alert** — never silently absorbed. `classifySettlementRow(row) → category` is a pure function
+with a unit test locking every known mapping.
+
+### Posting model
+
+Honours the existing `payout_revenue_model` switch, so Amazon behaves like Shopify/Faire:
+- **`invoice`**: one ACCREC invoice per settlement, `AMZN-{settlement_id}` (prefix already
+  reserved), gross positive / fees negative so the total equals the deposit and the bank
+  matches 1:1. Pure `amazonSettlementToComponents()` adapter in `settlement-invoice-builder.ts`,
+  unit-tested like the Shopify/Faire adapters. Net-negative settlements (likely in launch
+  months) take the existing credit-note path.
+- **`deferred`**: manual journal CR Deferred Revenue / DR fees / DR Receivables Holding, then
+  `postBankTransactionReceive` Amazon Clearing ← Receivables Holding.
 
 ---
 
-## 8. COGS & revenue recognition — rides existing machinery
+## 8. FBA inventory & FIFO — your question answered
 
-Because Amazon orders are real `orders`/`order_items` rows with `shipped_at`, both daily
-finance jobs pick them up with only allowlist/label edits:
+> *"right now I create an order for all of the inventory in ShipHero to send to FBA. The order
+> in ShipHero is for $0. I'm not sure if this is even being reported as a COGS now."*
 
-**Daily COGS** (`runDailyCogsPosting`, cron 16:45 UTC) — its shipped-lines query has **no
-channel filter**, so Amazon lines flow in automatically the day they ship. Required before
-enabling (sequencing matters — the Xero mappings must exist first or journals fall back to
-default accounts with no tracking):
-- `channelLabel()` in `daily-cogs.ts:329` += `amazon` case
-- Amazon Xero account mappings + tracking option created (Phase 4 precedes Phase 5)
-- SKU resolution: `resolveDepletionTarget` handles pack-size + aliases already; add `-FBA`
-  suffix stripping either as `catalog_sku_aliases` rows (no code change, one row per FBA SKU —
-  34 today) **or** a suffix-strip in the resolver. **Recommend alias rows**: zero code risk,
-  visible in the UI, and handles one-off weird SKUs the same way.
-- Idempotency is free: depletions key on real `order_item_id`s (the Rev 1 synthetic-key
-  workaround is obsolete).
+### What is happening today
 
-**Revenue recognition** (`runShipmentRevenueRecognition`, cron 16:30 UTC) — deliberately
-allowlisted; wire Amazon in by:
-- `SUPPORTED_CHANNELS` += `'amazon'` (`shipment-revenue-recognition.ts:74`)
-- payout-prefix `REPLACE()` list += `'amazon_settlement_'`
-- platform mappings preload loop += `'amazon'`
-- Requires the settlement bridge rows from §7 step 6 (order ↔ settlement join), matching via
-  `external_id='amazon:'+order_id` — same dual-key join the reconciliation view already does.
-- Only relevant under the `deferred` model; no-ops under `invoice` (existing guard).
+**It is not generating COGS — and that is correct.** Verified in code:
 
-### ⚠️ Open decision: FBA stock vs ShipHero FIFO layers
+1. `syncShipHeroOrders` (`operations/lib/shiphero/sync-orders.ts`) **only ever inserts into
+   `shiphero_shipments`** — it never inserts into `orders`. It matches ShipHero orders onto
+   *existing* local orders by `partner_order_id = orders.external_id` and updates them.
+   `shipment-update.ts` likewise only finds, never creates.
+2. So a ShipHero-native order — one you create directly in ShipHero, like the $0 FBA transfer —
+   **never becomes a row in The Frame's `orders` table.**
+3. `runDailyCogsPosting` selects `FROM order_items oi JOIN orders o …`. No local order means no
+   order items, so the transfer is invisible to COGS. Nothing is depleted, nothing is posted.
+4. FIFO layers are touched only by `fifo-engine.ts`, `daily-cogs.ts` and `cogs-backfill.ts`.
+   The ShipHero **inventory** sync does not touch `inventory_cost_layers` at all — confirmed by
+   search. So shipping units to FBA doesn't disturb the cost ledger.
 
-20 of 21 orders are FBA — fulfilled from Amazon's warehouse. Stock gets there via ShipHero →
-FBA replenishment shipments. Our FIFO cost layers live against received PO stock and deplete at
-sale time; physical warehouse counts come from ShipHero hourly.
+### The recommended model
 
-- COGS at Amazon sale time is correct **as long as the ShipHero→FBA transfer is not itself
-  recorded as a depletion/write-off anywhere.** I found no code path that depletes FIFO on
-  ShipHero outbound transfers, so this *should* already be safe — but how that transfer is
-  operationally recorded (in ShipHero, in Xero, or not at all) needs confirming with you before
-  Phase 5 goes live.
-- FBA on-hand (`fba_myi_unsuppressed_inventory_data`) will be shown on the dashboard as a
-  separate location; it deliberately does **not** feed the `inventory` table (whose `warehouse`
-  quantity is authoritatively ShipHero's).
-- `sell-through.ts` gets the channel guard (§3b) so FBA sales don't trip ShipHero reorder flags.
-  FBA replenishment planning ("restock FBA") is a natural later feature from the same data —
-  out of scope for this plan.
+**Treat FIFO cost layers as location-agnostic "inventory we own", and deplete only on a real
+customer sale — whichever channel sells it.**
+
+This is both correct accounting and (conveniently) how the system already behaves:
+
+- Moving your own goods from your 3PL to Amazon's warehouse is a **transfer, not a sale**. No
+  revenue, no COGS. The goods stay an asset (Inventory 1400) until a customer buys them.
+- The $0 value on the ShipHero order is exactly right — it's a picking document, not a sale.
+- When Amazon sells the unit, we deplete FIFO then, so COGS lands in the same period as the
+  revenue it earned. That's the ASC 606 matching we already do for Shopify and Faire.
+
+**So: no change to the FIFO engine, and no double-count risk.** The one thing that must stay
+true is that the transfer order must **never** become a local order.
+
+### Guard rails to add
+
+1. **Keep creating the FBA transfer directly in ShipHero, not in Shopify.** A ShipHero-native
+   order can't reach `orders`. If it were ever raised as a $0 *Shopify* order it **would**
+   import and **would** deplete FIFO at transfer time — double-counting COGS when the Amazon
+   sale later depletes again. This is the single behavioural rule to preserve.
+2. **Defensive check** in the daily COGS run: flag any order with `total = 0` and >0 units as a
+   `cogs_exceptions` row of a new type `suspected_transfer` rather than depleting it silently.
+   Cheap insurance in case rule 1 is ever broken by accident.
+3. **Inventory visibility fix.** ShipHero's on-hand drops when units ship to FBA, so The Frame
+   currently *understates* what we own — units at Amazon are invisible. The new
+   `amazon_fba_inventory` snapshot fixes this:
+   **total owned = ShipHero on-hand + FBA fulfillable + FBA inbound + FBA reserved.**
+   Shown on the dashboard, and the correct basis for reorder decisions.
+4. **`sell-through.ts` channel guard** (§3b): Amazon sales must not inflate ShipHero warehouse
+   velocity, or reorder flags will fire against stock that isn't being consumed from ShipHero.
+5. **Month-end reconciliation check:** FIFO `Σ remaining_quantity` should ≈ ShipHero on-hand +
+   FBA total + inbound. Drift means a missed depletion or an untracked transfer. Added to the
+   month-end card (§10).
+
+### The 3PL fee on the transfer
+
+ShipHero charges pick/pack for the FBA transfer order; that already flows to
+`3PL - Fulfillment & Pick-Pack` via their invoice, which is correct. Strictly it could be
+capitalised into inventory cost (a cost of getting goods to the point of sale), but expensing
+it is simpler, consistent with current treatment, and immaterial at this volume. Amazon's own
+`Inbound Transportation Fee` goes to `COGS - Inbound Freight` (§7).
+
+### Revenue recognition & COGS wiring
+
+Because Amazon orders are real `orders`/`order_items` rows with `shipped_at`, both daily jobs
+pick them up with only allowlist/label edits:
+
+- **Daily COGS** — the shipped-lines query has no channel filter, so Amazon flows in
+  automatically. Needs: `channelLabel()` += `amazon`; Amazon Xero mappings + tracking option
+  created first (Phase 4 precedes Phase 5, or journals silently fall back to default accounts
+  with no tracking); `-FBA` SKU resolution.
+- **SKU mapping** — recommend adding `catalog_sku_aliases` rows for the `-FBA` SKUs (34 today)
+  rather than a suffix-strip in code: zero code risk, visible and editable in the UI, and
+  handles one-off odd SKUs the same way. Generated by script, reviewed before insert.
+- **Revenue recognition** — allowlisted, so wire in deliberately: `SUPPORTED_CHANNELS` +=
+  `'amazon'` (`shipment-revenue-recognition.ts:74`), payout-prefix list += `'amazon_settlement_'`,
+  platform preload += `'amazon'`. Needs the §7 settlement bridge rows for the order↔settlement
+  join. Only applies under the `deferred` model; no-ops under `invoice`.
 
 ---
 
 ## 9. Dashboard
 
-**New route:** `/finance/amazon` (tab pattern consistent with `/finance`), fed by
-`GET /api/v1/finance/amazon/metrics?range=…` reading `amazon_sales_traffic_daily`,
-`amazon_order_rows`, `amazon_settlement_rows`, `inventory_cost_depletions` — all local, no
-live Windsor calls, so it's fast and works regardless of Windsor's window.
+**New:** `/finance/amazon`, fed by `GET /api/v1/finance/amazon/metrics?range=…`, reading local
+tables only — fast, and unaffected by Windsor's 90-day window.
 
-**Headline tiles (range-selectable, default 30d):**
-Gross sales · Promotions (with % of gross, highlighted) · Net sales · Units · Orders ·
-Referral + FBA fees · Refund rate · Contribution margin (net − fees − COGS from depletions)
+**Tiles:** Gross sales · Promotions (% of gross, highlighted) · Net sales · Units · Orders ·
+Referral + FBA fees · Refund rate · Contribution margin (net − fees − COGS).
 
 **Charts:**
-1. Daily stacked: gross vs promotions vs net — the launch-pricing story at a glance
-2. Sessions / conversion (unit-session %) / Buy Box % — traffic quality (Amazon-only metrics)
-3. Top SKUs by units and by contribution margin (with `-FBA` SKUs merged onto the parent)
-4. Fee-load ratio over time (total fees ÷ gross) — channel health metric
-5. FBA inventory: fulfillable / inbound / reserved / unsellable units by SKU
+1. Daily gross vs promotions vs net — the launch-pricing story
+2. Sessions / conversion / Buy Box % — traffic quality (Amazon-only metrics)
+3. Top SKUs by units and contribution margin (`-FBA` merged onto parent)
+4. Fee-load ratio (total fees ÷ gross) over time — channel health
+5. **Inventory position**: ShipHero on-hand vs FBA fulfillable vs FBA inbound vs reserved,
+   with total-owned per SKU (§8)
 
-**Tables:** settlement history (id, period, gross/fees/net, Xero status + deep link) ·
-COGS exceptions for `channel='amazon'` · sync health per report (from `amazon_sync_state`:
-last success, watermark, rows, last error).
+**Tables:** settlement history (period, gross/fees/net, Xero status + link) · Amazon COGS
+exceptions · sync health per report from `amazon_sync_state` (last success, watermark, rows,
+last error) — important given the flaky report behaviour in §2.
 
-**Existing surfaces that light up via §3c edits:** P&L channel table (`pnl.ts` —
-`CHANNEL_LABELS` already has amazon), dashboard channel-mix widget, `/orders` filter +
-badges, reconciliation view, Slack daily/weekly digests.
-
-**Slack digest note:** revenue in digests comes from `orders` — once Amazon orders import,
-digests include them automatically (correct, no double-count: settlements feed journals, not
-digests).
+**Existing surfaces** light up via §3c: P&L channel table (`CHANNEL_LABELS` already has amazon),
+dashboard channel-mix, `/orders` filter and badges, reconciliation.
 
 ---
 
-## 10. Month-end reporting
+## 10. Slack alerts (confirmed: Amazon everywhere)
 
-- **P&L:** Amazon appears as a channel row in `calculatePnl()` — revenue from `orders`, COGS
-  from depletions, fees from `settlements` — with the existing `hasFullCostData` coverage flag.
-- **Reconciliation:** existing view works once bridge rows exist (settlement gross vs linked
-  orders' totals, >2% flagged). Amazon-specific wrinkle: settlements span two weeks and
-  include orders from before the period → expected-vs-received uses the line-item join
-  (already the fixed pattern, not date-range scans).
-- **Month-end checklist additions** (surfaced on the dashboard as a "Month-end" card):
-  unposted settlements · unmapped SKUs / open `cogs_exceptions` (channel amazon) ·
-  FBA reimbursements this month (income; easy to miss) · returns without matching refunds ·
-  promotions total vs plan · FBA storage fee trend.
-- **Period close:** rides `xero_period_lock_date` + the reverse-and-repost correction pattern
-  (`correctCogsForDate`) unchanged. Settlement restatements (rare) follow the Faire
-  issue-credit pattern: drift detected on re-pull → clawback bill + Slack, never edit-in-place.
+Amazon gets **purpose-built** notifications rather than piggybacking on ShipHero-triggered
+plumbing (which would misfire, per §3a):
+
+| Alert | Trigger |
+|---|---|
+| Daily / weekly digests | Amazon revenue line — automatic once orders import; `platformLabel` += `amazon` |
+| New Amazon orders | Daily summary from `amazon-orders-sync` (per-order at ~3/day would be noisy; summary now, per-order easy to switch on) |
+| Settlement posted | Per settlement: gross, fees, net, Xero link |
+| Unclassified fee type | Any settlement row hitting the suspense account (§7) |
+| COGS exceptions | Unmapped SKU / shortfall / `suspected_transfer` (§8), via existing grouped exception notifier |
+| Sync failure | After 3 consecutive failures for a report (§2 flakiness) |
+| FBA low stock | Fulfillable below threshold with nothing inbound — optional, Phase 6 |
+
+Deliberately **not** alerted: stuck-order scan (we can't action an order stuck at Amazon).
 
 ---
 
 ## 11. Cron jobs
 
-Entries in `src/modules/integrations/lib/cron/registry.ts` (no new Railway services; note the
-5-minute tick floor). The existing chain: payouts 15:00 → settlements 16:00 → faire 16:15 →
-recognition 16:30 → COGS 16:45 UTC. Amazon slots in so its data is in place before the shared
-jobs run:
+In `integrations/lib/cron/registry.ts` (no new Railway services; 5-minute tick floor). Existing
+chain: payouts 15:00 → settlements 16:00 → faire 16:15 → recognition 16:30 → COGS 16:45 UTC.
 
-| id | Schedule (UTC) | Handler | Notes |
-|---|---|---|---|
-| `amazon-orders-sync` | `10 14 * * *` | POST `/api/v1/orders/amazon-sync` | Orders + shipments reports, 7-day trailing upsert. After `shopify-orders-sync` (14:00), well before recognition. |
-| `amazon-sales-traffic-sync` | `30 14 * * *` | `syncAmazonSalesTraffic()` | Dashboard analytics, 7-day trailing upsert (restatements) |
-| `amazon-settlement-sync` | `20 16 * * *` | `syncAmazonSettlements()` | Raw archive + journals + bridge rows. After faire (16:15), before recognition (16:30). |
-| `amazon-fba-inventory-sync` | `0 13 * * *` | `syncAmazonFbaInventory()` | Daily FBA stock snapshot |
+| id | Schedule (UTC) | Purpose |
+|---|---|---|
+| `amazon-orders-sync` | `10 14 * * *` | Both order reports, 7-day trailing upsert |
+| `amazon-sales-traffic-sync` | `30 14 * * *` | Dashboard analytics, 7-day trailing |
+| `amazon-fba-inventory-sync` | `0 13 * * *` | Daily FBA stock snapshot |
+| `amazon-settlement-sync` | `20 16 * * *` | Raw archive + journals + bridge rows (after Faire, before recognition) |
 
-All four: `fireAndForget: false`, guarded by `WINDSOR_API_KEY` presence, tolerant of
-cold-report timeouts (log + retry next tick, no alert until 3 consecutive failures — then
-Slack via the existing notification lib).
+All guarded on `WINDSOR_API_KEY`, tolerant of cold-report timeouts, alerting only after 3
+consecutive failures.
 
 ---
 
 ## 12. Work breakdown
 
-**Phase 1 — Windsor client + raw archive + backfill** *(time-sensitive: settlement data is
-aging out of the 90-day window as we wait)*
-- `integrations/lib/windsor/client.ts` — generic client + tests (mock fetch; window chunking,
-  backoff, prefix handling)
-- `integrations/schema/amazon.ts` + `db.ts` + `__tests__/setup.ts` DDL — 5 tables
-- `integrations/lib/amazon/ingest.ts` — landing writers with idempotency keys + tests
-- One-off backfill: settlements (full 90d), orders + shipments (chunked to launch date
-  ~1 Jun), sales & traffic (since launch — verify actual history depth; report may allow more
-  than 90d)
+**Phase 1 — Windsor client + raw archive + full backfill** *(time-sensitive)*
+- `integrations/lib/windsor/client.ts` + tests (window chunking, backoff, prefix handling)
+- `integrations/schema/amazon.ts` + `db.ts` + `__tests__/setup.ts` — 5 tables
+- `integrations/lib/amazon/ingest.ts` — landing writers + idempotency + tests
+- **Backfill everything:** settlements (full 90d), orders both variants (chunked to ~1 Jun
+  launch), sales & traffic (probe real history depth — may exceed 90d), FBA inventory snapshot
 - `amazon_sync_state` wiring
 
 **Phase 2 — Order import**
-- `orders` enum + `orders/lib/amazon-sync.ts` + route + tests (status mapping, upsert,
-  shipped_at merge, SKU line handling, money sums)
-- Guard edits (§3b) + structural defences (prefixes, NULL company, pre-stamped alert) + tests
-  asserting each guard (e.g. stuck-order scan ignores amazon; activity-log matcher misses
-  `AMZ-` rows)
-- Cosmetic/UI (§3c)
-- Cron: `amazon-orders-sync`
+- enum + `orders/lib/amazon-sync.ts` + route + tests (status mapping, upsert, shipped_at
+  derivation, money sums, multi-line orders)
+- Guards (§3b) + structural defences + tests asserting each guard holds
+- Cosmetic/UI (§3c); cron `amazon-orders-sync`
 
-**Phase 3 — Dashboard**
-- `amazon-sales-traffic-sync` + `amazon-fba-inventory-sync` crons
+**Phase 3 — Dashboard + Slack**
+- `amazon-sales-traffic-sync`, `amazon-fba-inventory-sync` crons
 - `/api/v1/finance/amazon/metrics` + `/finance/amazon` page
-- Channel-mix / digests / P&L visual checks with real rows
+- Slack alerts (§10); verify channel-mix / digests / P&L with real rows
 
-**Phase 4 — Xero journals** *(needs sign-off on §7 accounts first)*
-- Xero: create/decide the bold accounts; add mapping suggestion rows + `_shared`
-  deferred/receivables rows; tracking option "Amazon"
-- `integrations/lib/amazon/settlement-classify.ts` — pure classifier + exhaustive test
-- `integrations/lib/amazon/payout-sync.ts` — orchestrator (Faire clone) + mocked-Xero tests
-- `amazonSettlementToComponents()` in `settlement-invoice-builder.ts` + pure tests
-- Bridge rows (`ensureAmazonSettlement()`) + reconciliation verification
-- Cron: `amazon-settlement-sync`; backfill-post June/July settlements after review in
-  DRAFT status first (post one settlement end-to-end, eyeball in Xero, then enable POSTED)
+**Phase 4 — Xero journals** *(after you create the §7 accounts)*
+- Mapping rows + tracking option "Amazon"
+- `amazon/settlement-classify.ts` — pure classifier + exhaustive test over all 288 archived rows
+- `amazon/payout-sync.ts` orchestrator (Faire clone) + mocked-Xero tests
+- `amazonSettlementToComponents()` + pure tests; `ensureAmazonSettlement()` bridge rows
+- **Post one settlement as DRAFT first, review in Xero, then enable POSTED** and backfill
+  June/July
 
-**Phase 5 — COGS + revenue recognition** *(needs §8 FBA-transfer answer)*
-- 34 `catalog_sku_aliases` rows for `-FBA` SKUs (script; verify against `catalog_skus`)
-- `channelLabel()` + `SUPPORTED_CHANNELS` + prefix-list edits
-- Dry-run `runDailyCogsPosting` on a known day; verify depletions + journal shape; enable
-- `sell-through` guard live check
+**Phase 5 — COGS + revenue recognition**
+- `catalog_sku_aliases` rows for `-FBA` SKUs (script, reviewed)
+- `channelLabel()`, `SUPPORTED_CHANNELS`, prefix-list edits
+- `suspected_transfer` exception type (§8)
+- Dry-run `runDailyCogsPosting` on a known day, verify depletions + journal, then enable
 
 **Phase 6 — Month-end**
-- Month-end card (checklist queries) + returns/reimbursements ingestion (2 more raw tables or
-  fold into the card queries live from raw reports monthly)
-- First full month-end run alongside the existing Shopify close
+- Month-end card: unposted settlements · open exceptions · FBA reimbursements ·
+  returns without refunds · promotions total · **FIFO vs (ShipHero + FBA) reconciliation** (§8)
+- Returns + reimbursements ingestion; first full close alongside Shopify
 
-**Phase 7 — later channels** — TikTok Shop / Facebook / Amazon Ads: connect in Windsor
-onboarding, then config + mapper per connector on the same client. Ad-spend lands as its own
-small tables + dashboard cards (no orders, no journals initially).
+**Phase 7 — later channels** — TikTok Shop / Facebook / Amazon Ads: connect in Windsor, then
+config + mapper on the same client. Ad spend lands as its own tables + dashboard cards.
 
-Testing conventions throughout (established repo patterns): pure builders unit-tested without
-mocks; orchestrators with `vi.mock`ed Xero client + Slack; DB tests on the in-memory sqlite
-from `getTestDb()`; new tables added to test DDL.
+Testing throughout, per repo convention: pure builders unit-tested without mocks; orchestrators
+with `vi.mock`ed Xero client + Slack; DB tests on in-memory sqlite via `getTestDb()`; new tables
+added to the test DDL.
 
 ---
 
-## 13. Decisions needed before the relevant phase
+## 13. Status of open items
 
-1. **§7 account mapping** *(blocks Phase 4)* — approve the taxonomy table, and: create
-   4020/5415/5420/5430 as new Xero accounts, or map onto existing codes?
-2. **§8 FBA transfers** *(blocks Phase 5)* — how is the ShipHero → Amazon FBA replenishment
-   currently recorded (ShipHero order? manual? nothing)? Determines whether sale-time FIFO
-   depletion is already correct (I believe it is — no depleting code path found — but want
-   operational confirmation).
-3. **Revenue model** — confirm Amazon follows the current `payout_revenue_model` setting
-   (recommended; keeps channels consistent).
-4. **Backfill depth** — everything available now (recommended), or from a clean month boundary?
-5. **Digest noise** — should Amazon appear in daily Slack digests immediately, or only after
-   journals go live? (It will appear automatically once orders import; easy to exclude if
-   too noisy at ~3 orders/day.)
+| Item | Status |
+|---|---|
+| Import orders vs aggregate | ✅ Import, never push (§3) |
+| Backfill depth | ✅ Everything available |
+| Slack alerts | ✅ Amazon everywhere (§10) |
+| FBA / FIFO handling | ✅ Answered (§8) — no COGS today, which is correct; deplete at sale, keep the transfer ShipHero-native |
+| Xero accounts | ⏳ **Create 3 accounts, confirm 2 exist** (§7) — only blocks Phase 4 |
+| Revenue model | ⏳ Confirm Amazon follows the current `payout_revenue_model` setting (recommended) |
+| Shipments report | ✅ Dropped as unavailable; `shipped_at` from last-update report (§5) |
 
-Everything else in this plan I consider settled and ready to build.
+Phases 1–3 are unblocked and can start immediately.
