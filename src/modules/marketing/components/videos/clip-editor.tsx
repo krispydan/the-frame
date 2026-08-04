@@ -28,7 +28,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ClipPreviewDialog } from "./clip-preview-dialog";
-import { effectiveDuration } from "@/modules/marketing/lib/video/clip-trims";
 import {
   ArrowLeft, ArrowRight, Clapperboard, Crop, FastForward, Focus, Loader2, Play, Plus, Rewind, Scissors, X,
 } from "lucide-react";
@@ -48,9 +47,6 @@ export interface EditorClip {
   categorySlug?: string | null;
   category?: string | null;
   isProductShot?: boolean;
-  /** Non-destructive in/out for THIS position in the sequence. Applied at
-   *  render; the library clip is never modified. */
-  trim?: { inSec: number; outSec: number } | null;
 }
 
 /** The label under a thumbnail, whichever field the caller populated. */
@@ -100,7 +96,6 @@ export function ClipEditor<T extends EditorClip>({
   readOnly = false,
   readOnlyReason,
   onAddClick,
-  onClipEdited,
   addLabel = "Add clip",
   title = "Clip editor",
   subtitle = "trim · reframe · add effects · reorder — this is your video, in order",
@@ -120,12 +115,6 @@ export function ClipEditor<T extends EditorClip>({
   readOnly?: boolean;
   readOnlyReason?: string;
   onAddClick?: () => void;
-  /**
-   * Called after a clip's tags are fixed from the preview dialog. The
-   * editor only holds the sequence, not the clip records, so the host has
-   * to refetch for the corrected category / products to show up.
-   */
-  onClipEdited?: () => void;
   addLabel?: string;
   title?: string;
   subtitle?: string;
@@ -139,21 +128,19 @@ export function ClipEditor<T extends EditorClip>({
   const [watchingIdx, setWatchingIdx] = useState<number | null>(null);
   const [fxBusyIdx, setFxBusyIdx] = useState<number | null>(null);
 
-  // Trim — which position's panel is open. The trim itself lives on the
-  // clip row, so setting one is local state, not a server round-trip.
+  // Trim
   const [trimIdx, setTrimIdx] = useState<number | null>(null);
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(0);
+  const [trimming, setTrimming] = useState(false);
+  const trimVideoRef = useRef<HTMLVideoElement | null>(null);
 
   // Reframe: zoom factor + normalized focal point.
   const [reframeIdx, setReframeIdx] = useState<number | null>(null);
   const [reframeZoom, setReframeZoom] = useState(1.4);
   const [reframeFocus, setReframeFocus] = useState({ x: 0.5, y: 0.42 });
 
-  // Trimmed length — this readout is how long the finished video runs, so
-  // it has to move the moment a handle does.
-  const totalDuration = clips.reduce(
-    (s, c) => s + effectiveDuration(c.durationSec ?? null, c.trim ?? null),
-    0,
-  );
+  const totalDuration = clips.reduce((s, c) => s + (c.durationSec ?? 0), 0);
 
   const move = (i: number, dir: -1 | 1) => {
     const j = i + dir;
@@ -186,11 +173,39 @@ export function ClipEditor<T extends EditorClip>({
     );
   };
 
-  const openTrim = (i: number) => setTrimIdx(i);
+  const openTrim = (i: number) => {
+    setTrimIdx(i);
+    setTrimStart(0);
+    setTrimEnd(Math.round((clips[i].durationSec ?? 0) * 10) / 10);
+  };
 
-  /** Set (or clear) the trim on one position. Instant — no encode. */
-  const setTrimAt = (i: number, trim: { inSec: number; outSec: number } | null) => {
-    onChange(clips.map((row, j) => (j === i ? { ...row, trim } : row)));
+  const applyTrim = async () => {
+    if (trimIdx === null) return;
+    const target = clips[trimIdx];
+    setTrimming(true);
+    try {
+      const res = await fetch(`/api/v1/marketing/videos/clips/${target.id}/trim`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ startSec: trimStart, endSec: trimEnd }),
+      });
+      const d = await readJson(res);
+      if (!res.ok) {
+        toast.error(String(d.error ?? "Trim failed"), { duration: 10000 });
+        return;
+      }
+      replaceAt(trimIdx, d.clip as ApiClip);
+      setTrimIdx(null);
+      toast.success(
+        d.deduped
+          ? `That exact trim already existed — swapped it in. Hit ${saveLabel}.`
+          : `Trimmed clip ready — hit ${saveLabel} to apply it.`,
+      );
+    } catch (e) {
+      toast.error(`Trim failed: ${e instanceof Error ? e.message : String(e)}`, { duration: 10000 });
+    } finally {
+      setTrimming(false);
+    }
   };
 
   const applyTransform = async (idx: number, spec: Record<string, unknown>, label: string) => {
@@ -383,14 +398,73 @@ export function ClipEditor<T extends EditorClip>({
           )}
         </div>
 
-        {/* Trim — non-destructive in/out on this position */}
+        {/* Trim */}
         {trimIdx !== null && clips[trimIdx] && (
-          <TrimPanel
-            clip={clips[trimIdx]}
-            trim={clips[trimIdx].trim ?? null}
-            onChange={(t) => setTrimAt(trimIdx, t)}
-            onClose={() => setTrimIdx(null)}
-          />
+          <div className="space-y-2 rounded-lg border p-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="flex items-center gap-1.5 text-xs font-medium">
+                <Scissors className="h-3.5 w-3.5" /> Trim “{clips[trimIdx].fileName ?? "clip"}”
+              </p>
+              <Button variant="ghost" size="sm" onClick={() => setTrimIdx(null)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex flex-wrap items-start gap-3">
+              <video
+                ref={trimVideoRef}
+                key={clips[trimIdx].id}
+                src={clips[trimIdx].previewUrl ?? undefined}
+                controls
+                muted
+                playsInline
+                className="aspect-[9/16] w-36 rounded bg-muted object-cover"
+              />
+              <div className="min-w-[240px] flex-1 space-y-2">
+                {(
+                  [
+                    ["Start", trimStart, setTrimStart],
+                    ["End", trimEnd, setTrimEnd],
+                  ] as Array<[string, number, (v: number) => void]>
+                ).map(([label, value, setter]) => (
+                  <div key={label} className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="w-9 text-xs font-medium">{label}</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={clips[trimIdx].durationSec ?? 0}
+                        step={0.1}
+                        value={value}
+                        onChange={(e) => setter(Number(e.target.value))}
+                        className="flex-1"
+                      />
+                      <span className="w-10 text-right text-xs tabular-nums">{value.toFixed(1)}s</span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 px-1.5 text-[11px]"
+                        onClick={() => setter(Math.round((trimVideoRef.current?.currentTime ?? 0) * 10) / 10)}
+                        title="Use the player's current position"
+                      >
+                        playhead
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                <p className="text-xs text-muted-foreground">
+                  Keeps {Math.max(0, trimEnd - trimStart).toFixed(1)}s of {(clips[trimIdx].durationSec ?? 0).toFixed(1)}s.
+                  The original clip stays in the library; the trim becomes a new clip in this position.
+                </p>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={applyTrim} disabled={trimming || trimEnd - trimStart < 1}>
+                    {trimming ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Scissors className="h-4 w-4 mr-1" />}
+                    {trimming ? "Trimming…" : "Apply trim"}
+                  </Button>
+                  {trimEnd - trimStart < 1 && <span className="self-center text-xs text-amber-600">Minimum 1s</span>}
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Reframe — drag the box, or pick a position */}
@@ -414,7 +488,6 @@ export function ClipEditor<T extends EditorClip>({
         <ClipPreviewDialog
           clip={clips[watchingIdx]}
           onClose={() => setWatchingIdx(null)}
-          onEdited={onClipEdited}
           onRemove={
             readOnly || clips.length <= minClips
               ? undefined
@@ -619,317 +692,3 @@ const REFRAME_ANCHORS = [
   { label: "Bottom", short: "↓", x: 0.5, y: 0.82 },
   { label: "Bottom right", short: "↘", x: 0.8, y: 0.82 },
 ];
-
-// ── Trim ─────────────────────────────────────────────────────────────────
-
-/**
- * Set a clip's in/out points, seeing the frame you're landing on.
- *
- * The old panel was two range sliders next to an unrelated player, so you
- * chose cut points blind. Here one preview retargets to whichever handle
- * you're dragging and snaps back to the playhead on release — the pattern
- * every consumer editor uses. (Two side-by-side previews are a
- * professional NLE convention for trimming the join BETWEEN two clips;
- * with a single clip against nothing they'd show the same thing twice.)
- *
- * Seeking uses chase-time coalescing rather than a throttle: issue the
- * next seek only when the last one reports back, always to the newest
- * position. A timer-based throttle is decoupled from how long a seek
- * actually takes, so it either floods the decoder or adds latency for
- * nothing.
- *
- * Nothing here calls the server. The trim is two numbers on the sequence,
- * baked in at render.
- */
-function TrimPanel({
-  clip,
-  trim,
-  onChange,
-  onClose,
-}: {
-  clip: EditorClip;
-  trim: { inSec: number; outSec: number } | null;
-  onChange: (t: { inSec: number; outSec: number } | null) => void;
-  onClose: () => void;
-}) {
-  // The probed duration is the DB's, and a handful of clips have never
-  // been probed (durationSec null) — those would render a zero-width
-  // timeline you can't drag. The <video> element knows its own length, so
-  // adopt that as soon as metadata lands and the panel works regardless.
-  const [mediaDuration, setMediaDuration] = useState<number | null>(null);
-  const duration = mediaDuration ?? clip.durationSec ?? 0;
-  const inSec = trim?.inSec ?? 0;
-  const outSec = trim?.outSec ?? duration;
-
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const trackRef = useRef<HTMLDivElement | null>(null);
-  const [playhead, setPlayhead] = useState(inSec);
-  const [drag, setDrag] = useState<"in" | "out" | "playhead" | null>(null);
-  const [filmstripUrl, setFilmstripUrl] = useState<string | null>(null);
-
-  // ── Chase-time seeking ──
-  // `seeking` guards a seek in flight; when it lands we re-fire only if
-  // the target moved. The watchdog exists because 'seeked' occasionally
-  // doesn't fire, which would otherwise deadlock the drag.
-  const chase = useRef({ target: 0, seeking: false, timer: 0 as number | ReturnType<typeof setTimeout> });
-  const seekTo = useCallback((t: number) => {
-    const v = videoRef.current;
-    if (!v) return;
-    const c = chase.current;
-    c.target = Math.max(0, Math.min(duration, t));
-    setPlayhead(c.target);
-    if (c.seeking) return;
-    c.seeking = true;
-    v.currentTime = c.target;
-    clearTimeout(c.timer);
-    c.timer = setTimeout(() => { c.seeking = false; }, 250);
-  }, [duration]);
-
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    const onSeeked = () => {
-      const c = chase.current;
-      clearTimeout(c.timer);
-      // Float comparison never lands exactly — an epsilon, not equality.
-      if (Math.abs(v.currentTime - c.target) < 0.02) {
-        c.seeking = false;
-      } else {
-        v.currentTime = c.target;
-        c.timer = setTimeout(() => { c.seeking = false; }, 250);
-      }
-    };
-    v.addEventListener("seeked", onSeeked);
-    const c = chase.current;
-    return () => {
-      v.removeEventListener("seeked", onSeeked);
-      clearTimeout(c.timer);
-    };
-  }, []);
-
-  // Filmstrip behind the track — decoration, so failure is silent.
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/v1/marketing/videos/clips/${clip.id}/filmstrip`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (!cancelled) setFilmstripUrl(d?.url ?? null); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [clip.id]);
-
-  const pct = (t: number) => (duration > 0 ? (t / duration) * 100 : 0);
-  const timeAt = useCallback((clientX: number) => {
-    const el = trackRef.current;
-    if (!el || duration <= 0) return 0;
-    const r = el.getBoundingClientRect();
-    return Math.max(0, Math.min(duration, ((clientX - r.left) / r.width) * duration));
-  }, [duration]);
-
-  /**
-   * Emit a range, or null when it covers the whole clip.
-   *
-   * Without the null case, opening the panel and nudging a handle back to
-   * the edge leaves a {0, duration} "trim" behind: it marks the post
-   * dirty, survives a save, and forces the render off its stream-copy
-   * path to re-encode a cut that removes nothing.
-   */
-  const emit = useCallback((nextIn: number, nextOut: number) => {
-    const i = roundFrame(nextIn);
-    const o = roundFrame(nextOut);
-    // Half a frame, NOT a millisecond: snapping to the frame grid moves
-    // the out point by up to 1/60s, so a clip of 4.806s rounds to 4.80.
-    // Against a 1ms threshold that reads as "not the whole clip", and
-    // dragging the handle back to the end would leave a trim behind that
-    // cuts six milliseconds — dirtying the post and costing a re-encode.
-    const halfFrame = 1 / 60;
-    const whole = i <= halfFrame && (duration <= 0 || o >= duration - halfFrame);
-    onChange(whole ? null : { inSec: i, outSec: o });
-  }, [duration, onChange]);
-
-  const setIn = useCallback((t: number) => {
-    emit(Math.max(0, Math.min(t, outSec - MIN_TRIM_SEC)), outSec);
-  }, [outSec, emit]);
-  const setOut = useCallback((t: number) => {
-    emit(inSec, Math.min(duration, Math.max(t, inSec + MIN_TRIM_SEC)));
-  }, [inSec, duration, emit]);
-
-  // ── Dragging ──
-  // The handlers live in refs and the listeners are attached IMPERATIVELY
-  // in pointerdown, rather than by an effect keyed on `drag`.
-  //
-  // An effect can only attach after React commits the setDrag render, and
-  // a quick flick puts several pointermove events on the wire before that
-  // — they land on nothing, so the first part of the gesture is silently
-  // dropped and the handle appears to stick. Attaching inside the same
-  // event that starts the drag closes that window; pointer capture then
-  // keeps the events coming even when the cursor leaves the track.
-  const live = useRef({ inSec, outSec, setIn, setOut, seekTo, timeAt });
-  // Synced after commit, not during render: a pointer event can only be
-  // handled after the browser yields, so the drag always reads current
-  // values.
-  useEffect(() => {
-    live.current = { inSec, outSec, setIn, setOut, seekTo, timeAt };
-  });
-
-  const startDrag = useCallback((which: "in" | "out" | "playhead", e: React.PointerEvent) => {
-    e.preventDefault();
-    const target = e.currentTarget as HTMLElement;
-    target.setPointerCapture?.(e.pointerId);
-    setDrag(which);
-
-    const onMove = (ev: PointerEvent) => {
-      const l = live.current;
-      const t = l.timeAt(ev.clientX);
-      if (which === "in") { l.setIn(t); l.seekTo(Math.min(t, l.outSec - MIN_TRIM_SEC)); }
-      else if (which === "out") { l.setOut(t); l.seekTo(Math.max(t, l.inSec + MIN_TRIM_SEC)); }
-      else l.seekTo(t);
-    };
-    // Release returns the preview to the in-point — the frame the clip
-    // will actually open on.
-    const onUp = () => {
-      target.removeEventListener("pointermove", onMove);
-      target.removeEventListener("pointerup", onUp);
-      target.removeEventListener("pointercancel", onUp);
-      if (which !== "playhead") live.current.seekTo(live.current.inSec);
-      setDrag(null);
-    };
-    target.addEventListener("pointermove", onMove);
-    target.addEventListener("pointerup", onUp);
-    target.addEventListener("pointercancel", onUp);
-
-    if (which === "playhead") onMove(e.nativeEvent);
-  }, []);
-
-  // ── Keyboard: editor conventions ──
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
-      const frame = 1 / 30;
-      if (e.key === "i" || e.key === "I") { e.preventDefault(); setIn(playhead); }
-      else if (e.key === "o" || e.key === "O") { e.preventDefault(); setOut(playhead); }
-      else if (e.key === "," ) { e.preventDefault(); seekTo(playhead - frame); }
-      else if (e.key === "." ) { e.preventDefault(); seekTo(playhead + frame); }
-      else if (e.key === "ArrowLeft") { e.preventDefault(); seekTo(playhead - (e.shiftKey ? 1 : frame)); }
-      else if (e.key === "ArrowRight") { e.preventDefault(); seekTo(playhead + (e.shiftKey ? 1 : frame)); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [playhead, setIn, setOut, seekTo]);
-
-  const kept = Math.max(0, outSec - inSec);
-  const trimmed = kept < duration - 0.05;
-
-  return (
-    <div className="space-y-2 rounded-lg border p-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <p className="flex items-center gap-1.5 text-xs font-medium">
-          <Scissors className="h-3.5 w-3.5" /> Trim “{clip.fileName ?? "clip"}”
-        </p>
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-
-      <div className="flex flex-wrap items-start gap-3">
-        <video
-          ref={videoRef}
-          src={clip.previewUrl ?? undefined}
-          poster={clip.posterUrl ?? undefined}
-          muted
-          playsInline
-          preload="auto"
-          onLoadedMetadata={(e) => {
-            const d = e.currentTarget.duration;
-            if (Number.isFinite(d) && d > 0) setMediaDuration(d);
-            seekTo(inSec);
-          }}
-          className="aspect-[9/16] w-44 shrink-0 rounded bg-black object-cover"
-        />
-
-        <div className="min-w-[300px] flex-1 space-y-2">
-          {/* Timeline: kept range bright, discarded ends dimmed */}
-          <div
-            ref={trackRef}
-            className="relative h-14 w-full cursor-pointer select-none overflow-hidden rounded border bg-muted bg-cover"
-            style={filmstripUrl ? { backgroundImage: `url(${filmstripUrl})`, backgroundSize: "100% 100%" } : undefined}
-            onPointerDown={(e) => startDrag("playhead", e)}
-          >
-            <div className="pointer-events-none absolute inset-y-0 left-0 bg-black/60" style={{ width: `${pct(inSec)}%` }} />
-            <div className="pointer-events-none absolute inset-y-0 right-0 bg-black/60" style={{ width: `${100 - pct(outSec)}%` }} />
-            {/* Handles sit ON the boundary with a generous hit area. */}
-            {([["in", inSec], ["out", outSec]] as const).map(([which, at]) => (
-              <div
-                key={which}
-                onPointerDown={(e) => { e.stopPropagation(); startDrag(which, e); }}
-                className="absolute inset-y-0 z-10 flex w-4 cursor-ew-resize items-center justify-center"
-                // Nudged inward at the extremes instead of centred on the
-                // boundary: the track is overflow-hidden, so a handle at 0%
-                // or 100% would have half its hit area clipped away and be
-                // almost impossible to grab — exactly where an untrimmed
-                // clip puts both of them.
-                style={{
-                  left: `${pct(at)}%`,
-                  transform: `translateX(${-Math.min(100, Math.max(0, pct(at)))}%)`,
-                }}
-                title={which === "in" ? "Drag the start" : "Drag the end"}
-                role="slider"
-                aria-label={which === "in" ? "Trim start" : "Trim end"}
-                aria-valuemin={0}
-                aria-valuemax={duration}
-                aria-valuenow={at}
-                aria-valuetext={`${at.toFixed(2)} seconds`}
-              >
-                {/* Widened while held, so it's obvious which end you have. */}
-                <span className={`h-full rounded bg-primary shadow ${drag === which ? "w-1.5" : "w-1"}`} />
-              </div>
-            ))}
-            <div className="pointer-events-none absolute inset-y-0 z-20 w-0.5 bg-white mix-blend-difference" style={{ left: `${pct(playhead)}%` }} />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            {/* 2dp, because a frame is 0.03s — 1dp would show three
-                distinct in-points as the same number. */}
-            <span className="tabular-nums text-muted-foreground">
-              in {inSec.toFixed(2)}s · out {outSec.toFixed(2)}s
-            </span>
-            <span className={trimmed ? "font-medium" : "text-muted-foreground"}>
-              keeps {kept.toFixed(1)}s of {duration.toFixed(1)}s
-            </span>
-            <div className="flex-1" />
-            <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setIn(playhead)}>
-              Set in
-            </Button>
-            <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setOut(playhead)}>
-              Set out
-            </Button>
-            {trimmed && (
-              <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={() => onChange(null)}>
-                Reset
-              </Button>
-            )}
-          </div>
-
-          <p className="text-[11px] text-muted-foreground">
-            Nothing is re-encoded — the trim is applied when the video renders, and can be widened again or
-            reset at any time. <b>I</b>/<b>O</b> set in/out at the playhead · <b>,</b>/<b>.</b> step one frame.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Matches MIN_TRIM_SEC in clip-trims.ts — the server rejects less. */
-const MIN_TRIM_SEC = 1;
-
-/**
- * Snap to the frame grid, not to a tenth of a second.
- *
- * The panel advertises single-frame stepping (`,` / `.`); rounding the
- * result to 0.1s would quantize three frames into one and make the keys
- * do nothing visible. 30fps is the canonical normalized rate.
- */
-function roundFrame(n: number): number {
-  return Math.round(n * 30) / 30;
-}

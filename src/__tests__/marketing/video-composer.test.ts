@@ -298,26 +298,6 @@ describe("Video composer", () => {
     expect(permutationHash("r1", ["c1", "c2", "c3"], "silent")).toBe(a);
   });
 
-  it("permutation hash is trim-sensitive, without rehashing untrimmed posts", () => {
-    const plain = permutationHash("r1", ["c1", "c2"], "silent");
-    const cutEarly = permutationHash("r1", ["c1", "c2"], "silent", [null, { inSec: 1, outSec: 2.5 }]);
-    const cutLate = permutationHash("r1", ["c1", "c2"], "silent", [null, { inSec: 3, outSec: 4 }]);
-
-    // Same clips, different cut → a genuinely different video. Without
-    // this the second one collides with the first on the UNIQUE index.
-    expect(cutEarly).not.toBe(plain);
-    expect(cutEarly).not.toBe(cutLate);
-
-    // All-null (and omitted) must hash exactly as before, or every post
-    // already in the table would need rehashing.
-    expect(permutationHash("r1", ["c1", "c2"], "silent", [null, null])).toBe(plain);
-    expect(permutationHash("r1", ["c1", "c2"], "silent", [])).toBe(plain);
-
-    // Position matters: the same trim on a different clip is not the same.
-    expect(permutationHash("r1", ["c1", "c2"], "silent", [{ inSec: 1, outSec: 2.5 }, null]))
-      .not.toBe(cutEarly);
-  });
-
   it("skips recipes the library cannot satisfy", () => {
     const clips = Array.from({ length: 5 }, () => makeClip({ categorySlug: "flat_lay" }));
     const impossible = makeRecipe({

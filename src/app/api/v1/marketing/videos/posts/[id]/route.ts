@@ -10,13 +10,6 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { db, sqlite } from "@/lib/db";
-import {
-  parseClipTrims,
-  serializeClipTrims,
-  validateTrim,
-  effectiveDuration,
-  type ClipTrim,
-} from "@/modules/marketing/lib/video/clip-trims";
 import { videoPosts } from "@/modules/marketing/schema";
 import { eq } from "drizzle-orm";
 import { deleteVideo, videoUrl, bustUrl } from "@/lib/storage/videos";
@@ -47,7 +40,6 @@ function loadPost(id: string) {
     WHERE c.id = ?
   `);
   const clipIds = JSON.parse(String(row.clip_ids || "[]")) as string[];
-  const clipTrims = parseClipTrims(row.clip_trims as string | null, clipIds.length);
   // Render paths are deterministic, so re-renders reuse the same URL —
   // version it by updated_at so the browser/CDN never serve a stale edit.
   const v = row.updated_at as string;
@@ -67,7 +59,6 @@ function loadPost(id: string) {
       return {
         position: i + 1,
         id: cid,
-        trim: clipTrims[i],
         ...clip,
         posterUrl: clip?.posterPath ? videoUrl(String(clip.posterPath)) : null,
         previewUrl: clip?.normalizedPath ? videoUrl(String(clip.normalizedPath)) : null,
@@ -129,35 +120,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         return NextResponse.json({ error: `Clip ${cid} is not ready (status: ${clip.status})` }, { status: 400 });
       }
     }
-    // Per-position trims, index-parallel to clipIds. Sent together so the
-    // two can never drift out of alignment — a trim on the wrong position
-    // silently cuts the wrong clip.
-    const newTrims: Array<ClipTrim | null> = new Array(newClipIds.length).fill(null);
-    if (body.clipTrims !== undefined) {
-      if (!Array.isArray(body.clipTrims) || body.clipTrims.length !== newClipIds.length) {
-        return NextResponse.json(
-          { error: "clipTrims must be an array the same length as clipIds" },
-          { status: 400 },
-        );
-      }
-      for (const [i, raw] of body.clipTrims.entries()) {
-        if (raw === null || raw === undefined) continue;
-        const rec = raw as Record<string, unknown>;
-        const clip = clipStmt.get(newClipIds[i]) as { durationSec: number | null };
-        const v = validateTrim(
-          { inSec: Number(rec.inSec), outSec: Number(rec.outSec) },
-          clip?.durationSec ?? null,
-        );
-        if (!v.ok) {
-          return NextResponse.json({ error: `Clip ${i + 1}: ${v.error}` }, { status: 400 });
-        }
-        newTrims[i] = v.trim!;
-      }
-    }
-
-    for (const [i, cid] of newClipIds.entries()) {
-      const clip = clipStmt.get(cid) as { durationSec: number | null };
-      newDuration += effectiveDuration(clip.durationSec, newTrims[i]);
+    for (const cid of newClipIds) {
+      newDuration += (clipStmt.get(cid) as { durationSec: number | null }).durationSec ?? 0;
     }
 
     // Audio: keep the previously-audible clips that survived the edit.
@@ -168,15 +132,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       audible.length === 0 ? "silent" : audible.length === newClipIds.length ? "full" : "partial";
 
     updates.clipIds = JSON.stringify(newClipIds);
-    updates.clipTrims = serializeClipTrims(newTrims);
     updates.audibleClipIds = JSON.stringify(audible);
     updates.audioTreatment = audioTreatment;
-    updates.permutationHash = permutationHash(
-      existing.recipeId ?? FALLBACK_RECIPE_ID,
-      newClipIds,
-      audioTreatment,
-      newTrims,
-    );
+    updates.permutationHash = permutationHash(existing.recipeId ?? FALLBACK_RECIPE_ID, newClipIds, audioTreatment);
     updates.durationSec = newDuration;
     // Reset the render: old files removed after a successful DB update.
     updates.filePath = null;

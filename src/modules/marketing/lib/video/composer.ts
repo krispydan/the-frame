@@ -373,29 +373,14 @@ export function resolveAudio(
 
 // ── Hash ──
 
-/**
- * Identity of a permutation — the UNIQUE key that stops us building the
- * same video twice.
- *
- * Trims are part of that identity: the same three clips cut 1.0–2.5 make
- * a different video from the same three cut 3.0–4.0, and without them in
- * the hash the second one 409s against the first.
- *
- * The trim segment is APPENDED and only when something is actually
- * trimmed, so every already-stored hash (all of which are untrimmed)
- * still matches — no rehash migration, no orphaned rows.
- */
 export function permutationHash(
   recipeId: string,
   clipIds: string[],
   audioTreatment: string,
-  clipTrims?: Array<{ inSec: number; outSec: number } | null>,
 ): string {
-  const base = `${recipeId}|${clipIds.join("|")}|a=${audioTreatment}|v${PERMUTATION_VERSION}`;
-  const trimPart = clipTrims?.some(Boolean)
-    ? `|t=${clipTrims.map((t) => (t ? `${t.inSec.toFixed(3)}-${t.outSec.toFixed(3)}` : "")).join(",")}`
-    : "";
-  return createHash("sha256").update(base + trimPart).digest("hex");
+  return createHash("sha256")
+    .update(`${recipeId}|${clipIds.join("|")}|a=${audioTreatment}|v${PERMUTATION_VERSION}`)
+    .digest("hex");
 }
 
 // ── Fallback ("freestyle") compose ──

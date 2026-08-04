@@ -3,7 +3,7 @@
  *
  *   GET   → the video, its clip sequence, and every other clip of this
  *           product that could be added
- *   PATCH → { clipIds, clipTrims? } rebuild from a hand-edited sequence
+ *   PATCH → { clipIds } rebuild from a hand-edited sequence
  *           { caption } edit the PDP line
  *           { approved } the publish gate
  */
@@ -20,7 +20,6 @@ import {
   setApproved,
   listProductVideos,
 } from "@/modules/marketing/lib/video/product-video";
-import { validateTrim, type ClipTrim } from "@/modules/marketing/lib/video/clip-trims";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -33,13 +32,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
 
 export async function PATCH(request: NextRequest, { params }: Params) {
   const { id } = await params;
-  let body: {
-    clipIds?: unknown;
-    clipTrims?: unknown;
-    caption?: unknown;
-    approved?: unknown;
-    regenerateCaption?: unknown;
-  };
+  let body: { clipIds?: unknown; caption?: unknown; approved?: unknown; regenerateCaption?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -50,33 +43,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (Array.isArray(body.clipIds)) {
     const clipIds = body.clipIds.map(String);
     if (clipIds.length === 0) return NextResponse.json({ error: "Pick at least one clip" }, { status: 400 });
-
-    // Trims travel WITH the sequence, index-parallel — validated here so a
-    // bad range is a 400 rather than a failed ffmpeg run minutes later.
-    const trims: Array<ClipTrim | null> = new Array(clipIds.length).fill(null);
-    if (body.clipTrims !== undefined) {
-      if (!Array.isArray(body.clipTrims) || body.clipTrims.length !== clipIds.length) {
-        return NextResponse.json(
-          { error: "clipTrims must be an array the same length as clipIds" },
-          { status: 400 },
-        );
-      }
-      const durationOf = sqlite.prepare(`SELECT duration_sec AS durationSec FROM marketing_video_clips WHERE id = ?`);
-      for (const [i, raw] of body.clipTrims.entries()) {
-        if (raw === null || raw === undefined) continue;
-        const rec = raw as Record<string, unknown>;
-        const row = durationOf.get(clipIds[i]) as { durationSec: number | null } | undefined;
-        const v = validateTrim(
-          { inSec: Number(rec.inSec), outSec: Number(rec.outSec) },
-          row?.durationSec ?? null,
-        );
-        if (!v.ok) return NextResponse.json({ error: `Clip ${i + 1}: ${v.error}` }, { status: 400 });
-        trims[i] = v.trim!;
-      }
-    }
-
     try {
-      const result = await buildProductVideo(id, clipIds, trims);
+      const result = await buildProductVideo(id, clipIds);
       if (!result.ok) return NextResponse.json({ error: `Can't build: ${result.reason}` }, { status: 422 });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);

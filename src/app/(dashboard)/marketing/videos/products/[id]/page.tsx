@@ -33,8 +33,6 @@ type Clip = {
   isProductShot: boolean;
   posterUrl: string | null;
   previewUrl: string | null;
-  /** Non-destructive in/out points, applied when the video is built. */
-  trim?: { inSec: number; outSec: number } | null;
 };
 type Video = {
   productId: string;
@@ -103,10 +101,8 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
   }, [detail?.productName, setOverride]);
 
   const dirty = useMemo(() => {
-    // Signature covers the trim as well as identity/order — a moved in/out
-    // point is an unsaved edit just as much as a reorder is.
-    const sig = (c: Clip) => `${c.id}@${c.trim ? `${c.trim.inSec}-${c.trim.outSec}` : "full"}`;
-    return (detail?.clips ?? []).map(sig).join("|") !== seq.map(sig).join("|");
+    const a = (detail?.clips ?? []).map((c) => c.id).join("|");
+    return a !== seq.map((c) => c.id).join("|");
   }, [detail, seq]);
 
   const hasProductShot = useMemo(() => seq.some((c) => c.isProductShot), [seq]);
@@ -241,20 +237,11 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
           <ClipEditor
             clips={seq}
             onChange={setSeq}
-            onSave={() =>
-              patch(
-                {
-                  clipIds: seq.map((c) => c.id),
-                  clipTrims: seq.map((c) => c.trim ?? null),
-                },
-                "Rebuilt",
-              )
-            }
+            onSave={() => patch({ clipIds: seq.map((c) => c.id) }, "Rebuilt")}
             dirty={dirty}
             saving={saving}
             saveLabel="Save & rebuild"
             savingLabel="Rebuilding…"
-            onClipEdited={load}
             subtitle="trim · reframe · add effects · reorder — this is the product video, in order"
             emptyHint="No clips yet — add some from below."
             warning={
@@ -356,7 +343,6 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
         <ClipPreviewDialog
           clip={watching.clip}
           onClose={() => setWatching(null)}
-          onEdited={load}
           onAdd={watching.inVideo ? undefined : () => setSeq((prev) => [...prev, watching.clip])}
           onRemove={
             watching.inVideo && watching.index !== undefined
