@@ -188,8 +188,14 @@ export async function captureListings(
   // So bound the run itself. We stop STARTING work at the deadline rather than
   // aborting in flight: everything captured so far is already committed, and
   // the next tick picks up where this one stopped.
+  //
+  // The budget MUST exceed one Apify call (300s ceiling), or salvage is
+  // unreachable by construction: a batch that times out has already spent
+  // 300s, so a 240s budget guarantees the deadline check fires before the
+  // first retry. 540s leaves room for a timed-out batch plus a salvage
+  // attempt, and still finishes inside the 15-minute stale-lock window.
   const startedAt = Date.now();
-  const deadlineMs = opts.deadlineMs ?? 240_000;
+  const deadlineMs = opts.deadlineMs ?? 540_000;
   const outOfTime = () => Date.now() - startedAt > deadlineMs;
 
   for (let i = 0; i < targets.length; i += BATCH_SIZE) {
@@ -214,6 +220,12 @@ export async function captureListings(
       // that would have resolved fine, and only lose the actual straggler.
       const reason = e instanceof Error ? e.message.slice(0, 160) : String(e);
       console.log(`[gmaps-profile] batch failed (${reason}) — retrying ${batch.length} singly`);
+      // Record the batch failure NOW, before attempting salvage. Previously
+      // errors were only recorded from the salvage loop's own catch, so when
+      // salvage was skipped on the deadline the run reported captured 0 with
+      // no errors — and the caller's "0 captured AND errors" check let that
+      // pass as success. A run that did nothing has to be able to say so.
+      result.errors.push({ company: batch.map((t) => t.name).join(" / "), reason });
       for (const t of batch) {
         // Salvage is a bonus, not an obligation — never let it push a run past
         // its deadline. Unsalvaged stores stay unlisted and come back next tick.
