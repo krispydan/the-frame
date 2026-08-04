@@ -26,7 +26,13 @@ export async function POST(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const body = (await req.json()) as { contact_id?: string; move_out?: boolean; move_to?: string };
+  const body = (await req.json()) as {
+    contact_id?: string;
+    move_out?: boolean;
+    move_to?: string;
+    set_dnc?: boolean;
+    add_tag?: string;
+  };
   const contactId = String(body.contact_id || "").trim();
   if (!contactId) return NextResponse.json({ ok: false, error: "contact_id required" }, { status: 400 });
 
@@ -79,7 +85,41 @@ export async function POST(req: NextRequest) {
         // available operations here.
         _links: (raw as Record<string, unknown>)?._links ?? null,
       };
-      if (body.move_to) {
+      if (body.set_dnc || body.add_tag) {
+        // Test alt mutation paths PB might actually honor.
+        const results: Array<Record<string, unknown>> = [];
+        const payloads: Array<[string, Record<string, unknown>]> = [];
+        if (body.set_dnc) {
+          payloads.push(["dnc_int_1", { do_not_call: 1 }]);
+          payloads.push(["dnc_str_1", { do_not_call: "1" }]);
+        }
+        if (body.add_tag) {
+          payloads.push(["tags_array", { tags: [body.add_tag] }]);
+          payloads.push(["tags_string", { tags: body.add_tag }]);
+        }
+        for (const [label, payload] of payloads) {
+          const r: Record<string, unknown> = { label, payload };
+          try {
+            await acct.client.updateContact(contactId, payload as never);
+          } catch (e) {
+            r.error = (e instanceof Error ? e.message : String(e)).slice(0, 200);
+            results.push(r);
+            continue;
+          }
+          try {
+            const afterRaw = await acct.client.getContact(contactId);
+            let ac = afterRaw as Record<string, unknown>;
+            if (ac?.contacts && typeof ac.contacts === "object") ac = ac.contacts as Record<string, unknown>;
+            const ai = ac.contacts;
+            if (Array.isArray(ai)) ac = (ai[0] as Record<string, unknown>) || {};
+            else if (ai && typeof ai === "object") ac = ai as Record<string, unknown>;
+            r.after_dnc = ac.do_not_call ?? null;
+            r.after_tags = ac.tags ?? null;
+          } catch { /* ignore */ }
+          results.push(r);
+        }
+        attempt.after = results;
+      } else if (body.move_to) {
         // Move to a real target folder — proven to work with updateContact.
         try {
           await acct.client.updateContact(contactId, { category_id: body.move_to } as never);
