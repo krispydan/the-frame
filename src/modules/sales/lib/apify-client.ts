@@ -144,12 +144,13 @@ class ApifyClient {
     }
     if (searchStrings.length === 0) return [];
 
-    // Apify timeout: 600s. Observed 2026-06-30: 300s wasn't enough
-    // for batches of 10 — actor hit Apify-side 408 "run-timeout-
-    // exceeded" on many runs. Combined with the batch-size drop to
-    // 5, this gives each place ~2 min average to resolve. Caller
-    // can still override via opts.timeoutSecs.
-    const url = `${APIFY_BASE}/acts/${ACTOR_GMAPS}/run-sync-get-dataset-items?token=${token}&timeout=${opts.timeoutSecs ?? 600}`;
+    // run-sync-get-dataset-items has a hard 300-second ceiling — the error it
+    // returns says so explicitly ("exceeded the timeout of 300 seconds for
+    // this API endpoint"). We used to ask for 600, which Apify simply
+    // ignored; asking for what we can actually get keeps the client-side
+    // bound below honest rather than 5 minutes too generous.
+    const apifyTimeoutSecs = opts.timeoutSecs ?? 300;
+    const url = `${APIFY_BASE}/acts/${ACTOR_GMAPS}/run-sync-get-dataset-items?token=${token}&timeout=${apifyTimeoutSecs}`;
     const body = {
       searchStringsArray: searchStrings,
       // Search-result tuning
@@ -174,12 +175,31 @@ class ApifyClient {
     // 3 times is just 3 timeouts, wasting wall-clock. The enrichment
     // loader stamps failed batches as 'batch_error' so they don't
     // come back next tick.
+    // Node's fetch has NO default timeout. Apify's sync endpoint is supposed
+    // to answer within its own 300s ceiling, but a stalled connection just
+    // hangs — and a hung call here holds whatever called it open forever. In
+    // cron that means the job's in_progress lock is never released, so the
+    // job only runs again when the 15-minute stale-lock window lets it, and
+    // a "*/3" schedule silently becomes "*/15". Bound it client-side.
+    const clientTimeoutMs = (apifyTimeoutSecs + 30) * 1000;
+
     for (let attempt = 0; attempt < this.maxRetries; attempt++) {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(clientTimeoutMs),
+        });
+      } catch (e) {
+        // Surface as a normal error so callers' batch-error handling applies
+        // (stamp and move on) rather than an opaque abort escaping upward.
+        if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) {
+          throw new Error(`Apify request timed out after ${Math.round(clientTimeoutMs / 1000)}s`);
+        }
+        throw e;
+      }
 
       if (res.status === 429) {
         const wait = (attempt + 1) * 2000;
