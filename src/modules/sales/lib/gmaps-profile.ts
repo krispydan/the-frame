@@ -45,6 +45,8 @@ export interface CaptureResult {
   rejected: number;
   errors: Array<{ company: string; reason: string }>;
   remaining: number;
+  /** Hit the wall-clock budget with targets left. Not an error — next tick continues. */
+  stoppedEarly?: boolean;
 }
 
 /**
@@ -142,7 +144,13 @@ const insertStmt = () =>
  * single most important field here, since they become the search terms.
  */
 export async function captureListings(
-  opts: { cohort?: "customers" | "called-no-order"; limit?: number; verify?: boolean } = {},
+  opts: {
+    cohort?: "customers" | "called-no-order";
+    limit?: number;
+    verify?: boolean;
+    /** Stop starting new Apify calls after this long. See the note below. */
+    deadlineMs?: number;
+  } = {},
 ): Promise<CaptureResult> {
   const cohort = opts.cohort ?? "customers";
   const limit = Math.max(1, Math.min(500, opts.limit ?? 50));
@@ -159,13 +167,33 @@ export async function captureListings(
 
   const ins = insertStmt();
 
+  // Per-call timeouts don't bound a run — they multiply. Each Apify call can
+  // burn 330s, the client retries rate-limits up to maxRetries, and the
+  // single-store salvage below fans one failed batch into BATCH_SIZE more
+  // calls. Worst case compounds into tens of minutes, which is what left runs
+  // sitting in 'running' long enough for the stale-lock window to reap them.
+  //
+  // So bound the run itself. We stop STARTING work at the deadline rather than
+  // aborting in flight: everything captured so far is already committed, and
+  // the next tick picks up where this one stopped.
+  const startedAt = Date.now();
+  const deadlineMs = opts.deadlineMs ?? 240_000;
+  const outOfTime = () => Date.now() - startedAt > deadlineMs;
+
   for (let i = 0; i < targets.length; i += BATCH_SIZE) {
+    if (outOfTime()) {
+      result.stoppedEarly = true;
+      break;
+    }
     const batch = targets.slice(i, i + BATCH_SIZE);
     let places: GoogleMapsPlace[] = [];
     try {
       places = await apifyClient.runGoogleMapsScraper(
         batch.map(searchStringFor),
-        { maxPerSearch: 1, fast: false },
+        // 180s, not the 300s default: successful batches of 3 land in ~40s, so
+        // anything still going at three minutes is a straggler and the salvage
+        // pass below is a better use of the remaining budget than waiting.
+        { maxPerSearch: 1, fast: false, timeoutSecs: 180 },
       );
     } catch (e) {
       // A batch dies as a unit: one store whose detail page crawls slowly
@@ -175,10 +203,17 @@ export async function captureListings(
       const reason = e instanceof Error ? e.message.slice(0, 160) : String(e);
       console.log(`[gmaps-profile] batch failed (${reason}) — retrying ${batch.length} singly`);
       for (const t of batch) {
+        // Salvage is a bonus, not an obligation — never let it push a run past
+        // its deadline. Unsalvaged stores stay unlisted and come back next tick.
+        if (outOfTime()) {
+          result.stoppedEarly = true;
+          break;
+        }
         try {
           const solo = await apifyClient.runGoogleMapsScraper([searchStringFor(t)], {
             maxPerSearch: 1,
             fast: false,
+            timeoutSecs: 180,
           });
           places.push(...solo);
         } catch (inner) {
