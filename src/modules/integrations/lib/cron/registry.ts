@@ -204,7 +204,10 @@ export const CRON_JOBS: CronJob[] = [
           : null;
       if (!cohort) return { done: true, controls: countControlListings() };
 
-      const res = await captureListings({ cohort, limit: 6 });
+      // detail: false — the detail-page crawl is what makes the actor time out
+      // on multi-place batches, and it only supplies hours and description.
+      // Everything the profile is built from comes back without it.
+      const res = await captureListings({ cohort, limit: 6, detail: false });
       // A tick that captured nothing because Apify timed out is a failure, and
       // cron_runs is the only place anyone will look. Reporting "ok" here is
       // how a backfill sits at zero for an hour without anyone noticing.
