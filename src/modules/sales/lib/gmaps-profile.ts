@@ -208,6 +208,157 @@ export async function captureListings(
   return result;
 }
 
+/**
+ * Capture (or refresh) the listing for ONE company.
+ *
+ * Used on conversion — a store's Google presence is the richest free context a
+ * rep can have before a call, and it goes stale, so we take a fresh copy when
+ * someone becomes a customer rather than trusting whatever a prospect-era
+ * enrichment left behind.
+ */
+export async function captureOneListing(
+  companyId: string,
+  opts: { force?: boolean; maxAgeDays?: number } = {},
+): Promise<{ companyId: string; status: "captured" | "fresh" | "no-match" | "skipped" | "error"; reason?: string }> {
+  const c = sqlite
+    .prepare("SELECT id, name, city, state FROM companies WHERE id = ?")
+    .get(companyId) as Target | undefined;
+  if (!c || !c.name?.trim()) return { companyId, status: "skipped", reason: "no company or name" };
+
+  if (!opts.force) {
+    const existing = sqlite
+      .prepare(
+        `SELECT 1 FROM gmaps_listings
+          WHERE company_id = ?
+            AND scraped_at >= datetime('now', ?)`,
+      )
+      .get(companyId, `-${Math.max(1, opts.maxAgeDays ?? 90)} days`);
+    if (existing) return { companyId, status: "fresh" };
+  }
+
+  try {
+    const places = await apifyClient.runGoogleMapsScraper([searchStringFor(c)], {
+      maxPerSearch: 1,
+      fast: false,
+    });
+    const place = places[0];
+    if (!place) return { companyId, status: "no-match" };
+
+    const subTypes = Array.isArray(place.subTypes) ? place.subTypes
+      : Array.isArray(place.categories) ? place.categories : [];
+
+    insertStmt().run(
+      crypto.randomUUID(), c.id, place.placeId ?? null, place.title ?? null,
+      place.categoryName ?? null,
+      Array.isArray(place.categories) ? JSON.stringify(place.categories) : null,
+      subTypes.length ? JSON.stringify(subTypes) : null,
+      place.totalScore ?? null, place.reviewsCount ?? null, place.price ?? null,
+      place.website ?? null, place.website ? 1 : 0,
+      place.phone ?? place.phoneUnformatted ?? null,
+      place.address ?? null, place.city ?? null, place.state ?? null, place.postalCode ?? null,
+      place.location?.lat ?? null, place.location?.lng ?? null,
+      place.permanentlyClosed ? 1 : 0, place.temporarilyClosed ? 1 : 0,
+      place.openingHours ? JSON.stringify(place.openingHours) : null,
+      place.description ?? null, place.url ?? null,
+      Array.isArray(place.imageUrls) ? place.imageUrls.length : null,
+      JSON.stringify(place), "unverified", "single-company capture",
+    );
+    return { companyId, status: "captured" };
+  } catch (e) {
+    return { companyId, status: "error", reason: e instanceof Error ? e.message.slice(0, 200) : String(e) };
+  }
+}
+
+/** The listing as the UI and Pipedrive need it. */
+export interface CompanyListing {
+  placeId: string | null;
+  title: string | null;
+  categoryName: string | null;
+  categories: string[];
+  subTypes: string[];
+  rating: number | null;
+  reviewCount: number | null;
+  price: string | null;
+  website: string | null;
+  phone: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  lat: number | null;
+  lng: number | null;
+  permanentlyClosed: boolean;
+  temporarilyClosed: boolean;
+  openingHours: Array<{ day: string; hours: string }>;
+  description: string | null;
+  mapsUrl: string | null;
+  imageCount: number | null;
+  scrapedAt: string | null;
+}
+
+export function getCompanyListing(companyId: string): CompanyListing | null {
+  const r = sqlite
+    .prepare("SELECT * FROM gmaps_listings WHERE company_id = ?")
+    .get(companyId) as Record<string, unknown> | undefined;
+  if (!r) return null;
+  const json = <T,>(v: unknown, fallback: T): T => {
+    try { return v ? (JSON.parse(String(v)) as T) : fallback; } catch { return fallback; }
+  };
+  return {
+    placeId: (r.place_id as string) ?? null,
+    title: (r.title as string) ?? null,
+    categoryName: (r.category_name as string) ?? null,
+    categories: json<string[]>(r.categories, []),
+    subTypes: json<string[]>(r.sub_types, []),
+    rating: r.rating != null ? Number(r.rating) : null,
+    reviewCount: r.review_count != null ? Number(r.review_count) : null,
+    price: (r.price as string) ?? null,
+    website: (r.website as string) ?? null,
+    phone: (r.phone as string) ?? null,
+    address: (r.address as string) ?? null,
+    city: (r.city as string) ?? null,
+    state: (r.state as string) ?? null,
+    lat: r.lat != null ? Number(r.lat) : null,
+    lng: r.lng != null ? Number(r.lng) : null,
+    permanentlyClosed: Number(r.permanently_closed) === 1,
+    temporarilyClosed: Number(r.temporarily_closed) === 1,
+    openingHours: json<Array<{ day: string; hours: string }>>(r.opening_hours, []),
+    description: (r.description as string) ?? null,
+    mapsUrl: (r.maps_url as string) ?? null,
+    imageCount: r.image_count != null ? Number(r.image_count) : null,
+    scrapedAt: (r.scraped_at as string) ?? null,
+  };
+}
+
+/**
+ * Cron: refresh customer listings that have gone stale.
+ *
+ * Ratings, review counts and opening hours drift, and a permanently-closed
+ * flag we never re-check is how a rep ends up calling a shut store.
+ */
+export async function refreshStaleCustomerListings(
+  limit = 20,
+  maxAgeDays = 120,
+): Promise<{ refreshed: number; noMatch: number; errors: number }> {
+  const rows = sqlite
+    .prepare(
+      `SELECT c.id FROM companies c
+        WHERE ${IS_CUSTOMER_SQL}
+          AND EXISTS (SELECT 1 FROM gmaps_listings g
+                       WHERE g.company_id = c.id AND g.scraped_at < datetime('now', ?))
+        LIMIT ?`,
+    )
+    .all(`-${maxAgeDays} days`, limit) as Array<{ id: string }>;
+
+  let refreshed = 0, noMatch = 0, errors = 0;
+  for (const r of rows) {
+    const res = await captureOneListing(r.id, { force: true });
+    if (res.status === "captured") refreshed++;
+    else if (res.status === "no-match") noMatch++;
+    else if (res.status === "error") errors++;
+  }
+  return { refreshed, noMatch, errors };
+}
+
 // ── Phase 2: turn listings into actor input ──
 
 export interface FeatureLift {

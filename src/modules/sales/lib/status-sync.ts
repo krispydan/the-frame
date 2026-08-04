@@ -76,6 +76,18 @@ export function fanOutStatusChange(
   // runs, with full call context). The lead/Pipedrive WRITE-backs inside
   // the job stay gated behind settings.interested_enrichment_enabled.
   // Scheduled ~30s out so the Pipedrive deal-creation job has landed.
+  // A new customer's Google Maps listing is the richest free context a rep can
+  // have, and it goes stale — so take a fresh copy at conversion rather than
+  // trusting whatever a prospect-era enrichment left behind.
+  if (status === "customer") {
+    void jobQueue.enqueue(
+      "sales.capture_gmaps_listing",
+      "sales",
+      { companyId, force: true, pushToPipedrive: true },
+      { priority: 4, scheduledFor: new Date(Date.now() + 60_000).toISOString() },
+    );
+  }
+
   if (status === "interested") {
     enqueueInterestedEnrichment(companyId);
     // Push the lead onto the wholesale Shopify store, which is what enrols
@@ -230,6 +242,28 @@ registerJobHandler(
     const status = String(input.status) as CompanyStatus;
     const { syncStatusToPipedrive } = await import("./pipedrive-sync");
     return syncStatusToPipedrive(companyId, status);
+  },
+);
+
+registerJobHandler(
+  "sales.capture_gmaps_listing",
+  async (input): Promise<Record<string, unknown>> => {
+    const companyId = String(input.companyId);
+    const { captureOneListing } = await import("./gmaps-profile");
+    const res = await captureOneListing(companyId, { force: input.force === true });
+    // Only push once we actually have something to push.
+    if (input.pushToPipedrive === true && (res.status === "captured" || res.status === "fresh")) {
+      try {
+        const { pushListingToPipedrive } = await import("./gmaps-pipedrive");
+        const push = await pushListingToPipedrive(companyId);
+        return { ...res, pipedrive: push };
+      } catch (e) {
+        // The listing is captured and correct; a Pipedrive outage shouldn't
+        // discard that work or fail the job into a retry loop.
+        return { ...res, pipedriveError: e instanceof Error ? e.message.slice(0, 200) : String(e) };
+      }
+    }
+    return res as unknown as Record<string, unknown>;
   },
 );
 
