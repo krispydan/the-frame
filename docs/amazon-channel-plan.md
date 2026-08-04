@@ -307,23 +307,32 @@ Note this corrects rev 2: I had proposed channel-specific discount accounts, but
 from the **tracking category**, not duplicated accounts — consistent with how Faire/Shopify
 already work.
 
-### Please create these three (Cost of Sales), following your `Faire Fees - *` convention
+### Create exactly these three (verified against the real chart of accounts)
 
-| Account to create | Type | Why not an existing account |
-|---|---|---|
-| **`Amazon Fees - FBA Fulfillment`** | Cost of Sales | Largest Amazon fee (−$205 so far). `3PL - Fulfillment & Pick-Pack` is ShipHero's fee — mixing them would make both channels' unit economics unreadable. |
-| **`Amazon Fees - FBA Storage`** | Cost of Sales | Distinct from `3PL - Storage` (ShipHero) for the same reason. Will grow as FBA stock grows. |
-| **`Amazon Fees - Subscription`** | Cost of Sales | $39.99/mo Professional plan. Could go to `Software & Subscriptions`, but keeping it in cost of sales makes Amazon channel contribution margin correct. |
+| Code | Name | Type | Tax Code | Description |
+|---|---|---|---|---|
+| **5470** | `Amazon Fees - FBA Fulfillment` | Direct Costs | Tax Exempt (0%) | Amazon FBA per-unit pick, pack and ship fees. Separate from 5500 3PL - Fulfillment & Pick-Pack (Big Sky) so each channel's unit economics stay readable. |
+| **5475** | `Amazon Fees - FBA Storage` | Direct Costs | Tax Exempt (0%) | Amazon FBA monthly inventory storage fees. Separate from 5510 3PL - Storage (Big Sky). |
+| **5480** | `Amazon Fees - Subscription` | Direct Costs | Tax Exempt (0%) | Amazon Professional selling plan subscription (~$39.99/mo). |
 
-### Please confirm these two exist (balance sheet — I could only see P&L accounts)
+Codes sit in the gap between the Faire fee block (5450–5460) and the 3PL block (5500+),
+following the same 5-step convention Faire uses.
 
-| Account | Type | Why |
-|---|---|---|
-| **`Amazon Clearing`** | **Bank** | Required for the deposit sweep, mirroring the Shopify/Faire clearing accounts. **Must be Bank type** — Xero forbids manual journals touching bank accounts, so the flow is manual journal → `Receivables Holding` → BankTransaction → `Amazon Clearing`. |
-| **`Sales Tax Payable`** | Current Liability | Only used as a safety net if facilitator-tax legs ever fail to net to zero (see below). |
+### Everything else already exists — no action
 
-Also confirm `_shared` accounts `Deferred Revenue` and `Receivables Holding` exist — the
-payout loaders require them and they aren't in the suggestion catalog.
+| Purpose | Existing account |
+|---|---|
+| Gross sales | 4010 Sales - Amazon |
+| Shipping income | 4060 Shipping Income |
+| Promotions (contra-revenue) | 4310 Sales Discounts & Promotions |
+| Refunds | 4300 Sales Returns & Allowances |
+| Referral commission | 5410 Merchant Fees - Amazon |
+| Inbound freight to FBA | 5010 COGS - Inbound Freight |
+| Return shipping labels | 5300 Outbound Shipping & Postage |
+| Unclassified fees (suspense) | 5440 Merchant Fees - Other |
+| Deposit clearing | 1030 Amazon Clearing — **already Bank type**, as required |
+| Deferred model | 2050 Deferred Revenue, 1100 Receivables Holding |
+| Facilitator-tax residual safety net | 2230 Sales Tax |
 
 ### Fee taxonomy → accounts (every one of our 288 settlement rows classified)
 
