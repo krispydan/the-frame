@@ -4,7 +4,7 @@ export const maxDuration = 120;
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { enrichViaGoogleMaps } from "@/modules/sales/lib/google-maps-enrichment";
-import { captureOneListing } from "@/modules/sales/lib/gmaps-profile";
+import { jobQueue } from "@/modules/core/lib/job-queue";
 
 /**
  * Enrich one prospect from Apify's Google Maps scraper.
@@ -16,10 +16,11 @@ import { captureOneListing } from "@/modules/sales/lib/gmaps-profile";
  * same permanently-closed and out-of-ICP handling. One provider, one
  * behaviour, one place to fix a bad match.
  *
- * Two writes happen per click: the pipeline fills the company's own columns
- * (phone, hours, rating, website…), and captureOneListing stores the full
- * listing so the Google Maps panel on this page and the aggregate Store DNA
- * profile both see it.
+ * The click itself does one Apify run — the pipeline filling the company's own
+ * columns (phone, hours, rating, website…) — and hands the full-listing
+ * capture to the job queue. Doing both inline would put two sequential Apify
+ * runs inside one HTTP request, and Railway cuts a connection that goes quiet
+ * for ~60s: the work would finish while the button reported failure.
  */
 
 /** Columns the Apify pipeline can fill — diffed before/after to report what changed. */
@@ -63,9 +64,14 @@ export async function POST(
     );
   }
 
-  // Keep the listing table in step so both views reflect the click. This
-  // failing doesn't undo the enrichment above, so it mustn't fail the request.
-  await captureOneListing(id, { force: true }).catch(() => null);
+  // Keep the listing table in step so the Google Maps panel and the Store DNA
+  // aggregate both reflect the click — but out of band, for the reason above.
+  void jobQueue.enqueue(
+    "sales.capture_gmaps_listing",
+    "sales",
+    { companyId: id, force: true, pushToPipedrive: true },
+    { priority: 3 },
+  );
 
   const after = snapshot(id);
   const newFields: string[] = [];
