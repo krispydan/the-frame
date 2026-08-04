@@ -1,11 +1,18 @@
 # Scheduled jobs (centralized cron)
 
-The-frame uses **one** Railway cron service that pings an internal endpoint every minute. The endpoint reads a code-defined registry of jobs and runs whatever's due. Do **not** create per-job Railway cron services — they're disabled / superseded.
+The-frame uses **one** Railway cron service that pings an internal endpoint. The endpoint reads a code-defined registry of jobs and runs whatever's due. Do **not** create per-job Railway cron services — they're disabled / superseded.
+
+> **The tick fires every 5 minutes, not every minute.** Measured in production
+> 2026-08-04: consecutive ticks at 06:05:30 and 06:10:25, with nothing in
+> between. Railway enforces a minimum interval on cron services, so the
+> `* * * * *` in its config does not get you a per-minute tick. **This is the
+> single most important thing to know before writing a schedule** — see
+> [Cron expression cheat sheet](#cron-expression-cheat-sheet).
 
 ## Architecture
 
 ```
-Railway cron service (every minute)
+Railway cron service (every 5 minutes — Railway's floor)
     │
     ▼
 POST /api/v1/cron/tick
@@ -53,9 +60,27 @@ State + history live in `cron_job_state` and `cron_runs` tables. The dashboard a
 
 5-field UTC. PT comments below assume PST (UTC-8); during PDT (UTC-7) jobs run 1 hour earlier in local time. We accept this drift for digest-class jobs.
 
+**Your schedule is evaluated only on ticks, and ticks land every 5 minutes on
+minutes divisible by 5.** So a schedule is really "the intersection of what you
+wrote and `*/5`". Anything finer than 5 minutes is silently coarser than it
+looks, and — worse — a schedule that *doesn't divide into 5* fires far less
+often than its author intended:
+
+| You write | You actually get | Why |
+|---|---|---|
+| `* * * * *` | every 5 min | every tick matches |
+| `*/2 * * * *` | every 10 min | only ticks at :00, :10, :20… have an even minute |
+| `*/3 * * * *` | **every 15 min** | needs a minute divisible by 3 *and* 5 |
+| `*/4 * * * *` | **every 20 min** | needs a minute divisible by 4 *and* 5 |
+| `*/5 * * * *` | every 5 min | ✅ the finest granularity available |
+
+`*/3` reading as "every 15 minutes" is not hypothetical — it's how
+`gmaps-profile-backfill` ran at a fifth of its intended rate, and
+`meta-leads-drain` still does. **If you want frequent, write `*/5`.**
+
 | Schedule | Meaning |
 |---|---|
-| `* * * * *` | Every minute |
+| `*/5 * * * *` | Every 5 minutes (the floor) |
 | `*/15 * * * *` | Every 15 minutes |
 | `0 * * * *` | Top of every hour |
 | `0 14 * * *` | 14:00 UTC daily (~7am PT) |
@@ -85,10 +110,20 @@ Exactly one service, named **`cron-scheduler`** (or similar). Configuration:
 |---|---|
 | Source | Docker Image: `curlimages/curl:latest` |
 | Start command | `curl -fsS -X POST https://theframe.getjaxy.com/api/v1/cron/tick` |
-| Cron schedule | `* * * * *` (every minute) |
+| Cron schedule | `* * * * *` — but Railway clamps this; observed cadence is **every 5 minutes** |
 | Restart policy | None (auto-disabled by Railway for cron services) |
 
-Total compute: ~1 second per minute. Negligible cost.
+Total compute: ~1 second per tick. Negligible cost.
+
+To re-measure the cadence (do this before trusting any claim here, including
+this one): poll `/api/admin/cron/jobs` once a minute and watch the newest
+`lastRunAt` — it only advances on a tick.
+
+```
+curl -sS -H "x-admin-key: $ADMIN_KEY" \
+  https://theframe.getjaxy.com/api/admin/cron/jobs \
+  | python3 -c "import json,sys; print(max(j['lastRunAt'] or '' for j in json.load(sys.stdin)['jobs']))"
+```
 
 ## Don'ts
 
