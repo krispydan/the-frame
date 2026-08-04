@@ -35,6 +35,12 @@ import { syncSettlementsAllShops } from "@/modules/finance/lib/shopify-settlemen
 import { runShipmentRevenueRecognition } from "@/modules/finance/lib/shipment-revenue-recognition";
 import { runDailyCogsPosting } from "@/modules/finance/lib/daily-cogs";
 import { syncFairePayouts } from "@/modules/integrations/lib/faire/payout-sync";
+import {
+  syncAmazonOrders,
+  syncAmazonSalesTraffic,
+  syncAmazonSettlements,
+  syncAmazonFbaInventory,
+} from "@/modules/integrations/lib/amazon/sync";
 import { runOrderDealSweep, runActivitySweep } from "@/modules/sales/lib/pipedrive-sync";
 import { enrichViaGoogleMaps } from "@/modules/sales/lib/google-maps-enrichment";
 import { recalculateAllHealthScores } from "@/modules/customers/lib/health-scoring";
@@ -305,6 +311,47 @@ export const CRON_JOBS: CronJob[] = [
     schedule: "15 16 * * *",  // 16:15 UTC ≈ 9:15am PT
     description: "Pull Faire orders, post per-order deferred-revenue journals + bank sweep for paid orders",
     handler: () => syncFairePayouts({}),
+  },
+
+  // ── Amazon channel (via Windsor AI) ──
+  // Data lands in raw archive tables first; everything downstream derives
+  // from those, never from a live Windsor call. See docs/amazon-channel-plan.md.
+  //
+  // Placement in the daily chain matters. Orders land at 14:10 so they are
+  // present before revenue recognition (16:30) and daily COGS (16:45).
+  // Settlements land at 16:20 — after Faire (16:15) so the Xero call rate
+  // stays spread out, and before recognition, which needs the settlement
+  // bridge rows to join orders to payouts.
+  //
+  // All four are gated on WINDSOR_API_KEY: without it every run would fail
+  // identically and bury the genuine failures in noise.
+  {
+    id: "amazon-orders-sync",
+    schedule: "10 14 * * *",  // 14:10 UTC ≈ 7:10am PT
+    description: "Pull Amazon orders (by order date + by last update) from Windsor into the raw archive",
+    handler: () => syncAmazonOrders({}),
+    guard: () => Boolean(process.env.WINDSOR_API_KEY),
+  },
+  {
+    id: "amazon-sales-traffic-sync",
+    schedule: "30 14 * * *",  // 14:30 UTC ≈ 7:30am PT
+    description: "Pull Amazon daily sales + traffic metrics (sessions, Buy Box, conversion) for the dashboard",
+    handler: () => syncAmazonSalesTraffic({}),
+    guard: () => Boolean(process.env.WINDSOR_API_KEY),
+  },
+  {
+    id: "amazon-fba-inventory-sync",
+    schedule: "0 13 * * *",   // 13:00 UTC ≈ 6:00am PT
+    description: "Snapshot FBA stock on hand — units held at Amazon that ShipHero cannot see",
+    handler: () => syncAmazonFbaInventory({}),
+    guard: () => Boolean(process.env.WINDSOR_API_KEY),
+  },
+  {
+    id: "amazon-settlement-sync",
+    schedule: "20 16 * * *",  // 16:20 UTC ≈ 9:20am PT
+    description: "Archive Amazon settlement rows (Windsor serves only 90 days — this is the permanent copy)",
+    handler: () => syncAmazonSettlements({}),
+    guard: () => Boolean(process.env.WINDSOR_API_KEY),
   },
 
   // ── Shipment-driven revenue recognition (accrual / ASC 606) ──
