@@ -63,6 +63,40 @@ tooling reach these endpoints, do ONE of:
    `curl --cacert /root/.ccr/ca-bundle.crt -H "x-ops-key: $OPS_TOKEN" <origin>/api/admin/ops`
    should return `{ ok: true, ... }`.
 
+## Database backups (daily → private R2)
+
+A daily cron (`database-backup`, 09:00 UTC ≈ 2am PT) takes a consistent SQLite
+snapshot, gzips it, uploads it to a **private** R2 bucket, and prunes backups
+older than the retention window. Code: `src/modules/integrations/lib/backup/db-backup.ts`.
+
+**Security — the dump must never be publicly reachable.** The media bucket
+(`R2_BUCKET`) is served over a public CDN (`R2_PUBLIC_BASE_URL`), so a DB dump
+placed there would be downloadable by anyone who guessed the URL. Backups
+therefore go to a **separate, private bucket** named by `R2_BACKUP_BUCKET`,
+accessed only via signed S3 requests — never a public URL (the backup R2 client
+forces `publicBaseUrl` to null). If `R2_BACKUP_BUCKET` is unset the job refuses
+to run rather than risk writing to the public bucket.
+
+Setup:
+1. Create a **new R2 bucket** for backups with **no** r2.dev public URL and
+   **no** custom-domain binding (private — the R2 default).
+2. Set `R2_BACKUP_BUCKET=<that-bucket-name>` (Railway env).
+3. Optional: `DB_BACKUP_RETENTION_DAYS` (default 30).
+
+Ops endpoints (token-guarded):
+- `GET  /api/admin/ops/db-backup` — list backups (newest first)
+- `POST /api/admin/ops/db-backup?confirm=1` — run one now
+
+Memory/disk safety (this app has a tight memory ceiling): the snapshot uses
+better-sqlite3's chunked online backup (doesn't freeze the event loop like a
+synchronous `VACUUM`); gzip and upload are streamed disk→R2 (never buffer the DB
+in RAM); temp files land on the DB volume and are cleaned up in a `finally`.
+
+**Restore:** download the object from the private bucket (via the R2 dashboard
+or a signed request), `gunzip the-frame-YYYY-MM-DD.db.gz`, then either replace
+the live DB file at `$DATABASE_PATH` (with the app stopped) or point
+`DATABASE_PATH` at the restored file and redeploy.
+
 ## For future Claude sessions
 
 `AGENTS.md` → "Running things against production (ops endpoints)" is the

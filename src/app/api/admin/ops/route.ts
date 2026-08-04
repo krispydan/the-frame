@@ -17,6 +17,8 @@ export async function GET(req: NextRequest) {
       "POST /api/admin/ops/geocode?confirm=1": "run a geocode batch { limit, force, retryFailed, customersOnly }",
       "POST /api/admin/ops/backfill-addresses?confirm=1": "fill blank company addresses from Shopify { stores, maxPages }",
       "GET  /api/admin/ops/order-lookup?number=&accountId=": "where an order actually lives vs. the account",
+      "GET  /api/admin/ops/db-backup": "list DB backups in the private R2 bucket",
+      "POST /api/admin/ops/db-backup?confirm=1": "run a DB backup now (snapshot → gzip → private R2 → prune)",
     },
     auth: "x-ops-key: <OPS_TOKEN>  (mutations also require ?confirm=1)",
   });

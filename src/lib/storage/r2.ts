@@ -20,7 +20,7 @@
  */
 import { AwsClient } from "aws4fetch";
 import { createHash } from "crypto";
-import { createWriteStream } from "fs";
+import { createWriteStream, createReadStream, statSync } from "fs";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 
@@ -96,6 +96,19 @@ function objectUrl(cfg: R2Config, key: string): string {
   return `${bucketEndpoint(cfg)}/${normalizeKey(key)}`;
 }
 
+/**
+ * Same credentials/account, but targeting a DIFFERENT bucket than the default
+ * media bucket — and with publicBaseUrl forced to null so no public URL can
+ * ever be built for it. This is how backups reach a dedicated PRIVATE bucket
+ * (R2_BACKUP_BUCKET) that has no r2.dev / custom-domain public binding, so a
+ * database dump can never be served publicly the way media is.
+ */
+function clientFor(bucketOverride?: string): { client: AwsClient; cfg: R2Config } {
+  const base = client();
+  if (!bucketOverride || bucketOverride === base.cfg.bucket) return base;
+  return { client: base.client, cfg: { ...base.cfg, bucket: bucketOverride, publicBaseUrl: null } };
+}
+
 // ── Server-side operations ──
 
 /** Upload bytes (processed outputs: normalized clips, posters, renders). */
@@ -114,6 +127,32 @@ export async function r2Put(key: string, body: Buffer | Uint8Array, contentType:
   if (!res.ok) {
     throw new Error(`R2 PUT ${key} failed: ${res.status} ${(await res.text().catch(() => "")).slice(0, 300)}`);
   }
+}
+
+/**
+ * Stream a local file straight to R2 without ever buffering it in memory.
+ * Uses a presigned PUT (auth in the query string) so SigV4 doesn't need to
+ * hash the payload — that lets us pass a Node read stream as the body. R2
+ * requires an explicit Content-Length (it rejects chunked PUTs), which we take
+ * from the file size. Returns the uploaded byte count.
+ *
+ * This is the upload path for large artifacts (e.g. database backups) where
+ * r2Put()'s in-memory Buffer would risk an OOM.
+ */
+export async function r2PutFile(key: string, filePath: string, contentType: string, bucket?: string): Promise<number> {
+  const size = statSync(filePath).size;
+  const url = await r2PresignPut(normalizeKey(key), contentType, 3600, bucket);
+  const res = await fetch(url, {
+    method: "PUT",
+    body: createReadStream(filePath) as unknown as BodyInit,
+    // undici requires duplex for a streamed request body; not in the DOM types.
+    duplex: "half",
+    headers: { "Content-Type": contentType, "Content-Length": String(size) },
+  } as RequestInit & { duplex: "half" });
+  if (!res.ok) {
+    throw new Error(`R2 PUT(file) ${key} failed: ${res.status} ${(await res.text().catch(() => "")).slice(0, 300)}`);
+  }
+  return size;
 }
 
 /**
@@ -200,8 +239,9 @@ export async function r2Head(key: string): Promise<{ exists: boolean; size: numb
 export async function r2List(
   prefix: string,
   maxObjects = 10_000,
+  bucket?: string,
 ): Promise<Array<{ key: string; size: number }>> {
-  const { client: c, cfg } = client();
+  const { client: c, cfg } = clientFor(bucket);
   const out: Array<{ key: string; size: number }> = [];
   let token: string | undefined;
 
@@ -240,8 +280,8 @@ function decodeXmlEntities(s: string): string {
     .replace(/&amp;/g, "&");
 }
 
-export async function r2Delete(key: string): Promise<void> {
-  const { client: c, cfg } = client();
+export async function r2Delete(key: string, bucket?: string): Promise<void> {
+  const { client: c, cfg } = clientFor(bucket);
   const res = await c.fetch(objectUrl(cfg, key), { method: "DELETE" });
   // R2 returns 204 on delete, 404 if already gone — both fine.
   if (!res.ok && res.status !== 404) {
@@ -255,8 +295,8 @@ export async function r2Delete(key: string): Promise<void> {
  * never touches the Next.js server, so no memory buffering / body
  * limits / proxy timeouts.
  */
-export async function r2PresignPut(key: string, contentType: string, expiresSec = 3600): Promise<string> {
-  const { client: c, cfg } = client();
+export async function r2PresignPut(key: string, contentType: string, expiresSec = 3600, bucket?: string): Promise<string> {
+  const { client: c, cfg } = clientFor(bucket);
   const url = new URL(objectUrl(cfg, key));
   url.searchParams.set("X-Amz-Expires", String(expiresSec));
   const signed = await c.sign(

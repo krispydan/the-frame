@@ -43,6 +43,7 @@ import { calculateSellThrough } from "@/modules/inventory/lib/sell-through";
 import { runWeeklyFaireExport } from "@/modules/sales/lib/faire-customer-export";
 import { topUpVideoQueue } from "@/modules/marketing/lib/video/scheduler";
 import { runVideoStorageHygiene } from "@/modules/marketing/lib/video/cleanup";
+import { runDatabaseBackup } from "@/modules/integrations/lib/backup/db-backup";
 import { drainMetaLeads, reconcileMetaLeads } from "@/modules/integrations/lib/meta/lead-ingest";
 import { runCapiSyncAndDrain } from "@/modules/integrations/lib/meta/capi";
 import { runMetaLeadCsvReminder } from "@/modules/integrations/lib/meta/daily-reminder";
@@ -533,6 +534,21 @@ export const CRON_JOBS: CronJob[] = [
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       return data;
     },
+  },
+
+  // ── Database backup ──
+  // Daily consistent SQLite snapshot → gzip → PRIVATE Cloudflare R2 bucket
+  // (R2_BACKUP_BUCKET), pruning anything older than DB_BACKUP_RETENTION_DAYS
+  // (default 30). fireAndForget: snapshot + gzip + upload can exceed the cron
+  // tick's edge timeout; the in_progress lock stops overlap. See
+  // src/modules/integrations/lib/backup/db-backup.ts. Refuses to run if
+  // R2_BACKUP_BUCKET is unset (never writes a dump to the public media bucket).
+  {
+    id: "database-backup",
+    schedule: "0 9 * * *",  // 09:00 UTC ≈ 2am PT — low traffic
+    description: "Daily SQLite backup → gzip → private R2 bucket; prunes backups older than DB_BACKUP_RETENTION_DAYS (default 30)",
+    handler: () => runDatabaseBackup() as unknown as Promise<unknown>,
+    fireAndForget: true,
   },
 
   // ── Video Remix Studio ──
