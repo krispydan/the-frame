@@ -32,6 +32,9 @@ export async function POST(req: NextRequest) {
     move_to?: string;
     set_dnc?: boolean;
     add_tag?: string;
+    hard_delete?: boolean;
+    create_dup_move?: string; // move existing to this folder via createContact+on_duplicate
+    email?: string; // needed for create_dup_move
   };
   const contactId = String(body.contact_id || "").trim();
   if (!contactId) return NextResponse.json({ ok: false, error: "contact_id required" }, { status: 400 });
@@ -85,7 +88,64 @@ export async function POST(req: NextRequest) {
         // available operations here.
         _links: (raw as Record<string, unknown>)?._links ?? null,
       };
-      if (body.set_dnc || body.add_tag) {
+      if (body.hard_delete) {
+        if (acct.rep !== "sandra") { attempt.after = { skipped: "sandra_only" }; }
+        else {
+          const r: Record<string, unknown> = {};
+          try {
+            const resp = await acct.client.rawDelete(`/contacts/${contactId}`);
+            r.delete_response = shapeOnly(resp);
+          } catch (e) {
+            r.delete_error = (e instanceof Error ? e.message : String(e)).slice(0, 200);
+          }
+          try {
+            await acct.client.getContact(contactId);
+            r.still_exists = true;
+          } catch (e) {
+            r.still_exists = false;
+            r.get_after_error = (e instanceof Error ? e.message : String(e)).slice(0, 100);
+          }
+          attempt.after = r;
+        }
+      } else if (body.create_dup_move && body.email) {
+        // Try createContact for an EXISTING email but with a new category_id
+        // + on_duplicate: "update". Hypothesis: this codepath actually moves
+        // the contact into the new folder (unlike updateContact PUT).
+        if (acct.rep !== "sandra") { attempt.after = { skipped: "sandra_only" }; }
+        else {
+          const cached = (await import("@/lib/db")).sqlite
+            .prepare("SELECT value FROM settings WHERE key = 'phoneburner_owner_id' LIMIT 1")
+            .get() as { value: string | null } | undefined;
+          const ownerId = cached?.value || (await acct.client.discoverOwnerId()) || "";
+          const r: Record<string, unknown> = { email: body.email, target_folder: body.create_dup_move };
+          try {
+            const resp = await acct.client.createContact({
+              owner_id: ownerId,
+              first_name: "MoveTest",
+              last_name: "MoveTest",
+              email: body.email,
+              category_id: body.create_dup_move,
+              on_duplicate: "update",
+            });
+            r.create_response = { id: resp.id };
+          } catch (e) {
+            r.create_error = (e instanceof Error ? e.message : String(e)).slice(0, 200);
+          }
+          // Re-fetch to see current nested category
+          try {
+            const afterRaw = await acct.client.getContact(contactId);
+            let ac = afterRaw as Record<string, unknown>;
+            if (ac?.contacts && typeof ac.contacts === "object") ac = ac.contacts as Record<string, unknown>;
+            const ai = ac.contacts;
+            if (Array.isArray(ai)) ac = (ai[0] as Record<string, unknown>) || {};
+            else if (ai && typeof ai === "object") ac = ai as Record<string, unknown>;
+            const nested = (ac.category as { category_id?: unknown } | null | undefined)?.category_id ?? null;
+            r.nested_category_after = nested;
+            r.moved = String(nested) === body.create_dup_move;
+          } catch { /* ignore */ }
+          attempt.after = r;
+        }
+      } else if (body.set_dnc || body.add_tag) {
         // Just ONE mutation, ONE rep — to avoid rate-limit hangs.
         if (acct.rep !== "sandra") {
           attempt.after = { skipped: "sandra_only_probe" };
