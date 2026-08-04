@@ -60,15 +60,21 @@ export async function POST(req: NextRequest) {
       const pe = rec.primary_email as { email_address?: unknown } | string | undefined;
       const email = typeof pe === "string" ? pe : (pe?.email_address as string) || null;
       attempt.before = {
-        top_level_keys: Object.keys((raw as Record<string, unknown>) || {}),
-        unwrapped_keys: Object.keys(rec || {}),
         user_id: rec.user_id ?? rec.id ?? null,
         first_name: rec.first_name ?? null,
         last_name: rec.last_name ?? null,
         email,
         category_id: rec.category_id ?? null,
+        category: rec.category ?? null,
+        entities: rec.entities ?? null,
+        tags: rec.tags ?? null,
         owner_id: rec.owner_id ?? null,
+        contact_owner_id: rec.contact_owner_id ?? null,
+        contact_user_id: rec.contact_user_id ?? null,
         do_not_call: rec.do_not_call ?? null,
+        archived: rec.archived ?? null,
+        trashed: rec.trashed ?? null,
+        removed: rec.removed ?? null,
       };
       if (body.move_out) {
         await acct.client.updateContact(contactId, { category_id: undefined });
