@@ -47,7 +47,7 @@ import { drainMetaLeads, reconcileMetaLeads } from "@/modules/integrations/lib/m
 import { runCapiSyncAndDrain } from "@/modules/integrations/lib/meta/capi";
 import { runMetaLeadCsvReminder } from "@/modules/integrations/lib/meta/daily-reminder";
 import { suppressBuyersFromMail } from "@/modules/sales/lib/shopify-wholesale-customer";
-import { refreshStaleCustomerListings, captureListings, countRemaining, countControlListings } from "@/modules/sales/lib/gmaps-profile";
+import { captureListings, countRemaining, countControlListings } from "@/modules/sales/lib/gmaps-profile";
 
 /**
  * How many "called, never ordered" listings to capture as the control group.
@@ -168,17 +168,15 @@ export const CRON_JOBS: CronJob[] = [
     description: "Remove the postpilot-mail tag from wholesale customers who have now ordered, so direct mail stops",
     handler: () => suppressBuyersFromMail(200),
   },
-  // Google Maps data ages: ratings and review counts drift, hours change, and
-  // a permanently-closed flag we never re-check is how a rep ends up calling a
-  // shut store. Small nightly slice rather than a big periodic sweep, so Apify
-  // spend stays flat and predictable.
-  {
-    id: "gmaps-refresh-customer-listings",
-    schedule: "30 12 * * *",  // 12:30 UTC ≈ 5:30am PT
-    description: "Refresh Google Maps listings for customers whose data is over 120 days old (rating, reviews, hours, closure)",
-    handler: () => refreshStaleCustomerListings(20, 120),
-    fireAndForget: true,
-  },
+  // The periodic Google Maps re-scrape is deliberately NOT scheduled.
+  //
+  // Removed on Daniel's instruction 2026-08-04. Automatic refresh is only
+  // worth having if you trust the match, and the matcher is currently
+  // producing wrong businesses — so a refresh loop would keep overwriting
+  // good records with bad ones on a timer, unattended. Re-scheduling this
+  // should wait until match quality is fixed and verified.
+  //
+  // refreshStaleCustomerListings() is still exported and can be run by hand.
   // Initial backfill of the profiling cohorts. This used to run as a long
   // admin POST and kept tripping Railway's proxy timeout — one Apify run for
   // five stores is minutes, and a 20-store request is not a request. So it
