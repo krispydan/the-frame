@@ -95,13 +95,32 @@ function shouldProgress(from: string | null, to: CompanyStatus): boolean {
 export function progressCompanyStatus(
   companyId: string,
   to: CompanyStatus,
-  opts?: { source?: "instantly" | "phoneburner" | "pipedrive" | "ui" | "system" },
+  opts?: {
+    source?: "instantly" | "phoneburner" | "pipedrive" | "ui" | "system";
+    /**
+     * Bypass the forward-only rank rules.
+     *
+     * The rank rules exist to stop AUTOMATED echo from rewriting a lead's
+     * stage — a webhook firing late shouldn't drag someone back down the
+     * pipeline. They were never meant to overrule a human, but they did:
+     * not_qualified ranks BELOW qualified_lead, so clicking "Not Qualified"
+     * on a qualified lead silently did nothing and the page redrew the old
+     * value. Deliberate disqualification is the whole point of that button.
+     *
+     * Set this for explicit operator actions and for signals that are
+     * genuinely disqualifying regardless of stage (a hard bounce).
+     */
+    force?: boolean;
+  },
 ): { updated: boolean; from: string | null; to: CompanyStatus } {
   const row = sqlite
     .prepare("SELECT status FROM companies WHERE id = ?")
     .get(companyId) as { status: string | null } | undefined;
   const from = row?.status ?? null;
-  if (!shouldProgress(from, to)) {
+  if (from === to) {
+    return { updated: false, from, to };
+  }
+  if (!opts?.force && !shouldProgress(from, to)) {
     return { updated: false, from, to };
   }
   sqlite

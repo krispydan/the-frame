@@ -281,7 +281,11 @@ export async function PATCH(
     statusProgressionResult = progressCompanyStatus(
       id,
       target as Parameters<typeof progressCompanyStatus>[1],
-      { source: "ui" },
+      // force: a status arriving on this route came from a person choosing it
+      // in the UI. The forward-only rank rules exist to stop webhook echo from
+      // rewriting a stage, not to overrule an operator — without this,
+      // "Not Qualified" on a qualified lead was accepted and silently ignored.
+      { source: "ui", force: true },
     );
   }
 
