@@ -181,17 +181,22 @@ registerJobHandler("marketing.video.render-post", async (input) => {
     return { ...render, copy: { ok: true, skipped: true }, burn } as unknown as Record<string, unknown>;
   }
 
-  // Copy generation is best-effort: a failed AI call leaves the post
-  // `rendered` (video usable, copy regenerable via the queue UI).
-  const { generateVideoCopy } = await import("./video-ai");
-  const copy = await generateVideoCopy(postId).catch((e) => ({
-    ok: false as const,
-    usedFallback: true,
-    error: e instanceof Error ? e.message : String(e),
-  }));
+  // Captions are NOT written automatically. The post lands with an empty
+  // caption and goes straight to `ready`; the operator writes it, or asks
+  // for a draft with "Write it for me" on the post. Generating one on
+  // every render meant paying for — and half-trusting — copy nobody asked
+  // for.
+  const { db: appDb } = await import("@/lib/db");
+  const { videoPosts } = await import("@/modules/marketing/schema");
+  const { eq } = await import("drizzle-orm");
+  appDb
+    .update(videoPosts)
+    .set({ status: "ready", updatedAt: new Date().toISOString() })
+    .where(eq(videoPosts.id, postId))
+    .run();
 
   const burn = await burnHook();
-  return { ...render, copy, burn } as unknown as Record<string, unknown>;
+  return { ...render, copy: { ok: true, skipped: true }, burn } as unknown as Record<string, unknown>;
 });
 
 /**
@@ -202,7 +207,7 @@ registerJobHandler("marketing.video.render-post", async (input) => {
  */
 registerJobHandler("marketing.video.build-product-videos", async (input) => {
   const ids = Array.isArray(input.productIds) ? (input.productIds as string[]) : [];
-  const { buildProductVideo, generateProductCaption } = await import("./product-video");
+  const { buildProductVideo } = await import("./product-video");
   let built = 0;
   let skipped = 0;
   let failed = 0;
@@ -215,7 +220,8 @@ registerJobHandler("marketing.video.build-product-videos", async (input) => {
         continue;
       }
       built++;
-      await generateProductCaption(productId).catch(() => {});
+      // No automatic caption here either — the operator writes it, or
+      // asks for a draft on the product's page.
     } catch (e) {
       failed++;
       console.error(`[product-video] ${productId} failed:`, e instanceof Error ? e.message : e);

@@ -387,7 +387,21 @@ function PostCard({ post, onChanged }: { post: Post; onChanged: () => void }) {
             {post.caption ? (
               <p className="text-sm leading-snug line-clamp-3">{post.caption}</p>
             ) : (
-              <p className="text-sm text-muted-foreground italic">caption pending…</p>
+              // Captions aren't written automatically any more — say so,
+              // and put the on-demand draft one click away rather than
+              // behind an icon tooltip.
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm italic text-muted-foreground">No caption — write one, or</p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 px-2 text-xs"
+                  disabled={busy || !post.videoUrl}
+                  onClick={() => regenerate(true)}
+                >
+                  <Sparkles className="h-3 w-3 mr-1" /> draft it for me
+                </Button>
+              </div>
             )}
             {post.hashtags?.length > 0 && (
               <p className="text-xs text-muted-foreground truncate">{post.hashtags.join(" ")}</p>

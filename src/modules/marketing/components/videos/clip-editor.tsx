@@ -23,7 +23,7 @@
  * save to re-render.
  */
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -443,73 +443,18 @@ export function ClipEditor<T extends EditorClip>({
           </div>
         )}
 
-        {/* Reframe — click the preview to set the focal point */}
+        {/* Reframe — drag the box, or pick a position */}
         {reframeIdx !== null && clips[reframeIdx] && (
-          <div className="space-y-2 rounded-lg border p-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <p className="flex items-center gap-1.5 text-xs font-medium">
-                <Crop className="h-3.5 w-3.5" /> Reframe “{clips[reframeIdx].fileName ?? "clip"}” — zoom in for a tighter shot
-              </p>
-              <Button variant="ghost" size="sm" onClick={() => setReframeIdx(null)}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-            <div className="flex flex-wrap items-start gap-3">
-              <div
-                className="relative aspect-[9/16] w-40 shrink-0 cursor-crosshair overflow-hidden rounded bg-muted"
-                onClick={(e) => {
-                  const r = e.currentTarget.getBoundingClientRect();
-                  setReframeFocus({
-                    x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
-                    y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
-                  });
-                }}
-                title="Click to set the focal point"
-              >
-                {clips[reframeIdx].posterUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={clips[reframeIdx].posterUrl!} alt="" className="h-full w-full object-cover" />
-                ) : null}
-                {(() => {
-                  const w = 100 / reframeZoom;
-                  const h = 100 / reframeZoom;
-                  const left = Math.min(100 - w, Math.max(0, reframeFocus.x * 100 - w / 2));
-                  const top = Math.min(100 - h, Math.max(0, reframeFocus.y * 100 - h / 2));
-                  return (
-                    <div
-                      className="pointer-events-none absolute border-2 border-white/90 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]"
-                      style={{ left: `${left}%`, top: `${top}%`, width: `${w}%`, height: `${h}%` }}
-                    />
-                  );
-                })()}
-              </div>
-              <div className="min-w-[240px] flex-1 space-y-2">
-                <div className="flex items-center gap-2">
-                  <span className="w-12 text-xs font-medium">Zoom</span>
-                  <input
-                    type="range"
-                    min={1}
-                    max={2.5}
-                    step={0.05}
-                    value={reframeZoom}
-                    onChange={(e) => setReframeZoom(Number(e.target.value))}
-                    className="flex-1"
-                  />
-                  <span className="w-10 text-right text-xs tabular-nums">{reframeZoom.toFixed(2)}×</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Click the frame to choose what stays centred. The original clip is untouched — the reframe
-                  becomes a new clip in this position.
-                </p>
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={applyReframe} disabled={fxBusyIdx === reframeIdx}>
-                    {fxBusyIdx === reframeIdx ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Crop className="h-4 w-4 mr-1" />}
-                    {fxBusyIdx === reframeIdx ? "Reframing…" : "Apply reframe"}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <ReframePanel
+            clip={clips[reframeIdx]}
+            zoom={reframeZoom}
+            focus={reframeFocus}
+            onZoom={setReframeZoom}
+            onFocus={setReframeFocus}
+            onApply={applyReframe}
+            onClose={() => setReframeIdx(null)}
+            busy={fxBusyIdx === reframeIdx}
+          />
         )}
 
         {children}
@@ -532,3 +477,194 @@ export function ClipEditor<T extends EditorClip>({
     </Card>
   );
 }
+
+// ── Reframe ──────────────────────────────────────────────────────────────
+
+/**
+ * Choose WHAT the tighter crop keeps.
+ *
+ * The first version only let you click a small thumbnail to re-centre,
+ * with no handle to grab and no way to say "keep the bottom". Since the
+ * default focal point sits above centre, anyone who adjusted the zoom
+ * without discovering the click got a crop near the top of the frame
+ * every time — which read as "it only crops from the top".
+ *
+ * So position is now stated three ways, and they all drive the same
+ * focal point: drag the box, pick a cell in the 3x3 grid, or read the
+ * exact percentages. The backdrop is the clip playing rather than its
+ * poster, because the right crop depends on the moment you're framing.
+ */
+function ReframePanel({
+  clip,
+  zoom,
+  focus,
+  onZoom,
+  onFocus,
+  onApply,
+  onClose,
+  busy,
+}: {
+  clip: EditorClip;
+  zoom: number;
+  focus: { x: number; y: number };
+  onZoom: (z: number) => void;
+  onFocus: (f: { x: number; y: number }) => void;
+  onApply: () => void;
+  onClose: () => void;
+  busy: boolean;
+}) {
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  /** Pointer position → normalized focal point, clamped to the frame. */
+  const focusAt = useCallback((clientX: number, clientY: number) => {
+    const el = frameRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    onFocus({
+      x: Math.min(1, Math.max(0, (clientX - r.left) / r.width)),
+      y: Math.min(1, Math.max(0, (clientY - r.top) / r.height)),
+    });
+  }, [onFocus]);
+
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: MouseEvent) => focusAt(e.clientX, e.clientY);
+    const onUp = () => setDragging(false);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [dragging, focusAt]);
+
+  // The crop window as a percentage of the frame, clamped the same way
+  // the ffmpeg crop is — so the preview can't promise a framing the
+  // encoder won't produce.
+  const boxPct = 100 / zoom;
+  const left = Math.min(100 - boxPct, Math.max(0, focus.x * 100 - boxPct / 2));
+  const top = Math.min(100 - boxPct, Math.max(0, focus.y * 100 - boxPct / 2));
+
+  return (
+    <div className="space-y-2 rounded-lg border p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-xs font-medium">
+          <Crop className="h-3.5 w-3.5" /> Reframe “{clip.fileName ?? "clip"}” — zoom in for a tighter shot
+        </p>
+        <Button variant="ghost" size="sm" onClick={onClose}>
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="flex flex-wrap items-start gap-3">
+        <div
+          ref={frameRef}
+          className="relative aspect-[9/16] w-48 shrink-0 select-none overflow-hidden rounded bg-muted"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            focusAt(e.clientX, e.clientY);
+            setDragging(true);
+          }}
+          title="Drag to choose what the crop keeps"
+        >
+          {/* The clip itself, scrubbable — the right crop depends on the
+              moment, which a single poster frame can't tell you. */}
+          {clip.previewUrl ? (
+            <video
+              src={clip.previewUrl}
+              poster={clip.posterUrl ?? undefined}
+              muted
+              playsInline
+              loop
+              autoPlay
+              className="pointer-events-none h-full w-full object-cover"
+            />
+          ) : clip.posterUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={clip.posterUrl} alt="" className="pointer-events-none h-full w-full object-cover" />
+          ) : null}
+
+          {/* Everything outside the box is dimmed by the huge spread shadow. */}
+          <div
+            className={`pointer-events-none absolute border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.55)] ${
+              dragging ? "cursor-grabbing" : "cursor-grab"
+            }`}
+            style={{ left: `${left}%`, top: `${top}%`, width: `${boxPct}%`, height: `${boxPct}%` }}
+          >
+            {/* Centre mark — makes it obvious the box is draggable. */}
+            <span className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-black/40" />
+          </div>
+        </div>
+
+        <div className="min-w-[260px] flex-1 space-y-2.5">
+          <div className="flex items-center gap-2">
+            <span className="w-12 text-xs font-medium">Zoom</span>
+            <input
+              type="range"
+              min={1.05}
+              max={2.5}
+              step={0.05}
+              value={zoom}
+              onChange={(e) => onZoom(Number(e.target.value))}
+              className="flex-1"
+            />
+            <span className="w-10 text-right text-xs tabular-nums">{zoom.toFixed(2)}×</span>
+          </div>
+
+          {/* Explicit positions — the fastest way to say "keep the bottom". */}
+          <div className="space-y-1">
+            <span className="text-xs font-medium">Crop from</span>
+            <div className="flex items-start gap-2">
+              <div className="grid w-[84px] grid-cols-3 gap-0.5">
+                {REFRAME_ANCHORS.map((a) => {
+                  const active = Math.abs(focus.x - a.x) < 0.02 && Math.abs(focus.y - a.y) < 0.02;
+                  return (
+                    <button
+                      key={a.label}
+                      type="button"
+                      onClick={() => onFocus({ x: a.x, y: a.y })}
+                      title={a.label}
+                      className={`h-6 rounded border text-[9px] leading-none ${
+                        active ? "border-primary bg-primary/15 font-semibold" : "hover:bg-muted"
+                      }`}
+                    >
+                      {a.short}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="flex-1 text-[11px] text-muted-foreground">
+                Drag the box on the frame, or pick a position. Currently{" "}
+                <b className="tabular-nums">{Math.round(focus.x * 100)}% across, {Math.round(focus.y * 100)}% down</b>.
+              </p>
+            </div>
+          </div>
+
+          <p className="text-[11px] text-muted-foreground">
+            The original clip is untouched — the reframe becomes a new clip in this position.
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={onApply} disabled={busy}>
+              {busy ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Crop className="h-4 w-4 mr-1" />}
+              {busy ? "Reframing…" : "Apply reframe"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 3x3 focal points, in grid order. */
+const REFRAME_ANCHORS = [
+  { label: "Top left", short: "↖", x: 0.2, y: 0.18 },
+  { label: "Top", short: "↑", x: 0.5, y: 0.18 },
+  { label: "Top right", short: "↗", x: 0.8, y: 0.18 },
+  { label: "Left", short: "←", x: 0.2, y: 0.5 },
+  { label: "Centre", short: "•", x: 0.5, y: 0.5 },
+  { label: "Right", short: "→", x: 0.8, y: 0.5 },
+  { label: "Bottom left", short: "↙", x: 0.2, y: 0.82 },
+  { label: "Bottom", short: "↓", x: 0.5, y: 0.82 },
+  { label: "Bottom right", short: "↘", x: 0.8, y: 0.82 },
+];
