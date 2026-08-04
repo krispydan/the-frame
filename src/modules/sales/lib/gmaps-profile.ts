@@ -88,6 +88,21 @@ export function countRemaining(cohort: "customers" | "called-no-order"): number 
     .get() as { n: number }).n;
 }
 
+/**
+ * How many control listings we already hold. The backfill caps on this rather
+ * than on `countRemaining`, because the control pool is ~3k companies and we
+ * only need enough of them to establish a baseline share.
+ */
+export function countControlListings(): number {
+  return (sqlite
+    .prepare(
+      `SELECT COUNT(*) n FROM gmaps_listings g
+         JOIN companies c ON c.id = g.company_id
+        WHERE NOT ${IS_CUSTOMER_SQL}`,
+    )
+    .get() as { n: number }).n;
+}
+
 function searchStringFor(t: Target): string {
   return [t.name, t.city, t.state].filter(Boolean).join(", ");
 }

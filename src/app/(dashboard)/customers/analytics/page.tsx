@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { GeoPoint } from "@/modules/customers/components/customer-map";
+import { StoreDna } from "@/modules/customers/components/store-dna";
 
 // Leaflet touches window → client-only
 const CustomerMap = dynamic(() => import("@/modules/customers/components/customer-map"), {
@@ -459,6 +460,9 @@ export default function CustomerAnalyticsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Store DNA — the aggregate Google Maps picture, and the actor input it implies */}
+      <StoreDna />
     </div>
   );
 }
