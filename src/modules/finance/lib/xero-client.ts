@@ -373,6 +373,28 @@ export async function pushInvoiceToXero(order: {
 }
 
 /**
+ * fetch() against the Xero API with automatic 429 backoff. Xero rate-limits
+ * orgs to ~60 calls/min; a backfill burst (e.g. the 110-invoice Faire catch-up
+ * on 2026-08-04) tips over even a throttled loop. Honors Retry-After when Xero
+ * sends it, else escalating fixed delays. Non-429 responses return untouched.
+ */
+async function fetchWithXero429Retry(
+  url: string,
+  init: RequestInit,
+  attempts = 4,
+): Promise<Response> {
+  const delays = [3000, 8000, 20000];
+  let res: Response = await fetch(url, init);
+  for (let i = 0; i < attempts - 1 && res.status === 429; i++) {
+    const retryAfter = parseInt(res.headers.get("Retry-After") || "0", 10);
+    const waitMs = retryAfter > 0 ? Math.min(retryAfter * 1000, 60000) : delays[Math.min(i, delays.length - 1)];
+    await new Promise((r) => setTimeout(r, waitMs));
+    res = await fetch(url, init);
+  }
+  return res;
+}
+
+/**
  * Post a settlement ACCREC invoice (the settlement-date revenue model).
  * Idempotent by InvoiceNumber: if an invoice with that number already exists in
  * Xero, returns its ID without creating a duplicate. `payload` is the shape
@@ -392,7 +414,7 @@ export async function postSettlementInvoice(
 
   // Idempotency: look up by InvoiceNumber first.
   try {
-    const lookup = await fetch(
+    const lookup = await fetchWithXero429Retry(
       `https://api.xero.com/api.xro/2.0/Invoices?InvoiceNumbers=${encodeURIComponent(payload.InvoiceNumber)}`,
       { headers },
     );
@@ -405,7 +427,7 @@ export async function postSettlementInvoice(
     /* fall through to create */
   }
 
-  const res = await fetch("https://api.xero.com/api.xro/2.0/Invoices", {
+  const res = await fetchWithXero429Retry("https://api.xero.com/api.xro/2.0/Invoices", {
     method: "POST", // POST upserts; with a new InvoiceNumber it creates
     headers,
     body: JSON.stringify({ Invoices: [payload] }),
@@ -444,7 +466,7 @@ export async function postClawbackBill(opts: {
     Accept: "application/json",
   };
   try {
-    const lookup = await fetch(
+    const lookup = await fetchWithXero429Retry(
       `https://api.xero.com/api.xro/2.0/Invoices?InvoiceNumbers=${encodeURIComponent(opts.billNumber)}`,
       { headers },
     );
@@ -455,7 +477,7 @@ export async function postClawbackBill(opts: {
     }
   } catch { /* fall through to create */ }
 
-  const res = await fetch("https://api.xero.com/api.xro/2.0/Invoices", {
+  const res = await fetchWithXero429Retry("https://api.xero.com/api.xro/2.0/Invoices", {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -503,7 +525,7 @@ export async function postSettlementCreditNote(
     Accept: "application/json",
   };
   try {
-    const lookup = await fetch(
+    const lookup = await fetchWithXero429Retry(
       `https://api.xero.com/api.xro/2.0/CreditNotes?where=${encodeURIComponent(`CreditNoteNumber=="${payload.CreditNoteNumber}"`)}`,
       { headers },
     );
@@ -515,7 +537,7 @@ export async function postSettlementCreditNote(
   } catch {
     /* fall through */
   }
-  const res = await fetch("https://api.xero.com/api.xro/2.0/CreditNotes", {
+  const res = await fetchWithXero429Retry("https://api.xero.com/api.xro/2.0/CreditNotes", {
     method: "POST",
     headers,
     body: JSON.stringify({ CreditNotes: [payload] }),
