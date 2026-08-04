@@ -36,7 +36,14 @@ const COGS_DUTIES_ACCOUNT = "5020";
 const DEFAULT_PRODUCT_COGS_ACCOUNT = "5000";
 const DEFAULT_INVENTORY_ACCOUNT = "1400";
 
-export type ExceptionType = "shortfall" | "zero_cost" | "implausible_cost" | "unmapped_sku";
+export type ExceptionType = "shortfall" | "zero_cost" | "implausible_cost" | "unmapped_sku" | "suspected_transfer";
+
+/**
+ * Units on a single $0 line above which the line is worth a human look.
+ * Influencer gifting and warranty replacements move ones and twos; an FBA
+ * replenishment moves dozens. Above this we flag (but still cost) the line.
+ */
+const SUSPECTED_TRANSFER_MIN_UNITS = 20;
 
 export interface DailyCogsResult {
   date: string;
@@ -71,6 +78,8 @@ interface ShippedLine {
   quantity: number;
   channel: string | null;
   shippedAt: string | null;
+  /** Order total, used by the suspected-transfer guard. */
+  orderTotal: number | null;
 }
 
 function yesterdayUTC(): string {
@@ -129,7 +138,8 @@ export async function runDailyCogsPosting(
                JOIN settlements s ON s.id = sli.settlement_id
                WHERE sli.order_id = o.id AND s.channel = 'faire'
              ) THEN 'faire' ELSE o.channel END AS channel,
-             o.shipped_at AS shippedAt
+             o.shipped_at AS shippedAt,
+             o.total AS orderTotal
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN inventory_cost_depletions d ON d.order_item_id = oi.id
@@ -178,6 +188,29 @@ export async function runDailyCogsPosting(
       // Non-product lines (Faire discount/adjustment markers) carry no COGS by
       // design — skip silently so they don't recur as unmapped-SKU exceptions.
       if (isNonProductLine(line.sku)) { result.nonProductLinesSkipped++; continue; }
+
+      // Zero-value order carrying a BULK quantity: flag it, but still cost it.
+      //
+      // The risk being watched for is an inventory TRANSFER raised as an
+      // order — most plausibly a replenishment to Amazon FBA. Costing that
+      // would recognise COGS at transfer time and again when the units
+      // actually sell, double-counting while the books still balanced
+      // against themselves.
+      //
+      // It raises an exception rather than skipping, because skipping has its
+      // own failure mode: influencer gifting and warranty replacements are
+      // genuinely $0 orders whose cost we DO want recognised, and silently
+      // refusing to cost them would understate COGS just as invisibly. So the
+      // anomaly is surfaced for a human while normal costing continues — the
+      // safe default given that transfers are currently raised in ShipHero,
+      // where The Frame never sees them at all.
+      if ((line.orderTotal ?? 0) === 0 && line.quantity >= SUSPECTED_TRANSFER_MIN_UNITS) {
+        raiseException(
+          "suspected_transfer", line, line.quantity, null,
+          `Order total is $0 but this line carries ${line.quantity} units. It has been costed as normal, but check it is a genuine sale or giveaway rather than an inventory transfer (e.g. a replenishment to Amazon FBA) — a transfer costed here will be counted again when the units actually sell.`,
+        );
+        // Deliberately no `continue`: costing proceeds.
+      }
 
       result.ordersProcessed++;
       const { unitSkuId, units } = resolveDepletionTarget({ sku: line.sku, skuId: line.skuId, quantity: line.quantity });

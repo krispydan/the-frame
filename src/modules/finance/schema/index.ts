@@ -182,7 +182,7 @@ export const cogsRunLog = sqliteTable("cogs_run_log", {
 export const cogsExceptions = sqliteTable("cogs_exceptions", {
   id: id(),
   type: text("type", {
-    enum: ["shortfall", "zero_cost", "implausible_cost", "unmapped_sku"],
+    enum: ["shortfall", "zero_cost", "implausible_cost", "unmapped_sku", "suspected_transfer"],
   }).notNull(),
   orderId: text("order_id"),
   orderItemId: text("order_item_id"),

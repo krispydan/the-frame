@@ -132,3 +132,47 @@ describe("daily COGS job", () => {
     });
   });
 });
+
+describe("suspected-transfer guard (Amazon FBA replenishment safety net)", () => {
+  it("flags a bulk $0 line but still costs it", async () => {
+    // Skipping would have its own failure mode: influencer gifting and
+    // warranty replacements are genuine $0 orders whose cost we DO want
+    // recognised. So the anomaly is surfaced while costing continues.
+    const { runDailyCogsPosting } = await import("@/modules/finance/lib/daily-cogs");
+    const db = getTestDb();
+
+    db.prepare("INSERT OR IGNORE INTO catalog_products (id, name) VALUES ('p9','T')").run();
+    db.prepare("INSERT INTO catalog_skus (id, product_id, sku) VALUES ('s9','p9','JX9-BLK')").run();
+    db.prepare(`INSERT INTO inventory_cost_layers (id, sku_id, quantity, remaining_quantity, unit_cost, freight_per_unit, duties_per_unit, landed_cost_per_unit, received_at)
+                VALUES ('l9','s9',1000,1000,2,0,0,2,'2026-06-01')`).run();
+    db.prepare(`INSERT INTO orders (id, order_number, channel, status, total, shipped_at)
+                VALUES ('t1','T1','shopify_dtc','shipped',0,'2026-06-20T12:00:00')`).run();
+    db.prepare(`INSERT INTO order_items (id, order_id, sku, sku_id, product_name, quantity, unit_price, total_price)
+                VALUES ('ti1','t1','JX9-BLK','s9','T',50,0,0)`).run();
+
+    const res = await runDailyCogsPosting({ date: "2026-06-20", dryRun: true });
+
+    expect(res.exceptions.some((e) => e.type === "suspected_transfer")).toBe(true);
+    // Still costed — the line is not skipped.
+    expect(res.unitsCosted).toBe(50);
+  });
+
+  it("leaves a small $0 giveaway alone", async () => {
+    const { runDailyCogsPosting } = await import("@/modules/finance/lib/daily-cogs");
+    const db = getTestDb();
+
+    db.prepare("INSERT OR IGNORE INTO catalog_products (id, name) VALUES ('p8','T')").run();
+    db.prepare("INSERT INTO catalog_skus (id, product_id, sku) VALUES ('s8','p8','JX8-BLK')").run();
+    db.prepare(`INSERT INTO inventory_cost_layers (id, sku_id, quantity, remaining_quantity, unit_cost, freight_per_unit, duties_per_unit, landed_cost_per_unit, received_at)
+                VALUES ('l8','s8',1000,1000,2,0,0,2,'2026-06-01')`).run();
+    db.prepare(`INSERT INTO orders (id, order_number, channel, status, total, shipped_at)
+                VALUES ('g1','G1','shopify_dtc','shipped',0,'2026-06-21T12:00:00')`).run();
+    db.prepare(`INSERT INTO order_items (id, order_id, sku, sku_id, product_name, quantity, unit_price, total_price)
+                VALUES ('gi1','g1','JX8-BLK','s8','T',2,0,0)`).run();
+
+    const res = await runDailyCogsPosting({ date: "2026-06-21", dryRun: true });
+
+    expect(res.exceptions.some((e) => e.type === "suspected_transfer")).toBe(false);
+    expect(res.unitsCosted).toBe(2);
+  });
+});
