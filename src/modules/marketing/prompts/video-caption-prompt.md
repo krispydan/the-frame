@@ -45,10 +45,9 @@ Active/upcoming marketing moments:
 {{events}}                     ← array of {title, type, window, priority,
                                   description} (may be empty)
 
-TikTok trending sounds RIGHT NOW (synced from TikTok's charts):
-{{trendingSounds}}             ← array of {id, title, author, chart:
-                                  "breakout"|"popular", rank, trend,
-                                  durationSec} (may be empty)
+Music:
+{{trendingSounds}}             ← the team picks tracks by hand, so never
+                                  name a specific song or artist
 
 ────────────────────────────────────────────────────────────
 CAPTION RULES
@@ -95,17 +94,13 @@ Write the exact manual steps for the person posting:
   list). Pick the one the clips actually support.
 - scriptBeats: optional 3-beat spine [hook, value, payoff/CTA] — the
   retention arc. Use it to inform the on-screen text below.
-- audio: If the video is silent AND trendingSounds is non-empty, pick
-  the 2-3 sounds that best fit this video's pacing and vibe and return
-  their ids in suggestedSoundIds (best fit first). Prefer "breakout"
-  chart and trend "up"/"new" — riding a sound on its way up beats one
-  already saturated. In the audio text, name your top pick naturally
-  ("Use 'song title' by author — it's breaking out right now").
-  If trendingSounds is empty, describe the vibe to look for instead
-  (upbeat / chill / voiceover-friendly) and leave suggestedSoundIds [].
-  If original audio is kept on some clips, say which clip's audio
-  matters and whether to layer a trending sound underneath at low
-  volume; suggestedSoundIds may still carry one low-volume option.
+- audio: NEVER name a specific song, artist or sound. Whether a track is
+  cleared for commercial use is a decision only a person can make, and
+  naming one invites someone to use music we have no licence for.
+  Describe the VIBE to look for instead — tempo, energy, and whether it
+  needs to be voiceover-friendly (e.g. "upbeat, punchy, something with a
+  drop around 2s"). If original audio is kept on some clips, say which
+  clip's audio matters and whether to layer music under it at low volume.
 - onScreenText: 0-3 short text overlays with timing, written to be
   typed in the TikTok/IG editor. Front-load the hook text in the first
   2 seconds. Empty array if the video speaks for itself.
@@ -138,7 +133,6 @@ Forced tool call `submit_video_copy`:
     "pillar": "string — the content pillar this video sits in",
     "scriptBeats": ["hook", "value", "payoff/CTA (optional, max 3)"],
     "audio": "string",
-    "suggestedSoundIds": ["id from trendingSounds, max 3, best first"],
     "onScreenText": [{ "text": "string", "timing": "string", "placement": "string" }],
     "tagProducts": ["string"],
     "coverSuggestion": "string",

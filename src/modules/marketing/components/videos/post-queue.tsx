@@ -9,7 +9,7 @@
  * type on-screen text, tag products) written by the AI.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -22,12 +22,9 @@ import {
   Check,
   Copy,
   Download,
-  ExternalLink,
   Lightbulb,
   Music,
-  Pause,
   Pencil,
-  Play,
   RefreshCw,
   ShoppingBag,
   Sparkles,
@@ -35,35 +32,14 @@ import {
   Type,
 } from "lucide-react";
 
-type SuggestedSound = {
-  id: string;
-  title: string;
-  author: string | null;
-  tiktokLink: string | null;
-  rank: number | null;
-  rankType: string;
-  trendDirection: string | null;
-};
-
 type Instructions = {
   hook?: string;
   pillar?: string;
   audio?: string;
-  suggestedSounds?: SuggestedSound[];
   onScreenText?: Array<{ text: string; timing: string; placement: string }>;
   tagProducts?: string[];
   coverSuggestion?: string;
   firstComment?: string;
-};
-
-type TrendingSound = SuggestedSound & {
-  coverUrl: string | null;
-  previewUrl: string | null;
-  usageCount: number | null;
-  durationSec: number | null;
-  isPromoted: number | null;
-  usageDelta: number | null;
-  growthPct: number | null;
 };
 
 type Post = {
@@ -109,7 +85,6 @@ export function PostQueue() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [showGenerate, setShowGenerate] = useState(false);
-  const [showSounds, setShowSounds] = useState(false);
   const [showIdeas, setShowIdeas] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
 
@@ -167,9 +142,6 @@ export function PostQueue() {
         <Button variant="outline" onClick={() => setShowIdeas(true)}>
           <Lightbulb className="h-4 w-4 mr-1" /> Idea bank
         </Button>
-        <Button variant="outline" onClick={() => setShowSounds(true)}>
-          <Music className="h-4 w-4 mr-1" /> Trending audio
-        </Button>
         <Button onClick={() => setShowGenerate(true)}>
           <Sparkles className="h-4 w-4 mr-1" /> Generate videos
         </Button>
@@ -217,8 +189,6 @@ export function PostQueue() {
           }}
         />
       )}
-
-      {showSounds && <TrendingSoundsDialog onClose={() => setShowSounds(false)} />}
       {showIdeas && <IdeaBankDialog onClose={() => setShowIdeas(false)} />}
     </div>
   );
@@ -336,205 +306,6 @@ function IdeaBankDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ── Trending sounds browser ──
-
-function TrendingSoundsDialog({ onClose }: { onClose: () => void }) {
-  const [sounds, setSounds] = useState<TrendingSound[]>([]);
-  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
-  const [configured, setConfigured] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [loading, setLoading] = useState(true);
-  // Inline audio preview — one shared element so only one plays at a time.
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [playingId, setPlayingId] = useState<string | null>(null);
-
-  const togglePlay = (s: TrendingSound) => {
-    const a = audioRef.current;
-    if (!a || !s.previewUrl) return;
-    if (playingId === s.id) {
-      a.pause();
-      setPlayingId(null);
-      return;
-    }
-    a.src = s.previewUrl;
-    a.play()
-      .then(() => setPlayingId(s.id))
-      .catch(() => {
-        // TikTok CDN links can be region/time-limited or block hotlinking.
-        toast.error("Preview unavailable here — open on TikTok");
-        setPlayingId(null);
-      });
-  };
-
-  const load = useCallback(() => {
-    fetch("/api/v1/marketing/videos/sounds")
-      .then((r) => r.json())
-      .then((d) => {
-        setSounds(
-          (d.sounds ?? []).map((s: Record<string, unknown>) => ({
-            id: s.id,
-            title: s.title,
-            author: s.author,
-            tiktokLink: s.tiktokLink,
-            rank: s.rank,
-            rankType: s.rankType,
-            trendDirection: s.trendDirection,
-            coverUrl: s.coverUrl,
-            previewUrl: s.previewUrl,
-            usageCount: s.usageCount,
-            durationSec: s.durationSec,
-            isPromoted: s.isPromoted,
-            usageDelta: s.usageDelta,
-            growthPct: s.growthPct,
-          })),
-        );
-        setLastSyncedAt(d.lastSyncedAt ?? null);
-        setConfigured(Boolean(d.configured));
-        setSyncing(Boolean(d.syncing));
-        setLoading(false);
-      });
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  // While a background sync runs, poll until it finishes, then the fresh
-  // chart appears on its own.
-  useEffect(() => {
-    if (!syncing) return;
-    const t = setInterval(load, 8000);
-    return () => clearInterval(t);
-  }, [syncing, load]);
-
-  const sync = async () => {
-    const res = await fetch("/api/v1/marketing/videos/sounds", { method: "POST" });
-    const data = await res.json();
-    if (res.ok) {
-      setSyncing(true);
-      toast.success(
-        data.alreadyRunning
-          ? "A sync is already running — it takes a few minutes"
-          : "Sync started — pulling TikTok's chart in the background (a few minutes)",
-      );
-    } else {
-      toast.error(data.error ?? "Sync failed");
-    }
-  };
-
-  const visible = sounds;
-
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>TikTok trending audio</DialogTitle>
-        </DialogHeader>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Top {visible.length} trending</span>
-          <div className="flex-1" />
-          <span>{lastSyncedAt ? `synced ${new Date(lastSyncedAt).toLocaleString()}` : "never synced"}</span>
-          <Button size="sm" variant="outline" onClick={sync} disabled={syncing}>
-            <RefreshCw className={`h-3.5 w-3.5 mr-1 ${syncing ? "animate-spin" : ""}`} />
-            {syncing ? "Syncing…" : "Sync now"}
-          </Button>
-        </div>
-
-        {!configured && (
-          <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm">
-            APIFY_API_TOKEN isn&apos;t set in this environment — sync runs on the server where it is
-            configured (Railway).
-          </div>
-        )}
-
-        {loading ? (
-          <div className="animate-pulse h-48 bg-muted rounded" />
-        ) : visible.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-6 text-center">
-            No sounds yet — hit <b>Sync now</b> to pull TikTok&apos;s current charts.
-          </p>
-        ) : (
-          <div className="space-y-1">
-            {/* One shared element so only a single preview plays at a time. */}
-            <audio ref={audioRef} onEnded={() => setPlayingId(null)} className="hidden" />
-            {visible.map((s, i) => {
-              const isPlaying = playingId === s.id;
-              // List is sorted best-bet first, so #1 is our top pick.
-              const bestBet = i === 0 && visible.length > 1;
-              const rising = s.growthPct != null && s.growthPct > 0;
-              return (
-                <div
-                  key={s.id}
-                  className={`flex items-center gap-2 rounded border p-2 text-sm ${bestBet ? "border-primary/60 bg-primary/5" : ""}`}
-                >
-                  <span className="w-5 text-right font-semibold text-muted-foreground">{i + 1}</span>
-                  {/* Cover doubles as the play/pause control when a preview exists. */}
-                  <button
-                    type="button"
-                    onClick={() => togglePlay(s)}
-                    disabled={!s.previewUrl}
-                    title={s.previewUrl ? (isPlaying ? "Pause" : "Play preview") : "No preview available"}
-                    className="relative h-9 w-9 shrink-0 overflow-hidden rounded bg-muted disabled:opacity-60"
-                  >
-                    {s.coverUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={s.coverUrl} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <span className="flex h-full w-full items-center justify-center">🎵</span>
-                    )}
-                    {s.previewUrl && (
-                      <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-white opacity-0 hover:opacity-100 data-[on=true]:opacity-100" data-on={isPlaying}>
-                        {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                      </span>
-                    )}
-                  </button>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">{s.title}</span>
-                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      {s.author && <span className="truncate">{s.author}</span>}
-                      {s.durationSec != null && <span>· {Math.round(s.durationSec)}s</span>}
-                      {s.isPromoted ? <span>· original</span> : null}
-                    </span>
-                  </span>
-                  <span className="flex flex-col items-end gap-0.5">
-                    {bestBet ? (
-                      <Badge variant="default" className="text-[10px]">🔥 best bet</Badge>
-                    ) : (s.trendDirection === "up" || s.trendDirection === "new") ? (
-                      <Badge variant="default" className="text-[10px]">
-                        {s.trendDirection === "new" ? "new" : "rising"}
-                      </Badge>
-                    ) : null}
-                    {rising && (
-                      <span className="text-[11px] font-medium text-emerald-600 whitespace-nowrap">
-                        ▲ +{Math.round((s.growthPct ?? 0) * 100)}%/day
-                      </span>
-                    )}
-                    {s.usageCount != null && (
-                      <span className="text-[11px] text-muted-foreground whitespace-nowrap">
-                        {s.usageCount.toLocaleString()} videos
-                      </span>
-                    )}
-                  </span>
-                  {s.tiktokLink && (
-                    <a
-                      href={s.tiktokLink}
-                      target="_blank"
-                      rel="noreferrer"
-                      title="Open on TikTok"
-                      className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                    </a>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 // ── Post card ──
 
@@ -653,24 +424,6 @@ function PostCard({ post, onChanged }: { post: Post; onChanged: () => void }) {
           <div className="rounded border bg-muted/30 p-2 text-xs space-y-1">
             {instructions.audio && (
               <div className="flex gap-1.5"><Music className="h-3.5 w-3.5 shrink-0 mt-px" /><span>{instructions.audio}</span></div>
-            )}
-            {(instructions.suggestedSounds ?? []).length > 0 && (
-              <div className="flex flex-wrap gap-1 pl-5">
-                {instructions.suggestedSounds!.map((s) => (
-                  <a
-                    key={s.id}
-                    href={s.tiktokLink ?? undefined}
-                    target="_blank"
-                    rel="noreferrer"
-                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${s.tiktokLink ? "hover:bg-muted" : "pointer-events-none"}`}
-                    title={`${s.rankType} #${s.rank ?? "?"}${s.trendDirection ? ` · ${s.trendDirection}` : ""}`}
-                  >
-                    🎵 {s.title}
-                    {s.author && <span className="text-muted-foreground">· {s.author}</span>}
-                    {(s.trendDirection === "up" || s.trendDirection === "new") && <span>📈</span>}
-                  </a>
-                ))}
-              </div>
             )}
             {(instructions.onScreenText ?? []).map((t, i) => (
               <div key={i} className="flex gap-1.5">
