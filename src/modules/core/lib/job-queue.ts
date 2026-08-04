@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { jobs } from "@/modules/core/schema";
-import { eq, and, lte, or, isNull, asc, sql } from "drizzle-orm";
+import { eq, and, lte, lt, or, isNull, asc, sql } from "drizzle-orm";
 
 export interface EnqueueOptions {
   priority?: number; // 1 = highest, 3 = lowest (default 2)
@@ -49,18 +49,40 @@ export class JobQueue {
     // "running" for 13.8 days.) Reset any 'running' job whose started_at
     // is older than 15 min back to 'pending' so it — and the queue —
     // recover automatically.
+    const strandCutoff = new Date(Date.now() - 15 * 60_000).toISOString();
+    const stranded = or(
+      isNull(jobs.startedAt),
+      lte(jobs.startedAt, strandCutoff),
+    );
+
+    // Quarantine poison jobs BEFORE recycling the rest.
+    //
+    // attempts is incremented when a job is dequeued, but the maxAttempts cap
+    // is only ever enforced in fail() — which a job that KILLS THE PROCESS
+    // never reaches. So a job heavy enough to OOM the container was recycled
+    // here forever: start, dequeue, crash, wait 15 min, repeat, with attempts
+    // climbing and nothing reading it. That is a self-sustaining outage, and
+    // it's what kept the container crash-looping on 2026-08-04 after the
+    // memory cause was fixed.
+    //
+    // A job that has been picked up maxAttempts times and never reported an
+    // outcome has earned the benefit of the doubt running out.
+    db
+      .update(jobs)
+      .set({
+        status: "failed",
+        error:
+          "Stranded in 'running' after maxAttempts pickups without ever reporting an outcome — " +
+          "the worker process most likely died executing it. Quarantined so it cannot crash-loop the queue.",
+        completedAt: new Date().toISOString(),
+      })
+      .where(and(eq(jobs.status, "running"), stranded, sql`${jobs.attempts} >= ${jobs.maxAttempts}`))
+      .run();
+
     db
       .update(jobs)
       .set({ status: "pending", startedAt: null })
-      .where(
-        and(
-          eq(jobs.status, "running"),
-          or(
-            isNull(jobs.startedAt),
-            lte(jobs.startedAt, new Date(Date.now() - 15 * 60_000).toISOString()),
-          ),
-        ),
-      )
+      .where(and(eq(jobs.status, "running"), stranded))
       .run();
 
     // Check concurrent running jobs
@@ -76,6 +98,9 @@ export class JobQueue {
     const conditions = [
       eq(jobs.status, "pending"),
       or(isNull(jobs.scheduledFor), lte(jobs.scheduledFor, now)),
+      // Belt and braces with the quarantine above: never hand out a job that
+      // has already used its attempts, whatever put it back in 'pending'.
+      lt(jobs.attempts, jobs.maxAttempts),
     ];
 
     if (module) {
