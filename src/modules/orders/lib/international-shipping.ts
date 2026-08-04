@@ -137,16 +137,15 @@ export async function maybeCreateInternationalShippingRequest(
 
   if (!order) return null;
 
-  // Gate: non-US ship-to country is the hard requirement.
+  // Gate 1: non-US ship-to country.
   if (!isNonUsCountry(order.ship_to_country)) return null;
 
-  // Confirmation: order should have originated from Faire. If we have no
-  // source_name at all, we still proceed (country is the hard rule) but flag
-  // it in notes so the dashboard shows it needs a human glance.
-  const faire = isFaireChannel(order.source_name);
-  const channelNote = faire
-    ? null
-    : `Channel not confirmed as Faire (source_name="${order.source_name ?? "none"}") — please verify before shipping.`;
+  // Gate 2: the order must have originated from FAIRE. Only Faire international
+  // orders need Jaxy to generate the label through Faire's system. A non-US
+  // order created directly in Shopify (source_name not "faire") ships as-is —
+  // no dims email. Faire attribution lives on order.source_name.
+  if (!isFaireChannel(order.source_name)) return null;
+  const channelNote = null;
 
   // Idempotent: one request per order.
   const existing = sqlite.prepare(
