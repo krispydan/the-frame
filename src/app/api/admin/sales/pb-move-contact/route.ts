@@ -4,6 +4,17 @@ export const maxDuration = 60;
 import { NextRequest, NextResponse } from "next/server";
 import { phoneBurnerAccounts } from "@/modules/sales/lib/phoneburner-client";
 
+function shapeOnly(v: unknown, depth = 0): unknown {
+  if (depth > 3 || v == null) return typeof v;
+  if (Array.isArray(v)) return v.length === 0 ? "array[0]" : [`array[${v.length}]`, shapeOnly(v[0], depth + 1)];
+  if (typeof v === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v).slice(0, 20)) out[k] = shapeOnly(val, depth + 1);
+    return out;
+  }
+  return typeof v;
+}
+
 /**
  * POST /api/admin/sales/pb-move-contact
  *
