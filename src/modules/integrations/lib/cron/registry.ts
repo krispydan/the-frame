@@ -320,6 +320,21 @@ export const CRON_JOBS: CronJob[] = [
     description: "Pull Faire orders, post per-order deferred-revenue journals + bank sweep for paid orders",
     handler: () => syncFairePayouts({}),
   },
+  {
+    id: "faire-rec-digest",
+    schedule: "0 17 * * *",  // 17:00 UTC ≈ 10am PT — after the payout sync so fresh invoices count
+    description: "Classify unreconciled Faire bank lines on Mercury against payout invoices / IC bills and Slack the reconciliation checklist (silent when clean)",
+    handler: async () => {
+      const { runFaireRecDigest } = await import("@/modules/finance/lib/faire-rec-digest");
+      const res = await runFaireRecDigest({});
+      if (!res.ok) throw new Error(res.error || "digest failed");
+      if (res.lines.length > 0) {
+        const { notifyFaireRecDigest } = await import("@/modules/integrations/lib/slack/notifications");
+        await notifyFaireRecDigest({ bankAccount: res.bankAccount || "Mercury", lines: res.lines });
+      }
+      return { scanned: res.scanned, unreconciledFaire: res.unreconciledFaire };
+    },
+  },
 
   // ── Amazon channel (via Windsor AI) ──
   // Data lands in raw archive tables first; everything downstream derives

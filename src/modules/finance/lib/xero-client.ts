@@ -111,12 +111,15 @@ export function getXeroAuthUrl(): string | null {
   //                                 without it Xero returns 401
   //                                 AuthorizationUnsuccessful on POST /Invoices.
   //   accounting.settings.read    - chart of accounts (Phase 1 mapping UI)
+  //   accounting.reports.read     - Reports/BankStatement for the daily Faire
+  //                                 reconciliation digest (unreconciled bank
+  //                                 lines classified + Slacked as a checklist)
   //   files                       - attach payout CSVs to journals
   // Override via XERO_SCOPES env var if Xero adds or renames scopes.
   // NOTE: adding a scope requires the user to RE-AUTHORIZE Xero (reconnect)
   // so the new consent is granted — existing tokens won't gain it on refresh.
   const scopes = process.env.XERO_SCOPES ||
-    "openid profile email offline_access accounting.manualjournals accounting.banktransactions accounting.contacts accounting.invoices accounting.settings.read files";
+    "openid profile email offline_access accounting.manualjournals accounting.banktransactions accounting.contacts accounting.invoices accounting.settings.read accounting.reports.read files";
   const state = crypto.randomUUID();
 
   return `https://login.xero.com/identity/connect/authorize?response_type=code&client_id=${config.clientId}&redirect_uri=${encodeURIComponent(config.redirectUri)}&scope=${encodeURIComponent(scopes)}&state=${state}`;
