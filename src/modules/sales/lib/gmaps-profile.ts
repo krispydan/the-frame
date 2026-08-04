@@ -139,9 +139,18 @@ const insertStmt = () =>
 /**
  * Capture Google Maps listings for a cohort.
  *
- * Runs with full detail (not the enrichment's `fast` mode) because categories
- * and opening hours only come from the detail page — and categories are the
- * single most important field here, since they become the search terms.
+ * `detail` controls whether we crawl each place's detail page. Full detail
+ * gets opening hours and Google's description; it also costs enough that the
+ * actor now TIMES OUT on batches of three even at Apify's 300s ceiling, which
+ * is what stalled the bulk backfill at 103 of 316.
+ *
+ * The fields the profile is actually built from — categoryName, categories,
+ * subTypes, rating, reviewCount, price, website, address — all come back in
+ * the search result without the detail page. Hours and description are panel
+ * garnish by comparison. So bulk cohort work runs fast and leaves those two
+ * columns null, while the paths where one store's page really is the point
+ * (conversion capture, the manual Enrich button, the nightly staleness
+ * refresh) keep full detail and only ever ask for one place at a time.
  */
 export async function captureListings(
   opts: {
@@ -150,9 +159,12 @@ export async function captureListings(
     verify?: boolean;
     /** Stop starting new Apify calls after this long. See the note below. */
     deadlineMs?: number;
+    /** Crawl each place's detail page (hours + description). Default true. */
+    detail?: boolean;
   } = {},
 ): Promise<CaptureResult> {
   const cohort = opts.cohort ?? "customers";
+  const detail = opts.detail !== false;
   const limit = Math.max(1, Math.min(500, opts.limit ?? 50));
   const targets = loadTargets(limit, { cohort });
 
@@ -190,10 +202,10 @@ export async function captureListings(
     try {
       places = await apifyClient.runGoogleMapsScraper(
         batch.map(searchStringFor),
-        // 180s, not the 300s default: successful batches of 3 land in ~40s, so
-        // anything still going at three minutes is a straggler and the salvage
-        // pass below is a better use of the remaining budget than waiting.
-        { maxPerSearch: 1, fast: false, timeoutSecs: 180 },
+        // 300s is Apify's ceiling for this endpoint; asking for less just
+        // converts slow-but-recoverable runs into TIMED-OUT ones, which is
+        // what a 180s experiment here demonstrated.
+        { maxPerSearch: 1, fast: !detail, timeoutSecs: 300 },
       );
     } catch (e) {
       // A batch dies as a unit: one store whose detail page crawls slowly
@@ -212,8 +224,8 @@ export async function captureListings(
         try {
           const solo = await apifyClient.runGoogleMapsScraper([searchStringFor(t)], {
             maxPerSearch: 1,
-            fast: false,
-            timeoutSecs: 180,
+            fast: !detail,
+            timeoutSecs: 300,
           });
           places.push(...solo);
         } catch (inner) {
