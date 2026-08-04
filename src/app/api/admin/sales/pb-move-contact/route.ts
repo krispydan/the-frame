@@ -77,10 +77,41 @@ export async function POST(req: NextRequest) {
         removed: rec.removed ?? null,
       };
       if (body.move_out) {
-        await acct.client.updateContact(contactId, { category_id: undefined });
-        const after = await acct.client.getContact(contactId);
-        const arec = after as Record<string, unknown>;
-        attempt.after = { category_id: arec.category_id ?? null };
+        // Try several mutation payloads — PB's remove-from-folder shape
+        // isn't documented in what we have. Each attempt is followed by
+        // a fresh getContact to check whether nested category cleared.
+        const attempts_shape: Array<[string, Record<string, unknown>]> = [
+          ["category_null", { category: null }],
+          ["category_id_zero", { category_id: 0 }],
+          ["category_id_empty", { category_id: "" }],
+          ["category_id_null_str", { category_id: null }],
+        ];
+        const results: Array<Record<string, unknown>> = [];
+        for (const [label, payload] of attempts_shape) {
+          try {
+            await acct.client.updateContact(contactId, payload as never);
+          } catch (e) {
+            results.push({ label, error: (e instanceof Error ? e.message : String(e)).slice(0, 120) });
+            continue;
+          }
+          // Re-fetch to see if nested category cleared.
+          const afterRaw = await acct.client.getContact(contactId);
+          let ac = afterRaw as Record<string, unknown>;
+          if (ac?.contacts && typeof ac.contacts === "object") ac = ac.contacts as Record<string, unknown>;
+          const ai = ac.contacts;
+          if (Array.isArray(ai)) ac = (ai[0] as Record<string, unknown>) || {};
+          else if (ai && typeof ai === "object") ac = ai as Record<string, unknown>;
+          const nestedCategory = (ac.category as { category_id?: unknown } | null | undefined)?.category_id ?? null;
+          results.push({
+            label,
+            payload,
+            nested_category_id_after: nestedCategory,
+            top_category_id_after: ac.category_id ?? null,
+            success: nestedCategory == null,
+          });
+          if (nestedCategory == null) break; // first success stops
+        }
+        attempt.after = results;
       }
     } catch (e) {
       attempt.error = (e instanceof Error ? e.message : String(e)).slice(0, 300);
