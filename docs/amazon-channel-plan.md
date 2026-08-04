@@ -1,6 +1,8 @@
 # Amazon Sales Channel — Integration Plan (via Windsor AI)
 
-**Status:** Rev 3 — all open decisions resolved. Ready to build on approval.
+**Status:** BUILT. All six phases implemented and committed. See
+[§14 Implementation status](#14-implementation-status) for what shipped, what is
+verified against the live account, and the two things still needed from you.
 **Prepared:** 2026-08-04
 
 **Decisions carried in from review:**
@@ -578,3 +580,82 @@ added to the test DDL.
 | Shipments report | ✅ Dropped as unavailable; `shipped_at` from last-update report (§5) |
 
 Phases 1–3 are unblocked and can start immediately.
+
+---
+
+## 14. Implementation status
+
+All six phases are built, tested and committed. 190 new tests; the full suite
+went from 705 to 927 passing with no regressions. (The repo has 92 pre-existing
+test failures in unrelated files — identical before and after this work.)
+
+### What shipped
+
+| Phase | Status | Key files |
+|---|---|---|
+| 1. Windsor client + raw archive | ✅ | `integrations/lib/windsor/client.ts`, `integrations/lib/amazon/{reports,ingest,sync}.ts`, `integrations/schema/amazon.ts`, `scripts/amazon-backfill.ts` |
+| 2. Order import + guards | ✅ | `orders/lib/amazon-sync.ts`, `api/v1/orders/amazon-sync/route.ts`, guards in 4 existing files |
+| 3. Dashboard | ✅ | `(dashboard)/finance/amazon/page.tsx`, `api/v1/finance/amazon/route.ts`, `integrations/lib/amazon/metrics.ts` |
+| 4. Settlement classifier + bridge | ✅ | `integrations/lib/amazon/{settlement-classify,settlement-bridge}.ts` |
+| 5. COGS + revenue recognition | ✅ | edits to `shipment-revenue-recognition.ts`, `daily-cogs.ts`, `scripts/amazon-seed-fba-aliases.ts` |
+| 6. Month-end checklist | ✅ | `integrations/lib/amazon/month-end.ts` |
+
+Four cron jobs are registered and gated on `WINDSOR_API_KEY`: orders 14:10,
+sales/traffic 14:30, FBA inventory 13:00, settlements 16:20 UTC.
+
+### Verified against the live account, not just tested
+
+- **Report definitions** — 6 of 7 reports returned real data end to end. The
+  FBA shipments report timed out on every attempt (9 min, 5 min, 4 min, and a
+  single-day window at 2 min) and is documented as unavailable; `shipped_at`
+  derives from the by-last-update report instead.
+- **Classifier** — run against all 288 real settlement rows: **zero
+  unclassified**, facilitator-tax legs net to exactly zero on every settlement,
+  and the reconstructed total reproduces the real **$19.99** net for the period,
+  matching an independent calculation.
+- **Order import** — 61 real Amazon orders imported end to end. All seven
+  safety invariants clean (no company_id, no shiphero_order_id, no claimable
+  fulfilment alert, no `confirmed` status, correct prefixes, no total
+  mismatches), and re-running was fully idempotent.
+
+### Discovered during the build
+
+- **Amazon cancels a report request when a period has no data**, and Windsor
+  relays that as a generic failure. Without special handling, any legitimately
+  empty report (no returns this week) would alert nightly and train everyone to
+  ignore alerts. Classified as `no_data` and recorded as a successful empty run.
+- **`depleteInventoryFifo` keys idempotency solely on `order_item_id`.** Noted
+  in rev 2; moot now that Amazon orders carry real order items.
+- **Settlement duplicates are real.** Amazon can emit economically identical
+  rows (two equal promotions on one item). Dedup counts per identity rather
+  than checking existence, so genuine duplicates survive instead of silently
+  understating the settlement.
+- **The revenue-recognition join needed widening.** It matched
+  `settlement_line_items.order_id = orders.id` only, but Amazon settlements
+  carry Amazon's own order id. Without the dual key every Amazon order would
+  have failed to recognise, silently.
+
+### Still needed from you
+
+1. **Create three Xero accounts** (§7): `Amazon Fees - FBA Fulfillment`,
+   `Amazon Fees - FBA Storage`, `Amazon Fees - Subscription`. Confirm
+   `Amazon Clearing` exists and is **Bank** type, and that `Deferred Revenue`
+   and `Receivables Holding` exist as shared accounts. This blocks posting
+   journals to Xero — everything else runs without it.
+2. **Set `WINDSOR_API_KEY`** in the Railway environment. Nothing pulls without it.
+
+Then run the backfill — it is the time-sensitive step, since settlement history
+older than 90 days is unrecoverable from Windsor:
+
+```
+npx tsx scripts/amazon-backfill.ts --from 2026-06-01 --dry-run
+npx tsx scripts/amazon-backfill.ts --from 2026-06-01
+npx tsx scripts/amazon-seed-fba-aliases.ts          # reports SKUs needing a decision
+```
+
+### Deliberately not built
+
+Live Xero posting for Amazon settlements. The classifier, bridge and account
+mappings are all in place, but posting is gated on the three accounts above
+existing. The plan's DRAFT-first rollout (post one settlement, eyeball it in
+Xero, then enable POSTED) is the right next step once they do.
