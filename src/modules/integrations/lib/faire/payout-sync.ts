@@ -90,12 +90,15 @@ interface ChannelXeroConfig {
  * Walks Faire orders (paginated), processes any with `payment_initiated_at`
  * set that aren't yet in xero_payout_syncs. Idempotent.
  *
- * Bounded by `maxPages` so a single run can't OOM on a huge catalog. The
- * cron runs daily; new payouts trickle in slowly enough that one or two
- * pages of orders covers the gap.
+ * `maxPages` is a runaway guard, NOT a coverage bound. Faire returns orders
+ * OLDEST-FIRST, so the cap must comfortably exceed total order count / 50 —
+ * at 5 pages the sync starved the moment order #251 existed: every run
+ * re-scanned the same fully-synced first 250 orders, posted 0, and never
+ * reached new payouts (caught 2026-08-04 after ~10 days of missed invoices).
+ * Memory is bounded per page (50 orders), not by the walk length.
  */
 export async function syncFairePayouts(opts: { maxPages?: number } = {}): Promise<FairePayoutSyncResult> {
-  const maxPages = opts.maxPages ?? 5;
+  const maxPages = opts.maxPages ?? 200; // 10,000 orders — raise when volume outgrows it
 
   const [run] = await db.insert(xeroSyncRuns).values({
     kind: "faire_payouts",
