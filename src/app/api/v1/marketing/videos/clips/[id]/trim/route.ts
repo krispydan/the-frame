@@ -8,12 +8,16 @@
  */
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Download from R2 + re-encode + normalize (a second encode, poster and
+// muted variant) + upload back. 60s was not enough for a long clip on a
+// cold cache, and a timeout surfaces as an unexplained failure.
+export const maxDuration = 300;
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { trimClip } from "@/modules/marketing/lib/video/trim";
 import { videoUrl } from "@/lib/storage/videos";
+import { describeMediaError } from "@/modules/marketing/lib/video/ffmpeg";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -44,7 +48,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       },
     });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    const message = describeMediaError(e);
     const status = /not found/i.test(message) ? 404 : /must be|is past|required|no video/i.test(message) ? 400 : 500;
     if (status === 500) console.error("[trim] failed:", e);
     return NextResponse.json({ error: message }, { status });

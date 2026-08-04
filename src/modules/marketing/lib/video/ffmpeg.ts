@@ -120,3 +120,26 @@ export async function assertFfmpegAvailable(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * A message worth showing a human.
+ *
+ * FfmpegError.message is only ever "ffmpeg failed: Command failed: …" —
+ * the actual reason lives in stderr, which callers were dropping. That's
+ * how a broken trim reached the operator as a bare "Trim failed" with
+ * nothing to act on. Pull out the last real stderr line instead.
+ */
+export function describeMediaError(e: unknown): string {
+  if (e instanceof FfmpegError) {
+    const line = e.stderr
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .pop();
+    if (/timed out|ETIMEDOUT/i.test(e.message)) {
+      return "Video processing timed out — the clip may be too long or storage too slow";
+    }
+    return line ? `Video processing failed: ${line}` : e.message;
+  }
+  return e instanceof Error ? e.message : String(e);
+}

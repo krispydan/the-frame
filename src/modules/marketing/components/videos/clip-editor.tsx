@@ -65,6 +65,25 @@ interface ApiClip {
   categoryName?: string | null;
 }
 
+/**
+ * Parse a response that might not be JSON.
+ *
+ * A 500 or a gateway timeout returns HTML, and `await res.json()` throws
+ * there — which killed the handler before any toast fired, so a failed
+ * trim looked like nothing happening at all.
+ */
+async function readJson(res: Response): Promise<Record<string, unknown>> {
+  try {
+    return (await res.json()) as Record<string, unknown>;
+  } catch {
+    return {
+      error: res.status === 504 || res.status === 408
+        ? "Timed out while processing the video — it may still finish; refresh in a minute"
+        : `Server error (${res.status})`,
+    };
+  }
+}
+
 export function ClipEditor<T extends EditorClip>({
   clips,
   onChange,
@@ -170,9 +189,9 @@ export function ClipEditor<T extends EditorClip>({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ startSec: trimStart, endSec: trimEnd }),
       });
-      const d = await res.json();
+      const d = await readJson(res);
       if (!res.ok) {
-        toast.error(d.error ?? "Trim failed");
+        toast.error(String(d.error ?? "Trim failed"), { duration: 10000 });
         return;
       }
       replaceAt(trimIdx, d.clip as ApiClip);
@@ -182,6 +201,8 @@ export function ClipEditor<T extends EditorClip>({
           ? `That exact trim already existed — swapped it in. Hit ${saveLabel}.`
           : `Trimmed clip ready — hit ${saveLabel} to apply it.`,
       );
+    } catch (e) {
+      toast.error(`Trim failed: ${e instanceof Error ? e.message : String(e)}`, { duration: 10000 });
     } finally {
       setTrimming(false);
     }
@@ -197,9 +218,9 @@ export function ClipEditor<T extends EditorClip>({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(spec),
       });
-      const d = await res.json();
+      const d = await readJson(res);
       if (!res.ok) {
-        toast.error(d.error ?? `${label} failed`);
+        toast.error(String(d.error ?? `${label} failed`), { duration: 10000 });
         return false;
       }
       replaceAt(idx, d.clip as ApiClip);
@@ -209,6 +230,9 @@ export function ClipEditor<T extends EditorClip>({
           : `${label} applied — hit ${saveLabel} to bake it in.`,
       );
       return true;
+    } catch (e) {
+      toast.error(`${label} failed: ${e instanceof Error ? e.message : String(e)}`, { duration: 10000 });
+      return false;
     } finally {
       setFxBusyIdx(null);
     }
