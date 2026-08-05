@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { getTestDb, resetTestDb } from "../setup";
-import { parseSearchTerms, likePattern, buildSearchClause } from "@/modules/marketing/lib/video/clip-search";
+import { parseSearchTerms, likePattern, buildSearchClause, skuVariants } from "@/modules/marketing/lib/video/clip-search";
 import { GET } from "@/app/api/v1/marketing/videos/clips/route";
 
 describe("parseSearchTerms", () => {
@@ -33,6 +33,18 @@ describe("likePattern", () => {
     expect(likePattern("3_Sub_207")).toBe("%3\\_Sub\\_207%");
     expect(likePattern("50%")).toBe("%50\\%%");
     expect(likePattern("a\\b")).toBe("%a\\\\b%");
+  });
+});
+
+describe("skuVariants", () => {
+  it("maps between the catalog and Shopify spellings, both ways", () => {
+    expect(skuVariants("JX4011-S-BLK")).toEqual(["JX4011-BLK"]);
+    expect(skuVariants("JX4011-BLK")).toEqual(["JX4011-S-BLK", "JX4011-R-BLK"]);
+  });
+
+  it("leaves non-SKU terms alone", () => {
+    expect(skuVariants("boulevard")).toEqual([]);
+    expect(skuVariants("3_Sub_207")).toEqual([]);
   });
 });
 
@@ -95,6 +107,13 @@ beforeEach(() => {
 
 describe("clip search (real query)", () => {
   it("finds a clip by SKU — which used to be unsearchable", async () => {
+    expect(await names("search=JX4011-BLK")).toEqual(["beach_day.mp4"]);
+  });
+
+  it("accepts the Shopify SKU spelling as well as the catalog one", async () => {
+    // The seeded catalog SKU is the legacy form JX4011-BLK; the current
+    // form carries an -S-. Either typed in the box must find the clip.
+    expect(await names("search=JX4011-S-BLK")).toEqual(["beach_day.mp4"]);
     expect(await names("search=JX4011-BLK")).toEqual(["beach_day.mp4"]);
   });
 

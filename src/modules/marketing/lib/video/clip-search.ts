@@ -21,24 +21,56 @@
  * contiguous behaviour.
  */
 
-/** Fields a bare term is matched against, in the order they're OR'd. */
-const TERM_SQL = `(
-  c.file_name LIKE ? ESCAPE '\\'
-  OR c.notes LIKE ? ESCAPE '\\'
-  OR c.talent LIKE ? ESCAPE '\\'
-  OR cat.name LIKE ? ESCAPE '\\'
-  OR cat.slug LIKE ? ESCAPE '\\'
-  OR EXISTS (
-    SELECT 1 FROM marketing_video_clip_products cp
-      JOIN catalog_skus s ON s.id = cp.sku_id
-      LEFT JOIN catalog_products p ON p.id = s.product_id
-     WHERE cp.clip_id = c.id
-       AND (p.name LIKE ? ESCAPE '\\' OR s.sku LIKE ? ESCAPE '\\' OR s.color_name LIKE ? ESCAPE '\\')
-  )
-)`;
+/**
+ * Alternate spellings of a SKU term.
+ *
+ * The catalog carries two generations — JX4011-S-BLK (current) and
+ * JX4011-BLK (legacy, and what Shopify shows). Someone reading a SKU off
+ * the storefront types the form they can see, so searching has to accept
+ * either and find the same clips. Purely textual, both directions; no
+ * catalog lookup, so a partial like "JX4011" still behaves as a prefix.
+ */
+export function skuVariants(term: string): string[] {
+  const up = term.toUpperCase();
+  const out: string[] = [];
+  // JX4011-S-BLK → JX4011-BLK
+  const stripped = up.replace(/^(JX\d{4})-[SR]-/, "$1-");
+  if (stripped !== up) out.push(stripped);
+  // JX4011-BLK → JX4011-S-BLK / JX4011-R-BLK
+  const m = /^(JX\d{4})-(?![SR]-)(.+)$/.exec(up);
+  if (m) out.push(`${m[1]}-S-${m[2]}`, `${m[1]}-R-${m[2]}`);
+  return out;
+}
 
-/** How many placeholders one term consumes. Keep in step with TERM_SQL. */
-const PARAMS_PER_TERM = 8;
+/**
+ * SQL for one term, plus its params in order.
+ *
+ * Built per-term rather than as a constant because a SKU-shaped term
+ * carries extra spellings to try (see skuVariants).
+ */
+function termSql(term: string): { sql: string; params: string[] } {
+  const like = likePattern(term);
+  const skuLikes = [like, ...skuVariants(term).map(likePattern)];
+  const skuOr = skuLikes.map(() => `s.sku LIKE ? ESCAPE '\\'`).join(" OR ");
+  return {
+    sql: `(
+      c.file_name LIKE ? ESCAPE '\\'
+      OR c.notes LIKE ? ESCAPE '\\'
+      OR c.talent LIKE ? ESCAPE '\\'
+      OR cat.name LIKE ? ESCAPE '\\'
+      OR cat.slug LIKE ? ESCAPE '\\'
+      OR EXISTS (
+        SELECT 1 FROM marketing_video_clip_products cp
+          JOIN catalog_skus s ON s.id = cp.sku_id
+          LEFT JOIN catalog_products p ON p.id = s.product_id
+         WHERE cp.clip_id = c.id
+           AND (p.name LIKE ? ESCAPE '\\' OR s.color_name LIKE ? ESCAPE '\\' OR ${skuOr})
+      )
+    )`,
+    // Order must match the placeholders above exactly.
+    params: [like, like, like, like, like, like, like, ...skuLikes],
+  };
+}
 
 /**
  * Split a query into terms, honouring "quoted phrases".
@@ -87,12 +119,12 @@ export function buildSearchClause(raw: string | null | undefined): SearchClause 
   const terms = parseSearchTerms(raw ?? "");
   if (terms.length === 0) return { sql: null, params: [], terms };
 
-  const params: string[] = [];
-  for (const term of terms) {
-    const like = likePattern(term);
-    for (let i = 0; i < PARAMS_PER_TERM; i++) params.push(like);
-  }
-  return { sql: terms.map(() => TERM_SQL).join(" AND "), params, terms };
+  const parts = terms.map(termSql);
+  return {
+    sql: parts.map((p) => p.sql).join(" AND "),
+    params: parts.flatMap((p) => p.params),
+    terms,
+  };
 }
 
 /**
