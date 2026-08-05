@@ -21,6 +21,7 @@
  */
 
 import { sqlite } from "@/lib/db";
+import { SKU_MAP_CTE, COST_CTE } from "./sku-map";
 
 /** Days of cover beyond which stock is excess rather than prudent. */
 export const EXCESS_COVER_DAYS = 180;
@@ -93,11 +94,7 @@ export function buildExcessReport(opts?: {
   }
 
   const rows = sqlite.prepare(`
-    WITH sku_map AS (
-      SELECT sku AS spelling, id AS sku_id FROM catalog_skus WHERE sku IS NOT NULL AND sku != ''
-      UNION
-      SELECT alias AS spelling, sku_id FROM catalog_sku_aliases
-    ),
+    ${SKU_MAP_CTE},
     velocity AS (
       SELECT r.sku AS sku,
              SUM(CASE WHEN r.item_promotion_discount >= r.item_price - 0.005
@@ -109,13 +106,7 @@ export function buildExcessReport(opts?: {
         AND IFNULL(LOWER(r.item_status), '') != 'cancelled'
       GROUP BY r.sku
     ),
-    cost AS (
-      SELECT cl.sku_id AS sku_id,
-             (SELECT x.landed_cost_per_unit FROM inventory_cost_layers x
-               WHERE x.sku_id = cl.sku_id AND x.remaining_quantity > 0
-               ORDER BY x.received_at ASC, x.created_at ASC LIMIT 1) AS landed
-      FROM inventory_cost_layers cl GROUP BY cl.sku_id
-    )
+    ${COST_CTE}
     SELECT rr.sku AS sku, rr.asin AS asin, rr.product_name AS amazonTitle,
            rr.available AS fbaAvailable, rr.unfulfillable AS unfulfillable,
            IFNULL(v.paidUnits, 0) AS paidUnits30d,

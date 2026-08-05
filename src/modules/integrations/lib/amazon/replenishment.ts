@@ -25,6 +25,7 @@
  */
 
 import { sqlite } from "@/lib/db";
+import { SKU_MAP_CTE, WAREHOUSE_CTE, COST_CTE } from "./sku-map";
 
 /** Cover target, in days, for FBA stock. Configurable per run. */
 export const DEFAULT_COVER_DAYS = 60;
@@ -130,16 +131,8 @@ export function buildReplenishmentProposal(opts?: {
   }
 
   const rows = sqlite.prepare(`
-    WITH sku_map AS (
-      SELECT sku AS spelling, id AS sku_id FROM catalog_skus WHERE sku IS NOT NULL AND sku != ''
-      UNION
-      SELECT alias AS spelling, sku_id FROM catalog_sku_aliases
-    ),
-    warehouse AS (
-      SELECT m.spelling AS spelling, i.quantity AS qty, m.sku_id AS sku_id
-      FROM inventory i JOIN sku_map m ON m.sku_id = i.sku_id
-      WHERE i.location = 'warehouse'
-    ),
+    ${SKU_MAP_CTE},
+    ${WAREHOUSE_CTE},
     -- Paid vs seeded units over the trailing window, from OUR archive. This
     -- is the Vine correction: Amazon's units_sold_last_30_days counts both.
     velocity AS (
@@ -163,14 +156,7 @@ export function buildReplenishmentProposal(opts?: {
       WHERE received_at IS NULL AND created_for >= ?
       GROUP BY sku
     ),
-    -- Next unit out under FIFO, which is what the next unit shipped costs.
-    cost AS (
-      SELECT cl.sku_id AS sku_id,
-             (SELECT x.landed_cost_per_unit FROM inventory_cost_layers x
-               WHERE x.sku_id = cl.sku_id AND x.remaining_quantity > 0
-               ORDER BY x.received_at ASC, x.created_at ASC LIMIT 1) AS landed
-      FROM inventory_cost_layers cl GROUP BY cl.sku_id
-    )
+    ${COST_CTE}
     SELECT
       rr.sku                    AS sku,
       rr.asin                   AS asin,
@@ -186,7 +172,7 @@ export function buildReplenishmentProposal(opts?: {
       IFNULL(w.qty, 0)          AS warehouseAvailable,
       IFNULL(tf.qty, 0)         AS inFlight,
       IFNULL(v.paidUnits, 0)    AS paidUnits30d,
-      IFNULL(vf.seededUnits, 0) AS seededUnits30d,
+      IFNULL(v.seededUnits, 0)  AS seededUnits30d,
       c.landed                  AS landedCostPerUnit
     FROM amazon_restock_recommendations rr
     LEFT JOIN sku_map m   ON m.spelling = rr.internal_sku
@@ -195,8 +181,7 @@ export function buildReplenishmentProposal(opts?: {
     -- Velocity is keyed on the Amazon-facing SKU, which is what the order
     -- rows carry; the FBA and merchant listings of one product sell
     -- separately and must not be pooled.
-    LEFT JOIN velocity v  ON v.sku = rr.sku
-    LEFT JOIN velocity vf ON vf.sku = rr.sku
+    LEFT JOIN velocity v   ON v.sku = rr.sku
     LEFT JOIN in_flight tf ON tf.sku = rr.sku
     WHERE rr.snapshot_date = ?
   `).all(windowStart, today, windowStart, snapshotDate) as Array<{

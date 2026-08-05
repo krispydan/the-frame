@@ -310,3 +310,51 @@ describe("totals", () => {
     expect(propose(90).lines[0].proposedQty).toBe(90);
   });
 });
+
+describe("no row multiplication", () => {
+  it("lists a SKU once even when several spellings map to it", () => {
+    // Found in production: sku_map yields one row per SPELLING, and a naive
+    // per-sku_id join through it multiplied every row. All 140 SKUs were
+    // listed twice with doubled totals, and every unit test passed because
+    // no fixture had both a catalog SKU and an alias for it.
+    catalogSku("s1", "JX1-S-BLK", "JX1-BLK");
+    sqlite.prepare(
+      "INSERT INTO catalog_sku_aliases (alias, sku_id, canonical_sku) VALUES ('JX1-ALT', 's1', 'JX1-S-BLK')",
+    ).run();
+    warehouse("s1", 100);
+    restock({ sku: "JX1-BLK-FBA", recommended: 50, sold30d: 30 });
+    sold("JX1-BLK-FBA", 30);
+
+    const p = propose();
+    expect(p.lines.filter((l) => l.sku === "JX1-BLK-FBA")).toHaveLength(1);
+    expect(p.totals.skusConsidered).toBe(1);
+    // And the warehouse figure must not be double-counted either.
+    expect(p.lines[0].warehouseAvailable).toBe(100);
+  });
+
+  it("lets a real catalog SKU win over an alias claiming the same spelling", () => {
+    catalogSku("s1", "JX1-BLK");
+    catalogSku("s2", "JX2-BLK");
+    sqlite.prepare(
+      "INSERT INTO catalog_sku_aliases (alias, sku_id, canonical_sku) VALUES ('JX1-BLK', 's2', 'JX2-BLK')",
+    ).run();
+    warehouse("s1", 77);
+    warehouse("s2", 11);
+    restock({ sku: "JX1-BLK-FBA", recommended: 10, sold30d: 30 });
+    sold("JX1-BLK-FBA", 30);
+
+    const l = propose().lines.find((x) => x.sku === "JX1-BLK-FBA")!;
+    expect(l.warehouseAvailable).toBe(77);
+  });
+
+  it("sums warehouse rows for one SKU rather than emitting a line each", () => {
+    catalogSku("s1", "JX1-BLK", "JX1-BLK");
+    warehouse("s1", 40);
+    restock({ sku: "JX1-BLK-FBA", recommended: 10, sold30d: 30 });
+    sold("JX1-BLK-FBA", 30);
+
+    const p = propose();
+    expect(p.lines).toHaveLength(1);
+    expect(p.lines[0].warehouseAvailable).toBe(40);
+  });
+});
