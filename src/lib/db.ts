@@ -2886,4 +2886,17 @@ try {
   }
 } catch (e) { console.error("[db] 3PL billing tables error:", e); }
 
+// ── Dashboard cache (L2) ──
+// The dashboard bundle is expensive (~45s cold: FIFO P&L, product performance,
+// business health) but only needs ~5h freshness. The in-process Map (L1) dies
+// on every deploy — and this app deploys many times a day — so entries are
+// mirrored here to survive restarts. See src/modules/dashboard/lib/cache.ts.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS dashboard_cache (
+    key TEXT PRIMARY KEY NOT NULL,
+    value_json TEXT NOT NULL,
+    built_at INTEGER NOT NULL
+  )`);
+} catch (e) { console.error("[db] dashboard_cache table error:", e); }
+
 }  // end if (!IS_BUILD_PHASE)

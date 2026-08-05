@@ -193,12 +193,19 @@ export default function DashboardPage() {
               </button>
             ))}
           </div>
+          {/* Figures refresh on a 5h cadence (see dashboard-warm cron) — say
+              when they're from so a cached number is never mistaken for live. */}
+          {core?.builtAt ? (
+            <span className="text-xs text-muted-foreground whitespace-nowrap" suppressHydrationWarning>
+              as of {new Date(core.builtAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+            </span>
+          ) : null}
           <Button
             variant="ghost"
             size="sm"
             onClick={loadData}
             aria-label="Refresh"
-            title={core?.cached ? "Showing cached figures — click to recompute" : "Refresh"}
+            title={core?.cached ? "Showing cached figures — click to recompute now" : "Refresh"}
           >
             <RefreshCw className={`h-4 w-4 ${loading || heavyPending ? "animate-spin" : ""}`} />
           </Button>

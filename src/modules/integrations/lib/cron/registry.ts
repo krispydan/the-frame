@@ -54,6 +54,7 @@ import { runWeeklyFaireExport } from "@/modules/sales/lib/faire-customer-export"
 import { topUpVideoQueue } from "@/modules/marketing/lib/video/scheduler";
 import { runVideoStorageHygiene } from "@/modules/marketing/lib/video/cleanup";
 import { runDatabaseBackup } from "@/modules/integrations/lib/backup/db-backup";
+import { warmDashboardCache } from "@/modules/dashboard/lib/warm";
 import { drainMetaLeads, reconcileMetaLeads } from "@/modules/integrations/lib/meta/lead-ingest";
 import { runCapiSyncAndDrain } from "@/modules/integrations/lib/meta/capi";
 import { runMetaLeadCsvReminder } from "@/modules/integrations/lib/meta/daily-reminder";
@@ -635,6 +636,19 @@ export const CRON_JOBS: CronJob[] = [
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       return data;
     },
+  },
+
+  // ── Dashboard cache warm ──
+  // The dashboard bundle costs ~45s to build cold (FIFO P&L, product
+  // performance, business health) and only needs 5h freshness. This rebuilds
+  // every role's bundle in the background and persists it (two-tier cache in
+  // dashboard/lib/cache.ts), so page loads are always an instant cache read.
+  {
+    id: "dashboard-warm",
+    schedule: "0 */5 * * *",  // every 5 hours, on the hour
+    description: "Rebuild + persist the dashboard bundles per role (5h freshness contract) so nobody waits on the ~45s cold build",
+    handler: () => warmDashboardCache(),
+    fireAndForget: true,  // multi-role rebuild can exceed the tick's edge timeout
   },
 
   // ── Database backup ──

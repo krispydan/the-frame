@@ -58,6 +58,9 @@ export default function ThreePlPage() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [openInvoice, setOpenInvoice] = useState<string | null>(null);
+  // Rate card is read-only unless explicitly unlocked — it drives every audit,
+  // it's rarely edited, and a stray keystroke would silently skew findings.
+  const [editingRates, setEditingRates] = useState(false);
   const [audit, setAudit] = useState<Record<string, { findings: AuditFinding[]; totals: { overcharged: number; undercharged: number; checkedLines: number } } | null>>({});
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -261,10 +264,18 @@ export default function ThreePlPage() {
 
       {/* Rate card */}
       <Card>
-        <CardHeader><CardTitle className="text-base">Contract Rate Card</CardTitle></CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">Contract Rate Card</CardTitle>
+          <Button size="sm" variant={editingRates ? "default" : "outline"} onClick={() => setEditingRates((v) => !v)}>
+            {editingRates ? "Done editing" : "Edit rates"}
+          </Button>
+        </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground mb-3">
-            The audit engine recomputes every invoice line from these rates (Big Sky contract, Exhibit A). Edit a value and it applies to future imports and re-audits.
+            The audit engine recomputes every invoice line from these rates (Big Sky contract, Exhibit A).
+            {editingRates
+              ? " Editing is live — a changed value applies to future imports and re-audits."
+              : " Locked to prevent accidental changes — click Edit rates to update after a contract change."}
           </p>
           <Table>
             <TableHeader><TableRow>
@@ -278,17 +289,24 @@ export default function ThreePlPage() {
                     <div className="flex flex-wrap gap-2">
                       {Object.entries(r.rate).map(([k, v]) => (
                         typeof v === "number" ? (
-                          <label key={k} className="flex items-center gap-1 text-xs">
-                            <span className="text-muted-foreground">{k}</span>
-                            <input
-                              type="number" step="0.01" defaultValue={v}
-                              className="w-20 rounded border px-1.5 py-0.5 text-sm tabular-nums"
-                              onBlur={(e) => {
-                                const nv = parseFloat(e.target.value);
-                                if (Number.isFinite(nv) && nv !== v) saveRate(r, k, nv);
-                              }}
-                            />
-                          </label>
+                          editingRates ? (
+                            <label key={k} className="flex items-center gap-1 text-xs">
+                              <span className="text-muted-foreground">{k}</span>
+                              <input
+                                type="number" step="0.01" defaultValue={v}
+                                className="w-20 rounded border px-1.5 py-0.5 text-sm tabular-nums"
+                                onBlur={(e) => {
+                                  const nv = parseFloat(e.target.value);
+                                  if (Number.isFinite(nv) && nv !== v) saveRate(r, k, nv);
+                                }}
+                              />
+                            </label>
+                          ) : (
+                            <span key={k} className="text-xs self-center">
+                              <span className="text-muted-foreground">{k}</span>{" "}
+                              <span className="font-medium tabular-nums">${v.toFixed(2)}</span>
+                            </span>
+                          )
                         ) : (
                           <span key={k} className="text-xs text-muted-foreground self-center">{k}: {String(v)}</span>
                         )

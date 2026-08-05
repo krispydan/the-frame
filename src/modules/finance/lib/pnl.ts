@@ -29,6 +29,8 @@ export interface ChannelPnl {
 export interface PnlSummary {
   period: { start: string; end: string; label: string };
   revenue: number;
+  /** Order count for the period (drives the headline cards + AOV). */
+  orders: number;
   cogs: number;
   grossMargin: number;
   grossMarginPct: number;
@@ -43,11 +45,14 @@ export interface PnlSummary {
 export interface PnlComparison {
   priorPeriod: { start: string; end: string; label: string };
   revenue: number;
+  orders: number;
   cogs: number;
   grossMargin: number;
   totalExpenses: number;
   netIncome: number;
   revenueChange: number;
+  ordersChange: number;
+  aovChange: number;
   cogsChange: number;
   grossMarginChange: number;
   expensesChange: number;
@@ -128,6 +133,7 @@ function pctChange(current: number, prior: number): number {
 
 function calculatePnlForRange(startDate: string, endDate: string): {
   revenue: number;
+  orders: number;
   cogs: number;
   grossMargin: number;
   totalFees: number;
@@ -246,6 +252,7 @@ function calculatePnlForRange(startDate: string, endDate: string): {
 
   // Totals
   const revenue = channels.reduce((s, c) => s + c.revenue, 0);
+  const orders = channels.reduce((s, c) => s + c.orderCount, 0);
   const cogs = channels.reduce((s, c) => s + c.cogs, 0);
   const totalFees = channels.reduce((s, c) => s + c.fees, 0);
   const totalExpenses = expenseData.reduce((s, e) => s + e.amount, 0);
@@ -253,6 +260,7 @@ function calculatePnlForRange(startDate: string, endDate: string): {
 
   return {
     revenue,
+    orders,
     cogs,
     grossMargin,
     totalFees,
@@ -278,11 +286,17 @@ export function calculatePnl(
   const comparison: PnlComparison = {
     priorPeriod: priorDates,
     revenue: prior.revenue,
+    orders: prior.orders,
     cogs: prior.cogs,
     grossMargin: prior.grossMargin,
     totalExpenses: prior.totalExpenses,
     netIncome: prior.netIncome,
     revenueChange: pctChange(current.revenue, prior.revenue),
+    ordersChange: pctChange(current.orders, prior.orders),
+    aovChange: pctChange(
+      current.orders > 0 ? current.revenue / current.orders : 0,
+      prior.orders > 0 ? prior.revenue / prior.orders : 0,
+    ),
     cogsChange: pctChange(current.cogs, prior.cogs),
     grossMarginChange: pctChange(current.grossMargin, prior.grossMargin),
     expensesChange: pctChange(current.totalExpenses, prior.totalExpenses),

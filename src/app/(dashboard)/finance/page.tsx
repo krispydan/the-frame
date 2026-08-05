@@ -36,11 +36,14 @@ import {
 interface PnlComparison {
   priorPeriod: { start: string; end: string; label: string };
   revenue: number;
+  orders: number;
   cogs: number;
   grossMargin: number;
   totalExpenses: number;
   netIncome: number;
   revenueChange: number;
+  ordersChange: number;
+  aovChange: number;
   cogsChange: number;
   grossMarginChange: number;
   expensesChange: number;
@@ -50,6 +53,7 @@ interface PnlComparison {
 interface PnlSummary {
   period: { start: string; end: string; label: string };
   revenue: number;
+  orders: number;
   cogs: number;
   grossMargin: number;
   grossMarginPct: number;
@@ -579,36 +583,43 @@ function formatDelta(d: number | null): { text: string; cls: string } {
   };
 }
 
-function TrajectoryCharts({ trajectory }: { trajectory: Trajectory }) {
-  const { mom, monthly, weekly, channels } = trajectory;
+function TrajectoryCharts({ trajectory, pnl }: { trajectory: Trajectory; pnl: PnlSummary }) {
+  const { monthly, weekly, channels } = trajectory;
+  // Headline cards follow the PERIOD SELECTOR (they used to be hardwired to
+  // this-month-vs-last-month from the trajectory endpoint, so changing the
+  // dropdown never changed them). formatDelta expects fractions; the P&L
+  // comparison reports percents — hence the /100.
+  const comp = pnl.comparison;
+  const aov = pnl.orders > 0 ? pnl.revenue / pnl.orders : 0;
+  const priorAov = comp && comp.orders > 0 ? comp.revenue / comp.orders : 0;
 
   return (
     <div className="space-y-4">
-      {/* MoM headline cards */}
+      {/* Headline cards for the selected P&L period */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <MomCard
           label="Revenue"
-          subLabel={mom.thisMonth.label}
-          value={fmt(mom.thisMonth.revenue)}
-          prior={fmt(mom.lastMonth.revenue)}
-          priorLabel={mom.lastMonth.label}
-          delta={mom.delta.revenue}
+          subLabel={pnl.period.label}
+          value={fmt(pnl.revenue)}
+          prior={comp ? fmt(comp.revenue) : "—"}
+          priorLabel={comp?.priorPeriod.label ?? ""}
+          delta={comp ? comp.revenueChange / 100 : null}
         />
         <MomCard
           label="Orders"
-          subLabel={mom.thisMonth.label}
-          value={mom.thisMonth.orders.toString()}
-          prior={mom.lastMonth.orders.toString()}
-          priorLabel={mom.lastMonth.label}
-          delta={mom.delta.orders}
+          subLabel={pnl.period.label}
+          value={pnl.orders.toString()}
+          prior={comp ? comp.orders.toString() : "—"}
+          priorLabel={comp?.priorPeriod.label ?? ""}
+          delta={comp ? comp.ordersChange / 100 : null}
         />
         <MomCard
           label="AOV"
-          subLabel={mom.thisMonth.label}
-          value={fmt(mom.thisMonth.aov)}
-          prior={fmt(mom.lastMonth.aov)}
-          priorLabel={mom.lastMonth.label}
-          delta={mom.delta.aov}
+          subLabel={pnl.period.label}
+          value={fmt(aov)}
+          prior={comp ? fmt(priorAov) : "—"}
+          priorLabel={comp?.priorPeriod.label ?? ""}
+          delta={comp ? comp.aovChange / 100 : null}
         />
       </div>
 
@@ -760,22 +771,25 @@ function PnlTab({ pnl, trajectory, onExportCsv }: { pnl: PnlSummary; trajectory:
         </button>
       </div>
 
-      {/* Trajectory: MoM cards + monthly/weekly trend bars */}
-      {trajectory && <TrajectoryCharts trajectory={trajectory} />}
+      {/* Headline cards (selected period) + monthly/weekly trend bars */}
+      {trajectory && <TrajectoryCharts trajectory={trajectory} pnl={pnl} />}
 
       {/* Summary Cards with Comparison */}
       {(() => {
         const hasPartialCogs = pnl.channels.some((c) => c.hasFullCostData === false);
         const partialNote = hasPartialCogs ? " (partial)" : "";
+        // No expenses here: operating expenses live in Xero (per Daniel,
+        // Apr + Aug 2026) — showing a local "Expenses" figure was inaccurate.
+        // Net After Fees = gross margin − channel fees (settlement-derived).
         return (
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <SummaryCard title="Revenue" value={fmt(pnl.revenue)} icon={DollarSign} trend={comp ? changeBadge(comp.revenueChange) : null} />
             <SummaryCard title={`COGS${partialNote}`} value={fmt(pnl.cogs)} icon={TrendingDown} trend={comp ? changeBadge(comp.cogsChange, true) : null} negative />
             <SummaryCard title={`Gross Margin${partialNote}`} value={fmt(pnl.grossMargin)} subtitle={pct(pnl.grossMarginPct)} icon={TrendingUp} trend={comp ? changeBadge(comp.grossMarginChange) : null} />
-            <SummaryCard title="Expenses + Fees" value={fmt(pnl.totalExpenses + pnl.totalFees)} icon={CreditCard} trend={comp ? changeBadge(comp.expensesChange, true) : null} negative />
             <SummaryCard
-              title={`Net Income${partialNote}`}
+              title={`Net After Fees${partialNote}`}
               value={fmt(pnl.netIncome)}
+              subtitle="Opex lives in Xero"
               icon={Wallet}
               trend={comp ? changeBadge(comp.netIncomeChange) : null}
               negative={pnl.netIncome < 0}
@@ -805,11 +819,7 @@ function PnlTab({ pnl, trajectory, onExportCsv }: { pnl: PnlSummary; trajectory:
               <div className="font-medium">{fmt(comp.grossMargin)}</div>
             </div>
             <div>
-              <span className="text-muted-foreground">Expenses</span>
-              <div className="font-medium">{fmt(comp.totalExpenses)}</div>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Net Income</span>
+              <span className="text-muted-foreground">Net After Fees</span>
               <div className="font-medium">{fmt(comp.netIncome)}</div>
             </div>
           </div>

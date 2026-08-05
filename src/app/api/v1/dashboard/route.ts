@@ -20,11 +20,18 @@ import { cached } from "@/modules/dashboard/lib/cache";
  * is cached for longer since those move slowly. `fresh=1` bypasses the cache.
  */
 
-/** Heavy aggregates change slowly — hold them longer than the cheap ones. */
+/**
+ * 5-hour freshness across the board (per Daniel, Aug 2026 — the dashboard
+ * doesn't need to be more current than that). The huge stale window means a
+ * visitor virtually always gets an instant cached answer while a refresh runs
+ * behind the request; the dashboard-warm cron force-rebuilds every 5h anyway,
+ * and the Refresh button (fresh=1) recomputes on demand.
+ */
+const FIVE_H = 5 * 60 * 60_000;
 const TTL: Record<Part, { ttlMs: number; staleMs: number }> = {
-  core: { ttlMs: 60_000, staleMs: 4 * 60_000 },
-  heavy: { ttlMs: 5 * 60_000, staleMs: 25 * 60_000 },
-  all: { ttlMs: 60_000, staleMs: 4 * 60_000 },
+  core: { ttlMs: FIVE_H, staleMs: 7 * 24 * 60 * 60_000 },
+  heavy: { ttlMs: FIVE_H, staleMs: 7 * 24 * 60 * 60_000 },
+  all: { ttlMs: FIVE_H, staleMs: 7 * 24 * 60 * 60_000 },
 };
 
 export async function GET(req: NextRequest) {
