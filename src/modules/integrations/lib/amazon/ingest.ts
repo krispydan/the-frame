@@ -641,3 +641,84 @@ export function skuDisplayNames(): Map<string, string> {
   }
   return out;
 }
+
+/**
+ * Amazon's restock recommendations, snapshotted daily.
+ *
+ * Snapshotted rather than overwritten because the recommendation is a moving
+ * target: "Amazon wanted 220 units three weeks ago and we sent 45" is the
+ * only way to tell later whether a stockout was a planning miss or a
+ * deliberate call. A single current-state row cannot answer that.
+ */
+export function ingestRestockRecommendations(
+  rows: WindsorRow[],
+  snapshotDate: string,
+): IngestResult {
+  const result = emptyResult();
+  result.received = rows.length;
+
+  const upsert = sqlite.prepare(`
+    INSERT INTO amazon_restock_recommendations (
+      id, snapshot_date, sku, internal_sku, asin, fnsku, product_name,
+      alert, recommended_action, recommended_qty, recommended_ship_date,
+      units_sold_30d, days_of_supply, total_days_of_supply,
+      available, inbound, working, receiving, unfulfillable, total_units,
+      price, ingested_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(snapshot_date, sku) DO UPDATE SET
+      internal_sku = excluded.internal_sku, asin = excluded.asin,
+      fnsku = excluded.fnsku, product_name = excluded.product_name,
+      alert = excluded.alert, recommended_action = excluded.recommended_action,
+      recommended_qty = excluded.recommended_qty,
+      recommended_ship_date = excluded.recommended_ship_date,
+      units_sold_30d = excluded.units_sold_30d,
+      days_of_supply = excluded.days_of_supply,
+      total_days_of_supply = excluded.total_days_of_supply,
+      available = excluded.available, inbound = excluded.inbound,
+      working = excluded.working, receiving = excluded.receiving,
+      unfulfillable = excluded.unfulfillable, total_units = excluded.total_units,
+      price = excluded.price, ingested_at = datetime('now')
+  `);
+  const existing = sqlite.prepare(
+    "SELECT 1 AS hit FROM amazon_restock_recommendations WHERE snapshot_date = ? AND sku = ?",
+  );
+
+  // Amazon writes "none" and "" into date and numeric columns rather than
+  // leaving them empty, so a plain cast would silently produce 0 or an
+  // invalid date string.
+  const optDate = (v: unknown): string | null => {
+    const s = str(v);
+    return !s || s.toLowerCase() === "none" ? null : s;
+  };
+  const optNum = (v: unknown): number | null => {
+    const s = str(v);
+    return s === null ? null : num(s);
+  };
+
+  const run = sqlite.transaction((batch: WindsorRow[]) => {
+    for (const row of batch) {
+      const sku = str(row.merchant_sku);
+      if (!sku) { result.rejected.push({ reason: "missing merchant_sku", row }); continue; }
+
+      const had = existing.get(snapshotDate, sku) as { hit: number } | undefined;
+      upsert.run(
+        crypto.randomUUID(), snapshotDate, sku, toInternalSku(sku),
+        str(row.asin), str(row.fnsku), str(row.product_name),
+        str(row.alert), str(row.recommended_action),
+        Math.trunc(num(row.recommended_replenishment_qty)),
+        optDate(row.recommended_ship_date),
+        Math.trunc(num(row.units_sold_last_30_days)),
+        optNum(row.days_of_supply_at_amazon_fulfillment_network),
+        optNum(row.total_days_of_supply_including_units_from_open_shipments),
+        Math.trunc(num(row.available)), Math.trunc(num(row.inbound)),
+        Math.trunc(num(row.working)), Math.trunc(num(row.receiving)),
+        Math.trunc(num(row.unfulfillable)), Math.trunc(num(row.total_units)),
+        optNum(row.price),
+      );
+      if (had) result.updated++; else result.inserted++;
+    }
+  });
+
+  run(rows);
+  return result;
+}

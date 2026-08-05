@@ -40,6 +40,7 @@ import {
   syncAmazonSalesTraffic,
   syncAmazonAsinTraffic,
   syncAmazonListings,
+  syncAmazonRestock,
   syncAndBridgeAmazonSettlements,
   syncAmazonFbaInventory,
 } from "@/modules/integrations/lib/amazon/sync";
@@ -388,6 +389,13 @@ export const CRON_JOBS: CronJob[] = [
     schedule: "0 13 * * *",   // 13:00 UTC ≈ 6:00am PT
     description: "Snapshot FBA stock on hand — units held at Amazon that ShipHero cannot see",
     handler: () => syncAmazonFbaInventory({}),
+    guard: () => Boolean(process.env.WINDSOR_API_KEY),
+  },
+  {
+    id: "amazon-restock-sync",
+    schedule: "15 13 * * *",  // 13:15 UTC ≈ 6:15am PT, before the day's reporting
+    description: "Snapshot Amazon's FBA restock recommendations — recommended quantities, ship dates and days of supply per SKU",
+    handler: () => syncAmazonRestock({}),
     guard: () => Boolean(process.env.WINDSOR_API_KEY),
   },
   {

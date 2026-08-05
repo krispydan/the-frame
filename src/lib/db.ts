@@ -2696,6 +2696,33 @@ try {
   sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_amazon_fba_inventory_key ON amazon_fba_inventory(snapshot_date, sku)`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_amazon_fba_inventory_sku ON amazon_fba_inventory(sku)`);
 
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS amazon_restock_recommendations (
+    id TEXT PRIMARY KEY NOT NULL,
+    snapshot_date TEXT NOT NULL,
+    sku TEXT NOT NULL,
+    internal_sku TEXT,
+    asin TEXT,
+    fnsku TEXT,
+    product_name TEXT,
+    alert TEXT,
+    recommended_action TEXT,
+    recommended_qty INTEGER NOT NULL DEFAULT 0,
+    recommended_ship_date TEXT,
+    units_sold_30d INTEGER NOT NULL DEFAULT 0,
+    days_of_supply REAL,
+    total_days_of_supply REAL,
+    available INTEGER NOT NULL DEFAULT 0,
+    inbound INTEGER NOT NULL DEFAULT 0,
+    working INTEGER NOT NULL DEFAULT 0,
+    receiving INTEGER NOT NULL DEFAULT 0,
+    unfulfillable INTEGER NOT NULL DEFAULT 0,
+    total_units INTEGER NOT NULL DEFAULT 0,
+    price REAL,
+    ingested_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_amazon_restock_key ON amazon_restock_recommendations(snapshot_date, sku)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_amazon_restock_internal ON amazon_restock_recommendations(internal_sku)`);
+
   sqlite.exec(`CREATE TABLE IF NOT EXISTS amazon_asin_traffic_daily (
     id TEXT PRIMARY KEY NOT NULL,
     date TEXT NOT NULL,

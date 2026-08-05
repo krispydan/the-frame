@@ -258,6 +258,54 @@ export const MERCHANT_LISTINGS: WindsorReport = {
 };
 
 /**
+ * Amazon's own restock recommendations.
+ *
+ * The reason this build does not contain a demand forecast: Amazon already
+ * returns `recommended_replenishment_qty`, `recommended_ship_date`, days of
+ * supply, and an alert per SKU. Re-deriving that from order history would be
+ * strictly worse — Amazon can see Buy Box, competing offers and its own
+ * inbound queue, and we cannot.
+ *
+ * What Amazon CANNOT see is our warehouse stock, our landed cost, and the
+ * fact that a large share of `units_sold_last_30_days` on this account is
+ * Vine giveaway rather than paid demand. Those three corrections are applied
+ * downstream in replenishment.ts, not here.
+ *
+ * Measured: this report generates on demand and TIMES OUT on the first call,
+ * then answers in seconds once Amazon has cached it. The sync retries, so a
+ * cold first run is slow rather than failed.
+ */
+export const RESTOCK_RECOMMENDATIONS: WindsorReport = {
+  connector: AMAZON_CONNECTOR,
+  report: "get_restock_inventory_recommendations_report",
+  fields: [
+    "merchant_sku",
+    "asin",
+    "fnsku",
+    "product_name",
+    "condition",
+    "fulfilled_by",
+    "alert",
+    "recommended_action",
+    "recommended_replenishment_qty",
+    "recommended_ship_date",
+    "units_sold_last_30_days",
+    "days_of_supply_at_amazon_fulfillment_network",
+    "total_days_of_supply_including_units_from_open_shipments",
+    "available",
+    "inbound",
+    "working",
+    "receiving",
+    "unfulfillable",
+    "total_units",
+    "price",
+  ],
+  // A live snapshot with no date dimension, like FBA inventory.
+  maxWindowDays: 30,
+  timeoutMs: 280_000,
+};
+
+/**
  * Customer returns by return date. Month-end reporting only.
  */
 export const RETURNS: WindsorReport = {
@@ -338,6 +386,7 @@ export const REPORT_KEYS = {
   salesTraffic: "sales_traffic",
   salesTrafficByAsin: "sales_traffic_by_asin",
   merchantListings: "merchant_listings",
+  restock: "restock_recommendations",
   fbaInventory: "fba_inventory",
   returns: "returns",
   reimbursements: "reimbursements",

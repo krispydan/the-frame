@@ -29,6 +29,7 @@ import {
   SALES_TRAFFIC,
   SALES_TRAFFIC_BY_ASIN,
   MERCHANT_LISTINGS,
+  RESTOCK_RECOMMENDATIONS,
   FBA_INVENTORY,
   REPORT_KEYS,
   clampToSettlementWindow,
@@ -41,6 +42,7 @@ import {
   ingestSalesTraffic,
   ingestAsinTraffic,
   ingestListings,
+  ingestRestockRecommendations,
   ingestFbaInventory,
   markSyncRunning,
   markSyncSuccess,
@@ -406,6 +408,31 @@ export async function syncAmazonFbaInventory(
       ingest: ingestFbaInventory(rows, snapshotDate),
       syncedThrough: snapshotDate,
     };
+  });
+}
+
+/**
+ * Snapshot Amazon's restock recommendations.
+ *
+ * A live snapshot with no date dimension, stamped on arrival like FBA
+ * inventory — but SNAPSHOTTED rather than overwritten, because the
+ * recommendation is a moving target. "Amazon wanted 220 three weeks ago and
+ * we sent 45" is the only way to tell later whether a stockout was a planning
+ * miss or a deliberate call.
+ *
+ * Measured: this report times out on a cold call and answers in seconds once
+ * Amazon has cached it, so the first run of the day is expected to be slow
+ * rather than broken. runSync's retry handles it.
+ */
+export async function syncAmazonRestock(
+  opts: { snapshotDate?: string; today?: string } = {},
+): Promise<SyncOutcome> {
+  const today = opts.today ?? todayUtc();
+  const snapshotDate = opts.snapshotDate ?? today;
+
+  return runSync(REPORT_KEYS.restock, "restock recommendations", async () => {
+    const rows: WindsorRow[] = await fetchWindsorReport(RESTOCK_RECOMMENDATIONS, { datePreset: "last_7d" });
+    return { ingest: ingestRestockRecommendations(rows, snapshotDate), syncedThrough: snapshotDate };
   });
 }
 
