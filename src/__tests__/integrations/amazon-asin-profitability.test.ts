@@ -217,3 +217,23 @@ describe("presentation", () => {
     expect(report().notes).toEqual(["No Amazon orders in the window."]);
   });
 });
+
+describe("parent ASIN resolution", () => {
+  it("resolves the parent from any month, not only the latest", () => {
+    // Resolving from the latest month alone left the parent null for every
+    // ASIN with no traffic that month — 51 of 63 rows in production — which
+    // silently breaks any roll-up to parent level. Amazon reports Vine
+    // enrolment by PARENT ASIN, so that roll-up is how the two reconcile.
+    sale({ sku: "JX1-BLK", date: "2026-06-05", price: 100, asin: "B0CHILD" });
+    sale({ sku: "JX1-BLK", date: "2026-08-05", price: 100, asin: "B0CHILD" });
+    traffic({ asin: "B0CHILD", date: "2026-06-05", sessions: 10, unitsOrdered: 1, parent: "B0PARENT" });
+    // Nothing in August — the latest month.
+
+    expect(row("JX1-BLK").parentAsin).toBe("B0PARENT");
+  });
+
+  it("leaves the parent null when traffic never named one", () => {
+    sale({ sku: "JX1-BLK", date: "2026-07-05", price: 100, asin: "B0CHILD" });
+    expect(row("JX1-BLK").parentAsin).toBeNull();
+  });
+});

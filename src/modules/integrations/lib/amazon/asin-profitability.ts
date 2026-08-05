@@ -175,6 +175,10 @@ export function buildAsinProfitability(opts?: {
 
   const cogsKey = new Map(cogs.map((c) => [`${c.sku}|${c.month}`, c.cogs]));
   const trafficByAsin = new Map(traffic.map((t) => [`${t.asin}|${t.month}`, t]));
+  const parentByAsin = new Map<string, string>();
+  for (const t of traffic) {
+    if (t.parentAsin && !parentByAsin.has(t.asin)) parentByAsin.set(t.asin, t.parentAsin);
+  }
 
   // Group by SKU, since that is what money is reported against.
   const bySku = new Map<string, typeof sales>();
@@ -222,7 +226,11 @@ export function buildAsinProfitability(opts?: {
 
     rows.push({
       sku, asin,
-      parentAsin: asin ? trafficByAsin.get(`${asin}|${months[months.length - 1]}`)?.parentAsin ?? null : null,
+      // Any month's parent, not just the latest. Resolving from the latest
+      // month alone left the parent null for every ASIN that had no traffic
+      // that month — 51 of 63 rows — which silently breaks any roll-up to
+      // the parent level, and Amazon reports Vine enrolment by parent.
+      parentAsin: asin ? parentByAsin.get(asin) ?? null : null,
       title: titles.get(sku) ?? titles.get(internal) ?? null,
       months: cells,
       totalNetSales, totalUnits, totalFreeUnits, totalContribution,

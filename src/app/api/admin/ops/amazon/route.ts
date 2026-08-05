@@ -186,6 +186,52 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ ok: true, replenishment: buildReplenishmentProposal({ coverDays }) });
       }
 
+      case "free-units": {
+        // Splits the "free" band by MECHANISM, which is what tells Vine from
+        // a 100%-off promotion.
+        //
+        // Amazon ships a Vine unit at zero PRICE. A promotional giveaway
+        // ships at full list price with an equal offsetting discount. Both
+        // net to nothing, so a single "free units" figure cannot be
+        // reconciled against the Vine dashboard — and reconciling it is the
+        // only way to know whether the giveaway programme is being measured
+        // or merely estimated.
+        const rows = sqlite.prepare(`
+          SELECT
+            CASE
+              WHEN r.item_price <= 0.005 THEN 'zero_price'
+              WHEN r.item_promotion_discount >= r.item_price - 0.005 THEN 'full_discount'
+              ELSE 'paid'
+            END AS mechanism,
+            COUNT(*) AS lines,
+            IFNULL(SUM(r.quantity), 0) AS units,
+            COUNT(DISTINCT r.asin) AS asins,
+            MIN(date(r.purchase_date)) AS firstDate,
+            MAX(date(r.purchase_date)) AS lastDate
+          FROM amazon_order_rows r
+          WHERE IFNULL(LOWER(r.item_status), '') != 'cancelled'
+          GROUP BY mechanism
+        `).all();
+
+        const coverage = sqlite.prepare(`
+          SELECT MIN(date(purchase_date)) AS firstOrder,
+                 MAX(date(purchase_date)) AS lastOrder,
+                 COUNT(DISTINCT date(purchase_date)) AS daysWithOrders,
+                 COUNT(DISTINCT asin) AS distinctAsins
+          FROM amazon_order_rows WHERE purchase_date IS NOT NULL
+        `).get();
+
+        // Child → parent, so figures can be rolled up to the level Amazon
+        // reports Vine enrolment at.
+        const parents = sqlite.prepare(`
+          SELECT COUNT(DISTINCT child_asin) AS children,
+                 COUNT(DISTINCT parent_asin) AS parents
+          FROM amazon_asin_traffic_daily WHERE parent_asin IS NOT NULL
+        `).get();
+
+        return NextResponse.json({ ok: true, byMechanism: rows, coverage, parents });
+      }
+
       case "promotions": {
         // Defaults to all of history — the question this answers ("how much
         // of our volume is actually giveaway?") is a trend, not a snapshot.
