@@ -84,6 +84,24 @@ type LibClip = {
 };
 type LibCategory = { id: string; slug: string; name: string };
 
+/** Row → LibClip. Shared by the first page and every "Load more" page. */
+function toLibClip(raw: unknown): LibClip {
+  const c = raw as Record<string, unknown>;
+  return {
+    id: String(c.id),
+    fileName: String(c.fileName ?? c.file_name ?? ""),
+    durationSec: (c.durationSec ?? c.duration_sec) as number | null,
+    posterUrl: (c.posterUrl ?? c.poster_url ?? null) as string | null,
+    previewUrl: (c.previewUrl ?? null) as string | null,
+    category: (c.category_name ?? c.category_slug ?? c.category ?? null) as string | null,
+    talent: (c.talent ?? null) as string | null,
+    createdAt: (c.created_at ?? null) as string | null,
+    products: Array.isArray(c.products)
+      ? (c.products as Array<{ productName?: string }>).map((p) => p.productName ?? "").filter(Boolean)
+      : [],
+  };
+}
+
 const STATUS_COLORS: Record<string, string> = {
   queued: "bg-amber-100 text-amber-800",
   rendering: "bg-blue-100 text-blue-800",
@@ -120,10 +138,12 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
   const [libTalents, setLibTalents] = useState<string[]>([]);
   const [libTotal, setLibTotal] = useState(0);
   const [libLoading, setLibLoading] = useState(false);
+  const [libMore, setLibMore] = useState(false);
   const [previewClip, setPreviewClip] = useState<LibClip | null>(null);
   /** A clip from the sequence being watched. */
   const [watching, setWatching] = useState<{ clip: PostClip; index: number } | null>(null);
-  const LIB_LIMIT = 60;
+  /** First page only — "Load more" fetches the remainder. */
+  const LIB_PAGE = 60;
   // Trim dialog: which sequence index is being trimmed + the in/out points.
   // Which clip index currently has an effect applying (disables its tools).
 
@@ -221,33 +241,55 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
     if (ok) setPickerOpen(false);
   };
 
-  // Server-side search/filter — never loads the whole 750+ library into
-  // the browser. Fetches a capped page ordered newest-first.
+  // Server-side search/filter — the first page stays small so the picker
+  // paints instantly on a 750+ clip library. The rest is reachable via
+  // "Load more" rather than being unreachable: a filter that matches 286
+  // clips used to show 60 and silently hide the other 226.
+  const fetchLibraryPage = useCallback(
+    async (offset: number, limit: number) => {
+      const params = new URLSearchParams({
+        status: "ready",
+        limit: String(limit),
+        offset: String(offset),
+      });
+      if (libSearch.trim()) params.set("search", libSearch.trim());
+      if (libCategory) params.set("category", libCategory);
+      if (libTalent) params.set("talent", libTalent);
+      const res = await fetch(`/api/v1/marketing/videos/clips?${params}`);
+      return (await res.json()) as Record<string, unknown>;
+    },
+    [libSearch, libCategory, libTalent],
+  );
+
   const loadLibrary = useCallback(async () => {
     setLibLoading(true);
-    const params = new URLSearchParams({ status: "ready", limit: String(LIB_LIMIT) });
-    if (libSearch.trim()) params.set("search", libSearch.trim());
-    if (libCategory) params.set("category", libCategory);
-    if (libTalent) params.set("talent", libTalent);
-    const res = await fetch(`/api/v1/marketing/videos/clips?${params}`);
-    const d = await res.json();
-    setLibrary(
-      (d.clips ?? []).map((c: Record<string, unknown>) => ({
-        id: String(c.id),
-        fileName: String(c.fileName ?? c.file_name ?? ""),
-        durationSec: (c.durationSec ?? c.duration_sec) as number | null,
-        posterUrl: (c.posterUrl ?? c.poster_url ?? null) as string | null,
-        previewUrl: (c.previewUrl ?? null) as string | null,
-        category: (c.category_name ?? c.category_slug ?? c.category ?? null) as string | null,
-        talent: (c.talent ?? null) as string | null,
-        createdAt: (c.created_at ?? null) as string | null,
-        products: Array.isArray(c.products) ? (c.products as Array<{ productName?: string }>).map((p) => p.productName ?? "").filter(Boolean) : [],
-      })),
-    );
+    const d = await fetchLibraryPage(0, LIB_PAGE);
+    setLibrary(((d.clips as unknown[]) ?? []).map(toLibClip));
     setLibTotal(Number(d.total ?? 0));
     if (Array.isArray(d.talents)) setLibTalents(d.talents as string[]);
     setLibLoading(false);
-  }, [libSearch, libCategory, libTalent]);
+  }, [fetchLibraryPage]);
+
+  /**
+   * Append the rest of the matches. Asks for everything remaining in one
+   * request (the API caps a page at 500), so the common case is a single
+   * click rather than five. Deduped by id because a clip added between
+   * requests would otherwise shift the window and repeat a row.
+   */
+  const loadMoreLibrary = async () => {
+    setLibMore(true);
+    try {
+      const d = await fetchLibraryPage(library.length, Math.min(libTotal - library.length, 500));
+      const next = ((d.clips as unknown[]) ?? []).map(toLibClip);
+      setLibrary((prev) => {
+        const seen = new Set(prev.map((c) => c.id));
+        return [...prev, ...next.filter((c) => !seen.has(c.id))];
+      });
+      setLibTotal(Number(d.total ?? libTotal));
+    } finally {
+      setLibMore(false);
+    }
+  };
 
   const openPicker = async () => {
     setPickerOpen(true);
@@ -421,11 +463,25 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
                   <X className="h-4 w-4" />
                 </Button>
               </div>
-              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+              <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
                 <span>
                   {libLoading ? "Searching…" : `Showing ${library.length}${libTotal > library.length ? ` of ${libTotal}` : ""} — newest first`}
                 </span>
-                {libTotal > library.length && <span>refine to narrow</span>}
+                {!libLoading && libTotal > library.length && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={loadMoreLibrary}
+                    disabled={libMore}
+                  >
+                    {libMore ? (
+                      <><Loader2 className="mr-1 h-3 w-3 animate-spin" /> Loading…</>
+                    ) : (
+                      `Show all ${libTotal}`
+                    )}
+                  </Button>
+                )}
               </div>
               <div className="grid max-h-72 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4 md:grid-cols-6">
                 {library.map((c) => (
@@ -437,8 +493,17 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
                     >
                       <span className="relative block aspect-[9/16] w-full overflow-hidden rounded bg-muted">
                         {c.posterUrl ? (
+                          // Lazy + async: "Show all" can put several hundred
+                          // posters in this grid, and eagerly fetching every
+                          // one is what made a big list expensive to show.
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={c.posterUrl} alt="" className="h-full w-full object-cover" />
+                          <img
+                            src={c.posterUrl}
+                            alt=""
+                            loading="lazy"
+                            decoding="async"
+                            className="h-full w-full object-cover"
+                          />
                         ) : null}
                         <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover/lib:bg-black/25 group-hover/lib:opacity-100">
                           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-black">▶</span>
