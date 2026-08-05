@@ -23,6 +23,41 @@
 
 import { sqlite } from "@/lib/db";
 
+/**
+ * Every spelling that resolves to a catalog SKU, as one CTE.
+ *
+ * This has to agree with resolveCatalogSku() — exact catalog SKU first, then
+ * the alias table — or the diagnostics contradict the importers they are
+ * meant to explain. The first version of this module matched spellings inline
+ * and skipped aliases entirely, which reported 867 FBA units as unmatched
+ * while the Amazon importer was resolving every one of them.
+ *
+ * UNION (not UNION ALL) so an alias that duplicates a real catalog SKU cannot
+ * double-count the stock behind it.
+ */
+const SKU_MAP_CTE = `
+  WITH sku_map AS (
+    SELECT sku AS spelling, id AS sku_id FROM catalog_skus WHERE sku IS NOT NULL AND sku != ''
+    UNION
+    SELECT alias AS spelling, sku_id FROM catalog_sku_aliases
+  )`;
+
+/**
+ * The single spelling an FBA row should be looked up by.
+ *
+ * The ingest resolves the Amazon-facing SKU to internal_sku; where that is
+ * missing, strip the -FBA suffix the same way toInternalSku() does. Resolving
+ * to ONE spelling rather than OR-ing several keeps the join from matching a
+ * row twice and inflating the count.
+ */
+const FBA_SPELLING = `
+  COALESCE(
+    NULLIF(f.internal_sku, ''),
+    CASE WHEN UPPER(f.sku) LIKE '%-FBA'
+         THEN SUBSTR(f.sku, 1, LENGTH(f.sku) - 4)
+         ELSE f.sku END
+  )`;
+
 export type SkuDrift = {
   skuId: string;
   sku: string | null;
@@ -111,14 +146,16 @@ export function buildDriftReport(opts?: { limit?: number }): DriftReport {
   const limit = opts?.limit ?? 50;
 
   const rows = sqlite.prepare(`
-    WITH latest_fba AS (
+    ${SKU_MAP_CTE},
+    latest_fba AS (
       SELECT sku, MAX(snapshot_date) AS d FROM amazon_fba_inventory GROUP BY sku
     ),
     fba AS (
-      SELECT f.sku AS sku, f.internal_sku AS internal_sku, SUM(f.total_qty) AS qty
+      SELECT m.sku_id AS sku_id, SUM(f.total_qty) AS qty
       FROM amazon_fba_inventory f
       JOIN latest_fba l ON l.sku = f.sku AND l.d = f.snapshot_date
-      GROUP BY f.sku, f.internal_sku
+      JOIN sku_map m ON m.spelling = ${FBA_SPELLING}
+      GROUP BY m.sku_id
     ),
     layers AS (
       SELECT sku_id,
@@ -153,12 +190,7 @@ export function buildDriftReport(opts?: { limit?: number }): DriftReport {
     LEFT JOIN layers   ON layers.sku_id = cs.id
     LEFT JOIN firstdep ON firstdep.sku_id = cs.id
     LEFT JOIN wh       ON wh.sku_id = cs.id
-    -- FBA reports the Amazon-facing SKU, which carries a -FBA suffix for
-    -- stock we send in. The ingest already resolves that to internal_sku;
-    -- match on it first and fall back to the raw spellings.
-    LEFT JOIN fba ON fba.internal_sku = cs.sku
-                  OR fba.sku = cs.sku
-                  OR fba.sku = cs.sku || '-FBA'
+    LEFT JOIN fba ON fba.sku_id = cs.id
     WHERE IFNULL(layers.remaining, 0) != 0
        OR IFNULL(wh.qty, 0) != 0
        OR IFNULL(fba.qty, 0) != 0
@@ -258,13 +290,14 @@ export function buildSourceReport(): SourceReport {
   // ShipHero SKUs the mapper never landed in `inventory`. A large number here
   // with healthy raw stock is a mapping failure, not missing stock.
   const unmapped = sqlite.prepare(`
+    ${SKU_MAP_CTE}
     SELECT si.sku AS sku, SUM(si.on_hand) AS qty
     FROM shiphero_inventory si
     WHERE si.on_hand > 0
       AND NOT EXISTS (
-        SELECT 1 FROM catalog_skus cs
-        JOIN inventory i ON i.sku_id = cs.id AND i.location = 'warehouse' AND i.quantity > 0
-        WHERE cs.sku = si.sku
+        SELECT 1 FROM sku_map m
+        JOIN inventory i ON i.sku_id = m.sku_id AND i.location = 'warehouse' AND i.quantity > 0
+        WHERE m.spelling = si.sku
       )
     GROUP BY si.sku
     ORDER BY qty DESC
@@ -286,13 +319,11 @@ export function buildSourceReport(): SourceReport {
 
   const fbaUnmatched = snapshotDate
     ? sqlite.prepare(`
+      ${SKU_MAP_CTE}
       SELECT f.sku AS sku, f.total_qty AS qty
       FROM amazon_fba_inventory f
       WHERE f.snapshot_date = ? AND f.total_qty > 0
-        AND NOT EXISTS (
-          SELECT 1 FROM catalog_skus cs
-          WHERE cs.sku = f.internal_sku OR cs.sku = f.sku OR cs.sku || '-FBA' = f.sku
-        )
+        AND NOT EXISTS (SELECT 1 FROM sku_map m WHERE m.spelling = ${FBA_SPELLING})
       ORDER BY f.total_qty DESC
     `).all(snapshotDate) as Array<{ sku: string; qty: number }>
     : [];

@@ -10,6 +10,16 @@ export interface SyncResult {
   skuCount: number;
   syncedAt: string;
   error?: string;
+  /** Distinct SKUs this pull returned, and how many were expected from the
+   *  last known pull. Reported always, so a shrinking feed is visible before
+   *  it shrinks far enough to matter. */
+  distinctSkus?: number;
+  expectedSkus?: number;
+  /** True when the pull looked truncated and the reconcile was skipped.
+   *  Quantities are then last-known-good rather than current. */
+  truncatedPull?: boolean;
+  /** SKUs the reconcile set to zero this run. */
+  zeroed?: number;
 }
 
 /**
@@ -105,8 +115,34 @@ export async function syncShipHeroInventory(): Promise<SyncResult> {
     // SAFETY GUARD: only reconcile when the pull looks complete. A glitchy
     // partial pull (API hiccup returning a handful of rows) must never zero
     // the whole catalog. Jaxy's warehouse has well over this floor of SKUs.
+    //
+    // An absolute floor of 50 was far too low to be that guard. ShipHero
+    // returns ~2,276 rows; a truncated pull of a few hundred clears 50
+    // easily, and the reconcile then zeroes every SKU the partial response
+    // omitted. That is exactly what happened — warehouse stock went from
+    // ~20,300 units to 78 with the sync reporting success, and every reader
+    // of `inventory` (levels, days-of-stock, reorder points, sell-through,
+    // the FIFO-vs-physical check) silently worked from near-zero for as long
+    // as it took someone to notice.
+    //
+    // So the floor is now relative to what this feed actually returned last
+    // time, not a constant. A pull materially smaller than the last known
+    // good one is treated as truncated and skips the reconcile, leaving
+    // yesterday's quantities in place — stale is recoverable, zeroed is not.
+    // The absolute floor stays as a backstop for the very first run.
     const MIN_SYNC_ROWS_FOR_RECONCILE = 50;
-    const pullLooksComplete = inventory.length >= MIN_SYNC_ROWS_FOR_RECONCILE;
+    const RECONCILE_SHRINK_TOLERANCE = 0.8;
+
+    const lastRowCount = (sqlite.prepare(
+      "SELECT COUNT(DISTINCT sku) AS n FROM shiphero_inventory",
+    ).get() as { n: number }).n;
+
+    const distinctSkusThisPull = skuTotals.size;
+    const expected = Math.max(
+      MIN_SYNC_ROWS_FOR_RECONCILE,
+      Math.floor(lastRowCount * RECONCILE_SHRINK_TOLERANCE),
+    );
+    const pullLooksComplete = distinctSkusThisPull >= expected;
 
     // Collect the catalog sku_ids ShipHero actually returned this run.
     const seenSkuIds = new Set<string>();
@@ -165,13 +201,17 @@ export async function syncShipHeroInventory(): Promise<SyncResult> {
 
     if (!pullLooksComplete) {
       console.warn(
-        `[shiphero-inventory-sync] Pull returned only ${inventory.length} rows (< ${MIN_SYNC_ROWS_FOR_RECONCILE}); skipped stale-SKU reconciliation to avoid zeroing real stock.`,
+        `[shiphero-inventory-sync] Pull returned ${distinctSkusThisPull} distinct SKUs, below the ${expected} expected from the last known pull of ${lastRowCount}; skipped stale-SKU reconciliation to avoid zeroing real stock.`,
       );
     } else if (zeroedCount > 0) {
       console.log(`[shiphero-inventory-sync] Reconciled ${zeroedCount} SKU(s) to 0 (not present in ShipHero full pull).`);
     }
 
-    return { success: true, skuCount: inventory.length, syncedAt };
+    return {
+      success: true, skuCount: inventory.length, syncedAt,
+      distinctSkus: distinctSkusThisPull, expectedSkus: expected,
+      truncatedPull: !pullLooksComplete, zeroed: zeroedCount,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { success: false, skuCount: 0, syncedAt, error: message };
