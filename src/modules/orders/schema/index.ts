@@ -74,7 +74,13 @@ export const orderItems = sqliteTable("order_items", {
   colorName: text("color_name"),
   quantity: integer("quantity").notNull().default(1),
   unitPrice: real("unit_price").notNull().default(0),
+  /** Gross line value BEFORE promotions. */
   totalPrice: real("total_price").notNull().default(0),
+  /** Promotional value given away on this line, as a positive magnitude.
+   *  A line where this equals totalPrice took no money — a giveaway, not a
+   *  sale. Held per line because the order-level discount cannot say WHICH
+   *  line was free on a mixed order. */
+  discount: real("discount").notNull().default(0),
 }, (table) => [
   index("idx_order_items_order_id").on(table.orderId),
 ]);

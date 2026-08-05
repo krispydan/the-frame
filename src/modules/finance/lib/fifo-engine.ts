@@ -75,7 +75,13 @@ export interface CogsCalculation {
   dutiesCost: number;
   totalCogs: number;
   unitCount: number;
-  channelBreakdown: Record<string, { units: number; productCost: number; freightCost: number; dutiesCost: number; totalCogs: number }>;
+  channelBreakdown: Record<string, {
+    units: number; productCost: number; freightCost: number; dutiesCost: number; totalCogs: number;
+    /** Cost of stock that shipped for no consideration (Vine, gifting).
+     *  A SUBSET of the figures above, never an addition — callers that ignore
+     *  it stay correct, and the two halves always sum back to the total. */
+    seeded: { units: number; productCost: number; freightCost: number; dutiesCost: number; totalCogs: number };
+  }>;
   depletions: CostDepletion[];
 }
 
@@ -369,17 +375,38 @@ export function resolveDepletionTarget(opts: {
  * breaks down by sales channel.
  */
 export function calculateCogs(weekStart: string, weekEnd: string): CogsCalculation {
+  // `seeded` marks stock that shipped for no consideration — Amazon Vine
+  // giveaways, influencer gifting. Those units were spent to buy reviews or
+  // reach, not sold, so their cost is marketing rather than cost of sales.
+  // Lumping them into COGS understates gross margin on what was actually sold.
+  //
+  // A line is seeded when its promotion cancels its price. Compared against a
+  // small epsilon rather than exactly, since multi-unit lines leave cent-level
+  // rounding residue that would otherwise read as a sale.
   const depletions = sqlite.prepare(`
-    SELECT d.*, l.freight_per_unit, l.duties_per_unit, l.unit_cost as layer_unit_cost
+    SELECT d.*, l.freight_per_unit, l.duties_per_unit, l.unit_cost as layer_unit_cost,
+           CASE
+             WHEN oi.id IS NULL THEN 0
+             WHEN IFNULL(oi.discount, 0) >= oi.total_price - 0.005
+              AND oi.total_price > 0.005 THEN 1
+             ELSE 0
+           END AS seeded
     FROM inventory_cost_depletions d
     JOIN inventory_cost_layers l ON d.cost_layer_id = l.id
+    LEFT JOIN order_items oi ON oi.id = d.order_item_id
     WHERE d.depleted_at >= ? AND d.depleted_at < ?
     ORDER BY d.depleted_at ASC
   `).all(weekStart, weekEnd + "T23:59:59") as Array<CostDepletion & {
     freight_per_unit: number; duties_per_unit: number; layer_unit_cost: number;
+    seeded: number;
   }>;
 
-  const channelBreakdown: Record<string, { units: number; productCost: number; freightCost: number; dutiesCost: number; totalCogs: number }> = {};
+  const channelBreakdown: Record<string, {
+    units: number; productCost: number; freightCost: number; dutiesCost: number; totalCogs: number;
+    /** The seeded subset of the same numbers — a slice of the totals above,
+     *  never an addition to them, so existing callers stay correct. */
+    seeded: { units: number; productCost: number; freightCost: number; dutiesCost: number; totalCogs: number };
+  }> = {};
 
   let productCost = 0;
   let freightCost = 0;
@@ -398,13 +425,25 @@ export function calculateCogs(weekStart: string, weekEnd: string): CogsCalculati
 
     const ch = d.channel || "unknown";
     if (!channelBreakdown[ch]) {
-      channelBreakdown[ch] = { units: 0, productCost: 0, freightCost: 0, dutiesCost: 0, totalCogs: 0 };
+      channelBreakdown[ch] = {
+        units: 0, productCost: 0, freightCost: 0, dutiesCost: 0, totalCogs: 0,
+        seeded: { units: 0, productCost: 0, freightCost: 0, dutiesCost: 0, totalCogs: 0 },
+      };
     }
     channelBreakdown[ch].units += d.quantity;
     channelBreakdown[ch].productCost += pc;
     channelBreakdown[ch].freightCost += fc;
     channelBreakdown[ch].dutiesCost += dc;
     channelBreakdown[ch].totalCogs += pc + fc + dc;
+
+    if (d.seeded === 1) {
+      const s = channelBreakdown[ch].seeded;
+      s.units += d.quantity;
+      s.productCost += pc;
+      s.freightCost += fc;
+      s.dutiesCost += dc;
+      s.totalCogs += pc + fc + dc;
+    }
   }
 
   return {

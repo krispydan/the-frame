@@ -36,6 +36,34 @@ const COGS_DUTIES_ACCOUNT = "5020";
 const DEFAULT_PRODUCT_COGS_ACCOUNT = "5000";
 const DEFAULT_INVENTORY_ACCOUNT = "1400";
 
+/**
+ * Where the cost of stock given away lands, if configured.
+ *
+ * Amazon Vine units and influencer gifting ship for no consideration. They
+ * were spent to buy reviews and reach, not sold, so their landed cost is
+ * marketing — booking it to COGS understates gross margin on what actually
+ * sold. One account serves every channel; which channel seeded the stock is
+ * carried by the Sales Channel tracking category already on the line, so
+ * there is no per-channel account to create and reconcile.
+ *
+ * Read from settings rather than hardcoded, and INERT until set: with no
+ * account configured, seeded cost stays in COGS exactly as before. That keeps
+ * this deployable before the account exists in Xero, instead of failing every
+ * posting until someone creates it.
+ */
+const PRODUCT_SEEDING_ACCOUNT_SETTING = "product_seeding_account";
+
+function readSeedingAccount(): string | null {
+  try {
+    const row = sqlite.prepare("SELECT value FROM settings WHERE key = ?")
+      .get(PRODUCT_SEEDING_ACCOUNT_SETTING) as { value: string } | undefined;
+    const code = row?.value?.trim();
+    return code ? code : null;
+  } catch {
+    return null;
+  }
+}
+
 export type ExceptionType = "shortfall" | "zero_cost" | "implausible_cost" | "unmapped_sku" | "suspected_transfer";
 
 /**
@@ -318,6 +346,7 @@ export async function buildDailyCogsJournal(
   const sign = opts.reverse ? -1 : 1;
   const lines: Array<Record<string, unknown>> = [];
   let inventoryCredit = 0;
+  const seedingAccount = readSeedingAccount();
 
   for (const [channel, b] of Object.entries(calc.channelBreakdown)) {
     const cfg = await loadChannelXeroConfig(channel);
@@ -334,9 +363,27 @@ export async function buildDailyCogsJournal(
       lines.push({ LineAmount: sign * a, AccountCode: acct, Description: desc, Tracking: tracking });
       inventoryCredit += a;
     };
-    push(b.productCost, productAcct, `COGS Product — ${label} (${b.units}u)`);
-    push(b.freightCost, COGS_FREIGHT_ACCOUNT, `COGS Freight — ${label}`);
-    push(b.dutiesCost, COGS_DUTIES_ACCOUNT, `COGS Duties — ${label}`);
+
+    // Split the seeded slice out of the channel's totals. `b.seeded` is a
+    // subset of `b`, never an addition, so the two halves must sum back to
+    // the original — the inventory credit is unchanged either way, and the
+    // entry balances exactly as it did before.
+    const seeded = b.seeded ?? { units: 0, productCost: 0, freightCost: 0, dutiesCost: 0, totalCogs: 0 };
+    const seedAcct = seeded.totalCogs > 0 ? seedingAccount : null;
+    const soldUnits = b.units - seeded.units;
+
+    if (seedAcct) {
+      push(seeded.productCost, seedAcct, `Product seeding — ${label} (${seeded.units}u, product)`);
+      push(seeded.freightCost, seedAcct, `Product seeding — ${label} (freight)`);
+      push(seeded.dutiesCost, seedAcct, `Product seeding — ${label} (duties)`);
+      push(b.productCost - seeded.productCost, productAcct, `COGS Product — ${label} (${soldUnits}u)`);
+      push(b.freightCost - seeded.freightCost, COGS_FREIGHT_ACCOUNT, `COGS Freight — ${label}`);
+      push(b.dutiesCost - seeded.dutiesCost, COGS_DUTIES_ACCOUNT, `COGS Duties — ${label}`);
+    } else {
+      push(b.productCost, productAcct, `COGS Product — ${label} (${b.units}u)`);
+      push(b.freightCost, COGS_FREIGHT_ACCOUNT, `COGS Freight — ${label}`);
+      push(b.dutiesCost, COGS_DUTIES_ACCOUNT, `COGS Duties — ${label}`);
+    }
   }
 
   // Single net inventory credit (all components were capitalized into 1400).

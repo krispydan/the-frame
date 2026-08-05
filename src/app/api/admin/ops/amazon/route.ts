@@ -10,7 +10,7 @@ import {
   syncAmazonFbaInventory,
   backfillAmazon,
 } from "@/modules/integrations/lib/amazon/sync";
-import { importAmazonOrders } from "@/modules/orders/lib/amazon-sync";
+import { importAmazonOrders, backfillAmazonLineDiscounts } from "@/modules/orders/lib/amazon-sync";
 import { bridgeAmazonSettlements } from "@/modules/integrations/lib/amazon/settlement-bridge";
 import {
   getAmazonHeadline,
@@ -303,6 +303,15 @@ export async function POST(req: NextRequest) {
         try { await loadAmazonXeroConfig(); } catch (e) { ready = false; error = (e as Error).message; }
 
         return NextResponse.json({ ok: true, action, created, updated, skipped, ready, error });
+      }
+
+      case "backfill-line-discounts": {
+        const { dryRun } = body as { dryRun?: boolean };
+        // Additive only — writes order_items.discount and nothing else, so it
+        // is safe on lines that already carry COGS. Still dry-run by default.
+        const isDryRun = dryRun !== false;
+        const result = backfillAmazonLineDiscounts({ dryRun: isDryRun });
+        return NextResponse.json({ ok: true, action, dryRun: isDryRun, result });
       }
 
       case "post-xero": {

@@ -602,6 +602,10 @@ try { sqlite.exec("ALTER TABLE orders ADD COLUMN source_name TEXT"); } catch { /
 // race / retry / multi-package shipment could fire the alert 2-3×. The
 // helper now atomically claims this column before sending.
 try { sqlite.exec("ALTER TABLE orders ADD COLUMN shipped_alert_sent_at TEXT"); } catch { /* exists */ }
+// Per-line promotional value. A line whose discount equals its total_price
+// took no money (Amazon Vine, influencer gifting) — the order-level discount
+// cannot say which line on a mixed order was the free one.
+try { sqlite.exec("ALTER TABLE order_items ADD COLUMN discount REAL NOT NULL DEFAULT 0"); } catch { /* exists */ }
 try {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS international_shipping_requests (
     id TEXT PRIMARY KEY NOT NULL,

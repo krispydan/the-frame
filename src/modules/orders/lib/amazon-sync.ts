@@ -322,8 +322,8 @@ function importOne(
         sqlite.prepare(`
           INSERT INTO order_items (
             id, order_id, product_id, sku_id, sku, product_name, quantity,
-            unit_price, total_price
-          ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)
+            unit_price, total_price, discount
+          ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           crypto.randomUUID(),
           orderId,
@@ -333,6 +333,11 @@ function importOne(
           Math.max(0, Math.trunc(line.quantity)),
           line.quantity > 0 ? round2(line.item_price / line.quantity) : 0,
           round2(line.item_price),
+          // Per line, not per order. Amazon Vine reports a giveaway at full
+          // list price with an equal offsetting promotion, so without this
+          // the line is indistinguishable from a sale — and on a mixed order
+          // the order-level discount cannot say which line was the free one.
+          round2(line.item_promotion_discount + line.ship_promotion_discount),
         );
         result.itemsWritten++;
       }
@@ -340,4 +345,50 @@ function importOne(
   });
 
   write();
+}
+
+/**
+ * Backfill `order_items.discount` from the raw archive.
+ *
+ * Line items are deliberately never rewritten once they carry COGS — re-costing
+ * a closed period silently changes its margin. But the discount column is new
+ * and purely additive: it records what the promotion already was, changes no
+ * cost, and without it every historical Vine giveaway stays indistinguishable
+ * from a sale. So this updates that ONE column and nothing else, which is safe
+ * on costed lines in a way a re-import would not be.
+ *
+ * Matched on (order external_id, sku) — the same key the archive is unique on.
+ */
+export function backfillAmazonLineDiscounts(opts?: { dryRun?: boolean }): {
+  matched: number;
+  updated: number;
+  freeLines: number;
+} {
+  const candidates = sqlite.prepare(`
+    SELECT oi.id AS orderItemId,
+           ROUND(r.item_promotion_discount + r.ship_promotion_discount, 2) AS discount,
+           oi.total_price AS totalPrice
+    FROM order_items oi
+    JOIN orders o ON o.id = oi.order_id
+    JOIN amazon_order_rows r
+      ON r.amazon_order_id = REPLACE(o.external_id, '${AMAZON_EXTERNAL_ID_PREFIX}', '')
+     AND r.sku = oi.sku
+    WHERE o.channel = 'amazon'
+  `).all() as Array<{ orderItemId: string; discount: number; totalPrice: number }>;
+
+  const changed = candidates.filter((c) => c.discount > 0);
+
+  if (!opts?.dryRun && changed.length > 0) {
+    const upd = sqlite.prepare("UPDATE order_items SET discount = ? WHERE id = ?");
+    const tx = sqlite.transaction((rows: typeof changed) => {
+      for (const r of rows) upd.run(r.discount, r.orderItemId);
+    });
+    tx(changed);
+  }
+
+  return {
+    matched: candidates.length,
+    updated: opts?.dryRun ? 0 : changed.length,
+    freeLines: changed.filter((c) => c.discount >= c.totalPrice - 0.005).length,
+  };
 }
