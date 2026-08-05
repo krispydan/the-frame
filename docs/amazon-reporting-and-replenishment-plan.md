@@ -266,6 +266,11 @@ production data, not fixtures.
 | 6 · Dashboard trend + heatmap | ✅ | `?view=series&days=90` |
 | 7 · Ad spend / ACOS / TACOS | ⛔ | Blocked — link Amazon Ads in Windsor |
 | 8 · Excess + removal | ✅ | `?view=excess&coverDays=180` |
+| UI · Reports in The Frame | ✅ | `/finance/amazon` — Performance / Products / Replenish tabs |
+
+Each report has two front doors: `/api/v1/finance/amazon/reports?view=…`
+(session-guarded, what the page calls) and `/api/admin/ops/amazon?view=…`
+(token-guarded, for tooling). One implementation behind both.
 
 ### What the live data says
 
