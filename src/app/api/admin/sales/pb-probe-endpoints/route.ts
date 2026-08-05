@@ -15,11 +15,15 @@ import { phoneBurnerAccounts } from "@/modules/sales/lib/phoneburner-client";
  * Auth: x-admin-key: jaxy2026
  */
 
-// Deep-dive: fetch shape of the working endpoints
+// Test /contacts search parameter variants
+const EM = "info@blackbirdofcalistoga.com";
 const PATHS_TO_PROBE = [
-  "/dialsession?page_size=3",  // sample dial sessions
-  "/members",                  // resolve user_id 1294137966
-  "/contacts/1296839589/auditlog", // Waterloo TX activity history
+  `/contacts?search=${EM}&page_size=5`,
+  `/contacts?q=${EM}&page_size=5`,
+  `/contacts?email=${EM}&page_size=5`,
+  `/contacts?primary_email=${EM}&page_size=5`,
+  `/contacts?filter=${EM}&page_size=5`,
+  `/contacts?keyword=${EM}&page_size=5`,
 ];
 
 export async function POST(req: NextRequest) {
