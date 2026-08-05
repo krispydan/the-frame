@@ -29,19 +29,19 @@ beforeEach(() => {
 
 const trafficRow = (over: Partial<Record<string, unknown>> = {}): WindsorRow => ({
   date: "2026-07-10",
-  childAsin: "B0AAA",
-  parentAsin: "B0PARENT",
-  "salesByAsin-unitsOrdered": 5,
-  "salesByAsin-unitsShipped": 4,
-  "salesByAsin-totalOrderItems": 5,
-  "salesByAsin-orderedProductSales-amount": 140,
-  "salesByAsin-averageSellingPrice-amount": 28,
-  "salesByAsin-refundRate": 0.02,
-  "trafficByAsin-sessions": 200,
-  "trafficByAsin-pageViews": 260,
-  "trafficByAsin-buyBoxPercentage": 98.5,
-  "trafficByAsin-unitSessionPercentage": 2.5,
-  "trafficByAsin-sessionPercentage": 11.1,
+  childasin: "B0AAA",
+  parentasin: "B0PARENT",
+  "salesbyasin_unitsordered": 5,
+  "salesbyasin_unitsshipped": 4,
+  "salesbyasin_totalorderitems": 5,
+  "salesbyasin_orderedproductsales_amount": 140,
+  "salesbyasin_averagesellingprice_amount": 28,
+  "salesbyasin_refundrate": 0.02,
+  "trafficbyasin_sessions": 200,
+  "trafficbyasin_pageviews": 260,
+  "trafficbyasin_buyboxpercentage": 98.5,
+  "trafficbyasin_unitsessionpercentage": 2.5,
+  "trafficbyasin_sessionpercentage": 11.1,
   ...over,
 }) as WindsorRow;
 
@@ -51,7 +51,7 @@ const rows = () => sqlite.prepare(
 
 describe("per-ASIN traffic", () => {
   it("lands a row per ASIN per day", () => {
-    const r = ingestAsinTraffic([trafficRow(), trafficRow({ childAsin: "B0BBB" })]);
+    const r = ingestAsinTraffic([trafficRow(), trafficRow({ childasin: "B0BBB" })]);
     expect(r.inserted).toBe(2);
     expect(rows()).toHaveLength(2);
     expect(rows()[0]).toMatchObject({
@@ -63,7 +63,7 @@ describe("per-ASIN traffic", () => {
   it("rejects the parent-only summary row rather than storing it", () => {
     // Amazon sends this alongside the child rows; keeping it would double
     // every metric against its own children.
-    const r = ingestAsinTraffic([trafficRow({ childAsin: null })]);
+    const r = ingestAsinTraffic([trafficRow({ childasin: null })]);
     expect(r.inserted).toBe(0);
     expect(r.rejected[0].reason).toBe("missing childAsin");
     expect(rows()).toHaveLength(0);
@@ -77,7 +77,7 @@ describe("per-ASIN traffic", () => {
   it("restates a day rather than duplicating it", () => {
     // Amazon revises recent days as orders settle and sessions dedupe.
     ingestAsinTraffic([trafficRow()]);
-    const second = ingestAsinTraffic([trafficRow({ "trafficByAsin-sessions": 240, "salesByAsin-unitsOrdered": 7 })]);
+    const second = ingestAsinTraffic([trafficRow({ "trafficbyasin_sessions": 240, "salesbyasin_unitsordered": 7 })]);
 
     expect(second.updated).toBe(1);
     expect(second.inserted).toBe(0);
@@ -91,25 +91,25 @@ describe("per-ASIN traffic", () => {
   });
 
   it("coerces Windsor's empty strings to zero rather than null", () => {
-    ingestAsinTraffic([trafficRow({ "trafficByAsin-sessions": "", "salesByAsin-unitsOrdered": "" })]);
+    ingestAsinTraffic([trafficRow({ "trafficbyasin_sessions": "", "salesbyasin_unitsordered": "" })]);
     expect(rows()[0]).toMatchObject({ sessions: 0, units_ordered: 0 });
   });
 
   it("truncates fractional unit counts", () => {
-    ingestAsinTraffic([trafficRow({ "salesByAsin-unitsOrdered": 5.9 })]);
+    ingestAsinTraffic([trafficRow({ "salesbyasin_unitsordered": 5.9 })]);
     expect(rows()[0].units_ordered).toBe(5);
   });
 });
 
 const listingRow = (over: Partial<Record<string, unknown>> = {}): WindsorRow => ({
-  "seller-sku": "JX3004-S-BLK",
+  seller_sku: "JX3004-S-BLK",
   asin1: "B0AAA",
-  "item-name": "Aviator Sunglasses — Black",
+  item_name: "Aviator Sunglasses — Black",
   price: 28,
   quantity: 40,
   status: "Active",
-  "fulfillment-channel": "DEFAULT",
-  "open-date": "2026-06-01",
+  "fulfillment_channel": "DEFAULT",
+  open_date: "2026-06-01",
   ...over,
 }) as WindsorRow;
 
@@ -119,7 +119,7 @@ const listings = () => sqlite.prepare(
 
 describe("listings", () => {
   it("lands a listing and resolves the internal SKU", () => {
-    ingestListings([listingRow(), listingRow({ "seller-sku": "JX3004-S-BLK-FBA" })]);
+    ingestListings([listingRow(), listingRow({ seller_sku: "JX3004-S-BLK-FBA" })]);
     const l = listings();
     expect(l).toHaveLength(2);
     // Both spellings resolve to the one internal SKU, so downstream joins
@@ -128,20 +128,20 @@ describe("listings", () => {
   });
 
   it("rejects a row with no seller SKU", () => {
-    const r = ingestListings([listingRow({ "seller-sku": null })]);
+    const r = ingestListings([listingRow({ seller_sku: null })]);
     expect(r.rejected[0].reason).toBe("missing seller-sku");
   });
 
   it("updates an existing listing in place", () => {
     ingestListings([listingRow()]);
-    const r = ingestListings([listingRow({ "item-name": "Aviator Sunglasses — Matte Black", price: 32 })]);
+    const r = ingestListings([listingRow({ item_name: "Aviator Sunglasses — Matte Black", price: 32 })]);
     expect(r.updated).toBe(1);
     expect(listings()).toHaveLength(1);
     expect(listings()[0]).toMatchObject({ title: "Aviator Sunglasses — Matte Black", price: 32 });
   });
 
   it("keeps the last known title for a listing Amazon stops returning", () => {
-    ingestListings([listingRow(), listingRow({ "seller-sku": "JX9-GONE", "item-name": "Discontinued" })]);
+    ingestListings([listingRow(), listingRow({ seller_sku: "JX9-GONE", item_name: "Discontinued" })]);
     ingestListings([listingRow()]); // JX9-GONE absent from this pull
     expect(listings()).toHaveLength(2);
     expect(listings().find((l) => l.sku === "JX9-GONE")!.title).toBe("Discontinued");

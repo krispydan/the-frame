@@ -139,6 +139,23 @@ export function reportPrefix(report: string): string {
   return `${report.replace(/^get_/, "")}__`;
 }
 
+/**
+ * Windsor's wire form for a field name: lowercase, hyphens as underscores.
+ *
+ * The field catalog advertises names in Amazon's own casing —
+ * `salesByAsin-unitsOrdered`, `seller-sku` — but the query parameter only
+ * accepts `salesbyasin_unitsordered` and `seller_sku`. Passing a catalog name
+ * verbatim returns "Fields could not be found", listing every field, which
+ * reads like the report is unavailable rather than like a formatting problem.
+ *
+ * Normalising centrally means a field can be pasted straight from the catalog
+ * into a report definition and still work. Idempotent, so the definitions
+ * already written in wire form are unaffected.
+ */
+export function normalizeFieldName(field: string): string {
+  return field.trim().toLowerCase().replace(/-/g, "_");
+}
+
 /** Strips the API key from any string before it reaches a log or a DB column. */
 export function redact(text: string): string {
   const key = process.env.WINDSOR_API_KEY;
@@ -299,7 +316,10 @@ async function fetchOnce(
   const prefix = reportPrefix(report.report);
   const url = new URL(`${WINDSOR_BASE}/${report.connector}`);
   url.searchParams.set("api_key", key);
-  url.searchParams.set("fields", report.fields.map((f) => `${prefix}${f}`).join(","));
+  url.searchParams.set(
+    "fields",
+    report.fields.map((f) => `${prefix}${normalizeFieldName(f)}`).join(","),
+  );
   if (params.dateFrom && params.dateTo) {
     url.searchParams.set("date_from", params.dateFrom);
     url.searchParams.set("date_to", params.dateTo);

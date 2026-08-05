@@ -534,24 +534,24 @@ export function ingestAsinTraffic(rows: WindsorRow[]): IngestResult {
   const run = sqlite.transaction((batch: WindsorRow[]) => {
     for (const row of batch) {
       const date = str(row.date);
-      const childAsin = str(row.childAsin);
+      const childAsin = str(row.childasin);
       if (!date) { result.rejected.push({ reason: "missing date", row }); continue; }
       if (!childAsin) { result.rejected.push({ reason: "missing childAsin", row }); continue; }
 
       const had = existing.get(date, childAsin) as { hit: number } | undefined;
       upsert.run(
-        crypto.randomUUID(), date, childAsin, str(row.parentAsin),
-        Math.trunc(num(row["salesByAsin-unitsOrdered"])),
-        Math.trunc(num(row["salesByAsin-unitsShipped"])),
-        Math.trunc(num(row["salesByAsin-totalOrderItems"])),
-        round2(num(row["salesByAsin-orderedProductSales-amount"])),
-        round2(num(row["salesByAsin-averageSellingPrice-amount"])),
-        num(row["salesByAsin-refundRate"]),
-        Math.trunc(num(row["trafficByAsin-sessions"])),
-        Math.trunc(num(row["trafficByAsin-pageViews"])),
-        num(row["trafficByAsin-buyBoxPercentage"]),
-        num(row["trafficByAsin-unitSessionPercentage"]),
-        num(row["trafficByAsin-sessionPercentage"]),
+        crypto.randomUUID(), date, childAsin, str(row.parentasin),
+        Math.trunc(num(row.salesbyasin_unitsordered)),
+        Math.trunc(num(row.salesbyasin_unitsshipped)),
+        Math.trunc(num(row.salesbyasin_totalorderitems)),
+        round2(num(row.salesbyasin_orderedproductsales_amount)),
+        round2(num(row.salesbyasin_averagesellingprice_amount)),
+        num(row.salesbyasin_refundrate),
+        Math.trunc(num(row.trafficbyasin_sessions)),
+        Math.trunc(num(row.trafficbyasin_pageviews)),
+        num(row.trafficbyasin_buyboxpercentage),
+        num(row.trafficbyasin_unitsessionpercentage),
+        num(row.trafficbyasin_sessionpercentage),
       );
       if (had) result.updated++; else result.inserted++;
     }
@@ -598,14 +598,14 @@ export function ingestListings(rows: WindsorRow[]): IngestResult {
 
   const run = sqlite.transaction((batch: WindsorRow[]) => {
     for (const row of batch) {
-      const sku = str(row["seller-sku"]);
+      const sku = str(row.seller_sku);
       if (!sku) { result.rejected.push({ reason: "missing seller-sku", row }); continue; }
 
       const had = existing.get(sku) as { hit: number } | undefined;
       upsert.run(
-        sku, toInternalSku(sku), str(row.asin1), str(row["item-name"]),
+        sku, toInternalSku(sku), str(row.asin1), str(row.item_name),
         round2(num(row.price)), Math.trunc(num(row.quantity)),
-        str(row.status), str(row["fulfillment-channel"]), str(row["open-date"]),
+        str(row.status), str(row["fulfillment_channel"]), str(row.open_date),
       );
       if (had) result.updated++; else result.inserted++;
     }

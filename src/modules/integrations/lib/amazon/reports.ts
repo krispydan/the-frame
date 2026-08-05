@@ -182,6 +182,13 @@ export const FBA_INVENTORY: WindsorReport = {
  * SKU with neither is invisible. Order rows can tell you what sold; only this
  * can tell you what was looked at and not bought.
  *
+ * Field names are given in Windsor's wire form (lowercase, underscores), not
+ * the catalog's display casing. The catalog advertises `salesByAsin-sessions`
+ * but the query parameter only accepts `salesbyasin_sessions`; the client
+ * normalises either way, and wire form keeps this file internally consistent
+ * — it is also the form the response keys come back in, which is what the
+ * ingest reads.
+ *
  * Many fields in the catalog carry a literal "(Deprecated)" prefix in their
  * name. Those are excluded — Amazon still lists them but they return empty.
  */
@@ -190,19 +197,19 @@ export const SALES_TRAFFIC_BY_ASIN: WindsorReport = {
   report: "get_sales_and_traffic_report",
   fields: [
     "date",
-    "childAsin",
-    "parentAsin",
-    "salesByAsin-unitsOrdered",
-    "salesByAsin-unitsShipped",
-    "salesByAsin-totalOrderItems",
-    "salesByAsin-orderedProductSales-amount",
-    "salesByAsin-averageSellingPrice-amount",
-    "salesByAsin-refundRate",
-    "trafficByAsin-sessions",
-    "trafficByAsin-pageViews",
-    "trafficByAsin-buyBoxPercentage",
-    "trafficByAsin-unitSessionPercentage",
-    "trafficByAsin-sessionPercentage",
+    "childasin",
+    "parentasin",
+    "salesbyasin_unitsordered",
+    "salesbyasin_unitsshipped",
+    "salesbyasin_totalorderitems",
+    "salesbyasin_orderedproductsales_amount",
+    "salesbyasin_averagesellingprice_amount",
+    "salesbyasin_refundrate",
+    "trafficbyasin_sessions",
+    "trafficbyasin_pageviews",
+    "trafficbyasin_buyboxpercentage",
+    "trafficbyasin_unitsessionpercentage",
+    "trafficbyasin_sessionpercentage",
   ],
   // One row per ASIN per day multiplies volume by the catalogue size, so the
   // window is tighter than the by-date variant's 30.
@@ -225,16 +232,16 @@ export const MERCHANT_LISTINGS: WindsorReport = {
   connector: AMAZON_CONNECTOR,
   report: "get_merchant_listings_all_data",
   fields: [
-    "seller-sku",
+    "seller_sku",
     "asin1",
-    "item-name",
-    "item-description",
+    "item_name",
+    "item_description",
     "price",
     "quantity",
     "status",
-    "fulfillment-channel",
-    "open-date",
-    "item-is-marketplace",
+    "fulfillment_channel",
+    "open_date",
+    "item_is_marketplace",
   ],
   maxWindowDays: 30,
   timeoutMs: 180_000,

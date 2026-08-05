@@ -10,6 +10,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
+  normalizeFieldName,
   fetchWindsorReport,
   chunkDateRange,
   reportPrefix,
@@ -294,5 +295,39 @@ describe("probeConnector", () => {
     ) as unknown as typeof fetch;
     const res = await probeConnector("tiktok_shop", { report: "get_x", fields: ["a"] }, { fetchImpl });
     expect(res).toMatchObject({ ok: false, kind: "no_account" });
+  });
+});
+
+describe("field name normalization", () => {
+  // Windsor's catalog advertises names in Amazon's own casing
+  // (`salesByAsin-unitsOrdered`, `seller-sku`) but the query parameter only
+  // accepts the lowercase-underscore form. Passing a catalog name verbatim
+  // comes back as "Fields could not be found" listing every field, which
+  // reads like the report is unavailable rather than like a formatting slip —
+  // it cost a deploy cycle to spot.
+  it("lowercases and converts hyphens", () => {
+    expect(normalizeFieldName("salesByAsin-unitsOrdered")).toBe("salesbyasin_unitsordered");
+    expect(normalizeFieldName("seller-sku")).toBe("seller_sku");
+  });
+
+  it("is idempotent, so definitions already in wire form are untouched", () => {
+    expect(normalizeFieldName("amazon_order_id")).toBe("amazon_order_id");
+    expect(normalizeFieldName(normalizeFieldName("item-name"))).toBe("item_name");
+  });
+
+  it("normalizes on the way out, so a catalog-pasted field still resolves", async () => {
+    let calledUrl = "";
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      calledUrl = String(url);
+      return jsonResponse({ data: [] });
+    }) as unknown as typeof fetch;
+
+    await fetchWindsorReport(
+      { connector: "amazon_sp", report: "get_merchant_listings_all_data", fields: ["seller-sku", "item-name"] },
+      { datePreset: "last_7d", fetchImpl, sleepImpl: noSleep },
+    );
+
+    expect(calledUrl).toContain(encodeURIComponent("merchant_listings_all_data__seller_sku"));
+    expect(calledUrl).not.toContain("seller-sku");
   });
 });
