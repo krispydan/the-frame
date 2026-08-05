@@ -17,6 +17,7 @@ export const maxDuration = 120;
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { transformClip, type ClipTransform } from "@/modules/marketing/lib/video/transform";
+import { describeMediaError } from "@/modules/marketing/lib/video/ffmpeg";
 import { videoUrl } from "@/lib/storage/videos";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -60,9 +61,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       },
     });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    // describeMediaError, not e.message: an FfmpegError's message is only
+    // ever "ffmpeg failed: Command failed: …" and the actual reason sits in
+    // .stderr. Reporting the bare message is how a failed reframe reached
+    // the operator as an error with nothing in it to act on — the trim
+    // route already learned this; this one hadn't.
+    const message = describeMediaError(e);
     const status = /not found/i.test(message) ? 404 : /must be|required|no video|positive|greater/i.test(message) ? 400 : 500;
-    if (status === 500) console.error("[transform] failed:", e);
+    if (status === 500) {
+      console.error(
+        `[transform] failed for clip ${id} (${JSON.stringify(transform)}):`,
+        e instanceof Error ? e.stack ?? e.message : e,
+      );
+    }
     return NextResponse.json({ error: message }, { status });
   }
 }
