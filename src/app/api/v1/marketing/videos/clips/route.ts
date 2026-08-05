@@ -14,6 +14,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { videoUrl } from "@/lib/storage/videos";
+import { buildSearchClause, buildRelevanceOrder } from "@/modules/marketing/lib/video/clip-search";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
@@ -68,14 +69,13 @@ export async function GET(request: NextRequest) {
     );
     params.push(`%${product}%`);
   }
-  // One powerful search box: filename, notes, creator (talent), or a
-  // tagged product's name.
-  if (search) {
-    const like = `%${search}%`;
-    clauses.push(
-      "(c.file_name LIKE ? OR c.notes LIKE ? OR c.talent LIKE ? OR EXISTS (SELECT 1 FROM marketing_video_clip_products cp JOIN catalog_skus s ON s.id = cp.sku_id JOIN catalog_products p ON p.id = s.product_id WHERE cp.clip_id = c.id AND p.name LIKE ?))",
-    );
-    params.push(like, like, like, like);
+  // One search box across filename, notes, creator, shot type, product
+  // name, SKU and colourway. Multi-term (every word must match somewhere)
+  // with "quoted phrases" — see clip-search.ts for why.
+  const searchClause = buildSearchClause(search);
+  if (searchClause.sql) {
+    clauses.push(searchClause.sql);
+    params.push(...searchClause.params);
   }
 
   // Length filters drive the split-review queue. duration_sec is NULL
@@ -95,14 +95,19 @@ export async function GET(request: NextRequest) {
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   // Longest-first is what the review queue wants: worst offenders lead.
   const orderBy = sort === "longest" ? "c.duration_sec DESC, c.created_at DESC" : "c.created_at DESC";
+  // When searching, a filename hit leads — "boulevard" should surface the
+  // clips named for it before whatever is merely newest among everything
+  // tagged with that product. Only the rows query takes these params; the
+  // count below is unaffected by ordering.
+  const rel = buildRelevanceOrder(searchClause.terms);
   const rows = sqlite.prepare(`
     SELECT c.*, cat.slug AS category_slug, cat.name AS category_name
     FROM marketing_video_clips c
     LEFT JOIN marketing_video_clip_categories cat ON cat.id = c.category_id
     ${where}
-    ORDER BY ${orderBy}
+    ORDER BY ${rel.sql}${orderBy}
     LIMIT ? OFFSET ?
-  `).all(...params, limit, offset) as Array<Record<string, unknown>>;
+  `).all(...params, ...rel.params, limit, offset) as Array<Record<string, unknown>>;
 
   const total = (sqlite.prepare(`
     SELECT COUNT(*) AS n

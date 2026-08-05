@@ -432,7 +432,7 @@ export default function VideoPostPage({ params }: { params: Promise<{ id: string
               <div className="flex flex-wrap items-center gap-2">
                 <p className="text-xs font-medium">Clip library</p>
                 <Input
-                  placeholder="Search filename, creator, product…"
+                  placeholder="Search filename, creator, product, SKU, shot type — words narrow"
                   value={libSearch}
                   onChange={(e) => setLibSearch(e.target.value)}
                   className="h-8 min-w-[180px] flex-1"
