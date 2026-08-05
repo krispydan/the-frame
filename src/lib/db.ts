@@ -2787,4 +2787,103 @@ try {
   )`);
 } catch (e) { console.error("[db] Amazon channel tables error:", e); }
 
+// ── 3PL billing (Big Sky Fulfillment invoices) ──
+// Monthly invoice xlsx uploads land here: one invoices row per file/period,
+// one charges row per billable line (order-level fulfillment/postage, returns,
+// receiving, invoice-level fees), storage aggregated per day+type. The rate
+// card mirrors the contract (Exhibit A) so the audit engine can recompute
+// every line and flag discrepancies. See src/modules/operations/lib/three-pl/.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS three_pl_invoices (
+    id TEXT PRIMARY KEY NOT NULL,
+    period_start TEXT NOT NULL,
+    period_end TEXT NOT NULL,
+    filename TEXT,
+    provider TEXT NOT NULL DEFAULT 'big_sky',
+    summary_json TEXT,
+    total_amount REAL NOT NULL DEFAULT 0,
+    detail_orders INTEGER NOT NULL DEFAULT 0,
+    matched_orders INTEGER NOT NULL DEFAULT 0,
+    unmatched_orders INTEGER NOT NULL DEFAULT 0,
+    audit_json TEXT,
+    audit_flags INTEGER NOT NULL DEFAULT 0,
+    imported_at TEXT DEFAULT (datetime('now')),
+    notes TEXT
+  )`);
+  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_3pl_invoice_period ON three_pl_invoices(provider, period_start, period_end)");
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS three_pl_charges (
+    id TEXT PRIMARY KEY NOT NULL,
+    invoice_id TEXT NOT NULL REFERENCES three_pl_invoices(id) ON DELETE CASCADE,
+    charge_type TEXT NOT NULL,
+    amount REAL NOT NULL DEFAULT 0,
+    quantity REAL NOT NULL DEFAULT 0,
+    occurred_at TEXT,
+    order_id TEXT,
+    order_number_raw TEXT,
+    po_number TEXT,
+    carrier TEXT,
+    service_level TEXT,
+    tracking_number TEXT,
+    package_type TEXT,
+    package_length REAL, package_width REAL, package_height REAL,
+    weight_value REAL, weight_unit TEXT,
+    ship_country TEXT, ship_state TEXT,
+    channel_hint TEXT,
+    match_status TEXT NOT NULL DEFAULT 'no_order',
+    raw_json TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_3pl_charges_invoice ON three_pl_charges(invoice_id)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_3pl_charges_order ON three_pl_charges(order_id)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_3pl_charges_type ON three_pl_charges(charge_type)");
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS three_pl_storage_days (
+    id TEXT PRIMARY KEY NOT NULL,
+    invoice_id TEXT NOT NULL REFERENCES three_pl_invoices(id) ON DELETE CASCADE,
+    date TEXT NOT NULL,
+    storage_type TEXT NOT NULL,
+    location_count INTEGER NOT NULL DEFAULT 0,
+    quantity REAL NOT NULL DEFAULT 0,
+    amount REAL NOT NULL DEFAULT 0
+  )`);
+  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_3pl_storage_day ON three_pl_storage_days(invoice_id, date, storage_type)");
+
+  // Rate card: one row per service key per effective date. rate_json holds the
+  // structured pricing (base/tiers) since shapes differ per service.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS three_pl_rate_card (
+    id TEXT PRIMARY KEY NOT NULL,
+    service_key TEXT NOT NULL,
+    label TEXT NOT NULL,
+    rate_json TEXT NOT NULL,
+    effective_from TEXT NOT NULL DEFAULT '2026-04-01',
+    notes TEXT,
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_3pl_rate ON three_pl_rate_card(service_key, effective_from)");
+
+  // Seed from the Big Sky contract (Exhibit A, April 2026) — only when empty
+  // so operator edits are never clobbered on boot.
+  const rateCount = (sqlite.prepare("SELECT COUNT(*) AS c FROM three_pl_rate_card").get() as { c: number }).c;
+  if (rateCount === 0) {
+    const seed = sqlite.prepare(
+      "INSERT INTO three_pl_rate_card (id, service_key, label, rate_json, effective_from, notes) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    const rates: Array<[string, string, object, string]> = [
+      ["fulfillment_dtc", "DTC order fulfillment", { base: 2.15, addl: 0.68 }, "$2.15/order incl first item + $0.68/addl item"],
+      ["fulfillment_wholesale", "Wholesale order fulfillment", { base: 1.85, tier2to10: 0.38, tier10plus: 0.18 }, "$1.85/order + $0.38 items 2-10 + $0.18 items 10+"],
+      ["return_fee", "Returns processing", { base: 5.0, addl: 0.5 }, "$5.00/order + $0.50/addl item"],
+      ["receiving", "Receiving (inbound PO)", { perPo: 35.0 }, "$35.00/in-bound PO"],
+      ["account_management", "Account management", { perMonth: 450.0, startsOn: "2026-06-01" }, "$450/month beginning June 1, 2026"],
+      ["storage_pallet", "Storage — pallet", { perDay: 1.0 }, "$1.00/pallet/day"],
+      ["storage_bin", "Storage — bin", { perDay: 0.06 }, "Bin-12 observed at $0.06/day on invoices (contract lists $0.005 small bins)"],
+      ["fast_pass", "Fast Pass same-day surcharge", { perOrder: 1.0 }, "+$1.00/order, 1pm cutoff"],
+      ["labeling", "Labeling", { perProject: 20.0, perUnit: 0.2 }, "$20/project + $0.20/unit"],
+    ];
+    for (const [key, label, rate, note] of rates) {
+      seed.run(crypto.randomUUID(), key, label, JSON.stringify(rate), "2026-04-01", note);
+    }
+  }
+} catch (e) { console.error("[db] 3PL billing tables error:", e); }
+
 }  // end if (!IS_BUILD_PHASE)

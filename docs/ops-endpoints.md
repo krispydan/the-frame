@@ -24,6 +24,8 @@ Code) instead of pasting `fetch()` snippets into the browser console.
 | POST | `/api/admin/ops/geocode?confirm=1` | Run one geocode batch `{ limit, force, retryFailed, customersOnly }` |
 | POST | `/api/admin/ops/backfill-addresses?confirm=1` | Fill blank company addresses from Shopify `{ stores, maxPages }` |
 | GET | `/api/admin/ops/order-lookup?number=&accountId=` | Where an order actually lives vs. the account |
+| GET | `/api/admin/ops/three-pl` | List imported 3PL invoices + audit flag counts |
+| POST | `/api/admin/ops/three-pl?confirm=1` | Import a Big Sky invoice xlsx (multipart `file`) |
 | GET | `/api/admin/ops/amazon?view=status\|health\|month-end\|xero\|settlements` | Amazon channel diagnostics (read-only) |
 | POST | `/api/admin/ops/amazon?confirm=1` | Amazon operations — see below |
 

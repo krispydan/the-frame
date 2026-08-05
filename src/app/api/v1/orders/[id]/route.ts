@@ -137,6 +137,30 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
          FROM orders o LEFT JOIN companies c ON c.id = o.company_id WHERE o.id = ?`,
     )
     .get(id) as { pipedrive_deal_id: number | null; pipedrive_org_id: number | null; pipedrive_person_id: number | null } | undefined;
+  // 3PL invoice charges (Big Sky) attributed to this order — the ACTUAL
+  // fulfillment fee + postage billed, from the imported monthly invoices.
+  // Powers the Fulfillment Cost card: shipping margin = what the customer
+  // paid for shipping minus real postage + labor.
+  const threePlCharges = sqlite.prepare(
+    `SELECT charge_type AS chargeType, amount, quantity, occurred_at AS occurredAt,
+            carrier, service_level AS serviceLevel, tracking_number AS trackingNumber,
+            package_type AS packageType, weight_value AS weightValue, weight_unit AS weightUnit
+     FROM three_pl_charges WHERE order_id = ? ORDER BY occurred_at ASC`,
+  ).all(id) as Array<{ chargeType: string; amount: number; quantity: number; occurredAt: string | null; carrier: string | null; serviceLevel: string | null; trackingNumber: string | null; packageType: string | null; weightValue: number | null; weightUnit: string | null }>;
+  const tplPostage = threePlCharges.filter((c) => c.chargeType.startsWith("shipping_")).reduce((a, c) => a + c.amount, 0);
+  const tplFulfillment = threePlCharges.filter((c) => c.chargeType.startsWith("fulfillment_")).reduce((a, c) => a + c.amount, 0);
+  const tplOther = threePlCharges.filter((c) => !c.chargeType.startsWith("shipping_") && !c.chargeType.startsWith("fulfillment_")).reduce((a, c) => a + c.amount, 0);
+  const threePl = threePlCharges.length
+    ? {
+        charges: threePlCharges,
+        postage: Math.round(tplPostage * 100) / 100,
+        fulfillment: Math.round(tplFulfillment * 100) / 100,
+        other: Math.round(tplOther * 100) / 100,
+        total: Math.round((tplPostage + tplFulfillment + tplOther) * 100) / 100,
+        shippingMargin: Math.round(((order.shipping ?? 0) - tplPostage) * 100) / 100,
+      }
+    : null;
+
   const pdBase = getPipedriveConnectionStatus().apiDomain ?? null;
   const pipedrive = pdBase
     ? {
@@ -159,6 +183,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     shipheroUrl,
     shipments,
     fulfillmentCosts,
+    threePl,
     profit: {
       itemsRevenue,
       totalCost: totalCostKnown ? totalCost : null,

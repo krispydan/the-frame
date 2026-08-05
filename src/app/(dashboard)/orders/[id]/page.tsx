@@ -102,6 +102,19 @@ interface OrderDetail {
   }>;
   shipments: Shipment[];
   fulfillmentCosts: FulfillmentCost[];
+  /** Actual Big Sky invoice charges for this order (from /finance/3pl imports). */
+  threePl: {
+    charges: Array<{
+      chargeType: string; amount: number; quantity: number; occurredAt: string | null;
+      carrier: string | null; serviceLevel: string | null; trackingNumber: string | null;
+      packageType: string | null; weightValue: number | null; weightUnit: string | null;
+    }>;
+    postage: number;
+    fulfillment: number;
+    other: number;
+    total: number;
+    shippingMargin: number;
+  } | null;
   returns: Array<{
     id: string;
     reason: string | null;
@@ -119,6 +132,11 @@ interface OrderDetail {
 }
 
 // ── Config ──
+
+/** "$4.19", negatives as "-$3.50" (used by the 3PL cost card). */
+function fmtCurrency(n: number): string {
+  return `${n < 0 ? "-" : ""}$${Math.abs(n).toFixed(2)}`;
+}
 
 const channelConfig: Record<string, { label: string; color: string }> = {
   shopify_dtc: { label: "Shopify DTC", color: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300" },
@@ -778,6 +796,53 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
           {/* COGS / Costing */}
           <OrderCogsCard orderId={order.id} />
+
+          {/* 3PL fulfillment cost — actual Big Sky invoice charges (renders
+              once the month's invoice is imported on /finance/3pl) */}
+          {order.threePl && (
+            <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
+              <h2 className="text-base font-semibold mb-3">Fulfillment Cost (3PL)</h2>
+              <div className="space-y-1.5 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Fulfillment labor</span>
+                  <span className="tabular-nums">{fmtCurrency(order.threePl.fulfillment)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">
+                    Postage
+                    {(() => {
+                      const ship = order.threePl!.charges.find((c) => c.chargeType.startsWith("shipping_") && c.amount > 0);
+                      return ship ? ` (${[ship.carrier, ship.serviceLevel].filter(Boolean).join(" · ")}${ship.weightValue ? `, ${ship.weightValue} ${ship.weightUnit ?? "lb"}` : ""})` : "";
+                    })()}
+                  </span>
+                  <span className="tabular-nums">{fmtCurrency(order.threePl.postage)}</span>
+                </div>
+                {order.threePl.other > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Other (returns etc.)</span>
+                    <span className="tabular-nums">{fmtCurrency(order.threePl.other)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between border-t pt-1.5 font-semibold">
+                  <span>Total 3PL cost</span>
+                  <span className="tabular-nums">{fmtCurrency(order.threePl.total)}</span>
+                </div>
+                <div className="flex justify-between pt-1">
+                  <span className="text-muted-foreground">Shipping charged to customer</span>
+                  <span className="tabular-nums">{fmtCurrency(order.shipping)}</span>
+                </div>
+                <div className="flex justify-between font-semibold">
+                  <span>Shipping margin</span>
+                  <span className={`tabular-nums ${order.threePl.shippingMargin >= 0 ? "text-green-600" : "text-red-600"}`}>
+                    {fmtCurrency(order.threePl.shippingMargin)}
+                  </span>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mt-3">
+                From Big Sky&apos;s invoice · <Link href="/finance/3pl" className="underline hover:text-foreground">3PL billing</Link>
+              </p>
+            </div>
+          )}
 
           {/* Status Timeline (compact) */}
           <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
