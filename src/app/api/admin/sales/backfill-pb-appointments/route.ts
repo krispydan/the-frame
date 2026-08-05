@@ -80,12 +80,14 @@ async function handle(req: NextRequest) {
     since_days?: number;
     dryRun?: boolean;
     only_emails?: string[];
+    only_rep?: "sandra" | "christina";
   };
   const sinceDays = Math.max(1, Math.min(365, body.since_days ?? 30));
   const sinceIso = new Date(Date.now() - sinceDays * 86400_000).toISOString();
   const only = new Set((body.only_emails || []).map((e) => e.toLowerCase().trim()));
 
-  const accounts = phoneBurnerAccounts();
+  let accounts = phoneBurnerAccounts();
+  if (body.only_rep) accounts = accounts.filter((a) => a.rep === body.only_rep);
   const appointments: Array<{
     rep: string;
     call_id: string;
