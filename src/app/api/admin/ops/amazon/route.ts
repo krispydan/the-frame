@@ -22,6 +22,7 @@ import {
   getAmazonPromoBreakdown,
 } from "@/modules/integrations/lib/amazon/metrics";
 import { buildAmazonMonthEnd } from "@/modules/integrations/lib/amazon/month-end";
+import { buildAmazonMonthlyReport, sendAmazonMonthlyDigest } from "@/modules/integrations/lib/amazon/monthly-report";
 import { fetchWindsorCatalog, CANDIDATE_CONNECTORS } from "@/modules/integrations/lib/windsor/catalog";
 import { fetchWindsorReport, WindsorError, redact } from "@/modules/integrations/lib/windsor/client";
 import {
@@ -151,6 +152,11 @@ export async function GET(req: NextRequest) {
             kind: err.kind ?? "unknown", error: redact(err.message ?? String(e)),
           });
         }
+      }
+
+      case "performance": {
+        const months = Number(req.nextUrl.searchParams.get("months")) || 3;
+        return NextResponse.json({ ok: true, performance: buildAmazonMonthlyReport({ months }) });
       }
 
       case "promotions": {
@@ -381,6 +387,12 @@ export async function POST(req: NextRequest) {
       case "sync-listings": {
         const result = await syncAmazonListings({});
         return NextResponse.json({ ok: result.ok, action, result });
+      }
+
+      case "send-digest": {
+        const { months } = body as { months?: number };
+        const result = await sendAmazonMonthlyDigest({ months: months ?? 3 });
+        return NextResponse.json({ ok: true, action, result });
       }
 
       case "backfill-line-discounts": {

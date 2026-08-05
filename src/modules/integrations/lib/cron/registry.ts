@@ -43,6 +43,7 @@ import {
   syncAndBridgeAmazonSettlements,
   syncAmazonFbaInventory,
 } from "@/modules/integrations/lib/amazon/sync";
+import { sendAmazonMonthlyDigest } from "@/modules/integrations/lib/amazon/monthly-report";
 import { runOrderDealSweep, runActivitySweep } from "@/modules/sales/lib/pipedrive-sync";
 import { enrichViaGoogleMaps } from "@/modules/sales/lib/google-maps-enrichment";
 import { recalculateAllHealthScores } from "@/modules/customers/lib/health-scoring";
@@ -387,6 +388,16 @@ export const CRON_JOBS: CronJob[] = [
     schedule: "0 13 * * *",   // 13:00 UTC ≈ 6:00am PT
     description: "Snapshot FBA stock on hand — units held at Amazon that ShipHero cannot see",
     handler: () => syncAmazonFbaInventory({}),
+    guard: () => Boolean(process.env.WINDSOR_API_KEY),
+  },
+  {
+    id: "amazon-performance-digest",
+    schedule: "0 15 * * 1",   // Mondays 15:00 UTC ≈ 8:00am PT
+    description: "Post the Amazon month-over-month performance digest to Slack — paid vs giveaway, fees, landed cost, contribution margin, and a written read-out",
+    // Weekly rather than monthly: a month-end-only digest is read once and
+    // then it is too late to act on anything in it. Silent when there is no
+    // activity, so a quiet week does not train people to ignore the channel.
+    handler: () => sendAmazonMonthlyDigest({ months: 3 }),
     guard: () => Boolean(process.env.WINDSOR_API_KEY),
   },
   {

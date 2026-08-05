@@ -990,3 +990,73 @@ function humanPlatform(platform: string): string {
     default:                  return platform;
   }
 }
+
+/**
+ * Weekly Amazon performance digest.
+ *
+ * The account table plus the written read-out, posted where it will actually
+ * be seen. The narrative carries the interpretation, so the block layout
+ * stays deliberately plain — a wall of formatted metrics is what people stop
+ * reading after the second week.
+ */
+export async function notifyAmazonMonthlyDigest(opts: {
+  months: Array<{
+    month: string;
+    grossSales: number;
+    giveaway: number;
+    netSales: number;
+    units: number;
+    freeUnits: number;
+    contribution: number;
+    contributionPct: number;
+  }>;
+  narrative: string[];
+  provenance: string[];
+  currency?: string;
+}) {
+  if (opts.months.length === 0) return;
+  const cur = opts.currency ?? "USD";
+  const latest = opts.months[opts.months.length - 1];
+
+  // Fixed-width so the columns line up in Slack's monospace block. Slack has
+  // no table primitive and a bulleted list of metrics is unreadable at this
+  // width.
+  const header = "Month     Paid      Given     Units  Free  Contrib";
+  const rows = opts.months.map((m) => {
+    const pad = (s: string, n: number) => s.padEnd(n);
+    const num = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
+    return [
+      pad(m.month, 10),
+      pad(num(m.netSales), 10),
+      pad(num(m.giveaway), 10),
+      pad(String(m.units), 7),
+      pad(String(m.freeUnits), 6),
+      `${num(m.contribution)} (${m.contributionPct}%)`,
+    ].join("");
+  });
+
+  await postSlack({
+    topic: "amazon.monthly_digest",
+    text: `📊 Amazon ${latest.month}: ${money(latest.netSales, cur)} paid, ${money(latest.contribution, cur)} contribution`,
+    blocks: [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: `📊 *Amazon performance — through ${latest.month}*` },
+      },
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: "```\n" + [header, ...rows].join("\n") + "\n```" },
+      },
+      ...opts.narrative.map((line): SlackBlock => ({
+        type: "section",
+        text: { type: "mrkdwn", text: line },
+      })),
+      ...(opts.provenance.length > 0
+        ? ([{
+            type: "context",
+            elements: [{ type: "mrkdwn", text: opts.provenance.join("\n") }],
+          }] as SlackBlock[])
+        : []),
+    ],
+  });
+}
