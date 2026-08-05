@@ -20,6 +20,7 @@ import {
   getAmazonPromoBreakdown,
 } from "@/modules/integrations/lib/amazon/metrics";
 import { buildAmazonMonthEnd } from "@/modules/integrations/lib/amazon/month-end";
+import { fetchWindsorCatalog, CANDIDATE_CONNECTORS } from "@/modules/integrations/lib/windsor/catalog";
 import {
   syncAmazonSettlementsToXero,
   loadAmazonXeroConfig,
@@ -88,6 +89,24 @@ export async function GET(req: NextRequest) {
 
       case "settlements":
         return NextResponse.json({ ok: true, settlements: getAmazonSettlements(50) });
+
+      case "catalog": {
+        // Scopes the next connector from what the account can actually serve.
+        // `connector=all` sweeps the candidate slugs, since Windsor names them
+        // inconsistently and trying each is the only reliable way to find one.
+        const which = req.nextUrl.searchParams.get("connector") ?? "amazon_sp";
+        const targets = which === "all" ? [...CANDIDATE_CONNECTORS] : [which];
+        const results = await Promise.all(targets.map((c) => fetchWindsorCatalog(c)));
+        return NextResponse.json({
+          ok: true,
+          catalog: results.map((r) => ({
+            connector: r.connector, ok: r.ok,
+            reportCount: r.reportCount, fieldCount: r.fieldCount,
+            error: r.error,
+            reports: which === "all" ? r.reports.map((x) => x.report) : r.reports,
+          })),
+        });
+      }
 
       case "promotions": {
         // Defaults to all of history — the question this answers ("how much
