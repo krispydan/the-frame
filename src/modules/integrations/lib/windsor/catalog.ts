@@ -19,7 +19,8 @@ const CATALOG_BASE = "https://connectors.windsor.ai";
 export interface CatalogReport {
   report: string;
   fieldCount: number;
-  /** A short sample, so the shape is readable without dumping 899 rows. */
+  /** A 12-field sample by default, so the shape is readable without dumping
+   *  899 rows; every field when `allFields` is set. */
   sampleFields: string[];
 }
 
@@ -35,13 +36,16 @@ export interface CatalogResult {
 /**
  * List the reports a connector exposes for THIS account.
  *
- * Field names are prefixed with their report (`amazon_sp_orders.sku`), which
- * is what lets one catalog call answer "does this account have ad spend?"
- * without guessing a report name and getting an ambiguous `bad_fields` back.
+ * Each field carries its report in a trailing parenthesis, which is what lets
+ * one catalog call answer "does this account have ad spend?" without guessing
+ * a report name and getting an ambiguous `bad_fields` back.
+ *
+ * `allFields` returns every field rather than a 12-field sample — enough to
+ * actually scope a new report, rather than only confirm one exists.
  */
 export async function fetchWindsorCatalog(
   connector: string,
-  opts: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+  opts: { fetchImpl?: typeof fetch; timeoutMs?: number; allFields?: boolean } = {},
 ): Promise<CatalogResult> {
   const key = process.env.WINDSOR_API_KEY;
   if (!key) {
@@ -97,7 +101,8 @@ export async function fetchWindsorCatalog(
 
     const reports: CatalogReport[] = [...byReport.entries()]
       .map(([report, fields]) => ({
-        report, fieldCount: fields.length, sampleFields: fields.slice(0, 12),
+        report, fieldCount: fields.length,
+        sampleFields: opts.allFields ? fields : fields.slice(0, 12),
       }))
       .sort((a, b) => a.report.localeCompare(b.report));
 

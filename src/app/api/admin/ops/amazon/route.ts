@@ -95,15 +95,21 @@ export async function GET(req: NextRequest) {
         // `connector=all` sweeps the candidate slugs, since Windsor names them
         // inconsistently and trying each is the only reliable way to find one.
         const which = req.nextUrl.searchParams.get("connector") ?? "amazon_sp";
+        // `report=` drills into one report and returns EVERY field. Scoping a
+        // new report needs the full list — a 12-field sample is enough to see
+        // that a report exists, never enough to decide what it can answer.
+        const only = req.nextUrl.searchParams.get("report");
         const targets = which === "all" ? [...CANDIDATE_CONNECTORS] : [which];
-        const results = await Promise.all(targets.map((c) => fetchWindsorCatalog(c)));
+        const results = await Promise.all(targets.map((c) => fetchWindsorCatalog(c, { allFields: Boolean(only) })));
         return NextResponse.json({
           ok: true,
           catalog: results.map((r) => ({
             connector: r.connector, ok: r.ok,
             reportCount: r.reportCount, fieldCount: r.fieldCount,
             error: r.error,
-            reports: which === "all" ? r.reports.map((x) => x.report) : r.reports,
+            reports: which === "all"
+              ? r.reports.map((x) => x.report)
+              : only ? r.reports.filter((x) => x.report === only) : r.reports,
           })),
         });
       }
