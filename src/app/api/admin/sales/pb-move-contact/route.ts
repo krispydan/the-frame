@@ -100,8 +100,10 @@ export async function POST(req: NextRequest) {
         _links: (raw as Record<string, unknown>)?._links ?? null,
       };
       if (body.hard_delete) {
-        if (acct.rep !== "sandra") { attempt.after = { skipped: "sandra_only" }; }
-        else {
+        // Try delete from EVERY rep account — the owner's client is the
+        // only one PB will honor. Now that per-rep tokens are cached
+        // (pb-sync-member-tokens), Christina's client uses her token.
+        {
           const r: Record<string, unknown> = {};
           try {
             const resp = await acct.client.rawDelete(`/contacts/${contactId}`);
