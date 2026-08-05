@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
+import { AmazonReports } from "@/modules/integrations/components/amazon-reports";
 import {
   RefreshCw, AlertTriangle, CheckCircle, TrendingDown, Package,
   Percent, DollarSign, ShoppingCart, Boxes, ExternalLink,
@@ -171,6 +172,13 @@ export default function AmazonDashboardPage() {
           title="Some sold units have no cost attached"
           body="Contribution margin is optimistic until the daily COGS run has costed every shipped unit in this period." />
       )}
+
+      {/* Reports — performance, per-product profitability, replenishment.
+          Above the operational detail because these answer "how is the
+          channel doing", which is the question people open this page with.
+          They fetch independently, so a slow proposal never blocks the
+          numbers below. */}
+      <AmazonReports />
 
       {/* Headline */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
