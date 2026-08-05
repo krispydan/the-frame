@@ -248,3 +248,64 @@ you.
    planned as a separate line?** I'd plan them separately: it keeps the paid
    forecast clean while still shipping the units Vine needs.
 4. **Slack digest cadence** — Monday weekly, or first-of-month?
+
+---
+
+## Implementation status — built and deployed
+
+All unblocked phases shipped. Every figure below was verified against live
+production data, not fixtures.
+
+| Phase | Status | Read it at |
+|---|---|---|
+| 1 · Per-ASIN traffic + listing titles | ✅ | `?view=catalog`, cron `amazon-asin-traffic-sync`, `amazon-listings-sync` |
+| 2 · Account MoM + narrative + Slack | ✅ | `?view=performance`, cron `amazon-performance-digest` (Mon 08:00 PT) |
+| 3 · Replenishment proposal | ✅ | `?view=replenishment&coverDays=60` |
+| 4 · Transfer generation | ✅ | `POST {"action":"build-transfer"}` |
+| 5 · Per-ASIN profitability | ✅ | `?view=asin-profitability&months=3` |
+| 6 · Dashboard trend + heatmap | ✅ | `?view=series&days=90` |
+| 7 · Ad spend / ACOS / TACOS | ⛔ | Blocked — link Amazon Ads in Windsor |
+| 8 · Excess + removal | ✅ | `?view=excess&coverDays=180` |
+
+### What the live data says
+
+- **Vine is 24–25% of trailing-30-day units**, having been 90% in June. Amazon
+  recommends 199 units; the Vine-corrected proposal is 130.
+- **7 SKUs are capped by warehouse stock**, 33 units short of paid demand —
+  a purchasing signal, not an error.
+- **52 SKUs flagged as excess**, mostly stock with no paid sales at all.
+
+### Four things production taught us that fixtures did not
+
+1. **Windsor's wire field names are lowercase with underscores** —
+   `salesByAsin-unitsOrdered` must be sent as `salesbyasin_unitsordered`.
+   Except where the catalog name has brackets, which are kept verbatim.
+   Normalised centrally, and `?view=probe` now tests a report + field list in
+   one request instead of a deploy cycle.
+
+2. **The by-ASIN traffic report is a field pivot, not a report name.** No
+   `_by_asin` spelling resolves; `get_sales_and_traffic_report_by_date` with
+   `childasin` in the field list returns per-ASIN rows. Without `childasin` it
+   silently collapses to per-day — plausible numbers at the wrong grain.
+
+3. **A spelling-keyed SKU map multiplies whatever joins to it.** Every
+   proposal listed all 140 SKUs twice with doubled totals. All unit tests
+   passed, because no fixture had both a catalog SKU and an alias for it —
+   which is the shape production has everywhere.
+
+4. **Amazon lists most products twice** (merchant + FBA) and reports the
+   **same** FBA position on both rows. Counting both doubled excess and split
+   demand so neither listing looked worth restocking. Rows now collapse to one
+   per product: positions taken once, demand summed. 137 lines → 115.
+
+### Known gaps
+
+- **Per-ASIN traffic history is partial.** Amazon generates this report on
+  demand and a cold date range exceeds Railway's 300s edge timeout; a second
+  request for the same range hits its cache. The daily cron pulls a rolling
+  7-day window, so history accumulates forward from here. Backfilling older
+  ranges needs repeated warm-then-collect passes.
+- **Long-term storage fee projections** are absent from the excess report.
+  `get_fba_inventory_planning_data` exposes them, but its usable field family
+  carries no SKU key — `sku`, `asin`, `msku`, `merchant-sku`, `seller-sku` and
+  `fnsku` were each probed and none resolves alongside it.
