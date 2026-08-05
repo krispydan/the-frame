@@ -823,28 +823,27 @@ export async function notifyFaireIssueCredit(opts: {
 }
 
 export async function notifyFaireRecDigest(opts: {
-  bankAccount: string;
-  lines: Array<{ date: string; amount: number; orderCode: string | null; instruction: string }>;
+  lines: Array<{ invoiceNumber: string; date: string; amountDue: number; instruction: string }>;
 }) {
   const items = opts.lines
     .slice(0, 20)
-    .map((l) => `• *${l.date}* ${l.amount >= 0 ? "+" : "−"}$${Math.abs(l.amount).toFixed(2)}${l.orderCode ? ` (#${l.orderCode})` : ""} → ${l.instruction}`)
+    .map((l) => `• *${l.date}* ${l.invoiceNumber} ($${l.amountDue.toFixed(2)}) → ${l.instruction}`)
     .join("\n");
   await postSlack({
     topic: "finance.faire_rec_digest",
-    text: `🏦 Faire bank-rec checklist: ${opts.lines.length} unreconciled line${opts.lines.length === 1 ? "" : "s"}`,
+    text: `🏦 Faire bank-rec checklist: ${opts.lines.length} open item${opts.lines.length === 1 ? "" : "s"}`,
     blocks: [
       {
         type: "section",
         text: {
           type: "mrkdwn",
           text:
-            `🏦 *Faire bank-rec checklist — ${opts.bankAccount}*\n` +
-            `${opts.lines.length} unreconciled Faire line${opts.lines.length === 1 ? "" : "s"}, each with its treatment:\n${items}` +
+            `🏦 *Faire bank-rec checklist*\n` +
+            `${opts.lines.length} open Faire item${opts.lines.length === 1 ? "" : "s"} awaiting a bank match:\n${items}` +
             (opts.lines.length > 20 ? `\n…and ${opts.lines.length - 20} more` : ""),
         },
       },
-      { type: "context", elements: [{ type: "mrkdwn", text: "Work top to bottom in Xero bank rec. Rules: SOP §5.5 + the payout-delta pattern. Silent when clean." }] },
+      { type: "context", elements: [{ type: "mrkdwn", text: "Each open invoice/bill is an unreconciled Mercury line. Work top to bottom in Xero bank rec — rules per SOP §5.5. Silent when clean." }] },
     ],
   });
 }

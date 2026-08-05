@@ -12,8 +12,11 @@ export async function PATCH(
   const body = await request.json();
 
   const allowedFields = [
-    "colorName", "colorHex", "size", "upc", "weightOz",
+    "colorName", "lensColorName", "colorHex", "size", "upc", "weightOz",
     "costPrice", "wholesalePrice", "retailPrice", "inStock",
+    // Reading-glasses variant axis — drives the Strength option on every
+    // channel (see modules/catalog/lib/reading-glasses.ts).
+    "readingPower", "hasBlueLightFilter",
     "seoTitle", "metaDescription", "twelvePackSku", "twelvePackUpc", "status",
   ];
 

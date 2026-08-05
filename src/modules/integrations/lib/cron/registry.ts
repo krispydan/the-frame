@@ -323,16 +323,16 @@ export const CRON_JOBS: CronJob[] = [
   {
     id: "faire-rec-digest",
     schedule: "0 17 * * *",  // 17:00 UTC ≈ 10am PT — after the payout sync so fresh invoices count
-    description: "Classify unreconciled Faire bank lines on Mercury against payout invoices / IC bills and Slack the reconciliation checklist (silent when clean)",
+    description: "Slack a checklist of open Faire invoices / IC bills — each an unreconciled bank line — with its expected deposit + treatment (silent when clean)",
     handler: async () => {
       const { runFaireRecDigest } = await import("@/modules/finance/lib/faire-rec-digest");
-      const res = await runFaireRecDigest({});
+      const res = await runFaireRecDigest();
       if (!res.ok) throw new Error(res.error || "digest failed");
       if (res.lines.length > 0) {
         const { notifyFaireRecDigest } = await import("@/modules/integrations/lib/slack/notifications");
-        await notifyFaireRecDigest({ bankAccount: res.bankAccount || "Mercury", lines: res.lines });
+        await notifyFaireRecDigest({ lines: res.lines });
       }
-      return { scanned: res.scanned, unreconciledFaire: res.unreconciledFaire };
+      return { openInvoices: res.openInvoices, openBills: res.openBills };
     },
   },
 

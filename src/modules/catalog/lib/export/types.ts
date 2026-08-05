@@ -1,3 +1,5 @@
+import { compareStrength, hasReadingPowerSkus } from "@/modules/catalog/lib/reading-glasses";
+
 export type ValidationSeverity = "ready" | "blocked" | "warning";
 
 export interface ValidationIssue {
@@ -84,4 +86,47 @@ export interface ExportProduct {
   wholesalePrice: number | null;
   retailPrice: number | null;
   msrp: number | null;
+}
+
+/**
+ * True when a product should be treated as reading glasses by the
+ * channel exporters — i.e. it gets a Strength variation axis.
+ *
+ * Checks the tag-derived category first, then falls back to the SKU
+ * data: bulk imports (import-po) don't always write the productType
+ * tag, but their power SKUs are unambiguous.
+ */
+export function isReadingProduct(ep: ExportProduct): boolean {
+  const cat = (ep.product.category ?? "").toLowerCase();
+  if (cat === "reading" || cat === "reading_glasses") return true;
+  return hasReadingPowerSkus(ep.skus);
+}
+
+/**
+ * The SKUs that become real channel variants.
+ *
+ * For reading glasses the import stores a power-less colorway "base" row
+ * (e.g. `JX3010-R-BLK`, readingPower null) alongside its seven power
+ * rows. That base row is a grouping artifact — shipping it would create
+ * a phantom variant with a blank Strength — so it is filtered out here,
+ * and the remainder ordered by colorway then strength (Blue Light first).
+ *
+ * Everything else (sunglasses, optical) is returned untouched, so those
+ * exports are byte-identical to before.
+ */
+export function variantSkus(ep: ExportProduct): ExportProduct["skus"] {
+  if (!isReadingProduct(ep)) return ep.skus;
+  const powered = ep.skus.filter((s) => s.readingPower != null);
+  // A reader with no power rows at all (mid-import) still needs variants.
+  if (powered.length === 0) return ep.skus;
+  const colorOrder = new Map<string, number>();
+  for (const s of ep.skus) {
+    const key = s.colorName ?? "";
+    if (!colorOrder.has(key)) colorOrder.set(key, colorOrder.size);
+  }
+  return [...powered].sort((a, b) => {
+    const ca = colorOrder.get(a.colorName ?? "") ?? 0;
+    const cb = colorOrder.get(b.colorName ?? "") ?? 0;
+    return ca !== cb ? ca - cb : compareStrength(a, b);
+  });
 }

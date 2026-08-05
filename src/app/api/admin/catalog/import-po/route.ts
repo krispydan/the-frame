@@ -262,10 +262,18 @@ export async function POST(req: NextRequest) {
         status, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'intake', datetime('now'), datetime('now'))`,
   );
+  // The productType tag is what curatedAttrsFromTags() turns into
+  // ExportProduct.product.category — without it every reader falls back to
+  // the sunglasses copy/type mappings on all three channels.
+  const insertTypeTag = sqlite.prepare<unknown[]>(
+    `INSERT INTO catalog_tags (id, product_id, tag_name, dimension, source)
+     VALUES (lower(hex(randomblob(16))), ?, ?, 'productType', 'manual')`,
+  );
 
   const txn = sqlite.transaction(() => {
     for (const p of productInsertPlan) {
       insertProduct.run(p.id, p.entry.skuPrefix, p.entry.name);
+      insertTypeTag.run(p.id, p.entry.type === "reading_glasses" ? "reading" : "sunglasses");
     }
     for (const s of skuInsertPlan) {
       insertSku.run(
