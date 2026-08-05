@@ -15,18 +15,11 @@ import { phoneBurnerAccounts } from "@/modules/sales/lib/phoneburner-client";
  * Auth: x-admin-key: jaxy2026
  */
 
-// From PB docs at https://www.phoneburner.com/developer/route_list
-// Real endpoints, verified against the published route list.
+// Deep-dive: fetch shape of the working endpoints
 const PATHS_TO_PROBE = [
-  "/dialsession",              // list dial sessions with pagination — the real call history root
-  "/dialsession/settings",     // config
-  "/dialsession/usage",        // stats per date range
-  "/contacts/1296839589/activities", // per-contact activities (Waterloo TX)
-  "/contacts/1296839589/auditlog",   // change log
-  "/tags",                     // global tags
-  "/members",                  // team members incl. user_id 1294137966 lookup
-  "/voicemails",
-  "/customfields",
+  "/dialsession?page_size=3",  // sample dial sessions
+  "/members",                  // resolve user_id 1294137966
+  "/contacts/1296839589/auditlog", // Waterloo TX activity history
 ];
 
 export async function POST(req: NextRequest) {
@@ -42,13 +35,12 @@ export async function POST(req: NextRequest) {
 
   for (const path of PATHS_TO_PROBE) {
     try {
-      const r = (await sandra.client.rawGet(path, { page_size: 1 })) as Record<string, unknown> | null;
+      // Strip query if any and let rawGet fetch full body — include sample
+      const r = (await sandra.client.rawGet(path)) as Record<string, unknown> | null;
       results[path] = {
         status: "200",
         keys: r ? Object.keys(r).slice(0, 15) : [],
-        sample_data_len: r
-          ? (Array.isArray(r) ? r.length : ((r.data as unknown[])?.length ?? (r.calls as unknown[])?.length ?? "?"))
-          : 0,
+        sample_body: r,
       };
     } catch (e) {
       const msg = (e instanceof Error ? e.message : String(e));
