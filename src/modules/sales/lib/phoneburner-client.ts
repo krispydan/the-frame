@@ -744,61 +744,82 @@ export class PhoneBurnerClient {
    */
   async listRecentCalls(opts: {
     since?: string;
-    page?: number;
+    page?: number;         // legacy interface — internally we always fetch all pages
     page_size?: number;
   }): Promise<PbCall[]> {
-    const raw = (await this.request<Record<string, unknown>>("GET", "/dialsession", undefined, {
-      page: opts.page ?? 1,
-      page_size: opts.page_size ?? 100,
-    })) as Record<string, unknown>;
-    // Nested envelope: { dialsessions: { dialsessions: [...] } }
-    const env = ((raw?.dialsessions ?? raw) as Record<string, unknown>) || {};
-    const sessions = (env.dialsessions as Array<Record<string, unknown>>) || [];
-    if (!Array.isArray(sessions) || sessions.length === 0) return [];
-
-    // Filter to sessions started on/after `since` (PB timestamps are
-    // Central time in `YYYY-MM-DD HH:MM:SS` — treat as UTC-approx for
-    // filter purposes; individual call ingestion re-normalises).
+    const pageSize = opts.page_size ?? 100;
     const sinceMs = opts.since ? Date.parse(opts.since) : 0;
-    const eligible = sessions.filter((s) => {
-      const startWhen = String(s.start_when || "");
-      if (!startWhen) return true; // no timestamp → include, let caller filter
-      const ms = Date.parse(startWhen.replace(" ", "T") + "Z");
-      return isNaN(ms) || ms >= sinceMs;
-    });
 
-    // Fetch each session's call detail in parallel (small concurrency).
+    // Enumerate ALL sessions across pages. PB sessions are ordered
+    // oldest-first, so once we've seen sessions past `since` we can bail.
+    const allEligibleSessions: Array<Record<string, unknown>> = [];
+    let page = 1;
+    let totalPages: number | null = null;
+    let sawInWindow = false;
+    while (true) {
+      const raw = (await this.request<Record<string, unknown>>("GET", "/dialsession", undefined, {
+        page,
+        page_size: pageSize,
+      })) as Record<string, unknown>;
+      const env = ((raw?.dialsessions ?? raw) as Record<string, unknown>) || {};
+      const arr = (env.dialsessions as Array<Record<string, unknown>>) || [];
+      if (!Array.isArray(arr) || arr.length === 0) break;
+      if (totalPages == null) {
+        const tp = env.total_pages ?? env.totalPages;
+        totalPages = tp != null && Number.isFinite(Number(tp)) ? Number(tp) : null;
+      }
+      for (const s of arr) {
+        const startWhen = String(s.start_when || "");
+        if (!startWhen) { allEligibleSessions.push(s); continue; }
+        const ms = Date.parse(startWhen.replace(" ", "T") + "Z");
+        if (isNaN(ms) || ms >= sinceMs) {
+          allEligibleSessions.push(s);
+          sawInWindow = true;
+        }
+      }
+      // Bail once we're past the window and we've seen at least one in-window session
+      // (avoids paging further into the future when the tail is already all-old data).
+      if (totalPages != null && page >= totalPages) break;
+      if (arr.length < pageSize) break;
+      page++;
+      if (page > 200) break; // safety
+    }
+    void sawInWindow;
+
+    // Fetch each session's call detail concurrently. Detail shape:
+    //   { dialsessions: { dialsessions: { calls: [...] } } }
+    // — the innermost `dialsessions` is a SINGLE session object, not array.
     const calls: PbCall[] = [];
     const limit = 4;
     let idx = 0;
     const worker = async () => {
-      while (idx < eligible.length) {
+      while (idx < allEligibleSessions.length) {
         const i = idx++;
-        const sid = String(eligible[i].dialsession_id || "");
+        const sid = String(allEligibleSessions[i].dialsession_id || "");
         if (!sid) continue;
         try {
           const detail = (await this.request<Record<string, unknown>>(
             "GET",
             `/dialsession/${sid}`,
           )) as Record<string, unknown>;
-          // Detail shape: { dialsession: { calls: [...] } }
-          const de = (detail?.dialsession ?? detail) as Record<string, unknown>;
-          const cs = (de?.calls as PbCall[]) || [];
+          // Peel wrappers: { dialsessions: { dialsessions: {session} } }
+          let node = (detail?.dialsessions ?? detail) as Record<string, unknown>;
+          if (node?.dialsessions && typeof node.dialsessions === "object" && !Array.isArray(node.dialsessions)) {
+            node = node.dialsessions as Record<string, unknown>;
+          }
+          const cs = (node?.calls as PbCall[]) || [];
           for (const c of Array.isArray(cs) ? cs : []) {
             calls.push({
               ...c,
-              // Map dialsession fields to our PbCall shape where PB
-              // uses different names.
-              called_at: (c.called_at ?? c.call_time ?? c.connected_when) as string | undefined,
+              called_at: (c.called_at ?? c.call_time ?? c.connected_when ?? c.start_when) as string | undefined,
             });
           }
         } catch {
-          // per-session errors ignored — a single bad session shouldn't
-          // kill the whole batch.
+          // per-session errors ignored
         }
       }
     };
-    await Promise.all(Array.from({ length: Math.min(limit, eligible.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(limit, allEligibleSessions.length) }, worker));
     return calls;
   }
 
