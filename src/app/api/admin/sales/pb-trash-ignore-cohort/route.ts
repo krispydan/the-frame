@@ -53,44 +53,54 @@ async function handle(req: NextRequest) {
   if (emails.length === 0) return NextResponse.json({ ok: false, error: "emails[] required" }, { status: 400 });
 
   const accounts = phoneBurnerAccounts();
+  const wanted = new Set(emails);
 
-  interface Hit { email: string; contact_id: string; owner_id: string; owning_rep: string | null; already_trashed: boolean }
-  const hits: Hit[] = [];
-  const notFound: string[] = [];
+  // Enumerate ALL PB contacts across all rep accounts, building an
+  // email → contact map. PB's /contacts search-param is a no-op (it
+  // returns the whole workspace regardless of what you pass), so a
+  // single enumeration is way faster than 1 search per email.
+  interface Hit { email: string; contact_id: string; owner_id: string; already_trashed: boolean }
+  const emailToHit = new Map<string, Hit>();
 
-  await runWithConcurrency(emails, 6, async (email) => {
-    // Try each rep to find the contact — PB search is per-authenticated-user
-    // but usually returns visible-to-workspace results.
-    let found: Hit | null = null;
-    for (const acct of accounts) {
+  for (const acct of accounts) {
+    let page = 1;
+    let pageCap = 200;
+    while (pageCap-- > 0) {
+      let raw: Record<string, unknown> | null;
       try {
-        const raw = (await acct.client.rawGet("/contacts", { search: email, page_size: 5 })) as
+        raw = (await acct.client.rawGet("/contacts", { page, page_size: 100 })) as
           | Record<string, unknown> | null;
-        if (!raw) continue;
-        const env = ((raw.contacts ?? raw) as Record<string, unknown>) || {};
-        const arr = (env.contacts as unknown[]) || [];
-        for (const c of Array.isArray(arr) ? arr : []) {
-          const rec = c as Record<string, unknown>;
-          const pe = rec.primary_email as { email_address?: unknown } | string | undefined;
-          const cEmail = typeof pe === "string" ? pe.toLowerCase() : String((pe?.email_address as string) || "").toLowerCase();
-          if (cEmail !== email) continue;
-          const cid = String(rec.user_id || rec.id || "");
-          const owner = String(rec.owner_id || "");
-          const trashed = String(rec.trashed || "") === "1";
-          // Prefer the rep whose owner_id matches. Fallback to any hit.
-          const owningRep = accounts.find((a) => a.rep && rec.owner_id != null
-            && String((rec.owner_id as string | number)) === (a.ownerSetting ? String((rec.owner_id as string | number)) : ""))?.rep ?? null;
-          found = { email, contact_id: cid, owner_id: owner, owning_rep: owningRep, already_trashed: trashed };
-          break;
-        }
-        if (found) break;
       } catch {
-        // silent — try next rep
+        break;
       }
+      if (!raw) break;
+      const env = ((raw.contacts ?? raw) as Record<string, unknown>) || {};
+      const arr = (env.contacts as unknown[]) || [];
+      const list: unknown[] = Array.isArray(arr) ? arr : [];
+      if (list.length === 0) break;
+      for (const c of list) {
+        const rec = c as Record<string, unknown>;
+        const pe = rec.primary_email as { email_address?: unknown } | string | undefined;
+        const cEmail = typeof pe === "string"
+          ? pe.toLowerCase().trim()
+          : String((pe?.email_address as string) || "").toLowerCase().trim();
+        if (!cEmail || !wanted.has(cEmail)) continue;
+        // First-hit wins per email (prevents dup work across rep enumerations)
+        if (emailToHit.has(cEmail)) continue;
+        emailToHit.set(cEmail, {
+          email: cEmail,
+          contact_id: String(rec.user_id || rec.id || ""),
+          owner_id: String(rec.owner_id || ""),
+          already_trashed: String(rec.trashed || "") === "1",
+        });
+      }
+      if (list.length < 100) break;
+      page++;
     }
-    if (found) hits.push(found);
-    else notFound.push(email);
-  });
+  }
+
+  const hits: Hit[] = Array.from(emailToHit.values());
+  const notFound = emails.filter((e) => !emailToHit.has(e));
 
   if (body.dryRun) {
     return NextResponse.json({
