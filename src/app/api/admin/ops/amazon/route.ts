@@ -25,6 +25,7 @@ import {
 import { buildAmazonMonthEnd } from "@/modules/integrations/lib/amazon/month-end";
 import { buildAmazonMonthlyReport, sendAmazonMonthlyDigest } from "@/modules/integrations/lib/amazon/monthly-report";
 import { buildReplenishmentProposal } from "@/modules/integrations/lib/amazon/replenishment";
+import { buildFbaTransfer, buildFbaTransferFromProposal, recordFbaTransfer } from "@/modules/integrations/lib/amazon/fba-transfer";
 import { fetchWindsorCatalog, CANDIDATE_CONNECTORS } from "@/modules/integrations/lib/windsor/catalog";
 import { fetchWindsorReport, WindsorError, redact } from "@/modules/integrations/lib/windsor/client";
 import {
@@ -394,6 +395,21 @@ export async function POST(req: NextRequest) {
       case "sync-listings": {
         const result = await syncAmazonListings({});
         return NextResponse.json({ ok: result.ok, action, result });
+      }
+
+      case "build-transfer": {
+        // Generates the CSVs and returns them. Recording is a separate,
+        // explicit flag: producing a plan to look at must not commit to it.
+        const { lines, reference, coverDays, record } = body as {
+          lines?: Array<{ sku: string; quantity: number }>;
+          reference?: string; coverDays?: number; record?: boolean;
+        };
+        const plan = lines && lines.length > 0
+          ? buildFbaTransfer({ lines, reference: reference ?? `FBA-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}` })
+          : buildFbaTransferFromProposal({ reference, coverDays });
+
+        const recorded = record === true ? recordFbaTransfer(plan) : null;
+        return NextResponse.json({ ok: true, action, recorded, plan });
       }
 
       case "sync-restock": {

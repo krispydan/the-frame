@@ -52,6 +52,9 @@ export interface ReplenishmentLine {
   /** FBA position today. */
   fbaAvailable: number;
   fbaInbound: number;
+  /** Units we generated a transfer for that Amazon has not acknowledged yet.
+   *  Counted as covered, or a second shipment goes out for stock on a truck. */
+  inFlight: number;
   /** Units in OUR warehouse, resolved through the alias table. */
   warehouseAvailable: number;
   /** Units sold in the last 30 days that actually took money. */
@@ -150,6 +153,16 @@ export function buildReplenishmentProposal(opts?: {
         AND IFNULL(LOWER(r.item_status), '') != 'cancelled'
       GROUP BY r.sku
     ),
+    -- Transfers we generated but Amazon has not acknowledged as inbound yet.
+    -- Amazon can take days to show a shipment, and during that window its own
+    -- inbound count reads zero — so without this the proposal keeps
+    -- recommending units already on a truck, and a second shipment goes out.
+    in_flight AS (
+      SELECT sku, SUM(quantity) AS qty
+      FROM amazon_fba_transfers
+      WHERE received_at IS NULL AND created_for >= ?
+      GROUP BY sku
+    ),
     -- Next unit out under FIFO, which is what the next unit shipped costs.
     cost AS (
       SELECT cl.sku_id AS sku_id,
@@ -171,6 +184,7 @@ export function buildReplenishmentProposal(opts?: {
       rr.inbound + rr.working + rr.receiving AS fbaInbound,
       rr.price                  AS price,
       IFNULL(w.qty, 0)          AS warehouseAvailable,
+      IFNULL(tf.qty, 0)         AS inFlight,
       IFNULL(v.paidUnits, 0)    AS paidUnits30d,
       IFNULL(vf.seededUnits, 0) AS seededUnits30d,
       c.landed                  AS landedCostPerUnit
@@ -183,14 +197,15 @@ export function buildReplenishmentProposal(opts?: {
     -- separately and must not be pooled.
     LEFT JOIN velocity v  ON v.sku = rr.sku
     LEFT JOIN velocity vf ON vf.sku = rr.sku
+    LEFT JOIN in_flight tf ON tf.sku = rr.sku
     WHERE rr.snapshot_date = ?
-  `).all(windowStart, today, snapshotDate) as Array<{
+  `).all(windowStart, today, windowStart, snapshotDate) as Array<{
     sku: string; asin: string | null; amazonTitle: string | null;
     amazonAlert: string | null; amazonRecommendedQty: number;
     recommendedShipDate: string | null; amazonUnitsSold30d: number;
     daysOfSupply: number | null; fbaAvailable: number; fbaInbound: number;
-    price: number | null; warehouseAvailable: number; paidUnits30d: number;
-    seededUnits30d: number; landedCostPerUnit: number | null;
+    price: number | null; warehouseAvailable: number; inFlight: number;
+    paidUnits30d: number; seededUnits30d: number; landedCostPerUnit: number | null;
   }>;
 
   const titles = sqlite.prepare(`
@@ -204,7 +219,7 @@ export function buildReplenishmentProposal(opts?: {
 
     // ── Correction 2: demand from PAID velocity, not Amazon's blended figure.
     const paidPerDay = r.paidUnits30d / 30;
-    const covered = r.fbaAvailable + r.fbaInbound;
+    const covered = r.fbaAvailable + r.fbaInbound + r.inFlight;
     const rawDemand = Math.max(0, Math.ceil(paidPerDay * coverDays) - covered);
 
     if (r.paidUnits30d < MIN_VELOCITY_UNITS) {
@@ -245,6 +260,7 @@ export function buildReplenishmentProposal(opts?: {
       daysOfSupply: r.daysOfSupply,
       fbaAvailable: r.fbaAvailable,
       fbaInbound: r.fbaInbound,
+      inFlight: r.inFlight,
       warehouseAvailable: r.warehouseAvailable,
       paidUnits30d: r.paidUnits30d,
       seededUnits30d: r.seededUnits30d,

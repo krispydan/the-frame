@@ -2696,6 +2696,20 @@ try {
   sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_amazon_fba_inventory_key ON amazon_fba_inventory(snapshot_date, sku)`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_amazon_fba_inventory_sku ON amazon_fba_inventory(sku)`);
 
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS amazon_fba_transfers (
+    id TEXT PRIMARY KEY NOT NULL,
+    reference TEXT NOT NULL,
+    created_for TEXT NOT NULL,
+    sku TEXT NOT NULL,
+    warehouse_sku TEXT,
+    quantity INTEGER NOT NULL DEFAULT 0,
+    landed_cost_per_unit REAL,
+    received_at TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_amazon_fba_transfers_key ON amazon_fba_transfers(reference, sku)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_amazon_fba_transfers_sku ON amazon_fba_transfers(sku)`);
+
   sqlite.exec(`CREATE TABLE IF NOT EXISTS amazon_restock_recommendations (
     id TEXT PRIMARY KEY NOT NULL,
     snapshot_date TEXT NOT NULL,
