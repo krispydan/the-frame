@@ -178,3 +178,27 @@ describe("display names", () => {
     expect(skuDisplayNames().get("JX-UNKNOWN")).toBeUndefined();
   });
 });
+
+describe("report definition", () => {
+  it("keeps childasin in the by-ASIN field list", async () => {
+    // `childasin` is what pivots the report to per-ASIN rows. Without it,
+    // Windsor silently returns one row per DAY — plausible numbers at the
+    // wrong grain, which no assertion downstream would catch.
+    const { SALES_TRAFFIC_BY_ASIN } = await import("@/modules/integrations/lib/amazon/reports");
+    expect(SALES_TRAFFIC_BY_ASIN.fields).toContain("childasin");
+  });
+
+  it("requests the only report name that resolves", async () => {
+    // Verified by probe: the catalog's base `get_sales_and_traffic_report`
+    // does not resolve, nor does any `_by_asin` spelling. Only `_by_date`
+    // does, and the dimension comes from the fields.
+    const { SALES_TRAFFIC_BY_ASIN, SALES_TRAFFIC } = await import("@/modules/integrations/lib/amazon/reports");
+    expect(SALES_TRAFFIC_BY_ASIN.report).toBe("get_sales_and_traffic_report_by_date");
+    expect(SALES_TRAFFIC_BY_ASIN.report).toBe(SALES_TRAFFIC.report);
+  });
+
+  it("asks for no field carrying the catalog's (Deprecated) marker", async () => {
+    const { SALES_TRAFFIC_BY_ASIN } = await import("@/modules/integrations/lib/amazon/reports");
+    expect(SALES_TRAFFIC_BY_ASIN.fields.some((f) => f.includes("deprecated"))).toBe(false);
+  });
+});
