@@ -194,7 +194,12 @@ export const FBA_INVENTORY: WindsorReport = {
  */
 export const SALES_TRAFFIC_BY_ASIN: WindsorReport = {
   connector: AMAZON_CONNECTOR,
-  report: "get_sales_and_traffic_report",
+  // The catalog lists one `get_sales_and_traffic_report`, but Windsor resolves
+  // by VARIANT: asking for the base name with by-ASIN fields fails with
+  // "fields did not resolve to a single report", because `date` and the
+  // salesBy*/trafficBy* families exist in both dimensions. The by-date sync
+  // already uses `_by_date` for the same reason; this is its twin.
+  report: "get_sales_and_traffic_report_by_asin",
   fields: [
     "date",
     "childasin",
