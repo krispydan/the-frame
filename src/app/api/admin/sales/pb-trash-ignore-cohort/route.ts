@@ -48,9 +48,10 @@ async function handle(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const body = (await req.json()) as { emails?: string[]; dryRun?: boolean };
+  const body = (await req.json()) as { emails?: string[]; folder_id?: string; dryRun?: boolean };
   const emails = (body.emails || []).map((e) => e.toLowerCase().trim()).filter(Boolean);
   if (emails.length === 0) return NextResponse.json({ ok: false, error: "emails[] required" }, { status: 400 });
+  const folderFilter = body.folder_id ? String(body.folder_id) : null;
 
   const accounts = phoneBurnerAccounts();
   const wanted = new Set(emails);
@@ -68,8 +69,13 @@ async function handle(req: NextRequest) {
     while (pageCap-- > 0) {
       let raw: Record<string, unknown> | null;
       try {
-        raw = (await acct.client.rawGet("/contacts", { page, page_size: 100 })) as
-          | Record<string, unknown> | null;
+        // Note: PB's /contacts search-param is a no-op but category_id
+        // filter DOES work (returns only that folder's owner-visible
+        // contacts). Use it when narrowing.
+        raw = (await acct.client.rawGet("/contacts", folderFilter
+          ? { category_id: folderFilter, page, page_size: 100 }
+          : { page, page_size: 100 }
+        )) as Record<string, unknown> | null;
       } catch {
         break;
       }
