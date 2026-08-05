@@ -15,15 +15,10 @@ import { phoneBurnerAccounts } from "@/modules/sales/lib/phoneburner-client";
  * Auth: x-admin-key: jaxy2026
  */
 
-// Test /contacts search parameter variants
-const EM = "info@blackbirdofcalistoga.com";
+// Recent /dialsession + one detail to see shape
 const PATHS_TO_PROBE = [
-  `/contacts?search=${EM}&page_size=5`,
-  `/contacts?q=${EM}&page_size=5`,
-  `/contacts?email=${EM}&page_size=5`,
-  `/contacts?primary_email=${EM}&page_size=5`,
-  `/contacts?filter=${EM}&page_size=5`,
-  `/contacts?keyword=${EM}&page_size=5`,
+  `/dialsession?page=1&page_size=5`,
+  `/dialsession/46685153`,  // one from the earlier probe
 ];
 
 export async function POST(req: NextRequest) {
