@@ -81,9 +81,12 @@ async function handle(req: NextRequest) {
     dryRun?: boolean;
     only_emails?: string[];
     only_rep?: "sandra" | "christina";
+    until_days?: number; // upper bound: only process calls OLDER than N days ago
   };
   const sinceDays = Math.max(1, Math.min(365, body.since_days ?? 30));
+  const untilDays = body.until_days != null ? Math.max(0, Math.min(365, body.until_days)) : 0;
   const sinceIso = new Date(Date.now() - sinceDays * 86400_000).toISOString();
+  const untilMs = untilDays > 0 ? Date.now() - untilDays * 86400_000 : Number.MAX_SAFE_INTEGER;
   const only = new Set((body.only_emails || []).map((e) => e.toLowerCase().trim()));
 
   let accounts = phoneBurnerAccounts();
@@ -138,6 +141,15 @@ async function handle(req: NextRequest) {
       for (const call of batch) {
         const disp = String(call.disposition_label || call.disposition || "");
         if (!isSetAppointment(disp)) continue;
+
+        // Upper-bound filter (until_days) — skip calls newer than the boundary.
+        // Lets us slice a 30-day range into non-overlapping chunks so each fits
+        // under Cloudflare's 100s edge cap.
+        const calledAtStr = String(call.called_at || call.timestamp || "");
+        if (calledAtStr && untilMs !== Number.MAX_SAFE_INTEGER) {
+          const ms = Date.parse(calledAtStr.replace(" ", "T") + "Z");
+          if (!isNaN(ms) && ms > untilMs) continue;
+        }
 
         // Fetch the contact to get the email — PbCall doesn't include it.
         let email: string | null = null;
