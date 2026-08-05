@@ -202,3 +202,15 @@ describe("report definition", () => {
     expect(SALES_TRAFFIC_BY_ASIN.fields.some((f) => f.includes("deprecated"))).toBe(false);
   });
 });
+
+describe("restock report definition", () => {
+  it("keeps the parentheses Windsor requires in the total-days field", async () => {
+    // The catalog shows "Total Days of Supply (including units from open
+    // shipments)" and Windsor keeps the brackets in the wire name. Stripping
+    // them fails to resolve, and the error names only that one field out of
+    // twenty — easy to misread as the whole report being unavailable.
+    const { RESTOCK_RECOMMENDATIONS } = await import("@/modules/integrations/lib/amazon/reports");
+    expect(RESTOCK_RECOMMENDATIONS.fields)
+      .toContain("total_days_of_supply_(including_units_from_open_shipments)");
+  });
+});

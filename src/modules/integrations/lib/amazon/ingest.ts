@@ -709,7 +709,7 @@ export function ingestRestockRecommendations(
         optDate(row.recommended_ship_date),
         Math.trunc(num(row.units_sold_last_30_days)),
         optNum(row.days_of_supply_at_amazon_fulfillment_network),
-        optNum(row.total_days_of_supply_including_units_from_open_shipments),
+        optNum(row["total_days_of_supply_(including_units_from_open_shipments)"]),
         Math.trunc(num(row.available)), Math.trunc(num(row.inbound)),
         Math.trunc(num(row.working)), Math.trunc(num(row.receiving)),
         Math.trunc(num(row.unfulfillable)), Math.trunc(num(row.total_units)),

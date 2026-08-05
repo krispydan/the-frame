@@ -291,7 +291,10 @@ export const RESTOCK_RECOMMENDATIONS: WindsorReport = {
     "recommended_ship_date",
     "units_sold_last_30_days",
     "days_of_supply_at_amazon_fulfillment_network",
-    "total_days_of_supply_including_units_from_open_shipments",
+    // Parentheses are part of the wire name, verified by probe. The catalog
+    // shows "Total Days of Supply (including units from open shipments)" and
+    // Windsor keeps the brackets — stripping them fails to resolve.
+    "total_days_of_supply_(including_units_from_open_shipments)",
     "available",
     "inbound",
     "working",
