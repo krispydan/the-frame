@@ -239,12 +239,15 @@ async function handle(req: NextRequest) {
     // Move-out must be executed via the OWNING rep's account — otherwise
     // PB returns 404 (contact not visible to the caller). Build a quick
     // rep-keyed client map to route calls correctly.
+    // Empirically confirmed: PUT /contacts/{id} with category_id changes
+    // is a silent no-op. DELETE /contacts/{id} DOES work and sets
+    // trashed=1 (soft delete — contact gone from dial queues, history
+    // preserved). Use DELETE, not PUT.
     const clientByRep = new Map(accounts.map((a) => [a.rep, a.client] as const));
     await runWithConcurrency(pbToMoveOut, 8, async (c) => {
       const client = clientByRep.get(c.rep) || phoneBurnerClient;
       try {
-        // Clear category — contact stays in PB (history preserved) but leaves this folder.
-        await client.updateContact(c.id, { category_id: undefined });
+        await client.rawDelete(`/contacts/${c.id}`);
         pbMovedOut++;
       } catch (e) {
         pbMoveErrors.push({ id: c.id, email: c.email, reason: `${c.rep}: ${e instanceof Error ? e.message : String(e)}` });
