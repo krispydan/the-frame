@@ -11,7 +11,8 @@
     "test:e2e": "playwright test",
     "shiphero:register-webhooks": "tsx scripts/register-shiphero-webhooks.ts",
     "shiphero:backfill-faire-slips": "tsx scripts/backfill-faire-slips.ts",
-    "sku:test-shape": "tsx scripts/test-frame-shape.ts"
+    "sku:test-shape": "tsx scripts/test-frame-shape.ts",
+    "awin:triage": "node scripts/awin-partner-triage.mjs"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.1",
