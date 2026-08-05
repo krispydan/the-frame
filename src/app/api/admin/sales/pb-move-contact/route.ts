@@ -100,26 +100,48 @@ export async function POST(req: NextRequest) {
         _links: (raw as Record<string, unknown>)?._links ?? null,
       };
       if (body.hard_delete) {
-        // Try delete from EVERY rep account — the owner's client is the
-        // only one PB will honor. Now that per-rep tokens are cached
-        // (pb-sync-member-tokens), Christina's client uses her token.
-        {
-          const r: Record<string, unknown> = {};
+        // Probe every plausible delete shape until nested category clears
+        // or contact vanishes.
+        type P = { label: string; method: string; path: string; body?: unknown };
+        const shapes: P[] = [
+          { label: "bulk_contact_ids", method: "DELETE", path: `/contacts`, body: { contact_ids: [contactId] } },
+          { label: "bulk_ids", method: "DELETE", path: `/contacts`, body: { ids: [contactId] } },
+          { label: "bulk_query", method: "DELETE", path: `/contacts?contact_id=${contactId}` },
+          { label: "single_del", method: "DELETE", path: `/contacts/${contactId}` },
+        ];
+        const results: Array<Record<string, unknown>> = [];
+        for (const s of shapes) {
+          const r: Record<string, unknown> = { label: s.label, method: s.method, path: s.path };
           try {
-            const resp = await acct.client.rawDelete(`/contacts/${contactId}`);
-            r.delete_response = shapeOnly(resp);
+            const resp = await (
+              s.method === "DELETE" ? acct.client.rawDelete(s.path, s.body)
+              : acct.client.rawGet(s.path)
+            );
+            r.resp = shapeOnly(resp);
           } catch (e) {
-            r.delete_error = (e instanceof Error ? e.message : String(e)).slice(0, 200);
+            r.error = (e instanceof Error ? e.message : String(e)).slice(0, 200);
           }
           try {
-            await acct.client.getContact(contactId);
-            r.still_exists = true;
+            const g = await acct.client.getContact(contactId);
+            // extract just the "removed" / "trashed" / "archived" state
+            let rec = g as Record<string, unknown>;
+            if (rec.contacts && typeof rec.contacts === "object") rec = rec.contacts as Record<string, unknown>;
+            const inner = rec.contacts;
+            if (Array.isArray(inner)) rec = (inner[0] as Record<string, unknown>) || {};
+            r.after_state = {
+              removed: rec?.removed ?? null,
+              trashed: rec?.trashed ?? null,
+              archived: rec?.archived ?? null,
+              category_still_set: (rec?.category as { category_id?: unknown } | null)?.category_id ?? null,
+            };
           } catch (e) {
-            r.still_exists = false;
-            r.get_after_error = (e instanceof Error ? e.message : String(e)).slice(0, 100);
+            r.gone = true;
+            r.after_get_error = (e instanceof Error ? e.message : String(e)).slice(0, 100);
           }
-          attempt.after = r;
+          results.push(r);
+          if (r.gone) break;
         }
+        attempt.after = results;
       } else if (body.create_dup_move && body.email) {
         // Try createContact for an EXISTING email but with a new category_id
         // + on_duplicate: "update". Hypothesis: this codepath actually moves
