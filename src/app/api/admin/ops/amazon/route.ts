@@ -23,6 +23,7 @@ import {
 } from "@/modules/integrations/lib/amazon/metrics";
 import { buildAmazonMonthEnd } from "@/modules/integrations/lib/amazon/month-end";
 import { fetchWindsorCatalog, CANDIDATE_CONNECTORS } from "@/modules/integrations/lib/windsor/catalog";
+import { fetchWindsorReport, WindsorError, redact } from "@/modules/integrations/lib/windsor/client";
 import {
   syncAmazonSettlementsToXero,
   loadAmazonXeroConfig,
@@ -114,6 +115,42 @@ export async function GET(req: NextRequest) {
               : only ? r.reports.filter((x) => x.report === only) : r.reports,
           })),
         });
+      }
+
+      case "probe": {
+        // Try an arbitrary report + field list and report what came back.
+        //
+        // Windsor resolves a report from the prefixed field names, so a single
+        // wrong field fails the whole call with "fields did not resolve to a
+        // single report" — naming none of them. Without this, scoping a new
+        // report is guess, deploy, wait, repeat; with it the same loop is one
+        // request. That cost two deploy cycles on the by-ASIN traffic report.
+        const report = req.nextUrl.searchParams.get("report");
+        const fields = (req.nextUrl.searchParams.get("fields") ?? "").split(",").map((f) => f.trim()).filter(Boolean);
+        if (!report || fields.length === 0) {
+          return NextResponse.json(
+            { ok: false, error: "probe needs ?report=<name>&fields=<comma,separated>" },
+            { status: 400 },
+          );
+        }
+        const days = Number(req.nextUrl.searchParams.get("days")) || 3;
+        try {
+          const rows = await fetchWindsorReport(
+            { connector: "amazon_sp", report, fields, timeoutMs: 120_000 },
+            { datePreset: `last_${days}d`, retries: 0 },
+          );
+          return NextResponse.json({
+            ok: true, report, fields, rowCount: rows.length,
+            sampleRow: rows[0] ?? null,
+            keys: rows[0] ? Object.keys(rows[0]) : [],
+          });
+        } catch (e) {
+          const err = e as WindsorError;
+          return NextResponse.json({
+            ok: false, report, fields,
+            kind: err.kind ?? "unknown", error: redact(err.message ?? String(e)),
+          });
+        }
       }
 
       case "promotions": {
