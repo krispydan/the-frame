@@ -15,23 +15,18 @@ import { phoneBurnerAccounts } from "@/modules/sales/lib/phoneburner-client";
  * Auth: x-admin-key: jaxy2026
  */
 
+// From PB docs at https://www.phoneburner.com/developer/route_list
+// Real endpoints, verified against the published route list.
 const PATHS_TO_PROBE = [
-  "/calls",
-  "/call",
-  "/dialsession/calls",
-  "/dialsession/history",
-  "/dialsessions",
-  "/dialsessions/calls",
-  "/reports/calls",
-  "/reports/call_history",
-  "/history",
-  "/history/calls",
-  "/completed_calls",
-  "/call_history",
-  "/call_log",
-  "/agents/calls",
-  "/user/calls",
-  "/me/calls",
+  "/dialsession",              // list dial sessions with pagination — the real call history root
+  "/dialsession/settings",     // config
+  "/dialsession/usage",        // stats per date range
+  "/contacts/1296839589/activities", // per-contact activities (Waterloo TX)
+  "/contacts/1296839589/auditlog",   // change log
+  "/tags",                     // global tags
+  "/members",                  // team members incl. user_id 1294137966 lookup
+  "/voicemails",
+  "/customfields",
 ];
 
 export async function POST(req: NextRequest) {
