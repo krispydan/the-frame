@@ -115,6 +115,11 @@ interface OrderDetail {
     total: number;
     shippingMargin: number;
   } | null;
+  /** Rate-card estimate when NO invoice data exists (exactly one of
+   *  threePl / threePlEstimate is set — actual and estimated never mix). */
+  threePlEstimate: { fulfillment: number; postage: number; total: number; shippingMargin: number } | null;
+  /** Customer account id for the order's company → /customers/[id]. */
+  customerAccountId: string | null;
   returns: Array<{
     id: string;
     reason: string | null;
@@ -797,52 +802,90 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           {/* COGS / Costing */}
           <OrderCogsCard orderId={order.id} />
 
-          {/* 3PL fulfillment cost — actual Big Sky invoice charges (renders
-              once the month's invoice is imported on /finance/3pl) */}
-          {order.threePl && (
-            <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
-              <h2 className="text-base font-semibold mb-3">Fulfillment Cost (3PL)</h2>
-              <div className="space-y-1.5 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Fulfillment labor</span>
-                  <span className="tabular-nums">{fmtCurrency(order.threePl.fulfillment)}</span>
+          {/* ── Financials — the order's full economics in one place.
+              3PL costs are ACTUAL (Big Sky invoice) or ESTIMATED (contract
+              rate card + typical postage) — exactly one, never mixed. */}
+          {(() => {
+            const tpl = order.threePl;
+            const est = order.threePlEstimate;
+            const basis: "actual" | "estimated" | null = tpl ? "actual" : est ? "estimated" : null;
+            const fulfillment = tpl?.fulfillment ?? est?.fulfillment ?? 0;
+            const postage = tpl?.postage ?? est?.postage ?? 0;
+            const other = tpl?.other ?? 0;
+            const tplTotal = tpl?.total ?? est?.total ?? 0;
+            const shipMargin = tpl?.shippingMargin ?? est?.shippingMargin ?? order.shipping;
+            const cogs = order.profit?.hasFullCostData ? order.profit.totalCost : null;
+            const netProfit = cogs != null && basis
+              ? order.subtotal + order.shipping - cogs - tplTotal
+              : null;
+            const netMargin = netProfit != null && order.subtotal > 0 ? (netProfit / order.subtotal) * 100 : null;
+            const shipDetail = tpl?.charges.find((c) => c.chargeType.startsWith("shipping_") && c.amount > 0);
+            return (
+              <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-base font-semibold">Financials</h2>
+                  {basis && (
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wide ${
+                        basis === "actual" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
+                      }`}
+                      title={basis === "actual" ? "3PL costs from Big Sky's imported invoice" : "3PL costs estimated from the contract rate card + typical postage — replaced by actuals when the month's invoice is imported"}
+                    >
+                      {basis === "actual" ? "ACTUAL 3PL" : "ESTIMATED 3PL"}
+                    </span>
+                  )}
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">
-                    Postage
-                    {(() => {
-                      const ship = order.threePl!.charges.find((c) => c.chargeType.startsWith("shipping_") && c.amount > 0);
-                      return ship ? ` (${[ship.carrier, ship.serviceLevel].filter(Boolean).join(" · ")}${ship.weightValue ? `, ${ship.weightValue} ${ship.weightUnit ?? "lb"}` : ""})` : "";
-                    })()}
-                  </span>
-                  <span className="tabular-nums">{fmtCurrency(order.threePl.postage)}</span>
-                </div>
-                {order.threePl.other > 0 && (
+                <div className="space-y-1.5 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Other (returns etc.)</span>
-                    <span className="tabular-nums">{fmtCurrency(order.threePl.other)}</span>
+                    <span className="text-muted-foreground">Revenue (subtotal)</span>
+                    <span className="tabular-nums">{fmtCurrency(order.subtotal)}</span>
                   </div>
-                )}
-                <div className="flex justify-between border-t pt-1.5 font-semibold">
-                  <span>Total 3PL cost</span>
-                  <span className="tabular-nums">{fmtCurrency(order.threePl.total)}</span>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Shipping charged</span>
+                    <span className="tabular-nums">{fmtCurrency(order.shipping)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Product COGS</span>
+                    <span className="tabular-nums">{cogs != null ? <>−{fmtCurrency(cogs)}</> : <span className="text-amber-600 text-xs">incomplete</span>}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Fulfillment labor{basis === "estimated" ? " (est.)" : ""}</span>
+                    <span className="tabular-nums">−{fmtCurrency(fulfillment)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">
+                      Postage{basis === "estimated" ? " (est.)" : ""}
+                      {shipDetail ? ` (${[shipDetail.carrier, shipDetail.serviceLevel].filter(Boolean).join(" · ")}${shipDetail.weightValue ? `, ${shipDetail.weightValue} ${shipDetail.weightUnit ?? "lb"}` : ""})` : ""}
+                    </span>
+                    <span className="tabular-nums">−{fmtCurrency(postage)}</span>
+                  </div>
+                  {other > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Other 3PL (returns etc.)</span>
+                      <span className="tabular-nums">−{fmtCurrency(other)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between border-t pt-1.5 font-semibold">
+                    <span>Net order profit{basis === "estimated" ? " (est.)" : ""}</span>
+                    <span className={`tabular-nums ${netProfit == null ? "text-muted-foreground" : netProfit >= 0 ? "text-green-600" : "text-red-600"}`}>
+                      {netProfit != null ? `${fmtCurrency(netProfit)}${netMargin != null ? ` (${netMargin.toFixed(0)}%)` : ""}` : "needs COGS"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Shipping margin</span>
+                    <span className={`tabular-nums ${shipMargin >= 0 ? "text-green-600" : "text-red-600"}`}>{fmtCurrency(shipMargin)}</span>
+                  </div>
                 </div>
-                <div className="flex justify-between pt-1">
-                  <span className="text-muted-foreground">Shipping charged to customer</span>
-                  <span className="tabular-nums">{fmtCurrency(order.shipping)}</span>
-                </div>
-                <div className="flex justify-between font-semibold">
-                  <span>Shipping margin</span>
-                  <span className={`tabular-nums ${order.threePl.shippingMargin >= 0 ? "text-green-600" : "text-red-600"}`}>
-                    {fmtCurrency(order.threePl.shippingMargin)}
-                  </span>
-                </div>
+                <p className="text-xs text-muted-foreground mt-3">
+                  {basis === "actual"
+                    ? <>3PL costs from Big Sky&apos;s invoice · <Link href="/finance/3pl" className="underline hover:text-foreground">3PL billing</Link></>
+                    : basis === "estimated"
+                      ? "Estimated from the contract rate card + typical postage — becomes actual when the month's invoice is imported."
+                      : "No 3PL costs (cancelled order)."}
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground mt-3">
-                From Big Sky&apos;s invoice · <Link href="/finance/3pl" className="underline hover:text-foreground">3PL billing</Link>
-              </p>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Status Timeline (compact) */}
           <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
@@ -897,11 +940,22 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                 <Building2 className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
                 <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">Ship to</p>
-                  <p className="font-medium truncate">{order.shipToName || order.company?.name || "—"}</p>
+                  {order.customerAccountId ? (
+                    <Link href={`/customers/${order.customerAccountId}`} className="font-medium truncate block hover:underline" title="Open customer profile">
+                      {order.shipToName || order.company?.name || "—"}
+                    </Link>
+                  ) : (
+                    <p className="font-medium truncate">{order.shipToName || order.company?.name || "—"}</p>
+                  )}
                   {order.shipToName && order.company?.name && order.shipToName !== order.company.name && (
                     <p className="text-xs text-muted-foreground truncate" title={`CRM company: ${order.company.name}`}>
                       CRM: {order.company.name}
                     </p>
+                  )}
+                  {order.customerAccountId && (
+                    <Link href={`/customers/${order.customerAccountId}`} className="text-xs text-primary hover:underline">
+                      View customer profile →
+                    </Link>
                   )}
                 </div>
               </div>

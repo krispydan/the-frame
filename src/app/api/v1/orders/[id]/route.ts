@@ -161,6 +161,32 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       }
     : null;
 
+  // No invoice data yet → ESTIMATE from the contract rate card + historical
+  // postage medians, so the financials section always has a cost figure.
+  // Never blended with actuals: exactly one of threePl / threePlEstimate is
+  // non-null (per Daniel, Aug 2026 — "we should never have real and estimated").
+  let threePlEstimate: { fulfillment: number; postage: number; total: number; shippingMargin: number } | null = null;
+  if (!threePl && order.status !== "cancelled") {
+    try {
+      const { estimateThreePlCost } = await import("@/modules/finance/lib/order-economics");
+      const est = estimateThreePlCost(id, order.channel);
+      threePlEstimate = {
+        fulfillment: est.fulfillment,
+        postage: est.postage,
+        total: Math.round((est.fulfillment + est.postage) * 100) / 100,
+        shippingMargin: Math.round(((order.shipping ?? 0) - est.postage) * 100) / 100,
+      };
+    } catch (e) {
+      console.error("[orders] 3PL estimate failed:", e);
+    }
+  }
+
+  // The customer account for this order's company — lets the page link to
+  // /customers/[accountId] (the customer show page keys on account id).
+  const customerAccountId = order.companyId
+    ? ((sqlite.prepare("SELECT id FROM customer_accounts WHERE company_id = ?").get(order.companyId) as { id: string } | undefined)?.id ?? null)
+    : null;
+
   const pdBase = getPipedriveConnectionStatus().apiDomain ?? null;
   const pipedrive = pdBase
     ? {
@@ -184,6 +210,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     shipments,
     fulfillmentCosts,
     threePl,
+    threePlEstimate,
+    customerAccountId,
     profit: {
       itemsRevenue,
       totalCost: totalCostKnown ? totalCost : null,

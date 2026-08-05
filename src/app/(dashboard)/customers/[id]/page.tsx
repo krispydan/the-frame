@@ -3,6 +3,7 @@ import { sqlite } from "@/lib/db";
 import { CustomerDetail } from "@/modules/customers/components/customer-detail";
 import { predictReorder } from "@/modules/customers/lib/reorder-engine";
 import { predictChurn } from "@/modules/customers/agents/churn-predictor";
+import { getOrderEconomics } from "@/modules/finance/lib/order-economics";
 import { notFound } from "next/navigation";
 
 interface AccountRow {
@@ -76,8 +77,29 @@ async function getOrders(companyId: string) {
     FROM orders
     WHERE company_id = ?
     ORDER BY placed_at DESC
-    LIMIT 20
+    LIMIT 100
   `).all(companyId) as OrderRow[];
+}
+
+/**
+ * Percentile benchmarks vs the whole customer base — how good/bad this
+ * customer is, in numbers the sales team can act on. Percentile = share of
+ * customers at or below this one (higher = better).
+ */
+function getBenchmarks(account: AccountRow) {
+  const base = (sqlite.prepare("SELECT COUNT(*) AS c FROM customer_accounts").get() as { c: number }).c;
+  if (base === 0) return null;
+  const pct = (col: string, v: number) =>
+    Math.round(((sqlite.prepare(`SELECT COUNT(*) AS c FROM customer_accounts WHERE ${col} <= ?`).get(v) as { c: number }).c / base) * 100);
+  const avg = sqlite.prepare(
+    "SELECT AVG(lifetime_value) AS ltv, AVG(avg_order_value) AS aov, AVG(total_orders) AS orders FROM customer_accounts",
+  ).get() as { ltv: number; aov: number; orders: number };
+  return {
+    base,
+    ltv: { value: account.lifetime_value, percentile: pct("lifetime_value", account.lifetime_value), avg: avg.ltv ?? 0 },
+    aov: { value: account.avg_order_value, percentile: pct("avg_order_value", account.avg_order_value), avg: avg.aov ?? 0 },
+    orders: { value: account.total_orders, percentile: pct("total_orders", account.total_orders), avg: avg.orders ?? 0 },
+  };
 }
 
 async function getActivities(companyId: string) {
@@ -111,6 +133,15 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
     getHealthHistory(id),
   ]);
 
+  // Per-order economics (revenue / COGS / 3PL actual-or-estimated / profit)
+  // + lifetime profit rollup for the profit table and charts.
+  const econMap = getOrderEconomics(recentOrders.map((o) => o.id));
+  const orderEconomics = recentOrders.map((o) => ({
+    ...o,
+    economics: econMap.get(o.id) ?? null,
+  }));
+  const benchmarks = getBenchmarks(account);
+
   const reorderPrediction = predictReorder(id);
 
   // Get churn risk data for this account
@@ -121,6 +152,8 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
     <CustomerDetail
       account={account}
       recentOrders={recentOrders}
+      orderEconomics={orderEconomics}
+      benchmarks={benchmarks}
       activities={activities}
       healthHistory={healthHistory}
       reorderPrediction={reorderPrediction}

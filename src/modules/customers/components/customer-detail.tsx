@@ -57,6 +57,22 @@ interface OrderRow {
   placed_at: string;
 }
 
+/** Per-order economics from order-economics.ts (3PL actual OR estimated). */
+interface OrderEconomicsData {
+  revenue: number;
+  shippingCharged: number;
+  cogs: number | null;
+  cogsComplete: boolean;
+  threePl: { basis: "actual" | "estimated" | "none"; fulfillment: number; postage: number; other: number; total: number };
+  netProfit: number | null;
+  netMarginPct: number | null;
+}
+
+type OrderWithEconomics = OrderRow & { economics: OrderEconomicsData | null };
+
+interface BenchmarkMetric { value: number; percentile: number; avg: number }
+interface Benchmarks { base: number; ltv: BenchmarkMetric; aov: BenchmarkMetric; orders: BenchmarkMetric }
+
 interface ActivityRow {
   id: string;
   type: string;
@@ -111,6 +127,8 @@ const RETENTION_ACTIONS: Record<string, { icon: string; actions: string[] }> = {
 export function CustomerDetail({
   account,
   recentOrders,
+  orderEconomics,
+  benchmarks,
   activities,
   healthHistory,
   reorderPrediction,
@@ -118,6 +136,8 @@ export function CustomerDetail({
 }: {
   account: AccountData;
   recentOrders: OrderRow[];
+  orderEconomics?: OrderWithEconomics[];
+  benchmarks?: Benchmarks | null;
   activities: ActivityRow[];
   healthHistory: HealthHistoryRow[];
   reorderPrediction?: ReorderPrediction | null;
@@ -138,6 +158,15 @@ export function CustomerDetail({
 
   const retentionInfo = RETENTION_ACTIONS[account.health_status] || RETENTION_ACTIONS.healthy;
   const isAtRisk = account.health_status !== "healthy";
+
+  // ── Profit rollup (3PL costs actual or estimated, never mixed per order) ──
+  const econRows = (orderEconomics ?? []).filter((r) => r.economics && r.status !== "cancelled");
+  const lifetimeProfit = econRows.reduce((s, r) => s + (r.economics!.netProfit ?? 0), 0);
+  const profitKnownCount = econRows.filter((r) => r.economics!.netProfit != null).length;
+  const anyEstimated = econRows.some((r) => r.economics!.threePl.basis === "estimated");
+  const lifetimeMarginPct = account.lifetime_value > 0 && profitKnownCount > 0
+    ? (lifetimeProfit / account.lifetime_value) * 100
+    : null;
 
   return (
     <div className="space-y-6">
@@ -222,10 +251,19 @@ export function CustomerDetail({
       )}
 
       {/* Overview Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
         <div className="rounded-lg border bg-white p-4">
           <p className="text-sm text-gray-500">Lifetime Value</p>
           <p className="text-xl font-bold">{formatCurrency(account.lifetime_value)}</p>
+        </div>
+        <div className="rounded-lg border bg-white p-4">
+          <p className="text-sm text-gray-500">Lifetime Profit{anyEstimated ? " (est.)" : ""}</p>
+          <p className={`text-xl font-bold ${lifetimeProfit >= 0 ? "text-green-600" : "text-red-600"}`}>
+            {profitKnownCount > 0 ? formatCurrency(lifetimeProfit) : "—"}
+          </p>
+          {lifetimeMarginPct != null && (
+            <p className="text-xs text-gray-500">{lifetimeMarginPct.toFixed(0)}% of revenue</p>
+          )}
         </div>
         <div className="rounded-lg border bg-white p-4">
           <p className="text-sm text-gray-500">Total Orders</p>
@@ -247,6 +285,110 @@ export function CustomerDetail({
         </div>
       </div>
 
+      {/* ── Benchmarks: how this customer compares to the whole base ── */}
+      {benchmarks && benchmarks.base > 1 && (
+        <div className="rounded-lg border bg-white p-4">
+          <h2 className="font-semibold mb-1">📊 How they compare</h2>
+          <p className="text-xs text-gray-500 mb-3">vs all {benchmarks.base.toLocaleString()} customers — higher percentile is better</p>
+          <div className="grid md:grid-cols-3 gap-4">
+            {([
+              { label: "Lifetime Value", m: benchmarks.ltv, fmt: (v: number) => formatCurrency(v) },
+              { label: "Avg Order Value", m: benchmarks.aov, fmt: (v: number) => formatCurrency(v) },
+              { label: "Order Count", m: benchmarks.orders, fmt: (v: number) => v.toFixed(v % 1 ? 1 : 0) },
+            ] as const).map(({ label, m, fmt }) => {
+              const topPct = Math.max(1, 100 - m.percentile);
+              const good = m.percentile >= 75;
+              const mid = m.percentile >= 40 && m.percentile < 75;
+              return (
+                <div key={label}>
+                  <div className="flex items-baseline justify-between text-sm">
+                    <span className="text-gray-500">{label}</span>
+                    <span className={`text-xs font-semibold ${good ? "text-green-600" : mid ? "text-yellow-600" : "text-red-600"}`}>
+                      {good ? `Top ${topPct}%` : `${m.percentile}th percentile`}
+                    </span>
+                  </div>
+                  <div className="mt-1 h-2 rounded-full bg-gray-100 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${good ? "bg-green-500" : mid ? "bg-yellow-500" : "bg-red-400"}`}
+                      style={{ width: `${Math.max(3, m.percentile)}%` }}
+                    />
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {fmt(m.value)} vs {fmt(m.avg)} avg
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Profit by order: what we actually made on each order ── */}
+      {econRows.length > 0 && (
+        <div className="rounded-lg border bg-white p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold">Profit by Order</h2>
+            {anyEstimated && (
+              <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded" title="Orders not yet on an imported Big Sky invoice use rate-card + typical-postage estimates. Actual and estimated are never mixed within an order.">
+                est. = awaiting 3PL invoice
+              </span>
+            )}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-gray-500 border-b">
+                  <th className="py-1.5 pr-2">Order</th>
+                  <th className="py-1.5 pr-2">Date</th>
+                  <th className="py-1.5 pr-2 text-right">Revenue</th>
+                  <th className="py-1.5 pr-2 text-right">COGS</th>
+                  <th className="py-1.5 pr-2 text-right">3PL cost</th>
+                  <th className="py-1.5 pr-2 text-right">Net profit</th>
+                  <th className="py-1.5 text-right">Margin</th>
+                </tr>
+              </thead>
+              <tbody>
+                {econRows.map((r) => {
+                  const e = r.economics!;
+                  const est = e.threePl.basis === "estimated";
+                  return (
+                    <tr key={r.id} className="border-b last:border-0">
+                      <td className="py-1.5 pr-2">
+                        <Link href={`/orders/${r.id}`} className="font-medium hover:underline">{r.order_number}</Link>
+                        <span className="ml-1.5 text-xs text-gray-400">{r.channel.replace("shopify_", "")}</span>
+                      </td>
+                      <td className="py-1.5 pr-2 text-gray-500">{formatDate(r.placed_at)}</td>
+                      <td className="py-1.5 pr-2 text-right tabular-nums">{formatCurrency(e.revenue)}</td>
+                      <td className="py-1.5 pr-2 text-right tabular-nums">{e.cogs != null ? formatCurrency(e.cogs) : <span className="text-amber-600 text-xs">n/a</span>}</td>
+                      <td className="py-1.5 pr-2 text-right tabular-nums">
+                        {formatCurrency(e.threePl.total)}
+                        {est && <span className="ml-1 text-[10px] text-amber-600 align-top">est</span>}
+                      </td>
+                      <td className={`py-1.5 pr-2 text-right tabular-nums font-medium ${e.netProfit == null ? "text-gray-400" : e.netProfit >= 0 ? "text-green-600" : "text-red-600"}`}>
+                        {e.netProfit != null ? formatCurrency(e.netProfit) : "—"}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums text-gray-600">
+                        {e.netMarginPct != null ? `${e.netMarginPct.toFixed(0)}%` : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="font-semibold">
+                  <td className="py-2 pr-2" colSpan={2}>Total ({econRows.length} orders)</td>
+                  <td className="py-2 pr-2 text-right tabular-nums">{formatCurrency(econRows.reduce((s, r) => s + r.economics!.revenue, 0))}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums">{formatCurrency(econRows.reduce((s, r) => s + (r.economics!.cogs ?? 0), 0))}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums">{formatCurrency(econRows.reduce((s, r) => s + r.economics!.threePl.total, 0))}</td>
+                  <td className={`py-2 pr-2 text-right tabular-nums ${lifetimeProfit >= 0 ? "text-green-600" : "text-red-600"}`}>{formatCurrency(lifetimeProfit)}</td>
+                  <td className="py-2 text-right tabular-nums">{lifetimeMarginPct != null ? `${lifetimeMarginPct.toFixed(0)}%` : "—"}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Account Details */}
       {(account.segment || account.payment_terms || account.discount_rate > 0 || account.notes) && (
         <div className="rounded-lg border bg-white p-4 space-y-2">
@@ -266,26 +408,50 @@ export function CustomerDetail({
       )}
 
       <div className="grid md:grid-cols-2 gap-6">
-        {/* Order History */}
+        {/* Revenue vs profit per order, oldest → newest. The detailed rows
+            live in the Profit by Order table above; this is the shape-of-the-
+            relationship view for the sales team. */}
         <div className="rounded-lg border bg-white p-4">
-          <h2 className="font-semibold mb-3">Order History</h2>
-          {recentOrders.length === 0 ? (
+          <h2 className="font-semibold mb-3">Revenue &amp; Profit per Order</h2>
+          {econRows.length === 0 ? (
             <p className="text-gray-400 text-sm">No orders yet</p>
           ) : (
-            <div className="space-y-2">
-              {recentOrders.map((o) => (
-                <div key={o.id} className="flex justify-between items-center py-2 border-b last:border-0">
-                  <div>
-                    <p className="font-medium text-sm">{o.order_number}</p>
-                    <p className="text-xs text-gray-500">{o.channel} · {formatDate(o.placed_at)}</p>
+            (() => {
+              const chartRows = [...econRows].reverse().slice(-20);
+              const maxRev = Math.max(1, ...chartRows.map((r) => r.economics!.revenue));
+              return (
+                <>
+                  <div className="flex items-end gap-1 h-36">
+                    {chartRows.map((r) => {
+                      const e = r.economics!;
+                      const revH = Math.max(3, (e.revenue / maxRev) * 100);
+                      const profH = e.netProfit != null && e.netProfit > 0 ? (e.netProfit / maxRev) * 100 : 0;
+                      const loss = e.netProfit != null && e.netProfit < 0;
+                      return (
+                        <Link
+                          key={r.id}
+                          href={`/orders/${r.id}`}
+                          className="group relative flex-1 flex flex-col justify-end h-full"
+                          title={`${r.order_number} · ${formatDate(r.placed_at)}\nRevenue ${formatCurrency(e.revenue)} · Profit ${e.netProfit != null ? formatCurrency(e.netProfit) : "n/a"}${e.threePl.basis === "estimated" ? " (est.)" : ""}`}
+                        >
+                          <div className={`w-full rounded-t ${loss ? "bg-red-200" : "bg-blue-100"} group-hover:opacity-80 relative`} style={{ height: `${revH}%` }}>
+                            {profH > 0 && (
+                              <div className="absolute bottom-0 left-0 right-0 rounded-t bg-green-500/80" style={{ height: `${Math.min(100, (profH / revH) * 100)}%` }} />
+                            )}
+                          </div>
+                        </Link>
+                      );
+                    })}
                   </div>
-                  <div className="text-right">
-                    <p className="font-medium text-sm">{formatCurrency(o.total)}</p>
-                    <p className="text-xs text-gray-500">{o.status}</p>
+                  <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                    <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-blue-100" /> Revenue</span>
+                    <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-green-500/80" /> Net profit</span>
+                    <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-red-200" /> Loss-making</span>
+                    <span className="ml-auto">last {chartRows.length} orders, oldest → newest</span>
                   </div>
-                </div>
-              ))}
-            </div>
+                </>
+              );
+            })()
           )}
         </div>
 
