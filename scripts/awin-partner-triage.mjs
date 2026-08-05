@@ -110,14 +110,16 @@ const ARBITRAGE_TYPES = [
  */
 const COUPON_TOKENS = new RegExp(
   [
-    "coupon", "promo[ -]?code", "voucher", "discount", "deals?", "bargain",
-    "saver", "savings", "cashback", "clearance", "freebie",
+    // sav(e|ing) as a stem: "savings" alone missed saveonbest, savingheist,
+    // savingpantry, savemypenny, savingupscale, savingarena, smartssaving
+    "sav(e|ing)", "coupon", "copon", "promo", "code[sz]", "voucher", "discount",
+    "deals?", "bargain", "cashback", "clearance", "freebie", "steal", "slash",
     // es / pt / it
     "descuento", "cupon", "cupom", "promocion", "codigos", "sconto", "buono",
     // de / nl / nordics
-    "gutschein", "rabatt", "korting", "kortingscode", "tilbud",
+    "gutschein", "rabat", "korting", "tilbud",
     // pl / cz / sk
-    "kupon", "slevy", "zlavy", "rabatowe",
+    "kupon", "kupny", "slevy", "zlavy", "rabatowe",
   ].join("|"),
   "i",
 );
@@ -128,6 +130,58 @@ const WEAK_HOSTS =
 
 const SOCIAL_HOSTS =
   /(instagram\.com|tiktok\.com|facebook\.com|twitter\.com|x\.com|youtube\.com|pinterest\.)/i;
+
+/**
+ * Domains that belong to somebody else. An applicant entering one as their own
+ * website is padding a thin application — 11 separate applicants listed
+ * shareasale.com, a competitor network's homepage. Ownership is checked by name
+ * overlap, so Skimlinks listing skimlinks.com is not caught by this.
+ */
+const THIRD_PARTY_DOMAINS = new Set([
+  "shareasale.com", "awin.com", "cj.com", "rakuten.com", "impact.com",
+  "apps.apple.com", "play.google.com", "amazon.com", "ebay.com",
+  "apartmenttherapy.com", "southernliving.com", "thespruceeats.com",
+  "famousbirthdays.com", "eventbrite.co.uk", "msn.com", "ad4mat.com",
+]);
+
+/**
+ * Sub-networks we do want, despite their category scoring as traffic arbitrage.
+ * These bring genuine editorial inventory rather than intercepting carts.
+ */
+const TRUSTED_NETWORKS = new Set(["skimlinks.com", "sovrn.com"]);
+
+/** Bare host, lowercased, no scheme/www/path. */
+function hostOf(url) {
+  return String(url ?? "").replace(/^https?:\/\/(www\.)?/i, "").split("/")[0].toLowerCase();
+}
+
+/** Does the company name plausibly own this domain? Used to separate a brand */
+/** using its own site from an applicant borrowing someone else's. */
+function nameMatchesDomain(name, host) {
+  const domainWord = host.split(".")[0].replace(/[^a-z0-9]/g, "");
+  const nameWords = String(name).toLowerCase().match(/[a-z0-9]{4,}/g) ?? [];
+  return nameWords.some((w) => domainWord.includes(w) || w.includes(domainWord));
+}
+
+/**
+ * A social-only applicant is fine — plenty of real creators have no site — but
+ * these patterns marked a farm of batch-registered fakes: handles that share no
+ * words with the applicant's name, random digit strings, and generic
+ * aggregator handles.
+ */
+function socialLooksFake(name, url) {
+  const handle = (url.match(/(?:instagram|tiktok|youtube|facebook)\.com\/@?([\w.\-]+)/i) ?? [])[1];
+  if (!handle) return null;
+  if (/\d{4,}/.test(handle)) return { hard: true, why: "random digit string in handle" };
+  if (/^(big|best|top|hot|cheap)?(buy|deal|shop|store|sav|offer)s?\d*$/i.test(handle) ||
+      /^official[_.]?\w*(hub|store|shop|deals?)$/i.test(handle)) {
+    return { hard: true, why: "generic aggregator handle" };
+  }
+  const nameWords = new Set(String(name).toLowerCase().match(/[a-z]{3,}/g) ?? []);
+  const handleWords = new Set(handle.toLowerCase().match(/[a-z]{3,}/g) ?? []);
+  const overlap = [...nameWords].some((w) => handleWords.has(w) || handle.toLowerCase().includes(w));
+  return overlap ? null : { hard: false, why: "applicant name shares nothing with the handle" };
+}
 
 /**
  * Score one applicant. Returns points plus the human-readable reasons behind
@@ -146,27 +200,50 @@ function score(app) {
   const type = (app.promotionalType ?? "").toLowerCase();
   const name = app.companyName ?? "";
   const url = app.websiteUrl ?? "";
+  const host = hostOf(url);
 
-  if (!type) {
-    add(3, "no primary promotion type declared (incomplete profile)");
-  } else if (COUPON_TYPES.some((t) => type.includes(t))) {
-    add(3, `promotion type is "${app.promotionalType}"`);
-  } else if (ARBITRAGE_TYPES.some((t) => type.includes(t))) {
-    add(3, `promotion type is "${app.promotionalType}" (resells traffic)`);
+  // A trusted sub-network short-circuits everything below it.
+  if (TRUSTED_NETWORKS.has(host) && nameMatchesDomain(name, host)) {
+    reasons.push("trusted content sub-network");
+    return { points: 0, reasons };
   }
 
+  // Promotion type. Coupon/cashback/loyalty and traffic arbitrage are both
+  // rejections in their own right, not soft flags.
+  const socialOnly = SOCIAL_HOSTS.test(url);
+  if (!type) {
+    if (!socialOnly) add(3, "no primary promotion type declared (incomplete profile)");
+  } else if (COUPON_TYPES.some((t) => type.includes(t))) {
+    add(6, `promotion type is "${app.promotionalType}"`);
+  } else if (ARBITRAGE_TYPES.some((t) => type.includes(t))) {
+    add(6, `promotion type is "${app.promotionalType}" (resells traffic)`);
+  }
+
+  // Coupon wording in the domain overrides whatever type was declared —
+  // couponowner.com and idealcoupons.com both filed as "Editorial Content".
   if (COUPON_TOKENS.test(name)) add(3, "coupon/deal wording in company name");
-  if (url && COUPON_TOKENS.test(url)) add(3, "coupon/deal wording in domain");
+  if (host && COUPON_TOKENS.test(host)) add(6, "coupon/deal wording in domain");
+
+  if (host && THIRD_PARTY_DOMAINS.has(host) && !nameMatchesDomain(name, host)) {
+    add(6, `claims ${host}, a domain it does not own`);
+  }
+  // Consonant soup like bnccjiykdufcng.com — nobody's real brand.
+  const label = host.split(".")[0];
+  if (label.length >= 10 && !/[aeiou]{1}[a-z]*[aeiou]/.test(label)) {
+    add(6, "random-string domain");
+  }
 
   if (!url) {
-    add(4, "no website URL on the application");
+    add(6, "no website URL on the application");
   } else if (SOCIAL_HOSTS.test(url)) {
-    add(1, "only a social profile, no owned site");
+    const fake = socialLooksFake(name, url);
+    if (fake) add(fake.hard ? 6 : 3, `social profile only — ${fake.why}`);
+    else add(0, "social profile only, but coherent personal brand");
   } else if (WEAK_HOSTS.test(url)) {
     add(2, "free/parked host, no owned domain");
   }
 
-  if (points === 0) reasons.push("no flags raised");
+  if (points === 0 && reasons.length === 0) reasons.push("no flags raised");
   return { points, reasons };
 }
 
@@ -181,14 +258,57 @@ function decide(app, { points, reasons }) {
     return { decision: "reject", declineReason: "noUrlGiven", points, reasons };
   }
   if (points >= 6) {
-    const reason = COUPON_TOKENS.test(app.companyName ?? "") ||
-      COUPON_TYPES.some((t) => (app.promotionalType ?? "").toLowerCase().includes(t))
-      ? "doesntWorkType"
-      : "urlIrrelevant";
+    // Pick the decline reason from whichever rule actually fired, so the
+    // publisher gets an accurate one rather than a catch-all.
+    const fired = reasons.join(" ");
+    const reason = /does not own|random-string/.test(fired)
+      ? "urlIrrelevant"
+      : /social profile only/.test(fired)
+        ? "profileIncomplete"
+        : "doesntWorkType";
     return { decision: "reject", declineReason: reason, points, reasons };
   }
   if (points >= 3) return { decision: "review", declineReason: null, points, reasons };
   return { decision: "accept", declineReason: null, points, reasons };
+}
+
+/**
+ * Promote social-only applicants to `reject` when they look batch-registered.
+ *
+ * No per-applicant rule can see this: individually each one is just a creator
+ * with a themed handle. What gave the farm away was publisher ids clustered
+ * within a few hundred of each other on the same platform — five cycling
+ * accounts at 2033625/2033637/2033717/2033719/2033891, gaps of 12, 80, 2, 172.
+ * Real creators who happen to share a platform do not register in a burst.
+ *
+ * Mutates entries in place, so it runs before the plan is written.
+ */
+function flagBatchRegisteredClusters(plan, { window = 500, minSize = 3 } = {}) {
+  const social = plan
+    .filter((p) => SOCIAL_HOSTS.test(p.websiteUrl ?? "") && Number.isFinite(Number(p.publisherId)))
+    .sort((a, b) => Number(a.publisherId) - Number(b.publisherId));
+
+  let run = [];
+  const flush = () => {
+    if (run.length >= minSize) {
+      for (const p of run) {
+        if (p.decision === "reject") continue;
+        p.decision = "reject";
+        p.declineReason = "profileIncomplete";
+        p.points += 6;
+        p.reasons.push(
+          `+6 one of ${run.length} social accounts registered in a burst ` +
+            `(ids ${run[0].publisherId}–${run[run.length - 1].publisherId})`,
+        );
+      }
+    }
+    run = [];
+  };
+  for (const p of social) {
+    if (run.length && Number(p.publisherId) - Number(run[run.length - 1].publisherId) > window) flush();
+    run.push(p);
+  }
+  flush();
 }
 
 // ------------------------------------------------------------------- http ---
@@ -357,6 +477,7 @@ async function cmdList(opts) {
     seen.add(app.publisherId);
     plan.push({ ...app, ...decide(app, score(app)) });
   }
+  flagBatchRegisteredClusters(plan);
   plan.sort((a, b) => b.points - a.points);
 
   const w = (s, n) => String(s ?? "").slice(0, n).padEnd(n);
@@ -473,7 +594,7 @@ function parseArgs(argv) {
 }
 
 /** Exported so the scoring rules can be unit-tested without hitting Awin. */
-export { score, decide, normalize, DECLINE_REASONS };
+export { score, decide, normalize, DECLINE_REASONS, flagBatchRegisteredClusters };
 
 const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
 if (isMain) {
