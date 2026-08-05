@@ -167,15 +167,27 @@ export function auditInvoice(invoiceId: string): AuditReport {
         units += it.quantity;
       }
     }
-    if (units > 0 && Math.abs(units - c.quantity) > 0.5) {
-      const overBilled = c.quantity > units;
+    if (units <= 0) continue;
+    // Big Sky picks each frame's CASE as a separate unit (they stock JX-CASE-*
+    // SKUs), so billed units land between `frames` and `2×frames (+ a couple
+    // inserts)`. Observed invoices cluster at exactly 2:1. Only bill counts
+    // OUTSIDE that envelope are anomalies worth a human look:
+    //   below frames      → they picked fewer than the order (split shipment?)
+    //   above 2×frames+2  → more picks than frames+cases can explain
+    const envelopeMax = units * 2 + 2;
+    if (c.quantity < units - 0.5) {
       findings.push({
-        check: "quantity",
-        severity: overBilled ? "warning" : "info",
-        chargeType: c.charge_type,
+        check: "quantity", severity: "info", chargeType: c.charge_type,
         orderNumber: c.order_number_raw,
-        message: `Billed for ${c.quantity} units but the order contains ${units} (pack-expanded). ${overBilled ? "Possible overbilling." : "Billed fewer than ordered — check for split shipment."}`,
+        message: `Billed for ${c.quantity} units but the order contains ${units} frames (pack-expanded) — check for split shipment.`,
         charged: c.quantity, expected: units, delta: c.quantity - units,
+      });
+    } else if (c.quantity > envelopeMax + 0.5) {
+      findings.push({
+        check: "quantity", severity: "warning", chargeType: c.charge_type,
+        orderNumber: c.order_number_raw,
+        message: `Billed for ${c.quantity} units but the order contains ${units} frames — even with a case per frame that's at most ~${envelopeMax}. Possible overbilling.`,
+        charged: c.quantity, expected: envelopeMax, delta: c.quantity - envelopeMax,
       });
     }
   }
