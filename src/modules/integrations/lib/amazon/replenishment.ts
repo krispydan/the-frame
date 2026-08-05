@@ -25,7 +25,7 @@
  */
 
 import { sqlite } from "@/lib/db";
-import { SKU_MAP_CTE, WAREHOUSE_CTE, COST_CTE } from "./sku-map";
+import { SKU_MAP_CTE, WAREHOUSE_CTE, COST_CTE, INTERNAL_SKU } from "./sku-map";
 
 /** Cover target, in days, for FBA stock. Configurable per run. */
 export const DEFAULT_COVER_DAYS = 60;
@@ -135,8 +135,10 @@ export function buildReplenishmentProposal(opts?: {
     ${WAREHOUSE_CTE},
     -- Paid vs seeded units over the trailing window, from OUR archive. This
     -- is the Vine correction: Amazon's units_sold_last_30_days counts both.
+    -- Keyed on the INTERNAL spelling so a product listed both merchant and
+    -- FBA has its demand summed rather than split across two lines.
     velocity AS (
-      SELECT r.sku AS sku,
+      SELECT ${INTERNAL_SKU("r.sku")} AS sku,
              SUM(CASE WHEN r.item_promotion_discount >= r.item_price - 0.005
                        AND r.item_price > 0.005 THEN 0 ELSE r.quantity END) AS paidUnits,
              SUM(CASE WHEN r.item_promotion_discount >= r.item_price - 0.005
@@ -144,46 +146,47 @@ export function buildReplenishmentProposal(opts?: {
       FROM amazon_order_rows r
       WHERE date(r.purchase_date) BETWEEN ? AND ?
         AND IFNULL(LOWER(r.item_status), '') != 'cancelled'
-      GROUP BY r.sku
+      GROUP BY ${INTERNAL_SKU("r.sku")}
     ),
     -- Transfers we generated but Amazon has not acknowledged as inbound yet.
     -- Amazon can take days to show a shipment, and during that window its own
     -- inbound count reads zero — so without this the proposal keeps
     -- recommending units already on a truck, and a second shipment goes out.
     in_flight AS (
-      SELECT sku, SUM(quantity) AS qty
+      SELECT ${INTERNAL_SKU("sku")} AS sku, SUM(quantity) AS qty
       FROM amazon_fba_transfers
       WHERE received_at IS NULL AND created_for >= ?
-      GROUP BY sku
+      GROUP BY ${INTERNAL_SKU("sku")}
     ),
     ${COST_CTE}
+    -- One row per PRODUCT, not per listing. MAX on the FBA position because
+    -- both listings report the same physical stock; SUM would double it.
+    -- The -FBA spelling is preferred for display since that is what ships.
     SELECT
-      rr.sku                    AS sku,
-      rr.asin                   AS asin,
-      rr.product_name           AS amazonTitle,
-      rr.alert                  AS amazonAlert,
-      rr.recommended_qty        AS amazonRecommendedQty,
-      rr.recommended_ship_date  AS recommendedShipDate,
-      rr.units_sold_30d         AS amazonUnitsSold30d,
-      rr.days_of_supply         AS daysOfSupply,
-      rr.available              AS fbaAvailable,
-      rr.inbound + rr.working + rr.receiving AS fbaInbound,
-      rr.price                  AS price,
-      IFNULL(w.qty, 0)          AS warehouseAvailable,
-      IFNULL(tf.qty, 0)         AS inFlight,
-      IFNULL(v.paidUnits, 0)    AS paidUnits30d,
-      IFNULL(v.seededUnits, 0)  AS seededUnits30d,
-      c.landed                  AS landedCostPerUnit
+      MAX(rr.sku)               AS sku,
+      MAX(rr.asin)              AS asin,
+      MAX(rr.product_name)      AS amazonTitle,
+      MAX(rr.alert)             AS amazonAlert,
+      MAX(rr.recommended_qty)   AS amazonRecommendedQty,
+      MAX(rr.recommended_ship_date) AS recommendedShipDate,
+      MAX(rr.units_sold_30d)    AS amazonUnitsSold30d,
+      MAX(rr.days_of_supply)    AS daysOfSupply,
+      MAX(rr.available)         AS fbaAvailable,
+      MAX(rr.inbound + rr.working + rr.receiving) AS fbaInbound,
+      MAX(rr.price)             AS price,
+      IFNULL(MAX(w.qty), 0)     AS warehouseAvailable,
+      IFNULL(MAX(tf.qty), 0)    AS inFlight,
+      IFNULL(MAX(v.paidUnits), 0)   AS paidUnits30d,
+      IFNULL(MAX(v.seededUnits), 0) AS seededUnits30d,
+      MAX(c.landed)             AS landedCostPerUnit
     FROM amazon_restock_recommendations rr
     LEFT JOIN sku_map m   ON m.spelling = rr.internal_sku
     LEFT JOIN warehouse w ON w.sku_id = m.sku_id
     LEFT JOIN cost c      ON c.sku_id = m.sku_id
-    -- Velocity is keyed on the Amazon-facing SKU, which is what the order
-    -- rows carry; the FBA and merchant listings of one product sell
-    -- separately and must not be pooled.
-    LEFT JOIN velocity v   ON v.sku = rr.sku
-    LEFT JOIN in_flight tf ON tf.sku = rr.sku
+    LEFT JOIN velocity v   ON v.sku = rr.internal_sku
+    LEFT JOIN in_flight tf ON tf.sku = rr.internal_sku
     WHERE rr.snapshot_date = ?
+    GROUP BY rr.internal_sku
   `).all(windowStart, today, windowStart, snapshotDate) as Array<{
     sku: string; asin: string | null; amazonTitle: string | null;
     amazonAlert: string | null; amazonRecommendedQty: number;

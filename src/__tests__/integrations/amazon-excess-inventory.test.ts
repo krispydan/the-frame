@@ -158,3 +158,26 @@ describe("reporting", () => {
     expect(report().notes[0]).toContain("run the restock sync first");
   });
 });
+
+describe("one line per product, not per listing", () => {
+  it("counts the shared FBA position once across both listings", () => {
+    // Amazon reports the same physical stock on the merchant and FBA rows.
+    // Counting both doubled every excess unit and every dollar of capital
+    // reported as at risk — found against production, not in tests.
+    seed({ sku: "JX1-BLK", available: 8, paid: 0, landed: 2 });
+    seed({ sku: "JX1-BLK-FBA", available: 8, paid: 0, landed: 2 });
+
+    const r = report();
+    expect(r.lines).toHaveLength(1);
+    expect(r.totals.excessUnits).toBe(8);
+    expect(r.totals.excessValueAtCost).toBe(16);
+  });
+
+  it("pools demand across both listings before deciding a SKU is dead", () => {
+    // Otherwise a product selling only through its merchant listing reads as
+    // dead stock on the FBA one.
+    seed({ sku: "JX1-BLK-FBA", available: 30, paid: 0 });
+    seed({ sku: "JX1-BLK", available: 30, paid: 30 });
+    expect(report().lines).toHaveLength(0);
+  });
+});

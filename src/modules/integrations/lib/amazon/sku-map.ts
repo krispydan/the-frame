@@ -65,3 +65,19 @@ export const COST_CTE = `
              ORDER BY x.received_at ASC, x.created_at ASC LIMIT 1) AS landed
     FROM inventory_cost_layers cl GROUP BY cl.sku_id
   )`;
+
+
+/**
+ * SQL to strip the -FBA suffix from a column, matching `toInternalSku`.
+ *
+ * ⚠️ One product is often listed TWICE on Amazon — merchant-fulfilled and
+ * FBA — and the restock report emits a row for each. Verified against
+ * production: both rows carry the SAME FBA position, because it is the same
+ * physical stock. Treating them as two products double-counts every unit and
+ * every dollar of excess, and splits the product's demand across two lines so
+ * neither looks worth restocking.
+ *
+ * So: positions are taken ONCE across the pair (MAX), demand is SUMMED.
+ */
+export const INTERNAL_SKU = (col: string) =>
+  `CASE WHEN UPPER(${col}) LIKE '%-FBA' THEN SUBSTR(${col}, 1, LENGTH(${col}) - 4) ELSE ${col} END`;

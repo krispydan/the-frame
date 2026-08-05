@@ -21,7 +21,7 @@
  */
 
 import { sqlite } from "@/lib/db";
-import { SKU_MAP_CTE, COST_CTE } from "./sku-map";
+import { SKU_MAP_CTE, COST_CTE, INTERNAL_SKU } from "./sku-map";
 
 /** Days of cover beyond which stock is excess rather than prudent. */
 export const EXCESS_COVER_DAYS = 180;
@@ -95,8 +95,10 @@ export function buildExcessReport(opts?: {
 
   const rows = sqlite.prepare(`
     ${SKU_MAP_CTE},
+    -- Keyed on the INTERNAL spelling: one product listed both merchant and
+    -- FBA must have its demand summed, not split.
     velocity AS (
-      SELECT r.sku AS sku,
+      SELECT ${INTERNAL_SKU("r.sku")} AS sku,
              SUM(CASE WHEN r.item_promotion_discount >= r.item_price - 0.005
                        AND r.item_price > 0.005 THEN 0 ELSE r.quantity END) AS paidUnits,
              SUM(CASE WHEN r.item_promotion_discount >= r.item_price - 0.005
@@ -104,19 +106,23 @@ export function buildExcessReport(opts?: {
       FROM amazon_order_rows r
       WHERE date(r.purchase_date) BETWEEN ? AND ?
         AND IFNULL(LOWER(r.item_status), '') != 'cancelled'
-      GROUP BY r.sku
+      GROUP BY ${INTERNAL_SKU("r.sku")}
     ),
     ${COST_CTE}
-    SELECT rr.sku AS sku, rr.asin AS asin, rr.product_name AS amazonTitle,
-           rr.available AS fbaAvailable, rr.unfulfillable AS unfulfillable,
-           IFNULL(v.paidUnits, 0) AS paidUnits30d,
-           IFNULL(v.seededUnits, 0) AS seededUnits30d,
-           c.landed AS landedCostPerUnit
+    -- One row per PRODUCT. MAX on the position because both listings report
+    -- the same physical stock — summing would double every excess unit and
+    -- every dollar of capital reported as at risk.
+    SELECT MAX(rr.sku) AS sku, MAX(rr.asin) AS asin, MAX(rr.product_name) AS amazonTitle,
+           MAX(rr.available) AS fbaAvailable, MAX(rr.unfulfillable) AS unfulfillable,
+           IFNULL(MAX(v.paidUnits), 0) AS paidUnits30d,
+           IFNULL(MAX(v.seededUnits), 0) AS seededUnits30d,
+           MAX(c.landed) AS landedCostPerUnit
     FROM amazon_restock_recommendations rr
     LEFT JOIN sku_map m  ON m.spelling = rr.internal_sku
     LEFT JOIN cost c     ON c.sku_id = m.sku_id
-    LEFT JOIN velocity v ON v.sku = rr.sku
+    LEFT JOIN velocity v ON v.sku = rr.internal_sku
     WHERE rr.snapshot_date = ?
+    GROUP BY rr.internal_sku
   `).all(windowStart, today, snapshotDate) as Array<{
     sku: string; asin: string | null; amazonTitle: string | null;
     fbaAvailable: number; unfulfillable: number;

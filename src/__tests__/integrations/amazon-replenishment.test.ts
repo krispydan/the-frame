@@ -195,15 +195,32 @@ describe("correction 2 — Vine", () => {
     expect(line("JX1-BLK-FBA").paidUnits30d).toBe(0);
   });
 
-  it("does not pool the FBA and merchant listings of one product", () => {
-    // They sell separately and each has its own FBA position.
+  it("pools demand across the merchant and FBA listings of one product", () => {
+    // Corrected against production. Amazon lists many products twice and
+    // reports the SAME FBA position on both rows, so they are one product:
+    // demand must be summed, or each listing looks half as worth restocking.
     catalogSku("s1", "JX1-BLK", "JX1-BLK");
     warehouse("s1", 500);
     restock({ sku: "JX1-BLK-FBA", recommended: 50, sold30d: 30 });
     sold("JX1-BLK-FBA", 30);
     sold("JX1-BLK", 60);
 
-    expect(line("JX1-BLK-FBA").paidUnits30d).toBe(30);
+    expect(line("JX1-BLK-FBA").paidUnits30d).toBe(90);
+  });
+
+  it("counts the shared FBA position once across both listings", () => {
+    // Both rows carry the same physical stock. Summing would double it and
+    // make a product look covered when it is not.
+    catalogSku("s1", "JX1-BLK", "JX1-BLK");
+    warehouse("s1", 500);
+    restock({ sku: "JX1-BLK", available: 40, sold30d: 30 });
+    restock({ sku: "JX1-BLK-FBA", available: 40, sold30d: 30 });
+    sold("JX1-BLK-FBA", 30);
+
+    const p = propose();
+    expect(p.lines).toHaveLength(1);
+    expect(p.lines[0].fbaAvailable).toBe(40);
+    expect(p.lines[0].proposedQty).toBe(20); // 60 target − 40 already there
   });
 });
 
