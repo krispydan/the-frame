@@ -726,29 +726,80 @@ export class PhoneBurnerClient {
 
   // ── Calls (polling source) ──
   /**
-   * Fetch recent calls since `since` (ISO timestamp). PB's exact list
-   * endpoint URL isn't fully documented; we try the most likely path
-   * (`/calls`) and accept either an array body or a `{ data: [] }`
-   * envelope. If the empirical path differs once we hit the live API,
-   * swap the path here in one place.
+   * Fetch recent calls since `since` (ISO timestamp).
+   *
+   * PB's REST API doesn't expose a flat `/calls` list — the real path
+   * is `/dialsession` (list of sessions) + `/dialsession/{id}` (per
+   * session's calls). This wrapper fetches one page of sessions,
+   * filters to those that started after `since`, and pulls each
+   * session's call detail concurrently. Returns a flat PbCall[] so
+   * existing callers (pullPhoneBurnerCallResults, backfill endpoint)
+   * don't need to change.
+   *
+   * PB session-list shape (verified 2026-08):
+   *   { dialsessions: { dialsessions: [{ dialsession_id, start_when, ... }],
+   *                     page, total_pages, total_results } }
+   * PB session-detail shape:
+   *   { dialsession: { calls: [ ... ] } } (see /dialsession/{id})
    */
   async listRecentCalls(opts: {
     since?: string;
     page?: number;
     page_size?: number;
   }): Promise<PbCall[]> {
-    const raw = await this.request<{ data?: PbCall[] } | PbCall[]>(
-      "GET",
-      "/calls",
-      undefined,
-      {
-        since: opts.since,
-        page: opts.page ?? 1,
-        page_size: opts.page_size ?? 100,
-      },
-    );
-    if (Array.isArray(raw)) return raw;
-    return raw.data ?? [];
+    const raw = (await this.request<Record<string, unknown>>("GET", "/dialsession", undefined, {
+      page: opts.page ?? 1,
+      page_size: opts.page_size ?? 100,
+    })) as Record<string, unknown>;
+    // Nested envelope: { dialsessions: { dialsessions: [...] } }
+    const env = ((raw?.dialsessions ?? raw) as Record<string, unknown>) || {};
+    const sessions = (env.dialsessions as Array<Record<string, unknown>>) || [];
+    if (!Array.isArray(sessions) || sessions.length === 0) return [];
+
+    // Filter to sessions started on/after `since` (PB timestamps are
+    // Central time in `YYYY-MM-DD HH:MM:SS` — treat as UTC-approx for
+    // filter purposes; individual call ingestion re-normalises).
+    const sinceMs = opts.since ? Date.parse(opts.since) : 0;
+    const eligible = sessions.filter((s) => {
+      const startWhen = String(s.start_when || "");
+      if (!startWhen) return true; // no timestamp → include, let caller filter
+      const ms = Date.parse(startWhen.replace(" ", "T") + "Z");
+      return isNaN(ms) || ms >= sinceMs;
+    });
+
+    // Fetch each session's call detail in parallel (small concurrency).
+    const calls: PbCall[] = [];
+    const limit = 4;
+    let idx = 0;
+    const worker = async () => {
+      while (idx < eligible.length) {
+        const i = idx++;
+        const sid = String(eligible[i].dialsession_id || "");
+        if (!sid) continue;
+        try {
+          const detail = (await this.request<Record<string, unknown>>(
+            "GET",
+            `/dialsession/${sid}`,
+          )) as Record<string, unknown>;
+          // Detail shape: { dialsession: { calls: [...] } }
+          const de = (detail?.dialsession ?? detail) as Record<string, unknown>;
+          const cs = (de?.calls as PbCall[]) || [];
+          for (const c of Array.isArray(cs) ? cs : []) {
+            calls.push({
+              ...c,
+              // Map dialsession fields to our PbCall shape where PB
+              // uses different names.
+              called_at: (c.called_at ?? c.call_time ?? c.connected_when) as string | undefined,
+            });
+          }
+        } catch {
+          // per-session errors ignored — a single bad session shouldn't
+          // kill the whole batch.
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(limit, eligible.length) }, worker));
+    return calls;
   }
 
   async getCall(callId: string, opts?: { include_recording?: boolean }): Promise<PbCall> {
