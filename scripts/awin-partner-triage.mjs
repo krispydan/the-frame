@@ -31,11 +31,15 @@
  *
  * Usage:
  *   node scripts/awin-partner-triage.mjs list                  # score + write plan
+ *   node scripts/awin-partner-triage.mjs list --enrich         # + fetch profile descriptions
  *   node scripts/awin-partner-triage.mjs list --raw            # dump raw API JSON
  *   node scripts/awin-partner-triage.mjs apply --confirm       # execute the plan
  *   node scripts/awin-partner-triage.mjs apply --confirm --only-rejects
  *
- * Flags: --advertiser <id>  --plan <path>  --verbose
+ * Flags: --advertiser <id>  --plan <path>  --enrich  --verbose
+ *
+ * --enrich re-scores the undecided rows against their profile description,
+ * which the pending list does not carry. Costs one call per undecided row.
  */
 
 /** Overridable only so the flow can be exercised against a local mock in tests. */
@@ -150,6 +154,17 @@ const THIRD_PARTY_DOMAINS = new Set([
  */
 const TRUSTED_NETWORKS = new Set(["skimlinks.com", "sovrn.com"]);
 
+/**
+ * Business-model language in a profile description.
+ *
+ * Deliberately phrases rather than single words: a sock blog may well mention
+ * "deals", but only a coupon business describes itself as running a discount
+ * code site or a browser extension. Matched against the description only, never
+ * the company name, so it cannot fire on a brand that merely sounds salesy.
+ */
+const BUSINESS_MODEL_TOKENS =
+  /(coupon|voucher|promo(tional)? code|discount code|cash ?back|rebate|deal site|deals? platform|savings platform|browser extension|shopping assistant|price comparison)/i;
+
 /** Bare host, lowercased, no scheme/www/path. */
 function hostOf(url) {
   return String(url ?? "").replace(/^https?:\/\/(www\.)?/i, "").split("/")[0].toLowerCase();
@@ -243,6 +258,19 @@ function score(app) {
     add(2, "free/parked host, no owned domain");
   }
 
+  // Only present when --enrich has fetched the applicant's profile. The pending
+  // list itself carries no description, which is why so many applicants with no
+  // declared promotion type could not be scored either way.
+  if (app.description != null) {
+    const desc = app.description.trim();
+    if (!desc) {
+      add(2, "profile has no description at all");
+    } else if (BUSINESS_MODEL_TOKENS.test(desc)) {
+      const hit = desc.match(BUSINESS_MODEL_TOKENS)[0];
+      add(6, `describes itself as a coupon/cashback business ("${hit}")`);
+    }
+  }
+
   if (points === 0 && reasons.length === 0) reasons.push("no flags raised");
   return { points, reasons };
 }
@@ -270,6 +298,43 @@ function decide(app, { points, reasons }) {
   }
   if (points >= 3) return { decision: "review", declineReason: null, points, reasons };
   return { decision: "accept", declineReason: null, points, reasons };
+}
+
+/**
+ * Fetch one applicant's profile description.
+ *
+ * Needs ?advertiserId — without it the endpoint 400s. Returns null rather than
+ * throwing, so one bad profile cannot abort a whole enrichment pass.
+ */
+async function fetchDescription(advertiserId, publisherId) {
+  const url = `${UI}/partner-profile-api/publishers/${publisherId}/profile?advertiserId=${advertiserId}`;
+  const { ok, json } = await call("GET", url);
+  if (!ok) return null;
+  return typeof json?.description === "string" ? json.description : "";
+}
+
+/**
+ * Re-score the undecided rows using their profile description.
+ *
+ * Scoped to `review` because that is where the extra signal changes the answer —
+ * a row already rejected on its domain does not need a second opinion, and this
+ * keeps the pass to a few dozen calls rather than one per applicant.
+ */
+async function enrichUndecided(plan, advertiserId, verbose) {
+  const targets = plan.filter((p) => p.decision === "review");
+  if (verbose) console.error(`  enriching ${targets.length} undecided applicant(s)...`);
+  let moved = 0;
+  for (const p of targets) {
+    const description = await fetchDescription(advertiserId, p.publisherId);
+    if (description == null) continue;
+    p.description = description;
+    const before = p.decision;
+    Object.assign(p, decide(p, score(p)));
+    if (p.decision !== before) moved += 1;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  if (verbose) console.error(`  enrichment resolved ${moved} of ${targets.length}`);
+  return moved;
 }
 
 /**
@@ -477,6 +542,7 @@ async function cmdList(opts) {
     seen.add(app.publisherId);
     plan.push({ ...app, ...decide(app, score(app)) });
   }
+  if (opts.enrich) await enrichUndecided(plan, opts.advertiser, opts.verbose);
   flagBatchRegisteredClusters(plan);
   plan.sort((a, b) => b.points - a.points);
 
@@ -493,6 +559,7 @@ async function cmdList(opts) {
       `${w(p.decision, 8)} ${w(p.points, 4)} ${w(p.companyName, 30)} ${w(p.promotionalType, 18)} ${p.websiteUrl || "(none)"}`,
     );
     for (const r of p.reasons) console.log(`${" ".repeat(14)}${r}`);
+    if (p.description) console.log(`${" ".repeat(14)}"${p.description.slice(0, 120)}"`);
   }
 
   const counts = plan.reduce((a, p) => ((a[p.decision] = (a[p.decision] ?? 0) + 1), a), {});
@@ -587,6 +654,7 @@ function parseArgs(argv) {
     advertiser: flag("advertiser", DEFAULT_ADVERTISER),
     plan: flag("plan", DEFAULT_PLAN),
     raw: argv.includes("--raw"),
+    enrich: argv.includes("--enrich"),
     confirm: argv.includes("--confirm"),
     onlyRejects: argv.includes("--only-rejects"),
     verbose: argv.includes("--verbose"),
