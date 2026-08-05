@@ -89,6 +89,72 @@ describe("physical stock sourcing", () => {
   });
 });
 
+describe("sources", () => {
+  function shiphero(sku: string, onHand: number) {
+    sqlite.prepare(`
+      INSERT INTO shiphero_inventory (sku, warehouse_id, on_hand, allocated, available, synced_at)
+      VALUES (?, 'wh-1', ?, 0, ?, '2026-08-04T12:00:00Z')
+    `).run(sku, onHand, onHand);
+  }
+
+  it("separates a broken mapping from genuinely missing stock", () => {
+    // ShipHero holds 500 units; only 40 landed in `inventory`. The checks read
+    // `inventory`, so without this the answer looks like "we own nothing".
+    sku("s1", "JX1-BLK");
+    shiphero("JX1-BLK", 40);
+    shiphero("JX-MYSTERY", 460);
+    warehouse("s1", 40);
+
+    const s = buildDriftReport().sources;
+    expect(s.shiphero.onHand).toBe(500);
+    expect(s.mappedWarehouse).toBe(40);
+    expect(s.shiphero.unmappedOnHand).toBe(460);
+    expect(s.shiphero.unmappedExamples).toContain("JX-MYSTERY (460)");
+  });
+
+  it("reports nothing unmapped when every SKU maps through", () => {
+    sku("s1", "JX1-BLK");
+    shiphero("JX1-BLK", 40);
+    warehouse("s1", 40);
+    expect(buildDriftReport().sources.shiphero.unmappedOnHand).toBe(0);
+  });
+
+  it("counts FBA units the catalog cannot match under any spelling", () => {
+    sku("s1", "JX1-BLK");
+    fba("JX1-BLK-FBA", 100);   // matches via the -FBA suffix
+    fba("JX-GHOST-FBA", 25);   // matches nothing
+    const s = buildDriftReport().sources;
+    expect(s.fba.totalQty).toBe(125);
+    expect(s.fba.unmatchedQty).toBe(25);
+    expect(s.fba.unmatchedExamples).toEqual(["JX-GHOST-FBA (25)"]);
+  });
+
+  it("matches FBA rows on the ingest-resolved internal_sku", () => {
+    sku("s1", "JX1-BLK");
+    sqlite.prepare(`
+      INSERT INTO amazon_fba_inventory (id, sku, internal_sku, snapshot_date, total_qty)
+      VALUES (?, 'JX1-BLK-FBA-V2', 'JX1-BLK', '2026-08-04', 70)
+    `).run(crypto.randomUUID());
+    const r = buildDriftReport();
+    expect(r.sources.fba.unmatchedQty).toBe(0);
+    expect(r.totals.fba).toBe(70);
+  });
+
+  it("looks at the latest FBA snapshot only", () => {
+    sku("s1", "JX1-BLK");
+    fba("JX1-BLK-FBA", 999, "2026-07-01");
+    fba("JX1-BLK-FBA", 30, "2026-08-04");
+    const s = buildDriftReport().sources;
+    expect(s.fba.snapshotDate).toBe("2026-08-04");
+    expect(s.fba.totalQty).toBe(30);
+  });
+
+  it("surfaces the ShipHero sync timestamp so a stale feed is visible", () => {
+    shiphero("JX1-BLK", 10);
+    expect(buildDriftReport().sources.shiphero.lastSyncedAt).toBe("2026-08-04T12:00:00Z");
+  });
+});
+
 describe("verdict", () => {
   it("reads clean when FIFO matches physical", () => {
     sku("s1", "JX1-BLK");

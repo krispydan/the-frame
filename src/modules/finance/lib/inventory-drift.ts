@@ -44,7 +44,39 @@ export type SkuDrift = {
   firstDepletionAt: string | null;
 };
 
+/**
+ * What each upstream feed actually holds, before any mapping.
+ *
+ * The per-SKU view can only show stock it managed to join to a catalog SKU,
+ * so "physical is zero" there is ambiguous: the feed could be empty, or the
+ * feed could be full and the join broken. These are the raw numbers, which
+ * separate the two — and they are the difference between chasing a costing
+ * bug and chasing a sync bug.
+ */
+export type SourceReport = {
+  shiphero: {
+    /** Rows in the raw ShipHero table, and units across them. */
+    rows: number;
+    onHand: number;
+    lastSyncedAt: string | null;
+    /** Units the raw feed holds for SKUs that never mapped into `inventory`. */
+    unmappedOnHand: number;
+    unmappedExamples: string[];
+  };
+  /** Units in `inventory` at location='warehouse' — what the checks read. */
+  mappedWarehouse: number;
+  fba: {
+    rows: number;
+    totalQty: number;
+    snapshotDate: string | null;
+    /** FBA SKUs that match no catalog SKU under any spelling. */
+    unmatchedQty: number;
+    unmatchedExamples: string[];
+  };
+};
+
 export type DriftReport = {
+  sources: SourceReport;
   totals: {
     fifoRemaining: number;
     warehouse: number;
@@ -83,10 +115,10 @@ export function buildDriftReport(opts?: { limit?: number }): DriftReport {
       SELECT sku, MAX(snapshot_date) AS d FROM amazon_fba_inventory GROUP BY sku
     ),
     fba AS (
-      SELECT f.sku AS sku, SUM(f.total_qty) AS qty
+      SELECT f.sku AS sku, f.internal_sku AS internal_sku, SUM(f.total_qty) AS qty
       FROM amazon_fba_inventory f
       JOIN latest_fba l ON l.sku = f.sku AND l.d = f.snapshot_date
-      GROUP BY f.sku
+      GROUP BY f.sku, f.internal_sku
     ),
     layers AS (
       SELECT sku_id,
@@ -122,8 +154,11 @@ export function buildDriftReport(opts?: { limit?: number }): DriftReport {
     LEFT JOIN firstdep ON firstdep.sku_id = cs.id
     LEFT JOIN wh       ON wh.sku_id = cs.id
     -- FBA reports the Amazon-facing SKU, which carries a -FBA suffix for
-    -- stock we send in. Match both spellings onto the one catalog SKU.
-    LEFT JOIN fba ON fba.sku = cs.sku OR fba.sku = cs.sku || '-FBA'
+    -- stock we send in. The ingest already resolves that to internal_sku;
+    -- match on it first and fall back to the raw spellings.
+    LEFT JOIN fba ON fba.internal_sku = cs.sku
+                  OR fba.sku = cs.sku
+                  OR fba.sku = cs.sku || '-FBA'
     WHERE IFNULL(layers.remaining, 0) != 0
        OR IFNULL(wh.qty, 0) != 0
        OR IFNULL(fba.qty, 0) != 0
@@ -198,6 +233,7 @@ export function buildDriftReport(opts?: { limit?: number }): DriftReport {
   }
 
   return {
+    sources: buildSourceReport(),
     totals,
     shape: {
       skusWithDrift,
@@ -209,6 +245,74 @@ export function buildDriftReport(opts?: { limit?: number }): DriftReport {
       explanation,
     },
     skus: skus.sort((a, b) => Math.abs(b.drift) - Math.abs(a.drift)).slice(0, limit),
+  };
+}
+
+/** Raw feed totals, independent of any catalog join. */
+export function buildSourceReport(): SourceReport {
+  const sh = sqlite.prepare(`
+    SELECT COUNT(*) AS rows, IFNULL(SUM(on_hand), 0) AS onHand, MAX(synced_at) AS lastSyncedAt
+    FROM shiphero_inventory
+  `).get() as { rows: number; onHand: number; lastSyncedAt: string | null };
+
+  // ShipHero SKUs the mapper never landed in `inventory`. A large number here
+  // with healthy raw stock is a mapping failure, not missing stock.
+  const unmapped = sqlite.prepare(`
+    SELECT si.sku AS sku, SUM(si.on_hand) AS qty
+    FROM shiphero_inventory si
+    WHERE si.on_hand > 0
+      AND NOT EXISTS (
+        SELECT 1 FROM catalog_skus cs
+        JOIN inventory i ON i.sku_id = cs.id AND i.location = 'warehouse' AND i.quantity > 0
+        WHERE cs.sku = si.sku
+      )
+    GROUP BY si.sku
+    ORDER BY qty DESC
+  `).all() as Array<{ sku: string; qty: number }>;
+
+  const mappedWarehouse = (sqlite.prepare(
+    "SELECT IFNULL(SUM(quantity), 0) AS n FROM inventory WHERE location = 'warehouse'",
+  ).get() as { n: number }).n;
+
+  const snapshotDate = (sqlite.prepare(
+    "SELECT MAX(snapshot_date) AS d FROM amazon_fba_inventory",
+  ).get() as { d: string | null }).d;
+
+  const fbaAgg = snapshotDate
+    ? sqlite.prepare(
+      "SELECT COUNT(*) AS rows, IFNULL(SUM(total_qty), 0) AS totalQty FROM amazon_fba_inventory WHERE snapshot_date = ?",
+    ).get(snapshotDate) as { rows: number; totalQty: number }
+    : { rows: 0, totalQty: 0 };
+
+  const fbaUnmatched = snapshotDate
+    ? sqlite.prepare(`
+      SELECT f.sku AS sku, f.total_qty AS qty
+      FROM amazon_fba_inventory f
+      WHERE f.snapshot_date = ? AND f.total_qty > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM catalog_skus cs
+          WHERE cs.sku = f.internal_sku OR cs.sku = f.sku OR cs.sku || '-FBA' = f.sku
+        )
+      ORDER BY f.total_qty DESC
+    `).all(snapshotDate) as Array<{ sku: string; qty: number }>
+    : [];
+
+  return {
+    shiphero: {
+      rows: sh.rows,
+      onHand: sh.onHand,
+      lastSyncedAt: sh.lastSyncedAt,
+      unmappedOnHand: unmapped.reduce((t, r) => t + r.qty, 0),
+      unmappedExamples: unmapped.slice(0, 10).map((r) => `${r.sku} (${r.qty})`),
+    },
+    mappedWarehouse,
+    fba: {
+      rows: fbaAgg.rows,
+      totalQty: fbaAgg.totalQty,
+      snapshotDate,
+      unmatchedQty: fbaUnmatched.reduce((t, r) => t + r.qty, 0),
+      unmatchedExamples: fbaUnmatched.slice(0, 10).map((r) => `${r.sku} (${r.qty})`),
+    },
   };
 }
 
