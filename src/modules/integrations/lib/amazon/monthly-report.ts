@@ -20,6 +20,7 @@
  */
 
 import { sqlite } from "@/lib/db";
+import { recentAmazonMonths, monthBounds } from "./periods";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 1000) / 10 : 0);
@@ -61,23 +62,6 @@ export interface AmazonMonthlyReport {
   adSpendAvailable: boolean;
   narrative: string[];
   provenance: string[];
-}
-
-/** Months present in the data, oldest first. */
-function monthsWithData(limit: number): string[] {
-  const rows = sqlite.prepare(`
-    SELECT DISTINCT substr(date(purchase_date), 1, 7) AS m
-    FROM amazon_order_rows
-    WHERE purchase_date IS NOT NULL
-    ORDER BY m DESC LIMIT ?
-  `).all(limit) as Array<{ m: string }>;
-  return rows.map((r) => r.m).reverse();
-}
-
-function monthBounds(month: string): { start: string; end: string } {
-  const [y, m] = month.split("-").map(Number);
-  const end = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
-  return { start: `${month}-01`, end };
 }
 
 function figuresFor(month: string): AmazonMonthFigures {
@@ -176,7 +160,7 @@ const CHANGE_METRICS = [
 ] as const;
 
 export function buildAmazonMonthlyReport(opts?: { months?: number }): AmazonMonthlyReport {
-  const months = monthsWithData(opts?.months ?? 3).map(figuresFor);
+  const months = recentAmazonMonths(opts?.months ?? 3).map(figuresFor);
   const adSpendAvailable = false; // No source until the Amazon Ads connector is linked.
 
   let change: AmazonMonthlyReport["change"] = null;

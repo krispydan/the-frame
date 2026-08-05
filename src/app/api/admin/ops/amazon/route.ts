@@ -26,6 +26,7 @@ import { buildAmazonMonthEnd } from "@/modules/integrations/lib/amazon/month-end
 import { buildAmazonMonthlyReport, sendAmazonMonthlyDigest } from "@/modules/integrations/lib/amazon/monthly-report";
 import { buildReplenishmentProposal } from "@/modules/integrations/lib/amazon/replenishment";
 import { buildFbaTransfer, buildFbaTransferFromProposal, recordFbaTransfer } from "@/modules/integrations/lib/amazon/fba-transfer";
+import { buildAsinProfitability } from "@/modules/integrations/lib/amazon/asin-profitability";
 import { fetchWindsorCatalog, CANDIDATE_CONNECTORS } from "@/modules/integrations/lib/windsor/catalog";
 import { fetchWindsorReport, WindsorError, redact } from "@/modules/integrations/lib/windsor/client";
 import {
@@ -160,6 +161,12 @@ export async function GET(req: NextRequest) {
       case "performance": {
         const months = Number(req.nextUrl.searchParams.get("months")) || 3;
         return NextResponse.json({ ok: true, performance: buildAmazonMonthlyReport({ months }) });
+      }
+
+      case "asin-profitability": {
+        const months = Number(req.nextUrl.searchParams.get("months")) || 3;
+        const limit = Number(req.nextUrl.searchParams.get("limit")) || undefined;
+        return NextResponse.json({ ok: true, profitability: buildAsinProfitability({ months, limit }) });
       }
 
       case "replenishment": {
