@@ -106,23 +106,21 @@ async function handle(req: NextRequest) {
     error?: string;
   }> = [];
 
-  // Page every rep's calls since sinceDays. PB `listRecentCalls` returns
-  // dispositions inline, so we filter locally.
+  // listRecentCalls returns ALL matching calls in one shot (it internally
+  // paginates the /dialsession endpoint). Single call per rep — the old
+  // outer pagination loop was re-fetching everything on each iteration.
   for (const acct of accounts) {
-    let page = 1;
-    let cap = 60; // 60 pages × 100 = 6000 calls (~2mo peak volume)
-    while (cap-- > 0) {
+    {
       let batch: PbCall[];
       try {
         batch = (await acct.client.listRecentCalls({
           since: sinceIso,
-          page,
           page_size: 100,
         })) as unknown as PbCall[];
       } catch (e) {
         appointments.push({
           rep: acct.rep,
-          call_id: `(page ${page} error)`,
+          call_id: `(${acct.rep} listRecentCalls error)`,
           contact_id: "",
           disposition: "",
           called_at: "",
@@ -248,8 +246,7 @@ async function handle(req: NextRequest) {
         });
       }
 
-      if (batch.length < 100) break;
-      page++;
+      // Single-shot enumeration — no outer pagination needed.
     }
   }
 
