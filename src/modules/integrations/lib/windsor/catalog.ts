@@ -76,15 +76,22 @@ export async function fetchWindsorCatalog(
       .map((r) => (typeof r === "string" ? r : (r as Record<string, unknown>)?.name ?? (r as Record<string, unknown>)?.field))
       .filter((n): n is string => typeof n === "string");
 
-    // Group on the report prefix. Anything unprefixed is connector-level and
-    // grouped under "(root)" rather than dropped — a silently missing field
-    // is how a report gets scoped wrong.
+    // Windsor qualifies a field with its report in a trailing parenthesis —
+    // `seller-sku (get_afn_inventory_data_by_country)` — not with a dot
+    // prefix. Grouping on a dot instead lumped 898 of 899 fields into one
+    // bucket and hid every report name, which is the only thing this probe
+    // exists to surface.
+    //
+    // Fields with no qualifier are connector-level (Account ID, Account Name)
+    // and grouped under "(account)" rather than dropped — a silently missing
+    // field is how a report gets scoped wrong.
     const byReport = new Map<string, string[]>();
     for (const n of names) {
-      const idx = n.indexOf(".");
-      const report = idx > 0 ? n.slice(0, idx) : "(root)";
+      const m = n.match(/^(.*?)\s*\(([a-z0-9_]+)\)\s*$/i);
+      const report = m ? m[2] : "(account)";
+      const field = m ? m[1].trim() : n;
       const list = byReport.get(report) ?? [];
-      list.push(idx > 0 ? n.slice(idx + 1) : n);
+      list.push(field);
       byReport.set(report, list);
     }
 
