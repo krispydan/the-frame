@@ -274,3 +274,128 @@ export function fairePayoutToComponents(
   }
   return out;
 }
+
+// ── Amazon ────────────────────────────────────────────────────────────────
+
+export type AmazonInvoiceAccounts = {
+  sales: string;             // 4010 Sales - Amazon
+  shippingIncome: string;    // 4060 Shipping Income
+  discounts: string;         // 4310 Sales Discounts & Promotions
+  refunds: string;           // 4300 Sales Returns & Allowances
+  commission: string;        // 5410 Merchant Fees - Amazon
+  fbaFulfillment: string;    // 5470 Amazon Fees - FBA Fulfillment
+  fbaStorage: string;        // 5475 Amazon Fees - FBA Storage
+  subscription: string;      // 5480 Amazon Fees - Subscription
+  inboundFreight: string;    // 5010 COGS - Inbound Freight
+  outboundShipping: string;  // 5300 Outbound Shipping & Postage
+  unclassified: string;      // 5440 Merchant Fees - Other (suspense)
+};
+
+/**
+ * Minimal shape of a classified Amazon settlement.
+ *
+ * Structural rather than an import from the Amazon module, matching how
+ * `FaireInvoiceSummary` is declared — it keeps every channel's invoice
+ * mapping in this one file without the xero module depending on each
+ * channel's internals.
+ */
+export type AmazonInvoiceSummary = {
+  settlementId: string;
+  /** Signed per-category totals as Amazon reports them (revenue +, fees −). */
+  byCategory: Record<string, number>;
+  /** Net of every line — the amount that actually hits the bank. */
+  net: number;
+};
+
+/** Category → account + whether it lands on the revenue or contra side. */
+const AMAZON_COMPONENTS: Array<{
+  category: string;
+  field: keyof AmazonInvoiceAccounts;
+  kind: "revenue" | "contra";
+  label: string;
+}> = [
+  { category: "sales",             field: "sales",            kind: "revenue", label: "Gross product sales" },
+  { category: "shipping_income",   field: "shippingIncome",   kind: "revenue", label: "Shipping income" },
+  { category: "discounts",         field: "discounts",        kind: "contra",  label: "Promotions & discounts" },
+  { category: "refunds",           field: "refunds",          kind: "contra",  label: "Refunds" },
+  { category: "commission",        field: "commission",       kind: "contra",  label: "Referral commission" },
+  { category: "fba_fulfillment",   field: "fbaFulfillment",   kind: "contra",  label: "FBA fulfilment fees" },
+  { category: "fba_storage",       field: "fbaStorage",       kind: "contra",  label: "FBA storage fees" },
+  { category: "subscription",      field: "subscription",     kind: "contra",  label: "Selling plan subscription" },
+  { category: "inbound_freight",   field: "inboundFreight",   kind: "contra",  label: "Inbound freight to FBA" },
+  { category: "outbound_shipping", field: "outboundShipping", kind: "contra",  label: "Return shipping labels" },
+  { category: "unclassified",      field: "unclassified",     kind: "contra",  label: "Unclassified — needs review" },
+];
+
+/**
+ * Map a classified Amazon settlement → ACCREC invoice components.
+ *
+ * Under the settlement-date model the invoice total must equal the deposit,
+ * so the bank reconciles 1:1. Two Amazon-specific things make that non-trivial:
+ *
+ *  - **Facilitator tax never appears.** Amazon collects and remits sales tax
+ *    itself and the two legs cancel, so the classifier already excludes them.
+ *    Including them would inflate the invoice above the deposit.
+ *  - **Settlement-internal movements are excluded too** — the card charge
+ *    covering a negative balance offsets itself, and a micro deposit is a bank
+ *    artefact, not revenue or expense.
+ *
+ * Whatever those exclusions leave between the component total and the real
+ * deposit is emitted as an explicit plug to the suspense account, so the
+ * invoice ties exactly rather than drifting by a few cents every fortnight.
+ *
+ * A category with a sign opposite to its usual side (a net commission CREDIT
+ * after refunds, say) flips to the other side rather than being emitted as a
+ * negative magnitude — `buildSettlementInvoice` applies the sign from `kind`,
+ * so a negative amount there would silently double-negate.
+ */
+export function amazonSettlementToComponents(
+  s: AmazonInvoiceSummary,
+  accounts: AmazonInvoiceAccounts,
+): InvoiceComponent[] {
+  const label = `Amazon settlement ${s.settlementId}`;
+  const out: InvoiceComponent[] = [];
+
+  for (const spec of AMAZON_COMPONENTS) {
+    const raw = round2(s.byCategory[spec.category] ?? 0);
+    if (raw === 0) continue;
+
+    const accountCode = accounts[spec.field];
+    if (!accountCode) continue;
+
+    // Amazon reports revenue positive and fees negative, so the sign alone
+    // determines the side. `spec.kind` records the side each category
+    // normally lands on; a category can legitimately flip (a net commission
+    // CREDIT once refund credits exceed the fees), and following the sign
+    // handles that without a special case.
+    const kind: "revenue" | "contra" = raw > 0 ? "revenue" : "contra";
+
+    out.push({
+      category: spec.category,
+      accountCode,
+      amount: Math.abs(raw),
+      kind,
+      description: `${spec.label} — ${label}`,
+    });
+  }
+
+  // Tie the invoice to the deposit. `kind` decides the sign, so the plug's
+  // direction is chosen here rather than by handing over a negative amount.
+  const componentTotal = round2(
+    out.reduce((sum, c) => sum + (c.kind === "revenue" ? c.amount : -c.amount), 0),
+  );
+  const plug = round2(round2(s.net) - componentTotal);
+  if (Math.abs(plug) >= 0.005) {
+    out.push({
+      category: "unclassified",
+      accountCode: accounts.unclassified,
+      amount: Math.abs(plug),
+      kind: plug > 0 ? "revenue" : "contra",
+      description:
+        `Settlement adjustment — difference between mapped lines and net deposit — ${label} ` +
+        `(usually a bank artefact such as a micro deposit; review)`,
+    });
+  }
+
+  return out;
+}

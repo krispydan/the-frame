@@ -21,7 +21,8 @@
 import { db, sqlite } from "@/lib/db";
 import { inArray } from "drizzle-orm";
 import { xeroAccountMappings, xeroTrackingMappings, SHARED_PLATFORM_KEY } from "@/modules/integrations/schema/xero";
-import { postManualJournal, postBankTransactionReceive } from "@/modules/finance/lib/xero-client";
+import { postManualJournal, postBankTransactionReceive, postSettlementInvoice } from "@/modules/finance/lib/xero-client";
+import { buildSettlementInvoice, amazonSettlementToComponents } from "@/modules/integrations/lib/xero/settlement-invoice-builder";
 import { getPayoutRevenueModel } from "@/modules/integrations/lib/xero/payout-revenue-model";
 import { notifyIntegrationFailure } from "@/modules/integrations/lib/slack/notifications";
 import { summariseSettlement, type SettlementRowInput } from "./settlement-classify";
@@ -170,10 +171,13 @@ export async function syncAmazonSettlementsToXero(
   }
 
   const model = await getPayoutRevenueModel();
-  if (model === "invoice") {
+
+  // The deferred model needs the two accrual accounts; the invoice model does
+  // not touch them. Checking here keeps the failure specific to the model
+  // actually in use rather than demanding mappings that will never be read.
+  if (model === "deferred" && (!config.deferredRevenue || !config.receivablesHolding)) {
     summary.fatalError =
-      "payout_revenue_model is set to `invoice`. Amazon's settlement-date invoice path is not implemented; " +
-      "switch to `deferred` or implement amazonSettlementToComponents in settlement-invoice-builder.ts.";
+      "payout_revenue_model is `deferred`, which needs `deferred_revenue` and `receivables_holding` account mappings.";
     return summary;
   }
 
@@ -245,6 +249,12 @@ async function postOne(
   const date = candidate.periodEnd
     ?? rows.find((r) => r.settlement_end_date)?.settlement_end_date
     ?? new Date().toISOString().slice(0, 10);
+
+  // Settlement-date model: one ACCREC invoice whose total equals the deposit,
+  // so the bank statement line matches 1:1 and no accrual accounts are touched.
+  if (model === "invoice") {
+    return postAsInvoice(settlementId, settlementSummary, config, date.slice(0, 10), opts);
+  }
 
   const built = buildAmazonSettlementJournal({
     summary: settlementSummary,
@@ -328,6 +338,121 @@ async function postOne(
   return {
     settlementId, status: "posted", manualJournalId: journal.manualJournalId,
     bankTransactionId, net: built.netDeposit, warnings,
+  };
+}
+
+/**
+ * Post a settlement as an ACCREC invoice (the settlement-date model).
+ *
+ * Unlike the deferred path there is no bank sweep: the invoice IS the
+ * receivable, and Xero reconciles it directly against the deposit. That is
+ * the whole point of this model — one object per settlement, matched to one
+ * bank line.
+ *
+ * A net-negative settlement is refused rather than posted. Amazon charged the
+ * card instead of depositing, which is a credit note, not an invoice; posting
+ * a negative invoice would misstate receivables and fail to match anything.
+ */
+async function postAsInvoice(
+  settlementId: string,
+  settlementSummary: ReturnType<typeof summariseSettlement>,
+  config: AmazonXeroConfig,
+  date: string,
+  opts: { dryRun?: boolean; status?: "POSTED" | "DRAFT" },
+): Promise<PostResult> {
+  if (settlementSummary.net < 0) {
+    const error =
+      `Settlement is net negative (${settlementSummary.net.toFixed(2)}) — Amazon charged the card rather than ` +
+      `depositing. That needs a credit note, not an invoice; record it manually against Amazon Clearing.`;
+    logJournalAttempt(settlementId, "failed", null, settlementSummary.net, error, "invoice");
+    return { settlementId, status: "failed", warnings: [], error };
+  }
+
+  const components = amazonSettlementToComponents(
+    { settlementId, byCategory: settlementSummary.byCategory, net: settlementSummary.net },
+    {
+      sales: config.sales,
+      shippingIncome: config.shippingIncome,
+      discounts: config.discounts,
+      refunds: config.refunds,
+      commission: config.commission,
+      fbaFulfillment: config.fbaFulfillment,
+      fbaStorage: config.fbaStorage,
+      subscription: config.subscription,
+      inboundFreight: config.inboundFreight,
+      outboundShipping: config.outboundShipping,
+      unclassified: config.unclassified,
+    },
+  );
+
+  const track = config.tracking?.[0];
+  const built = buildSettlementInvoice({
+    channel: AMAZON_PLATFORM,
+    contactName: "Amazon",
+    // Prefix already reserved in settlement-revenue.ts; it is the idempotency
+    // key Xero itself enforces, on top of our xero_payout_syncs guard.
+    invoiceNumber: `AMZN-${settlementId}`,
+    reference: `Amazon settlement ${settlementId}`,
+    date,
+    netPayout: settlementSummary.net,
+    components,
+    tracking: track
+      ? {
+          trackingCategoryId: track.TrackingCategoryID ?? "",
+          trackingCategoryName: track.Name ?? null,
+          trackingOptionId: "",
+          trackingOptionName: track.Option,
+        }
+      : null,
+    status: opts.status === "DRAFT" ? "DRAFT" : "AUTHORISED",
+  });
+
+  if (!built.ok) {
+    logJournalAttempt(settlementId, "failed", null, settlementSummary.net, built.error, "invoice");
+    return { settlementId, status: "failed", warnings: [], error: built.error };
+  }
+
+  const warnings = [...built.warnings];
+  if (settlementSummary.unclassified.length > 0) {
+    warnings.push(`${settlementSummary.unclassified.length} settlement line(s) were unrecognised and booked to suspense.`);
+  }
+  if (Math.abs(settlementSummary.taxResidual) >= 0.01) {
+    warnings.push(
+      `Marketplace facilitator tax did not net to zero (residual ${settlementSummary.taxResidual}); ` +
+      `the invoice excludes both tax legs, so that amount is currently unrecorded.`,
+    );
+  }
+
+  if (opts.dryRun) {
+    return {
+      settlementId, status: "skipped", net: built.total,
+      warnings: ["Dry run — invoice built and tied to the deposit, nothing posted.", ...warnings],
+    };
+  }
+
+  const post = await postSettlementInvoice(built.payload as unknown as Record<string, unknown> & { InvoiceNumber: string });
+  if (!post.success) {
+    logJournalAttempt(settlementId, "failed", null, built.total, post.error ?? "unknown error", "invoice");
+    return { settlementId, status: "failed", warnings, error: post.error };
+  }
+  if (post.existed) {
+    warnings.push("An invoice with this number already existed in Xero; reused rather than duplicated.");
+  }
+
+  sqlite.prepare(`
+    INSERT INTO xero_payout_syncs (id, source_platform, source_payout_id, amount, currency, paid_at, xero_object_type, xero_object_id, synced_at)
+    VALUES (?, ?, ?, ?, 'USD', ?, 'invoice', ?, datetime('now'))
+  `).run(crypto.randomUUID(), AMAZON_PLATFORM, settlementId, built.total, date, post.invoiceId ?? null);
+
+  logJournalAttempt(settlementId, "success", post.invoiceId ?? null, built.total, null, "invoice");
+
+  sqlite.prepare(
+    "UPDATE settlements SET xero_transaction_id = ?, xero_synced_at = datetime('now'), status = 'synced_to_xero' WHERE external_id = ?",
+  ).run(post.invoiceId ?? "existing", amazonSettlementExternalId(settlementId));
+
+  return {
+    settlementId, status: "posted",
+    manualJournalId: post.invoiceId, net: built.total, warnings,
   };
 }
 
