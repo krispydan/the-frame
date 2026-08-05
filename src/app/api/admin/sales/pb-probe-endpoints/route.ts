@@ -15,10 +15,9 @@ import { phoneBurnerAccounts } from "@/modules/sales/lib/phoneburner-client";
  * Auth: x-admin-key: jaxy2026
  */
 
-// Fetch latest sessions to see recent Christina calls
+// Inspect calls from most recent session (today, 48 calls)
 const PATHS_TO_PROBE = [
-  `/dialsession?page=2&page_size=100`, // page 2 of ~158 total = newer
-  `/dialsession?page=1&page_size=100`, // page 1 for reference
+  `/dialsession/47391586`,  // today 2026-08-04
 ];
 
 export async function POST(req: NextRequest) {
