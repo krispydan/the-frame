@@ -229,7 +229,34 @@ export async function GET(req: NextRequest) {
           FROM amazon_asin_traffic_daily WHERE parent_asin IS NOT NULL
         `).get();
 
-        return NextResponse.json({ ok: true, byMechanism: rows, coverage, parents });
+        // Amazon's OWN unit count, from the sales & traffic report, which is
+        // produced independently of the all-orders report. If it exceeds the
+        // orders archive, the archive is missing units rather than the
+        // giveaway detection being wrong — a different problem with a
+        // different fix, and no other figure distinguishes them.
+        const amazonCounts = sqlite.prepare(`
+          SELECT IFNULL(SUM(units_ordered), 0) AS unitsOrdered,
+                 IFNULL(SUM(units_shipped), 0) AS unitsShipped,
+                 MIN(date) AS firstDate, MAX(date) AS lastDate,
+                 COUNT(*) AS days
+          FROM amazon_sales_traffic_daily
+        `).get() as Record<string, number | string>;
+
+        const ourUnits = (sqlite.prepare(`
+          SELECT IFNULL(SUM(quantity), 0) AS n FROM amazon_order_rows
+          WHERE IFNULL(LOWER(item_status), '') != 'cancelled'
+            AND date(purchase_date) BETWEEN ? AND ?
+        `).get(amazonCounts.firstDate, amazonCounts.lastDate) as { n: number }).n;
+
+        return NextResponse.json({
+          ok: true, byMechanism: rows, coverage, parents,
+          reconciliation: {
+            ...amazonCounts,
+            ourOrderUnitsSamePeriod: ourUnits,
+            unitsAmazonCountsThatWeDoNotHold:
+              Number(amazonCounts.unitsOrdered) - ourUnits,
+          },
+        });
       }
 
       case "promotions": {
