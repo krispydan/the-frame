@@ -28,6 +28,7 @@ import { buildReplenishmentProposal } from "@/modules/integrations/lib/amazon/re
 import { buildFbaTransfer, buildFbaTransferFromProposal, recordFbaTransfer } from "@/modules/integrations/lib/amazon/fba-transfer";
 import { buildAsinProfitability } from "@/modules/integrations/lib/amazon/asin-profitability";
 import { buildAmazonDashboardSeries } from "@/modules/integrations/lib/amazon/dashboard-series";
+import { buildExcessReport } from "@/modules/integrations/lib/amazon/excess-inventory";
 import { fetchWindsorCatalog, CANDIDATE_CONNECTORS } from "@/modules/integrations/lib/windsor/catalog";
 import { fetchWindsorReport, WindsorError, redact } from "@/modules/integrations/lib/windsor/client";
 import {
@@ -162,6 +163,11 @@ export async function GET(req: NextRequest) {
       case "performance": {
         const months = Number(req.nextUrl.searchParams.get("months")) || 3;
         return NextResponse.json({ ok: true, performance: buildAmazonMonthlyReport({ months }) });
+      }
+
+      case "excess": {
+        const coverDays = Number(req.nextUrl.searchParams.get("coverDays")) || undefined;
+        return NextResponse.json({ ok: true, excess: buildExcessReport({ coverDays }) });
       }
 
       case "series": {
