@@ -15,9 +15,9 @@ import { phoneBurnerAccounts } from "@/modules/sales/lib/phoneburner-client";
  * Auth: x-admin-key: jaxy2026
  */
 
-// Inspect calls from most recent session (today, 48 calls)
+// Enumerate BOTH reps' dial sessions
 const PATHS_TO_PROBE = [
-  `/dialsession/47391586`,  // today 2026-08-04
+  `/dialsession?page=1&page_size=5`,
 ];
 
 export async function POST(req: NextRequest) {
@@ -27,14 +27,26 @@ export async function POST(req: NextRequest) {
   const accounts = phoneBurnerAccounts();
   const results: Record<string, unknown> = {};
 
-  // Only probe with sandra to save time (both accounts hit same URL surface)
-  const sandra = accounts.find((a) => a.rep === "sandra");
-  if (!sandra) return NextResponse.json({ ok: false, error: "no sandra account" }, { status: 500 });
+  // Probe with BOTH reps to see per-account visibility
+  for (const acct of accounts) {
+    for (const path of PATHS_TO_PROBE) {
+      const key = `[${acct.rep}] ${path}`;
+      try {
+        const r = (await acct.client.rawGet(path)) as Record<string, unknown> | null;
+        results[key] = { status: "200", sample_body: r };
+      } catch (e) {
+        const msg = (e instanceof Error ? e.message : String(e));
+        const m = msg.match(/PhoneBurner (\d+)/);
+        results[key] = { status: m ? m[1] : "err", error: msg.slice(0, 100) };
+      }
+    }
+  }
+  return NextResponse.json({ ok: true, results });
 
+  // (Unreachable — the following is legacy and superseded by the loop above)
   for (const path of PATHS_TO_PROBE) {
     try {
-      // Strip query if any and let rawGet fetch full body — include sample
-      const r = (await sandra.client.rawGet(path)) as Record<string, unknown> | null;
+      const r = (await accounts[0].client.rawGet(path)) as Record<string, unknown> | null;
       results[path] = {
         status: "200",
         keys: r ? Object.keys(r).slice(0, 15) : [],
