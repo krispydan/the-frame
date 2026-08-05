@@ -285,6 +285,23 @@ export function buildReplenishmentProposal(opts?: {
     );
   }
 
+  // ⚠️ Vine claims that have not dispatched yet will still come out of FBA
+  // stock, and nothing in any Amazon report exposes them — the Vine dashboard
+  // is not in Windsor's catalog. So `fbaAvailable` is a ceiling, not a
+  // reservation, and cover is optimistic by however many claims are
+  // outstanding. Measured once against a Vine export: 131 claimed against 59
+  // dispatched, so the gap can be larger than a single SKU's cover target.
+  //
+  // Stated rather than silently corrected. A guessed reservation would be a
+  // number nobody could check; a caveat is one someone can act on.
+  if (seededTotal > 0) {
+    warnings.push(
+      "FBA cover is slightly optimistic: Vine units already CLAIMED but not yet dispatched will draw on " +
+      "the same FBA stock, and Amazon exposes no Vine data through Windsor. Treat `At FBA` as a ceiling. " +
+      "If a SKU is close to its cover target, check the Vine dashboard before deciding not to send.",
+    );
+  }
+
   const shortSkus = lines.filter((l) => l.shortfall > 0);
   if (shortSkus.length > 0) {
     warnings.push(

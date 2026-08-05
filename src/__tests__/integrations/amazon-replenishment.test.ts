@@ -375,3 +375,31 @@ describe("no row multiplication", () => {
     expect(p.lines[0].warehouseAvailable).toBe(40);
   });
 });
+
+describe("the Vine cover caveat", () => {
+  it("warns that FBA cover is optimistic while Vine is running", () => {
+    // Claims that have not dispatched still draw on FBA stock, and Amazon
+    // exposes no Vine data through Windsor. Measured once against a Vine
+    // export: 131 claimed against 59 dispatched. Stated rather than silently
+    // corrected — a guessed reservation would be a number nobody could check.
+    catalogSku("s1", "JX1-BLK", "JX1-BLK");
+    warehouse("s1", 100);
+    restock({ sku: "JX1-BLK-FBA", recommended: 10, sold30d: 10 });
+    sold("JX1-BLK-FBA", 5, { free: true });
+    sold("JX1-BLK-FBA", 5);
+
+    const w = propose().warnings.join(" ");
+    expect(w).toContain("FBA cover is slightly optimistic");
+    expect(w).toContain("not yet dispatched");
+  });
+
+  it("stays quiet when no giveaways ran in the window", () => {
+    // No evidence Vine is active, so the caveat would be noise.
+    catalogSku("s1", "JX1-BLK", "JX1-BLK");
+    warehouse("s1", 100);
+    restock({ sku: "JX1-BLK-FBA", recommended: 10, sold30d: 10 });
+    sold("JX1-BLK-FBA", 10);
+
+    expect(propose().warnings.join(" ")).not.toContain("optimistic");
+  });
+});

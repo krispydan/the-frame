@@ -303,6 +303,30 @@ Each report has two front doors: `/api/v1/finance/amazon/reports?view=…`
    demand so neither listing looked worth restocking. Rows now collapse to one
    per product: positions taken once, demand summed. 137 lines → 115.
 
+### Vine claims are not visible to the replenishment proposal
+
+A Vine dashboard export showed **131 claimed units across 34 parent ASINs**
+against the **59** giveaway units our order archive holds. The archive is not
+missing anything — Amazon's own units-ordered figure, produced independently of
+the all-orders report, is 157 and we hold exactly 157.
+
+The difference is that **"claimed" and "ordered" are different events.** A Vine
+Voice claiming a unit is a request; it becomes an order only on dispatch.
+Corroborating: of 157 units ordered, only 84 have shipped.
+
+Consequence: those undispatched claims will still draw on FBA stock, so
+`fbaAvailable` is a **ceiling, not a reservation**, and cover is optimistic by
+however many claims are outstanding. Amazon exposes no Vine data through
+Windsor (all 23 reports checked), so this cannot be automated.
+
+Decision: **state it, do not guess it.** The proposal emits a warning whenever
+giveaway units appear in the window, and the Replenish tab marks the `At FBA`
+column with a footnote. A guessed reservation would be a number nobody could
+check; a caveat is one someone can act on.
+
+Note also that Vine is reported by PARENT ASIN while order rows carry CHILD
+ASINs — comparing the two lists directly matches nothing.
+
 ### Known gaps
 
 - **Per-ASIN traffic history is partial.** Amazon generates this report on

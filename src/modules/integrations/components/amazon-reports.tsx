@@ -383,7 +383,12 @@ function ReplenishView({ d }: { d: Replenishment }) {
                 <th className="px-2 py-2 text-right font-medium">Amazon<br />wants</th>
                 <th className="px-2 py-2 text-right font-medium">Paid<br />30d</th>
                 <th className="px-2 py-2 text-right font-medium">Free<br />30d</th>
-                <th className="px-2 py-2 text-right font-medium">At<br />FBA</th>
+                <th
+                  className="px-2 py-2 text-right font-medium"
+                  title="A ceiling, not a reservation. Vine units already claimed but not yet dispatched will draw on this same stock, and Amazon exposes no Vine data through Windsor."
+                >
+                  At<br />FBA<span className="text-muted-foreground"> *</span>
+                </th>
                 <th className="px-2 py-2 text-right font-medium">In<br />flight</th>
                 <th className="px-2 py-2 text-right font-medium">Ware-<br />house</th>
                 <th className="px-2 py-2 text-right font-medium">Send</th>
@@ -421,6 +426,12 @@ function ReplenishView({ d }: { d: Replenishment }) {
             </tbody>
           </table>
         </div>
+        <p className="text-xs text-muted-foreground">
+          <span className="font-medium">* At FBA is a ceiling, not a reservation.</span>{" "}
+          Vine units already claimed but not yet dispatched draw on the same stock, and Amazon exposes no
+          Vine data through Windsor — so cover is optimistic by however many claims are outstanding. Check
+          the Vine dashboard before deciding <em>not</em> to send a SKU that is close to its target.
+        </p>
         <p className="text-xs text-muted-foreground">
           Generate the ShipHero transfer and FBA shipment plan with{" "}
           <code className="rounded bg-muted px-1">POST /api/admin/ops/amazon</code>{" "}
