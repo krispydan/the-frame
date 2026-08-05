@@ -165,9 +165,45 @@ const TRUSTED_NETWORKS = new Set(["skimlinks.com", "sovrn.com"]);
 const BUSINESS_MODEL_TOKENS =
   /(coupon|voucher|promo(tional)? code|discount code|cash ?back|rebate|deal site|deals? platform|savings platform|browser extension|shopping assistant|price comparison)/i;
 
+/**
+ * Coupon, cashback and rewards operators identified by brand rather than by
+ * wording, because the wording rules cannot see them.
+ *
+ * Both DontPayFull and Coupert filed two applications each: an honest one
+ * declaring "Discount Code", and a second declaring a content type from a
+ * domain containing no coupon token ("coupert" is not "coupon";
+ * "dontpayfull" is nothing at all). The honest one was rejected and the
+ * disguised one was accepted. Matching the registrable domain regardless of
+ * declared type or subdomain closes that, and catches
+ * extension.dontpayfull.com — a cart-injection browser extension — too.
+ */
+const COUPON_BRAND_DOMAINS = new Set([
+  "dontpayfull.com", "coupert.com", "honey.com", "joinhoney.com",
+  "fatcoupon.com", "simplycodes.com", "demand.io", "evreward.com",
+  "refermate.com", "rewardsbunny.com", "maxrebates.com", "joko.com",
+  "fanli.com", "55haitao.com", "trashie.io", "usebutton.com", "ibotta.com",
+  "retailmenot.com", "slickdeals.net", "dealspotr.com", "groupon.com",
+  "topcashback.com", "quidco.com", "shopback.com", "letyshops.com",
+  "wildfire-corp.com", "cbqueen.com", "shoptastic.io", "mimoni.com",
+  "salepops.com", "minty.com", "search.com", "pricecheckhq.com",
+]);
+
 /** Bare host, lowercased, no scheme/www/path. */
 function hostOf(url) {
   return String(url ?? "").replace(/^https?:\/\/(www\.)?/i, "").split("/")[0].toLowerCase();
+}
+
+/**
+ * Registrable domain, so a subdomain cannot be used to slip past a domain
+ * check — extension.dontpayfull.com must resolve to dontpayfull.com. Handles
+ * the common two-part public suffixes rather than shipping a full PSL.
+ */
+function registrableDomain(host) {
+  const parts = String(host).split(".").filter(Boolean);
+  if (parts.length <= 2) return parts.join(".");
+  const twoPartSuffix = /^(co|com|org|net|gov|ac|edu)\.[a-z]{2}$/;
+  const lastTwo = parts.slice(-2).join(".");
+  return twoPartSuffix.test(lastTwo) ? parts.slice(-3).join(".") : lastTwo;
 }
 
 /** Does the company name plausibly own this domain? Used to separate a brand */
@@ -217,10 +253,17 @@ function score(app) {
   const url = app.websiteUrl ?? "";
   const host = hostOf(url);
 
+  const domain = registrableDomain(host);
+
   // A trusted sub-network short-circuits everything below it.
-  if (TRUSTED_NETWORKS.has(host) && nameMatchesDomain(name, host)) {
+  if (TRUSTED_NETWORKS.has(domain) && nameMatchesDomain(name, host)) {
     reasons.push("trusted content sub-network");
     return { points: 0, reasons };
+  }
+
+  // Known coupon/cashback brand, whatever it declared itself as.
+  if (COUPON_BRAND_DOMAINS.has(domain)) {
+    add(6, `${domain} is a known coupon/cashback operator`);
   }
 
   // Promotion type. Coupon/cashback/loyalty and traffic arbitrage are both
@@ -239,7 +282,11 @@ function score(app) {
   if (COUPON_TOKENS.test(name)) add(3, "coupon/deal wording in company name");
   if (host && COUPON_TOKENS.test(host)) add(6, "coupon/deal wording in domain");
 
-  if (host && THIRD_PARTY_DOMAINS.has(host) && !nameMatchesDomain(name, host)) {
+  // Check both forms: the set holds registrable domains like shareasale.com and
+  // full hosts like apps.apple.com, whose registrable domain (apple.com) would
+  // otherwise miss.
+  const borrowed = THIRD_PARTY_DOMAINS.has(domain) || THIRD_PARTY_DOMAINS.has(host);
+  if (borrowed && !nameMatchesDomain(name, host)) {
     add(6, `claims ${host}, a domain it does not own`);
   }
   // Consonant soup like bnccjiykdufcng.com — nobody's real brand.

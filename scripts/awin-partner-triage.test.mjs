@@ -53,6 +53,17 @@ const cases = [
   { want: "reject", raw: row(22, "dragon", "https://www.instagram.com/dragon.2311067", null) },
   // consonant-soup domain
   { want: "reject", raw: row(23, "My Bliss Holidays", "https://bnccjiykdufcng.com", 15) },
+  // known coupon brands filing a SECOND application under a content type, from
+  // a domain with no coupon wording — both were accepted before this rule
+  { want: "reject", raw: row(24, "DONTPAYFULL SRL", "https://extension.dontpayfull.com", 17) },
+  { want: "reject", raw: row(25, "Coupert Limited", "https://coupert.com", 20) },
+  { want: "reject", raw: row(26, "Wildfire Systems, Inc.", "https://wildfire-corp.com", 20) },
+  // registrable-domain handling must not over-reach on co.uk
+  { want: "accept", raw: row(27, "Milice.co.uk", "https://milice.co.uk", 20) },
+  // app-store links are not a website; the registrable domain (apple.com) must
+  // not let these slip past the full-host entry
+  { want: "reject", raw: row(28, "Findies", "https://apps.apple.com/us/app/dealpump", 19) },
+  { want: "reject", raw: row(29, "N7 Interactive Inc.", "https://apps.apple.com/us/app/viba-me", null) },
 ];
 
 let pass = 0, fail = 0;
