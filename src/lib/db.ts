@@ -2696,6 +2696,43 @@ try {
   sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_amazon_fba_inventory_key ON amazon_fba_inventory(snapshot_date, sku)`);
   sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_amazon_fba_inventory_sku ON amazon_fba_inventory(sku)`);
 
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS amazon_asin_traffic_daily (
+    id TEXT PRIMARY KEY NOT NULL,
+    date TEXT NOT NULL,
+    child_asin TEXT NOT NULL,
+    parent_asin TEXT,
+    units_ordered INTEGER NOT NULL DEFAULT 0,
+    units_shipped INTEGER NOT NULL DEFAULT 0,
+    total_order_items INTEGER NOT NULL DEFAULT 0,
+    ordered_product_sales REAL NOT NULL DEFAULT 0,
+    avg_selling_price REAL NOT NULL DEFAULT 0,
+    refund_rate REAL,
+    sessions INTEGER NOT NULL DEFAULT 0,
+    page_views INTEGER NOT NULL DEFAULT 0,
+    buy_box_pct REAL,
+    conversion_rate REAL,
+    session_pct REAL,
+    ingested_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_amazon_asin_traffic_key ON amazon_asin_traffic_daily(date, child_asin)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_amazon_asin_traffic_asin ON amazon_asin_traffic_daily(child_asin)`);
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS amazon_listings (
+    sku TEXT PRIMARY KEY NOT NULL,
+    internal_sku TEXT,
+    asin TEXT,
+    title TEXT,
+    price REAL,
+    quantity INTEGER,
+    status TEXT,
+    fulfillment_channel TEXT,
+    opened_at TEXT,
+    synced_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_amazon_listings_asin ON amazon_listings(asin)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_amazon_listings_internal ON amazon_listings(internal_sku)`);
+
   sqlite.exec(`CREATE TABLE IF NOT EXISTS amazon_sync_state (
     report_name TEXT PRIMARY KEY NOT NULL,
     last_synced_through TEXT,

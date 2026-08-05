@@ -27,6 +27,8 @@ import {
   ORDERS_BY_LAST_UPDATE,
   SETTLEMENTS,
   SALES_TRAFFIC,
+  SALES_TRAFFIC_BY_ASIN,
+  MERCHANT_LISTINGS,
   FBA_INVENTORY,
   REPORT_KEYS,
   clampToSettlementWindow,
@@ -37,6 +39,8 @@ import {
   ingestOrderRows,
   ingestSettlementRows,
   ingestSalesTraffic,
+  ingestAsinTraffic,
+  ingestListings,
   ingestFbaInventory,
   markSyncRunning,
   markSyncSuccess,
@@ -344,6 +348,43 @@ export async function syncAmazonSalesTraffic(
   return runSync(REPORT_KEYS.salesTraffic, "sales & traffic", async () => {
     const rows = await fetchWindsorReport(SALES_TRAFFIC, { dateFrom, dateTo });
     return { ingest: ingestSalesTraffic(rows), dateFrom, dateTo };
+  });
+}
+
+/**
+ * Pull per-ASIN daily sales + traffic.
+ *
+ * Separate from the by-date sync rather than folded into it: the by-ASIN
+ * variant multiplies row volume by the catalogue and takes a much tighter
+ * window, so a slow ASIN pull must not be able to take the account-level
+ * numbers down with it. Two report keys, two health rows, two failure modes.
+ */
+export async function syncAmazonAsinTraffic(
+  opts: { dateFrom?: string; dateTo?: string; days?: number; today?: string } = {},
+): Promise<SyncOutcome> {
+  const today = opts.today ?? todayUtc();
+  const dateTo = opts.dateTo ?? latestAvailableDate(today);
+  const dateFrom = opts.dateFrom ?? subtractDays(dateTo, (opts.days ?? DEFAULT_TRAILING_DAYS) - 1);
+
+  return runSync(REPORT_KEYS.salesTrafficByAsin, "sales & traffic by ASIN", async () => {
+    const rows = await fetchWindsorReport(SALES_TRAFFIC_BY_ASIN, { dateFrom, dateTo });
+    return { ingest: ingestAsinTraffic(rows), dateFrom, dateTo };
+  });
+}
+
+/**
+ * Pull listing metadata — titles and the ASIN↔SKU bridge.
+ *
+ * A current-state snapshot with no date dimension, like FBA inventory.
+ * Titles change rarely, so this runs daily rather than on the sales cadence.
+ */
+export async function syncAmazonListings(
+  opts: { today?: string } = {},
+): Promise<SyncOutcome> {
+  const today = opts.today ?? todayUtc();
+  return runSync(REPORT_KEYS.merchantListings, "merchant listings", async () => {
+    const rows: WindsorRow[] = await fetchWindsorReport(MERCHANT_LISTINGS, { datePreset: "last_7d" });
+    return { ingest: ingestListings(rows), syncedThrough: today };
   });
 }
 

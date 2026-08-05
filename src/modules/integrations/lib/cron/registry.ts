@@ -38,6 +38,8 @@ import { syncFairePayouts } from "@/modules/integrations/lib/faire/payout-sync";
 import {
   syncAndImportAmazonOrders,
   syncAmazonSalesTraffic,
+  syncAmazonAsinTraffic,
+  syncAmazonListings,
   syncAndBridgeAmazonSettlements,
   syncAmazonFbaInventory,
 } from "@/modules/integrations/lib/amazon/sync";
@@ -360,6 +362,24 @@ export const CRON_JOBS: CronJob[] = [
     schedule: "30 14 * * *",  // 14:30 UTC ≈ 7:30am PT
     description: "Pull Amazon daily sales + traffic metrics (sessions, Buy Box, conversion) for the dashboard",
     handler: () => syncAmazonSalesTraffic({}),
+    guard: () => Boolean(process.env.WINDSOR_API_KEY),
+  },
+  {
+    id: "amazon-asin-traffic-sync",
+    schedule: "35 14 * * *",  // 14:35 UTC — right after the by-date variant
+    description: "Pull Amazon per-ASIN sales + traffic (sessions, conversion, Buy Box per product) for reporting",
+    // Deliberately a separate job from the by-date pull, not folded into it.
+    // The by-ASIN variant multiplies row volume by the catalogue and takes a
+    // much tighter window, so a slow ASIN pull must not be able to take the
+    // account-level numbers down with it.
+    handler: () => syncAmazonAsinTraffic({}),
+    guard: () => Boolean(process.env.WINDSOR_API_KEY),
+  },
+  {
+    id: "amazon-listings-sync",
+    schedule: "45 13 * * *",  // 13:45 UTC — before the day's reporting pulls
+    description: "Pull Amazon listing titles and the ASIN↔SKU bridge, so reports read as product names rather than SKU codes",
+    handler: () => syncAmazonListings({}),
     guard: () => Boolean(process.env.WINDSOR_API_KEY),
   },
   {

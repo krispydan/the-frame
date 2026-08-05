@@ -489,3 +489,155 @@ export function getSyncState(reportName?: string): SyncStateRow[] {
   const stmt = sqlite.prepare(sql);
   return (reportName ? stmt.all(reportName) : stmt.all()) as SyncStateRow[];
 }
+
+/**
+ * Per-ASIN daily sales & traffic.
+ *
+ * UPSERT on (date, child_asin): Amazon restates recent days as orders settle
+ * and sessions are deduplicated, so the last version of a day wins.
+ *
+ * Rows with no child ASIN are rejected rather than dropped silently. Amazon
+ * emits a parent-only summary row alongside the child rows; storing it would
+ * double-count every metric against its own children.
+ */
+export function ingestAsinTraffic(rows: WindsorRow[]): IngestResult {
+  const result = emptyResult();
+  result.received = rows.length;
+
+  const upsert = sqlite.prepare(`
+    INSERT INTO amazon_asin_traffic_daily (
+      id, date, child_asin, parent_asin, units_ordered, units_shipped,
+      total_order_items, ordered_product_sales, avg_selling_price, refund_rate,
+      sessions, page_views, buy_box_pct, conversion_rate, session_pct,
+      ingested_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    ON CONFLICT(date, child_asin) DO UPDATE SET
+      parent_asin = excluded.parent_asin,
+      units_ordered = excluded.units_ordered,
+      units_shipped = excluded.units_shipped,
+      total_order_items = excluded.total_order_items,
+      ordered_product_sales = excluded.ordered_product_sales,
+      avg_selling_price = excluded.avg_selling_price,
+      refund_rate = excluded.refund_rate,
+      sessions = excluded.sessions,
+      page_views = excluded.page_views,
+      buy_box_pct = excluded.buy_box_pct,
+      conversion_rate = excluded.conversion_rate,
+      session_pct = excluded.session_pct,
+      updated_at = datetime('now')
+  `);
+
+  const existing = sqlite.prepare(
+    "SELECT 1 AS hit FROM amazon_asin_traffic_daily WHERE date = ? AND child_asin = ?",
+  );
+
+  const run = sqlite.transaction((batch: WindsorRow[]) => {
+    for (const row of batch) {
+      const date = str(row.date);
+      const childAsin = str(row.childAsin);
+      if (!date) { result.rejected.push({ reason: "missing date", row }); continue; }
+      if (!childAsin) { result.rejected.push({ reason: "missing childAsin", row }); continue; }
+
+      const had = existing.get(date, childAsin) as { hit: number } | undefined;
+      upsert.run(
+        crypto.randomUUID(), date, childAsin, str(row.parentAsin),
+        Math.trunc(num(row["salesByAsin-unitsOrdered"])),
+        Math.trunc(num(row["salesByAsin-unitsShipped"])),
+        Math.trunc(num(row["salesByAsin-totalOrderItems"])),
+        round2(num(row["salesByAsin-orderedProductSales-amount"])),
+        round2(num(row["salesByAsin-averageSellingPrice-amount"])),
+        num(row["salesByAsin-refundRate"]),
+        Math.trunc(num(row["trafficByAsin-sessions"])),
+        Math.trunc(num(row["trafficByAsin-pageViews"])),
+        num(row["trafficByAsin-buyBoxPercentage"]),
+        num(row["trafficByAsin-unitSessionPercentage"]),
+        num(row["trafficByAsin-sessionPercentage"]),
+      );
+      if (had) result.updated++; else result.inserted++;
+    }
+  });
+
+  run(rows);
+  return result;
+}
+
+/**
+ * Listing metadata — titles and the ASIN↔SKU bridge.
+ *
+ * Keyed on seller SKU, which is the only stable identifier: a listing can be
+ * relisted under a new ASIN, and one ASIN can carry several SKUs (ours and
+ * the -FBA variant). `internal_sku` is resolved at ingest so downstream joins
+ * never have to know about the suffix.
+ *
+ * This is a full snapshot of current listings, so it REPLACES rather than
+ * accumulates — but only for SKUs present in the pull. A listing Amazon stops
+ * returning keeps its last known title, because a report that suddenly shows
+ * SKU codes where names used to be reads as a bug in the report.
+ */
+export function ingestListings(rows: WindsorRow[]): IngestResult {
+  const result = emptyResult();
+  result.received = rows.length;
+
+  const upsert = sqlite.prepare(`
+    INSERT INTO amazon_listings (
+      sku, internal_sku, asin, title, price, quantity, status,
+      fulfillment_channel, opened_at, synced_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(sku) DO UPDATE SET
+      internal_sku = excluded.internal_sku,
+      asin = excluded.asin,
+      title = excluded.title,
+      price = excluded.price,
+      quantity = excluded.quantity,
+      status = excluded.status,
+      fulfillment_channel = excluded.fulfillment_channel,
+      opened_at = excluded.opened_at,
+      synced_at = datetime('now')
+  `);
+  const existing = sqlite.prepare("SELECT 1 AS hit FROM amazon_listings WHERE sku = ?");
+
+  const run = sqlite.transaction((batch: WindsorRow[]) => {
+    for (const row of batch) {
+      const sku = str(row["seller-sku"]);
+      if (!sku) { result.rejected.push({ reason: "missing seller-sku", row }); continue; }
+
+      const had = existing.get(sku) as { hit: number } | undefined;
+      upsert.run(
+        sku, toInternalSku(sku), str(row.asin1), str(row["item-name"]),
+        round2(num(row.price)), Math.trunc(num(row.quantity)),
+        str(row.status), str(row["fulfillment-channel"]), str(row["open-date"]),
+      );
+      if (had) result.updated++; else result.inserted++;
+    }
+  });
+
+  run(rows);
+  return result;
+}
+
+/**
+ * Best available display name for an internal SKU.
+ *
+ * Prefers the catalog's own product name (ours, curated) and falls back to
+ * Amazon's listing title (theirs, keyword-stuffed but always present). A
+ * report row with no name at all is the one outcome worth avoiding.
+ */
+export function skuDisplayNames(): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const r of sqlite.prepare(`
+    SELECT l.internal_sku AS sku, l.title AS title FROM amazon_listings l
+    WHERE l.internal_sku IS NOT NULL AND l.title IS NOT NULL
+  `).all() as Array<{ sku: string; title: string }>) {
+    out.set(r.sku, r.title);
+  }
+  for (const r of sqlite.prepare(`
+    SELECT cs.sku AS sku,
+           TRIM(COALESCE(cp.name, '') || CASE WHEN cs.color_name IS NOT NULL
+                THEN ' · ' || cs.color_name ELSE '' END) AS name
+    FROM catalog_skus cs LEFT JOIN catalog_products cp ON cp.id = cs.product_id
+    WHERE cs.sku IS NOT NULL AND cp.name IS NOT NULL
+  `).all() as Array<{ sku: string; name: string }>) {
+    if (r.name) out.set(r.sku, r.name);
+  }
+  return out;
+}

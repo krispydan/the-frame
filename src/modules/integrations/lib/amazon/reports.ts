@@ -170,6 +170,77 @@ export const FBA_INVENTORY: WindsorReport = {
 };
 
 /**
+ * Daily sales + traffic BY ASIN.
+ *
+ * Same upstream report as SALES_TRAFFIC, different dimension: passing the
+ * `salesByAsin-*` / `trafficByAsin-*` fields makes Amazon return one row per
+ * child ASIN per day instead of one row per day.
+ *
+ * This is the only source of per-product sessions and conversion anywhere in
+ * the business, and it is what separates a traffic problem from a conversion
+ * problem — a SKU with sessions and no orders is priced or reviewed wrong, a
+ * SKU with neither is invisible. Order rows can tell you what sold; only this
+ * can tell you what was looked at and not bought.
+ *
+ * Many fields in the catalog carry a literal "(Deprecated)" prefix in their
+ * name. Those are excluded — Amazon still lists them but they return empty.
+ */
+export const SALES_TRAFFIC_BY_ASIN: WindsorReport = {
+  connector: AMAZON_CONNECTOR,
+  report: "get_sales_and_traffic_report",
+  fields: [
+    "date",
+    "childAsin",
+    "parentAsin",
+    "salesByAsin-unitsOrdered",
+    "salesByAsin-unitsShipped",
+    "salesByAsin-totalOrderItems",
+    "salesByAsin-orderedProductSales-amount",
+    "salesByAsin-averageSellingPrice-amount",
+    "salesByAsin-refundRate",
+    "trafficByAsin-sessions",
+    "trafficByAsin-pageViews",
+    "trafficByAsin-buyBoxPercentage",
+    "trafficByAsin-unitSessionPercentage",
+    "trafficByAsin-sessionPercentage",
+  ],
+  // One row per ASIN per day multiplies volume by the catalogue size, so the
+  // window is tighter than the by-date variant's 30.
+  maxWindowDays: 14,
+  timeoutMs: 240_000,
+};
+
+/**
+ * Listing metadata — the source of product titles.
+ *
+ * Without this every report reads as SKU codes. A row that says
+ * "JX3004-S-BLK lost $84" is not actionable to anyone who does not already
+ * know the catalogue by heart; "Aviator · Black (Small)" is.
+ *
+ * Also carries the ASIN↔SKU mapping, which is what lets per-ASIN traffic join
+ * to per-SKU cost. Amazon reports traffic by ASIN and money by SKU, and
+ * nothing else in the account bridges them.
+ */
+export const MERCHANT_LISTINGS: WindsorReport = {
+  connector: AMAZON_CONNECTOR,
+  report: "get_merchant_listings_all_data",
+  fields: [
+    "seller-sku",
+    "asin1",
+    "item-name",
+    "item-description",
+    "price",
+    "quantity",
+    "status",
+    "fulfillment-channel",
+    "open-date",
+    "item-is-marketplace",
+  ],
+  maxWindowDays: 30,
+  timeoutMs: 180_000,
+};
+
+/**
  * Customer returns by return date. Month-end reporting only.
  */
 export const RETURNS: WindsorReport = {
@@ -248,6 +319,8 @@ export const REPORT_KEYS = {
   ordersByLastUpdate: "orders_by_last_update",
   settlements: "settlements",
   salesTraffic: "sales_traffic",
+  salesTrafficByAsin: "sales_traffic_by_asin",
+  merchantListings: "merchant_listings",
   fbaInventory: "fba_inventory",
   returns: "returns",
   reimbursements: "reimbursements",

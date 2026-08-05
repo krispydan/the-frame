@@ -7,6 +7,8 @@ import {
   syncAndImportAmazonOrders,
   syncAndBridgeAmazonSettlements,
   syncAmazonSalesTraffic,
+  syncAmazonAsinTraffic,
+  syncAmazonListings,
   syncAmazonFbaInventory,
   backfillAmazon,
 } from "@/modules/integrations/lib/amazon/sync";
@@ -328,6 +330,20 @@ export async function POST(req: NextRequest) {
         try { await loadAmazonXeroConfig(); } catch (e) { ready = false; error = (e as Error).message; }
 
         return NextResponse.json({ ok: true, action, created, updated, skipped, ready, error });
+      }
+
+      case "sync-asin-traffic": {
+        const { from, to, days } = body as { from?: string; to?: string; days?: number };
+        if (from !== undefined && !isDate(from)) {
+          return NextResponse.json({ ok: false, error: "`from` must be YYYY-MM-DD" }, { status: 400 });
+        }
+        const result = await syncAmazonAsinTraffic({ dateFrom: from, dateTo: to, days });
+        return NextResponse.json({ ok: result.ok, action, result });
+      }
+
+      case "sync-listings": {
+        const result = await syncAmazonListings({});
+        return NextResponse.json({ ok: result.ok, action, result });
       }
 
       case "backfill-line-discounts": {
