@@ -450,10 +450,16 @@ async function call(method, url, body) {
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   const text = await res.text();
-  if (res.status === 401) {
+  // An expired token shows up as 401 on the read endpoints but as a bare
+  // "403 []" on application/update, which reads like a permissions problem.
+  // Treat an empty-bodied 403 on a write as the expiry it almost always is.
+  const looksExpired =
+    res.status === 401 || (res.status === 403 && text.trim().replace(/\[\]|\{\}/, "") === "");
+  if (looksExpired) {
     console.error(
-      `\n401 Unauthorized from ${url}\n` +
-        "The session JWT is missing, expired, or wrong. Grab a fresh one from DevTools.",
+      `\nHTTP ${res.status} from ${url}\n` +
+        "The session JWT is missing, expired, or wrong — Awin's tokens last about an hour.\n" +
+        "Grab a fresh one from DevTools and re-run; nothing in this batch was applied.",
     );
     process.exit(1);
   }
