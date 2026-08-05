@@ -35,7 +35,7 @@
  *   node scripts/awin-partner-triage.mjs apply --confirm       # execute the plan
  *   node scripts/awin-partner-triage.mjs apply --confirm --only-rejects
  *
- * Flags: --advertiser <id>  --plan <path>  --page-size <n>  --verbose
+ * Flags: --advertiser <id>  --plan <path>  --verbose
  */
 
 /** Overridable only so the flow can be exercised against a local mock in tests. */
@@ -59,6 +59,25 @@ const DECLINE_REASONS = new Set([
 
 // ---------------------------------------------------------------- scoring ---
 
+/**
+ * Awin's promotional-type taxonomy, keyed by the numeric id the pending-list
+ * endpoint returns. There is no readable lookup endpoint for advertisers
+ * (/backend/api/v0/promotional-types returns 403), so this map was resolved by
+ * calling the per-publisher promotion endpoint once per distinct id. Ids are
+ * network-wide constants; unknown ones degrade to "type <id>".
+ */
+const PROMO_TYPES = {
+  5: "Direct Linking", 6: "Linking via Landing Pages", 7: "Social Search",
+  8: "Mobile Search", 10: "Ad Networks", 11: "Media Brokers", 12: "Sub Networks",
+  13: "Direct Traffic", 14: "Social Traffic", 15: "Mobile Traffic",
+  16: "Retargeting (Display)", 17: "Contextual Targeting", 18: "Comparison Engine",
+  19: "Shopping Directory", 20: "Editorial Content", 21: "Social Content",
+  22: "Media Content", 23: "Communities & UGC", 24: "Cashback", 25: "Loyalty",
+  26: "Discount Code", 27: "Lead Generation (Content)", 29: "Newsletters",
+  30: "Lead Generation (Email)", 31: "Retargeting (Email)",
+  33: "Comparison Shopping Service (CSS)",
+};
+
 /** Promotion types that are the whole reason this script exists. */
 const COUPON_TYPES = [
   "discount code",
@@ -69,9 +88,39 @@ const COUPON_TYPES = [
   "coupon",
 ];
 
-/** Name/domain tokens that give away a coupon farm. */
-const COUPON_TOKENS =
-  /(coupon|promo[ -]?code|voucher|discount|deals?|bargain|saver|savings|cashback|rabatt|kupon|slevy|kortingscode|gutschein)/i;
+/**
+ * Traffic-arbitrage types. Not coupon farms, but they resell or rebroker traffic
+ * rather than bringing an audience of their own — worth a human look on a
+ * program this size rather than a silent accept.
+ */
+const ARBITRAGE_TYPES = [
+  "sub networks",
+  "ad networks",
+  "media brokers",
+  "retargeting",
+  "direct traffic",
+  "mobile traffic",
+  "social traffic",
+];
+
+/**
+ * Name/domain tokens that give away a coupon farm, including the non-English
+ * ones — a Spanish coupon site (codigosdescuentospromocionales.es) sailed
+ * through an English-only version of this list.
+ */
+const COUPON_TOKENS = new RegExp(
+  [
+    "coupon", "promo[ -]?code", "voucher", "discount", "deals?", "bargain",
+    "saver", "savings", "cashback", "clearance", "freebie",
+    // es / pt / it
+    "descuento", "cupon", "cupom", "promocion", "codigos", "sconto", "buono",
+    // de / nl / nordics
+    "gutschein", "rabatt", "korting", "kortingscode", "tilbud",
+    // pl / cz / sk
+    "kupon", "slevy", "zlavy", "rabatowe",
+  ].join("|"),
+  "i",
+);
 
 /** Free/parked hosts — a "publisher" with no real site of their own. */
 const WEAK_HOSTS =
@@ -79,9 +128,6 @@ const WEAK_HOSTS =
 
 const SOCIAL_HOSTS =
   /(instagram\.com|tiktok\.com|facebook\.com|twitter\.com|x\.com|youtube\.com|pinterest\.)/i;
-
-/** Regions the brands actually sell into. Everything else is a soft flag. */
-const TARGET_REGIONS = new Set(["US", "GB", "UK", "CA"]);
 
 /**
  * Score one applicant. Returns points plus the human-readable reasons behind
@@ -101,9 +147,14 @@ function score(app) {
   const name = app.companyName ?? "";
   const url = app.websiteUrl ?? "";
 
-  if (COUPON_TYPES.some((t) => type.includes(t))) {
+  if (!type) {
+    add(3, "no primary promotion type declared (incomplete profile)");
+  } else if (COUPON_TYPES.some((t) => type.includes(t))) {
     add(3, `promotion type is "${app.promotionalType}"`);
+  } else if (ARBITRAGE_TYPES.some((t) => type.includes(t))) {
+    add(3, `promotion type is "${app.promotionalType}" (resells traffic)`);
   }
+
   if (COUPON_TOKENS.test(name)) add(3, "coupon/deal wording in company name");
   if (url && COUPON_TOKENS.test(url)) add(3, "coupon/deal wording in domain");
 
@@ -113,13 +164,6 @@ function score(app) {
     add(1, "only a social profile, no owned site");
   } else if (WEAK_HOSTS.test(url)) {
     add(2, "free/parked host, no owned domain");
-  }
-
-  if (!app.description || app.description.trim().length < 40) {
-    add(2, "little or no profile description");
-  }
-  if (app.primaryRegion && !TARGET_REGIONS.has(app.primaryRegion.toUpperCase())) {
-    add(1, `primary region ${app.primaryRegion} outside US/GB/CA`);
   }
 
   if (points === 0) reasons.push("no flags raised");
@@ -193,54 +237,101 @@ async function call(method, url, body) {
 /**
  * Normalize a pending-application row.
  *
- * Field names are read from the webapp bundle rather than from a published
- * schema, so each one falls back through the plausible alternatives. Run
- * `list --raw` if something comes through blank — that prints the real payload.
+ * Shape confirmed against the live endpoint:
+ *   { advertiserId, partnerId, company, website, primaryPromotionalType (id),
+ *     sectors: [id], promotionalTypes: [id], membershipStatus, joinDate,
+ *     pendingInvitationDate, applicationDate, pendingSuspensionDate,
+ *     suspensionDate }
+ *
+ * Note the list carries no description and no region, so scoring works from
+ * company name, website and promotion type only. applicationDate is null for
+ * every row in practice. Run `list --raw` if Awin changes the schema.
  */
 function normalize(row) {
-  const socials = row.socialUrls ?? {};
+  const typeId = row.primaryPromotionalType;
   return {
-    publisherId: row.id ?? row.publisherId ?? row.partnerId,
-    companyName: row.companyName ?? row.company ?? row.name ?? "(unknown)",
-    websiteUrl: row.websiteUrl ?? socials.website ?? row.url ?? "",
-    promotionalType:
-      row.primaryPromotionalType?.name ??
-      row.promotionalType ??
-      row.primaryType ??
-      "",
-    primaryRegion: row.primaryRegion?.countryCode ?? row.primaryRegion ?? "",
-    sector: row.primarySector?.name ?? row.sector ?? "",
-    description: row.description ?? row.summary ?? "",
-    applicationDate: row.applicationDate ?? row.joinDate ?? "",
+    publisherId: row.partnerId ?? row.publisherId ?? row.id,
+    companyName: row.company ?? row.companyName ?? "(unknown)",
+    websiteUrl: row.website ?? row.websiteUrl ?? "",
+    promotionalType: typeId == null ? "" : (PROMO_TYPES[typeId] ?? `type ${typeId}`),
+    allPromotionalTypes: (row.promotionalTypes ?? []).map(
+      (id) => PROMO_TYPES[id] ?? `type ${id}`,
+    ),
+    membershipStatus: row.membershipStatus ?? "",
   };
 }
 
-async function fetchPending(advertiserId, pageSize, verbose) {
-  const all = [];
+/**
+ * Page through the pending list. The endpoint ignores any `size` parameter and
+ * always returns 5 rows per page, so a full backlog is a lot of round trips —
+ * progress goes to stderr under --verbose.
+ */
+async function sweep(advertiserId, verbose) {
+  const rows = [];
   let page = 1;
   let total = null;
   for (;;) {
-    const url = `${UI}/universal-search-api/partnerships/pending/${advertiserId}?page=${page}&size=${pageSize}`;
+    const url = `${UI}/universal-search-api/partnerships/pending/${advertiserId}?page=${page}`;
     const { ok, status, json, text } = await call("GET", url);
     if (!ok) {
       console.error(`GET pending page ${page} failed: HTTP ${status}\n${text.slice(0, 400)}`);
       process.exit(1);
     }
-    const rows = json?.partnerships ?? json?.content ?? json?.results ?? [];
-    total = json?.total ?? json?.totalElements ?? rows.length;
-    if (verbose) console.error(`  page ${page}: ${rows.length} rows (total ${total})`);
-    all.push(...rows);
-    if (all.length >= total || rows.length === 0) break;
+    const batch = json?.partnerships ?? [];
+    total = json?.total ?? batch.length;
+    rows.push(...batch);
+    if (rows.length >= total || batch.length === 0) break;
     page += 1;
-    if (page > 100) break; // pagination guard
+    if (page > Math.ceil(total / Math.max(batch.length, 1)) + 5) break; // guard
   }
-  return { rows: all, total };
+  if (verbose) console.error(`  sweep returned ${rows.length} rows (API total ${total})`);
+  return { rows, total };
+}
+
+/**
+ * Collect the pending backlog.
+ *
+ * The endpoint ignores `size` (always 5 rows/page) and — more importantly — its
+ * pagination is not stable: two identical passes returned 234 and 254 distinct
+ * publishers against a claimed total of 296, with 32 and 52 publishers unique to
+ * one pass. A single pass therefore silently under-reports. So sweep repeatedly
+ * and union the results until we reach the claimed total or two consecutive
+ * sweeps turn up nobody new.
+ */
+async function fetchPending(advertiserId, verbose) {
+  const byId = new Map();
+  let total = null;
+  let barren = 0;
+
+  for (let pass = 1; pass <= 8; pass += 1) {
+    const before = byId.size;
+    const res = await sweep(advertiserId, verbose);
+    total = res.total;
+    for (const row of res.rows) {
+      const id = row.partnerId ?? row.publisherId ?? row.id;
+      if (id != null && !byId.has(id)) byId.set(id, row);
+    }
+    const gained = byId.size - before;
+    if (verbose) console.error(`  pass ${pass}: +${gained} new → ${byId.size}/${total} distinct`);
+    if (total != null && byId.size >= total) break;
+    barren = gained === 0 ? barren + 1 : 0;
+    if (barren >= 2) break;
+  }
+
+  if (total != null && byId.size < total) {
+    console.error(
+      `\nNote: collected ${byId.size} distinct publishers but the API reports ${total}.\n` +
+        `Its pagination is unstable, so a few applicants may be missing from this plan.\n` +
+        `Re-run \`list\` later to pick up any stragglers.\n`,
+    );
+  }
+  return { rows: [...byId.values()], total };
 }
 
 // --------------------------------------------------------------- commands ---
 
 async function cmdList(opts) {
-  const { rows, total } = await fetchPending(opts.advertiser, opts.pageSize, opts.verbose);
+  const { rows, total } = await fetchPending(opts.advertiser, opts.verbose);
 
   if (opts.raw) {
     console.log(JSON.stringify(rows, null, 2));
@@ -251,14 +342,29 @@ async function cmdList(opts) {
     return;
   }
 
-  const plan = rows.map((raw) => {
+  // The pending endpoint repeats publishers across pages — a full pull returned
+  // 296 rows for 234 distinct partnerIds. Without this, apply would PUT the same
+  // decision twice and the second call would fail as already-actioned.
+  const seen = new Set();
+  const plan = [];
+  let duplicates = 0;
+  for (const raw of rows) {
     const app = normalize(raw);
-    return { ...app, ...decide(app, score(app)) };
-  });
+    if (seen.has(app.publisherId)) {
+      duplicates += 1;
+      continue;
+    }
+    seen.add(app.publisherId);
+    plan.push({ ...app, ...decide(app, score(app)) });
+  }
   plan.sort((a, b) => b.points - a.points);
 
   const w = (s, n) => String(s ?? "").slice(0, n).padEnd(n);
-  console.log(`\n${rows.length} pending application(s) (API total: ${total})\n`);
+  console.log(
+    `\n${plan.length} distinct pending application(s)` +
+      `${duplicates ? ` (${rows.length} rows returned, ${duplicates} duplicate)` : ""}` +
+      ` (API total: ${total})\n`,
+  );
   console.log(`${w("decision", 8)} ${w("pts", 4)} ${w("publisher", 30)} ${w("type", 18)} website`);
   console.log("-".repeat(100));
   for (const p of plan) {
@@ -359,7 +465,6 @@ function parseArgs(argv) {
     cmd,
     advertiser: flag("advertiser", DEFAULT_ADVERTISER),
     plan: flag("plan", DEFAULT_PLAN),
-    pageSize: Number(flag("page-size", "50")),
     raw: argv.includes("--raw"),
     confirm: argv.includes("--confirm"),
     onlyRejects: argv.includes("--only-rejects"),
