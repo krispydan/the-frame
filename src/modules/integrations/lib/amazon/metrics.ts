@@ -377,3 +377,112 @@ export function getAmazonUnmappedSkus(): Array<{ sku: string; units: number }> {
     GROUP BY oi.sku ORDER BY units DESC
   `).all() as Array<{ sku: string; units: number }>;
 }
+
+// ── Promotional (Vine) analysis ──────────────────────────────────────────
+//
+// Amazon Vine ships units to reviewers at no charge, but the settlement and
+// order reports do NOT show them as $0 sales. They show full list price in
+// `item_price` with an equal, offsetting `item_promotion_discount`. Net
+// consideration is zero; gross looks like a normal sale.
+//
+// That is why a catalogue running mostly on Vine still reports healthy gross
+// sales: every headline built on `subtotal` counts giveaways at list price.
+// Nothing is being computed wrongly — gross is genuinely gross — but read
+// without the split it materially overstates trading.
+//
+// Amazon does not flag Vine explicitly in either report, so the signal is the
+// discount ratio: a line discounted to (or below) zero took no money.
+
+export type PromoBand = "free" | "heavy" | "partial" | "full_price";
+
+export interface AmazonPromoRow {
+  band: PromoBand;
+  orders: number;
+  units: number;
+  /** List price before promotions. */
+  gross: number;
+  /** Promotional value given away. */
+  discount: number;
+  /** What the buyer actually paid, before Amazon's fees. */
+  netPaid: number;
+}
+
+export interface AmazonPromoBreakdown {
+  rows: AmazonPromoRow[];
+  totals: { orders: number; units: number; gross: number; discount: number; netPaid: number };
+  /** Share of units taking no money at all. The Vine proxy. */
+  freeUnitShare: number;
+  /** Share of gross list value given away across everything. */
+  discountRate: number;
+  byMonth: Array<{
+    month: string; units: number; freeUnits: number;
+    gross: number; discount: number; netPaid: number;
+  }>;
+}
+
+/**
+ * Split Amazon volume by how much the buyer actually paid.
+ *
+ * Banding is on the line's own discount ratio rather than the order's, since
+ * a Vine unit and a paid unit can sit on the same order.
+ */
+export function getAmazonPromoBreakdown(range: AmazonMetricsRange): AmazonPromoBreakdown {
+  // A line is "free" when the promotion cancels the price. Compared with a
+  // small epsilon rather than exactly, because rounding on multi-unit lines
+  // leaves cent-level residue that would otherwise band a giveaway as a sale.
+  const band = `
+    CASE
+      WHEN r.item_price <= 0.005 OR r.item_promotion_discount >= r.item_price - 0.005 THEN 'free'
+      WHEN r.item_promotion_discount >= r.item_price * 0.5 THEN 'heavy'
+      WHEN r.item_promotion_discount > 0.005 THEN 'partial'
+      ELSE 'full_price'
+    END`;
+
+  const where = `
+    WHERE date(r.purchase_date) BETWEEN ? AND ?
+      AND IFNULL(LOWER(r.item_status), '') != 'cancelled'`;
+
+  const rows = sqlite.prepare(`
+    SELECT ${band} AS band,
+           COUNT(DISTINCT r.amazon_order_id) AS orders,
+           IFNULL(SUM(r.quantity), 0) AS units,
+           ROUND(IFNULL(SUM(r.item_price), 0), 2) AS gross,
+           ROUND(IFNULL(SUM(r.item_promotion_discount), 0), 2) AS discount,
+           ROUND(IFNULL(SUM(r.item_price - r.item_promotion_discount), 0), 2) AS netPaid
+    FROM amazon_order_rows r
+    ${where}
+    GROUP BY band
+  `).all(range.from, range.to) as AmazonPromoRow[];
+
+  const order: PromoBand[] = ["free", "heavy", "partial", "full_price"];
+  rows.sort((a, b) => order.indexOf(a.band) - order.indexOf(b.band));
+
+  const totals = rows.reduce(
+    (t, r) => ({
+      orders: t.orders + r.orders, units: t.units + r.units,
+      gross: round2(t.gross + r.gross), discount: round2(t.discount + r.discount),
+      netPaid: round2(t.netPaid + r.netPaid),
+    }),
+    { orders: 0, units: 0, gross: 0, discount: 0, netPaid: 0 },
+  );
+
+  const freeUnits = rows.find((r) => r.band === "free")?.units ?? 0;
+
+  const byMonth = sqlite.prepare(`
+    SELECT substr(date(r.purchase_date), 1, 7) AS month,
+           IFNULL(SUM(r.quantity), 0) AS units,
+           IFNULL(SUM(CASE WHEN ${band} = 'free' THEN r.quantity ELSE 0 END), 0) AS freeUnits,
+           ROUND(IFNULL(SUM(r.item_price), 0), 2) AS gross,
+           ROUND(IFNULL(SUM(r.item_promotion_discount), 0), 2) AS discount,
+           ROUND(IFNULL(SUM(r.item_price - r.item_promotion_discount), 0), 2) AS netPaid
+    FROM amazon_order_rows r
+    ${where}
+    GROUP BY month ORDER BY month
+  `).all(range.from, range.to) as AmazonPromoBreakdown["byMonth"];
+
+  return {
+    rows, totals, byMonth,
+    freeUnitShare: totals.units > 0 ? Math.round((freeUnits / totals.units) * 1000) / 10 : 0,
+    discountRate: totals.gross > 0 ? Math.round((totals.discount / totals.gross) * 1000) / 10 : 0,
+  };
+}

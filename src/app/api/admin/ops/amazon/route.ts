@@ -17,6 +17,7 @@ import {
   getAmazonSyncHealth,
   getAmazonUnmappedSkus,
   getAmazonSettlements,
+  getAmazonPromoBreakdown,
 } from "@/modules/integrations/lib/amazon/metrics";
 import { buildAmazonMonthEnd } from "@/modules/integrations/lib/amazon/month-end";
 import {
@@ -87,6 +88,14 @@ export async function GET(req: NextRequest) {
 
       case "settlements":
         return NextResponse.json({ ok: true, settlements: getAmazonSettlements(50) });
+
+      case "promotions": {
+        // Defaults to all of history — the question this answers ("how much
+        // of our volume is actually giveaway?") is a trend, not a snapshot.
+        const from = req.nextUrl.searchParams.get("from") ?? "2000-01-01";
+        const to = req.nextUrl.searchParams.get("to") ?? "2100-01-01";
+        return NextResponse.json({ ok: true, promotions: getAmazonPromoBreakdown({ from, to }) });
+      }
 
       default: {
         const archive = sqlite.prepare(`
