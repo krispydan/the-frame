@@ -5,6 +5,8 @@ import { buildDriftReport, buildCoverageReport } from "@/modules/finance/lib/inv
 import { depleteUncostedOrders, getCostLayerSummary } from "@/modules/finance/lib/fifo-engine";
 import { runDailyCogsPosting } from "@/modules/finance/lib/daily-cogs";
 import { runShipmentRevenueRecognition } from "@/modules/finance/lib/shipment-revenue-recognition";
+import { proposeSkuAliases, applySkuAliases } from "@/modules/inventory/lib/sku-alias-proposals";
+import { syncShipHeroInventory } from "@/modules/operations/lib/shiphero/sync-inventory";
 
 /**
  * Token-guarded COGS / FIFO operations.
@@ -46,9 +48,14 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ ok: true, view, coverage: buildCoverageReport({ since }) });
       case "layers":
         return NextResponse.json({ ok: true, view, layers: getCostLayerSummary() });
+      case "sku-mapping":
+        return NextResponse.json({ ok: true, view, mapping: proposeSkuAliases() });
       default:
         return NextResponse.json(
-          { ok: false, error: `Unknown view "${view}".`, views: ["drift", "coverage", "layers"] },
+          {
+            ok: false, error: `Unknown view "${view}".`,
+            views: ["drift", "coverage", "layers", "sku-mapping"],
+          },
           { status: 400 },
         );
     }
@@ -95,11 +102,33 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true, action, result });
       }
 
+      case "apply-sku-aliases": {
+        const { dryRun } = body as { dryRun?: boolean };
+        // Same default as everything else that writes: omitting the flag
+        // must not mutate. Only unambiguous proposals are ever written.
+        const isDryRun = dryRun !== false;
+        const result = applySkuAliases({ dryRun: isDryRun });
+        return NextResponse.json({
+          ok: true, action, dryRun: isDryRun, result,
+          note: isDryRun
+            ? "Dry run — no aliases written. Re-send with \"dryRun\": false to apply."
+            : "Run sync-shiphero-inventory next so the new mappings take effect.",
+        });
+      }
+
+      case "sync-shiphero-inventory": {
+        const result = await syncShipHeroInventory();
+        return NextResponse.json({ ok: true, action, result });
+      }
+
       default:
         return NextResponse.json({
           ok: false,
           error: `Unknown action "${action ?? ""}".`,
-          actions: ["deplete-uncosted", "run-daily-cogs", "recognise-revenue"],
+          actions: [
+            "deplete-uncosted", "run-daily-cogs", "recognise-revenue",
+            "apply-sku-aliases", "sync-shiphero-inventory",
+          ],
         }, { status: 400 });
     }
   } catch (err) {

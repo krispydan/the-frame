@@ -58,11 +58,31 @@ export async function syncShipHeroInventory(): Promise<SyncResult> {
       skuTotals.set(item.sku, existing);
     }
 
-    // Lookup catalog_skus.id by sku for the inventory table join
+    // Lookup catalog_skus.id by sku for the inventory table join.
+    //
+    // Exact match alone is not enough: the catalog spells a SKU JX3004-S-BLK
+    // while ShipHero reports JX3004-BLK. Matching only exactly silently
+    // dropped 20k of 20.3k units on the floor — stock that plainly existed
+    // read as zero across inventory levels, days-of-stock, reorder points and
+    // the FIFO-vs-physical reconciliation, with no error anywhere.
+    //
+    // catalog_sku_aliases is the same table the Amazon order importer already
+    // resolves through (see resolveCatalogSku), so a spelling fixed for one
+    // channel now fixes it for the warehouse too. Exact matches still win:
+    // an alias can never shadow a real catalog SKU.
     const skuIdLookup = sqlite.prepare(
       "SELECT id, sku FROM catalog_skus WHERE sku IS NOT NULL"
     ).all() as Array<{ id: string; sku: string }>;
-    const skuToId = new Map(skuIdLookup.map((r) => [r.sku, r.id]));
+    const skuToId = new Map<string, string>();
+    try {
+      const aliases = sqlite.prepare(
+        "SELECT alias, sku_id FROM catalog_sku_aliases"
+      ).all() as Array<{ alias: string; sku_id: string }>;
+      for (const a of aliases) skuToId.set(a.alias, a.sku_id);
+    } catch {
+      // Alias table is optional in some environments (e.g. minimal test DBs).
+    }
+    for (const r of skuIdLookup) skuToId.set(r.sku, r.id);
 
     const upsertMainInventory = sqlite.prepare(`
       INSERT INTO inventory (id, sku_id, location, quantity, reserved_quantity, updated_at)
@@ -102,12 +122,25 @@ export async function syncShipHeroInventory(): Promise<SyncResult> {
         upsert.run(item.sku, item.warehouse_id, item.on_hand, item.allocated, item.available, syncedAt);
       }
 
-      // Write aggregated totals to main inventory table
+      // Write aggregated totals to main inventory table.
+      //
+      // Aggregate by RESOLVED sku_id, not by ShipHero spelling. Now that
+      // aliases resolve, two spellings (JX3004-BLK and JX3004-S-BLK) can land
+      // on one catalog SKU — and the upsert below SETs quantity rather than
+      // adding, so writing per-spelling would have the second row silently
+      // overwrite the first instead of summing.
+      const idTotals = new Map<string, { onHand: number; allocated: number }>();
       for (const [sku, totals] of skuTotals) {
         // Skip inner pack SKUs (12PK) — only sync each/unit SKUs
         if (sku.includes("-12PK")) continue;
         const skuId = skuToId.get(sku);
         if (!skuId) continue;
+        const acc = idTotals.get(skuId) ?? { onHand: 0, allocated: 0 };
+        acc.onHand += totals.onHand;
+        acc.allocated += totals.allocated;
+        idTotals.set(skuId, acc);
+      }
+      for (const [skuId, totals] of idTotals) {
         upsertMainInventory.run(skuId, totals.onHand, totals.allocated, syncedAt);
       }
 
