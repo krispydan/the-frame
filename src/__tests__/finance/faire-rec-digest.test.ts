@@ -29,12 +29,22 @@ describe("faire-rec-digest classifyOpenInvoice", () => {
     expect(r).toMatch(/5900/);
   });
 
-  it("formula wire BELOW invoice → part-payment playbook with expected remainder (the HNBW shape)", () => {
+  it("the real HNBW shape (invoice = API payout, formula higher) → higher-deposit playbook", () => {
     const r = classifyOpenInvoice({
-      invoiceNumber: "FAIRE-HNBWED5PFN", amountDue: 693.86, ageDays: 2,
+      invoiceNumber: "FAIRE-HNBWED5PFN", amountDue: 666.7, ageDays: 2,
       math: { netOrderTotal: 864, commission: 139.6, paymentFee: 30.54, totalPayout: 666.7 },
     });
+    expect(r).toMatch(/\$693\.86/);
+    expect(r).toMatch(/Receive Money \$27\.16/);
+  });
+
+  it("formula wire BELOW invoice → part-payment playbook with expected remainder", () => {
+    const r = classifyOpenInvoice({
+      invoiceNumber: "FAIRE-SPLITORDER", amountDue: 693.86, ageDays: 2,
+      math: { netOrderTotal: 864, commission: 139.6, paymentFee: 84.54, totalPayout: 639.86 },
+    });
     expect(r).toMatch(/part-pay/i);
+    expect(r).toMatch(/\$54\.00/);
   });
 
   it("no stored math → plain expected-deposit instruction", () => {
