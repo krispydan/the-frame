@@ -349,7 +349,7 @@ export default function CustomerAnalyticsPage() {
                 {data.bestCustomers.map((c) => (
                   <TableRow key={c.companyId}>
                     <TableCell>
-                      <Link href={`/customers`} className="font-medium hover:underline">{c.name}</Link>
+                      <Link href={`/customers/${c.companyId}`} className="font-medium hover:underline">{c.name}</Link>
                       <div className="text-xs text-muted-foreground">{[c.segment, c.state].filter(Boolean).join(" · ")}</div>
                     </TableCell>
                     <TableCell><span className={`px-1.5 py-0.5 rounded text-xs font-medium ${TIER_BADGE[c.tier] || "bg-gray-100"}`}>{c.tier}</span></TableCell>
@@ -378,7 +378,7 @@ export default function CustomerAnalyticsPage() {
                   {data.atRisk.map((c) => (
                     <TableRow key={c.companyId}>
                       <TableCell>
-                        <span className="font-medium">{c.name}</span>
+                        <Link href={`/customers/${c.companyId}`} className="font-medium hover:underline">{c.name}</Link>
                         <div className="text-xs text-muted-foreground">{[c.segment, c.state].filter(Boolean).join(" · ")}</div>
                       </TableCell>
                       <TableCell className="text-right font-semibold">{money(c.ltv)}</TableCell>

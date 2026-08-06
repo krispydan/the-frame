@@ -58,27 +58,56 @@ const norm = (s: string | undefined | null): string =>
     .replace(/\s+/g, " ")
     .trim();
 
+/**
+ * In-memory match index, built ONCE per import call.
+ *
+ * The naive version did a `LIKE '%name%'` lookup per contact. Against ~258k
+ * companies and a few thousand contacts that's thousands of unindexable full
+ * table scans in a single request — it timed the endpoint out. One pass to
+ * build two maps turns each lookup into a hash hit.
+ */
+interface MatchIndex {
+  byToken: Map<string, string>;                                   // r_… -> company id
+  byName: Map<string, Array<{ id: string; state: string }>>;      // normalized name -> rows
+}
+
+function buildIndex(): MatchIndex {
+  const byToken = new Map<string, string>();
+  const byName = new Map<string, Array<{ id: string; state: string }>>();
+  const rows = sqlite
+    .prepare("SELECT id, name, state, faire_retailer_id FROM companies")
+    .all() as Array<{ id: string; name: string | null; state: string | null; faire_retailer_id: string | null }>;
+  for (const r of rows) {
+    if (r.faire_retailer_id) byToken.set(r.faire_retailer_id, r.id);
+    const n = norm(r.name);
+    if (!n || n.length < 3) continue;
+    const list = byName.get(n);
+    const entry = { id: r.id, state: (r.state || "").toUpperCase() };
+    if (list) list.push(entry);
+    else byName.set(n, [entry]);
+  }
+  return { byToken, byName };
+}
+
 /** Resolve a campaign contact to a company id, conservatively. */
-function resolveCompany(c: { retailer_token?: string; retailer?: string; state?: string }): { id: string | null; how: "token" | "name" | null } {
+function resolveCompany(
+  idx: MatchIndex,
+  c: { retailer_token?: string; retailer?: string; state?: string },
+): { id: string | null; how: "token" | "name" | null } {
   if (c.retailer_token) {
-    const byToken = sqlite
-      .prepare("SELECT id FROM companies WHERE faire_retailer_id = ? LIMIT 1")
-      .get(c.retailer_token) as { id: string } | undefined;
-    if (byToken) return { id: byToken.id, how: "token" };
+    const hit = idx.byToken.get(c.retailer_token);
+    if (hit) return { id: hit, how: "token" };
   }
   const n = norm(c.retailer);
   if (!n || n.length < 3) return { id: null, how: null };
 
-  // Candidates by loose name match, then filter on normalized equality.
-  const token = n.split(" ")[0];
-  const cands = sqlite
-    .prepare("SELECT id, name, state FROM companies WHERE LOWER(COALESCE(name,'')) LIKE ? LIMIT 40")
-    .all(`%${token}%`) as Array<{ id: string; name: string | null; state: string | null }>;
-  const exact = cands.filter((x) => norm(x.name) === n);
+  const exact = idx.byName.get(n);
+  if (!exact || !exact.length) return { id: null, how: null };
   if (exact.length === 1) return { id: exact[0].id, how: "name" };
+  // Ambiguous on name alone — only state can break the tie, else refuse.
   const wantState = c.state?.toUpperCase();
-  if (exact.length > 1 && wantState) {
-    const byState = exact.filter((x) => (x.state || "").toUpperCase() === wantState);
+  if (wantState) {
+    const byState = exact.filter((x) => x.state === wantState);
     if (byState.length === 1) return { id: byState[0].id, how: "name" };
   }
   return { id: null, how: null };
@@ -93,6 +122,7 @@ export function importFaireOutreach(payload: {
 }): ImportSummary {
   const campaign = payload.campaign || "faire_market_2026_07";
   const dry = !!payload.dryRun;
+  const idx = buildIndex();
   const unmatchedSamples: string[] = [];
   const summary: ImportSummary = {
     contacts: { received: 0, matchedByToken: 0, matchedByName: 0, stamped: 0, unmatched: 0 },
@@ -104,7 +134,7 @@ export function importFaireOutreach(payload: {
   // 1. Stamp retailer tokens onto companies we can identify.
   for (const c of payload.contacts || []) {
     summary.contacts.received++;
-    const r = resolveCompany(c);
+    const r = resolveCompany(idx, c);
     if (!r.id) {
       summary.contacts.unmatched++;
       if (unmatchedSamples.length < 25) unmatchedSamples.push(`${c.retailer || "?"} (${c.state || "?"})`);
@@ -126,7 +156,7 @@ export function importFaireOutreach(payload: {
   // 2. Skiplist -> do_not_contact.
   for (const s of payload.skips || []) {
     summary.skips.received++;
-    const r = resolveCompany(s);
+    const r = resolveCompany(idx, s);
     if (!r.id) { summary.skips.unmatched++; continue; }
     if (!dry) {
       sqlite
@@ -155,7 +185,7 @@ export function importFaireOutreach(payload: {
     // left_unsent counts as sent for cooldown purposes — the send-verification
     // check produced false negatives, and a duplicate is worse than a miss.
     const status = m.status === "left_unsent" ? "sent_unverified" : m.status;
-    const r = resolveCompany(m);
+    const r = resolveCompany(idx, m);
     if (!r.id) summary.sends.unmatchedButKept++;
     if (!dry) {
       const res = insert.run(
