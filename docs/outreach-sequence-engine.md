@@ -135,14 +135,43 @@ the-frame (Railway) — the brain                     Mac runner — the Faire h
 
 ## 2. Data model (new tables + two column adds)
 
+**Two Faire brand accounts.** We sell on Faire as **A.J. Morgan** and **Jaxy**,
+and a retailer relationship is per brand: separate Messenger threads, separate
+history, separate "not interested." Some sequences target one brand, some both.
+So brand is a first-class dimension, not an afterthought:
+
+- `company_faire_accounts (company_id, brand, retailer_token, do_not_contact)`
+  is authoritative — one row per shop per brand.
+- `outreach_messages.brand` records who sent; dedup is
+  `(brand, token, campaign, sent_at)`.
+- **Suppression is two-level**: global `companies.do_not_contact` ("never
+  contact us") vs per-brand ("not interested in A.J. Morgan"). Declining one
+  brand does not suppress the other.
+- **Cooldowns are per-brand and hard; cross-brand is a softer check** — the
+  retailer is one human reading both inboxes, so `lastOutreach()` exposes both
+  and `seq.cross_brand_cooldown_days` (default 7) keeps AJM and Jaxy off the
+  same shop in the same week.
+- Sequences carry a `brand` field; enrollment resolves the right token, thread
+  link, sender identity and suppression set from it.
+
 ```sql
 -- Column adds
-ALTER TABLE companies ADD COLUMN faire_retailer_id TEXT;      -- r_… token; index it
+ALTER TABLE companies ADD COLUMN faire_retailer_id TEXT;      -- fast-lookup mirror only
 ALTER TABLE companies ADD COLUMN do_not_contact INTEGER DEFAULT 0;
 ALTER TABLE companies ADD COLUMN do_not_contact_reason TEXT;
 
+CREATE TABLE company_faire_accounts (   -- AUTHORITATIVE company × brand map
+  id TEXT PRIMARY KEY, company_id TEXT NOT NULL,
+  brand TEXT NOT NULL,                  -- 'ajm' | 'jaxy'
+  retailer_token TEXT NOT NULL,         -- r_… in THAT brand's portal
+  do_not_contact INTEGER DEFAULT 0, do_not_contact_reason TEXT,
+  first_seen_at TEXT, last_messaged_at TEXT,
+  UNIQUE(company_id, brand), UNIQUE(brand, retailer_token)
+);
+
 CREATE TABLE sequences (
   id TEXT PRIMARY KEY, name TEXT NOT NULL,
+  brand TEXT NOT NULL DEFAULT 'jaxy',  -- 'ajm' | 'jaxy' | 'both' (see above)
   trigger TEXT NOT NULL,               -- T0|T1|T2|T3|T4|T5|T6|manual
   class TEXT NOT NULL,                 -- 'relationship' | 'nudge'  (cooldown exemption, v0.2 §3)
   goal TEXT, status TEXT DEFAULT 'draft',  -- draft|active|paused|archived
