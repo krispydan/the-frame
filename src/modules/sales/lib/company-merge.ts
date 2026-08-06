@@ -152,6 +152,15 @@ function backfillKeeperFields(keepId: string, loserId: string): string[] {
 /** Free/consumer mail providers — a shared address here proves nothing. */
 const FREE_DOMAIN = /@(gmail|hotmail|outlook|yahoo|icloud|aol|live|msn|me|proton(mail)?|gmx|mail)\./i;
 
+/**
+ * Above this many companies, a shared contact address is a shared or
+ * placeholder inbox (a rep, an agency, an import default) rather than evidence
+ * two records are the same business. Set low deliberately: a genuine duplicate
+ * pair is 2–3 records, and a chain's store locations are separate businesses
+ * for our purposes anyway. Over the cap the group goes to human review.
+ */
+const SHARED_EMAIL_MAX = 6;
+
 export interface ReviewGroup {
   key: string; reason: string; companies: DuplicateGroup["companies"];
 }
@@ -212,8 +221,22 @@ export function findDuplicateCompanies(opts?: { minEvidence?: "name" | "email" |
     }
   }
 
-  // 2. Shared contact email (catches renamed/abbreviated records). Free-mail
-  //    addresses are excluded — a shared gmail says nothing about identity.
+  // 2. Shared contact email (catches renamed/abbreviated records).
+  //
+  // A shared address is much weaker evidence than it looks. Production has
+  // addresses sitting on hundreds of unrelated companies — a sales rep's own
+  // address, an agency inbox, or a placeholder written in during an import.
+  // The first scan produced one "email" group keyed on a single address that
+  // pulled 500+ unrelated retailers (Martin Patrick 3, Ventura Swimwear, bike
+  // shops, med spas) under one keeper. Merging that would have been
+  // catastrophic and effectively unpickable afterwards.
+  //
+  // So an email group must clear BOTH gates:
+  //   a) the address is not shared by an implausible number of companies —
+  //      past SHARED_EMAIL_MAX it is a shared/placeholder inbox, not identity;
+  //   b) the members corroborate each other the same way name groups must,
+  //      by normalized name or by location (zip, or city+state).
+  // Anything that fails is surfaced as needsReview, never auto-merged.
   const byEmail = new Map<string, DuplicateGroup["companies"]>();
   for (const c of all) {
     const e = (c.email ?? "").trim().toLowerCase();
@@ -222,13 +245,54 @@ export function findDuplicateCompanies(opts?: { minEvidence?: "name" | "email" |
   }
   for (const [e, items] of byEmail) {
     if (items.length < 2) continue;
-    // A shared free-mail address only counts when the names also agree.
-    if (FREE_DOMAIN.test(e)) {
-      const names = new Set(items.map((i) => normalizeCompanyName(i.name)));
-      if (names.size > 1) continue;
+
+    // (a) Shared/placeholder inbox — no identity signal at all.
+    if (items.length > SHARED_EMAIL_MAX) {
+      needsReview.push({
+        key: `email:${e}`,
+        reason: `${items.length} companies share this address — shared or placeholder inbox, not proof of identity`,
+        companies: items.slice(0, 25),
+      });
+      continue;
     }
-    const key = `email:${e}`;
-    if (!groups.has(key)) groups.set(key, { reason: "email", items });
+
+    // (b) Corroborate: same normalized name, or failing that, same location.
+    //     Name is tried first because it is the stronger signal, but a record
+    //     that was renamed ("Bygones" → "Bygones Vintage Emporium") only ever
+    //     matches on location, so name-singletons fall through to a second
+    //     pass rather than being dropped.
+    const buckets = new Map<string, DuplicateGroup["companies"]>();
+    const byNameSig = new Map<string, DuplicateGroup["companies"]>();
+    for (const c of items) {
+      const nameKey = normalizeCompanyName(c.name);
+      if (nameKey.length < 3) continue;
+      (byNameSig.get(nameKey) ?? byNameSig.set(nameKey, []).get(nameKey)!).push(c);
+    }
+    const unnamed: DuplicateGroup["companies"] = [];
+    for (const [nameKey, bucket] of byNameSig) {
+      if (bucket.length > 1) buckets.set(`n:${nameKey}`, bucket);
+      else unnamed.push(...bucket);
+    }
+    for (const c of items.filter((c) => normalizeCompanyName(c.name).length < 3).concat(unnamed)) {
+      const zip = (c.zip ?? "").slice(0, 5);
+      const sig = zip ? `z:${zip}` : (c.city && c.state) ? `c:${c.city}|${c.state}` : "";
+      if (!sig) continue;
+      (buckets.get(sig) ?? buckets.set(sig, []).get(sig)!).push(c);
+    }
+    for (const [sig, bucket] of buckets) {
+      if (bucket.length < 2) continue;
+      const key = `email:${e}|${sig}`;
+      if (!groups.has(key)) groups.set(key, { reason: "email", items: bucket });
+    }
+    const mergedIds = new Set([...buckets.values()].filter((b) => b.length > 1).flat().map((c) => c.id));
+    const leftovers = items.filter((c) => !mergedIds.has(c.id));
+    if (leftovers.length > 1) {
+      needsReview.push({
+        key: `email:${e}`,
+        reason: "shared contact address but different names and locations — likely different businesses",
+        companies: leftovers,
+      });
+    }
   }
 
   const out: DuplicateGroup[] = [];
