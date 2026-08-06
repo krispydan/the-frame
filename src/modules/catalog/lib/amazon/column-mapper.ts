@@ -16,6 +16,8 @@
  * The validator (Phase 1C) catches required-empty as a blocked issue.
  */
 import type { ExportProduct } from "@/modules/catalog/lib/export/types";
+import { isReadingProduct, variantSkus } from "@/modules/catalog/lib/export/types";
+import { strengthLabel, BLUE_LIGHT_POWER } from "@/modules/catalog/lib/reading-glasses";
 import { curatedAttrsFromTags } from "@/modules/catalog/lib/curated-attributes";
 import { mapAmazonColor } from "./color-map";
 import {
@@ -234,6 +236,11 @@ function truncateAtWord(s: string, maxChars: number): string {
  * them into a real spreadsheet, leaving any missing key as blank.
  */
 export function buildAmazonRows(input: MapInput): Record<string, string>[] {
+  // Reading glasses vary on Color AND diopter, so they use Amazon's
+  // Color/MagnificationStrength theme and fill the magnification_strength
+  // columns (both already exist in the template snapshot). Everything
+  // else keeps the single LensColor axis.
+  const isReader = isReadingProduct(input.product);
   const { product, listing, imageUrls } = input;
   const p = product.product;
   const curated = curatedAttrsFromTags(
@@ -328,7 +335,7 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
     // Matches Jaxy's actual SKU pattern: "Brown/Purple", "Green",
     // "Tortoise/Rose" — frame and lens vary together. "LensColor" alone
     // implied only the lens tint changed across SKUs, which isn't right.
-    variation_theme: "LensColor",
+    variation_theme: isReader ? "Color/MagnificationStrength" : "LensColor",
     // Content
     product_description: description,
     bullet_point1: bullets[0] ?? "",
@@ -376,7 +383,7 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
   // and we leave FBA's quantity blank so Amazon's inbound shipments
   // own the count rather than our number stomping theirs.
   const children: Record<string, string>[] = [];
-  for (const sku of product.skus) {
+  for (const sku of variantSkus(product)) {
     const colorName = sku.colorName?.trim() || "";
     const colorMap = listing?.suggestedColorMap || mapAmazonColor(colorName);
     const upc = sku.upc?.trim() || "";
@@ -433,12 +440,21 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
     // Matches Jaxy's actual SKU pattern: "Brown/Purple", "Green",
     // "Tortoise/Rose" — frame and lens vary together. "LensColor" alone
     // implied only the lens tint changed across SKUs, which isn't right.
-    variation_theme: "LensColor",
+    variation_theme: isReader ? "Color/MagnificationStrength" : "LensColor",
       // Variation axis — color
       color_name: colorName,
       color_map: colorMap,
       lens_color: colorName, // sunglasses lenses typically match the frame color in our catalog
       lens_color_map: colorMap,
+      // Second variation axis for readers. Amazon wants the bare number
+      // ("1.5"), not the "+1.50" display form; the blue-light SKU is a
+      // 0-diopter lens.
+      ...(isReader
+        ? {
+            magnification_strength: String(sku.readingPower ?? BLUE_LIGHT_POWER),
+            magnification_strength_unit_of_measure: "Diopters",
+          }
+        : {}),
       // Sunglasses are universally "One Size" in our catalog
       size_name: "One Size",
       // Product ID
