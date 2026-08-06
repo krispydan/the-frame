@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOpsToken } from "@/lib/ops-auth";
 import { sqlite } from "@/lib/db";
-import { importFaireOutreach, backfillTokensFromOrders } from "@/modules/sales/lib/faire-outreach-import";
+import { importFaireOutreach, backfillTokensFromOrders, createMissingCompanies } from "@/modules/sales/lib/faire-outreach-import";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +60,13 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     if (body.action === "backfill_tokens") {
       return NextResponse.json({ ok: true, ...backfillTokensFromOrders() });
+    }
+    if (body.action === "create_missing") {
+      return NextResponse.json({
+        ok: true,
+        dryRun: !!body.dryRun,
+        ...createMissingCompanies({ contacts: body.contacts || [], brand: body.brand, dryRun: !!body.dryRun }),
+      });
     }
     const summary = importFaireOutreach({
       contacts: body.contacts,

@@ -292,6 +292,60 @@ export function importFaireOutreach(payload: {
 }
 
 /**
+ * Create company records for Faire retailers we have a real relationship with
+ * (they're in a brand's Faire contact list, we've messaged them) but who were
+ * never in the CRM. Without a company row they can't be enrolled in a sequence,
+ * so the outreach engine would be blind to them.
+ *
+ * Only creates when the contact does NOT resolve to an existing company — the
+ * same conservative matcher decides, so this can't manufacture duplicates for
+ * shops we already know. Idempotent: re-running skips anything already linked
+ * by token.
+ */
+export function createMissingCompanies(payload: {
+  contacts: ImportContact[];
+  brand?: string;
+  dryRun?: boolean;
+}): { received: number; created: number; alreadyPresent: number; samples: string[] } {
+  const brand = (payload.brand || "ajm").toLowerCase();
+  const dry = !!payload.dryRun;
+  const idx = buildIndex();
+  const samples: string[] = [];
+  let created = 0, alreadyPresent = 0;
+
+  const insertCompany = sqlite.prepare(
+    `INSERT INTO companies (id, name, city, state, country, status, source, source_type, created_at, updated_at, faire_retailer_id)
+     VALUES (?, ?, ?, ?, ?, 'prospect', 'faire_outreach', 'faire', ?, ?, ?)`,
+  );
+  const linkUpsert = sqlite.prepare(
+    `INSERT OR IGNORE INTO company_faire_accounts (id, company_id, brand, retailer_token, first_seen_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  );
+  const relink = sqlite.prepare(
+    `UPDATE outreach_messages SET company_id = ? WHERE faire_retailer_id = ? AND company_id IS NULL`,
+  );
+
+  for (const c of payload.contacts || []) {
+    const r = resolveCompany(idx, c);
+    if (r.id) { alreadyPresent++; continue; }
+    if (samples.length < 20) samples.push(`${c.retailer || "?"} (${c.city || "?"}, ${c.state || "?"})`);
+    if (!dry) {
+      const now = new Date().toISOString();
+      const id = randomUUID();
+      try {
+        insertCompany.run(id, c.retailer || "(unnamed Faire retailer)", c.city || null,
+          c.state || null, "US", now, now, c.retailer_token);
+        linkUpsert.run(randomUUID(), id, brand, c.retailer_token, now);
+        // Attach the outreach history we imported by token to the new company.
+        relink.run(id, c.retailer_token);
+      } catch { continue; }
+    }
+    created++;
+  }
+  return { received: (payload.contacts || []).length, created, alreadyPresent, samples };
+}
+
+/**
  * Backfill retailer tokens for companies that already have Faire orders, using
  * the tokens captured on newly-synced orders. Cheap safety net for buyers whose
  * company row predates token capture.
