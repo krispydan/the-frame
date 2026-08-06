@@ -208,6 +208,21 @@ describe("mergeCompanies", () => {
     expect(rolled.rev).toBe(3404);
   });
 
+  it("rescues the loser's shopify id and blank fields onto the keeper", () => {
+    // Losing shopify_customer_id would let the order webhook recreate this
+    // exact duplicate on the customer's next order.
+    const worked = company("Grey56 Leather", "miami", "FL", { zip: "33101", notes: "key account" });
+    const stub = company("Grey 56 Leather Inc", "miami", "FL", { zip: "33101", createdAt: "2025-01-01" });
+    db.prepare("UPDATE companies SET shopify_customer_id='SHOP-999', domain='grey56.com' WHERE id=?").run(stub);
+
+    mergeCompanies({ apply: true });
+
+    const k = db.prepare("SELECT shopify_customer_id AS sid, domain, notes FROM companies WHERE id=?").get(worked) as Record<string, string>;
+    expect(k.sid).toBe("SHOP-999");
+    expect(k.domain).toBe("grey56.com");
+    expect(k.notes).toBe("key account"); // never overwritten
+  });
+
   it("is stable when run twice", () => {
     company("Show Pony", "seattle", "WA");
     company("Show Pony", "seattle", "WASHINGTON");

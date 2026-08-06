@@ -140,17 +140,30 @@ const BACKFILL_COLUMNS = [
   "icp_tier", "owner_id", "segment_id",
 ] as const;
 
-function backfillKeeperFields(keepId: string, loserId: string): string[] {
+/**
+ * Fill blanks on every keeper from its losers in one statement per column,
+ * driven off temp.merge_map. Must run BEFORE the losers are deleted.
+ * Returns "column: n rows" for the report.
+ */
+function backfillKeeperFields(): string[] {
   const filled: string[] = [];
   for (const col of BACKFILL_COLUMNS) {
     if (!hasColumn("companies", col)) continue;
     try {
       const r = sqlite.prepare(
-        `UPDATE companies SET ${col} = (SELECT ${col} FROM companies WHERE id = ?)
-         WHERE id = ? AND (${col} IS NULL OR TRIM(CAST(${col} AS TEXT)) = '')
-           AND (SELECT ${col} FROM companies WHERE id = ?) IS NOT NULL`,
-      ).run(loserId, keepId, loserId);
-      if (r.changes > 0) filled.push(col);
+        `UPDATE companies SET ${col} = (
+           SELECT l.${col} FROM temp.merge_map m JOIN companies l ON l.id = m.loser
+           WHERE m.keep = companies.id
+             AND l.${col} IS NOT NULL AND TRIM(CAST(l.${col} AS TEXT)) != ''
+           LIMIT 1)
+         WHERE (${col} IS NULL OR TRIM(CAST(${col} AS TEXT)) = '')
+           AND id IN (SELECT keep FROM temp.merge_map)
+           AND EXISTS (
+             SELECT 1 FROM temp.merge_map m JOIN companies l ON l.id = m.loser
+             WHERE m.keep = companies.id
+               AND l.${col} IS NOT NULL AND TRIM(CAST(l.${col} AS TEXT)) != '')`,
+      ).run();
+      if (r.changes > 0) filled.push(`${col}: ${r.changes}`);
     } catch { /* column type mismatch — skip */ }
   }
   return filled;
@@ -497,51 +510,81 @@ export function mergeCompanies(opts?: {
   const details: MergeResult["details"] = [];
   let companiesRemoved = 0, recoveredJaxy = 0, recoveredAjm = 0;
 
+  // Collect every loser→keeper edge first, then do the work SET-BASED.
+  //
+  // Walking pairs and issuing a statement per (loser, table) meant 22 tables ×
+  // ~7,000 losers ≈ 150,000 statements, which blew the 300s route budget on a
+  // dry run and would have been worse under apply. Everything below is driven
+  // off one temp mapping table instead, so each ref table costs one statement
+  // regardless of how many companies are merging.
+  for (const g of groups) {
+    const losers = g.companies.filter((c) => c.id !== g.keepId);
+    if (!losers.length) continue;
+    const keep = g.companies.find((c) => c.id === g.keepId)!;
+    for (const l of losers) {
+      companiesRemoved++;
+      recoveredJaxy += l.jaxyRevenue;
+      recoveredAjm += l.ajmRevenue;
+    }
+    details.push({
+      keep: g.keepId, keepName: keep.name,
+      merged: losers.map((l) => ({ id: l.id, name: l.name })),
+    });
+  }
+
   const run = () => {
+    sqlite.exec("DROP TABLE IF EXISTS temp.merge_map");
+    sqlite.exec("CREATE TABLE temp.merge_map (loser TEXT PRIMARY KEY, keep TEXT NOT NULL)");
+    const ins = sqlite.prepare("INSERT OR IGNORE INTO temp.merge_map (loser, keep) VALUES (?,?)");
     for (const g of groups) {
-      const losers = g.companies.filter((c) => c.id !== g.keepId);
-      if (!losers.length) continue;
-      const keep = g.companies.find((c) => c.id === g.keepId)!;
+      for (const c of g.companies) if (c.id !== g.keepId) ins.run(c.id, g.keepId);
+    }
 
-      for (const loser of losers) {
-        for (const t of COMPANY_REF_TABLES) {
-          if (!tableExists(t) || !hasColumn(t, "company_id")) continue;
-          if (apply) {
-            const r = sqlite.prepare(`UPDATE ${t} SET company_id = ? WHERE company_id = ?`).run(g.keepId, loser.id);
-            rowsRepointed[t] = (rowsRepointed[t] ?? 0) + r.changes;
-          } else {
-            const c = sqlite.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE company_id = ?`).get(loser.id) as { n: number };
-            rowsRepointed[t] = (rowsRepointed[t] ?? 0) + c.n;
-          }
-        }
+    for (const t of COMPANY_REF_TABLES) {
+      // Unique-per-company tables are handled below — a blind repoint would
+      // violate their unique index whenever the keeper already has a row.
+      if (UNIQUE_PER_COMPANY.has(t)) continue;
+      if (!tableExists(t) || !hasColumn(t, "company_id")) continue;
+      if (apply) {
+        const r = sqlite.prepare(
+          `UPDATE ${t} SET company_id = (SELECT m.keep FROM temp.merge_map m WHERE m.loser = ${t}.company_id)
+           WHERE company_id IN (SELECT loser FROM temp.merge_map)`,
+        ).run();
+        rowsRepointed[t] = r.changes;
+      } else {
+        const c = sqlite.prepare(
+          `SELECT COUNT(*) AS n FROM ${t} WHERE company_id IN (SELECT loser FROM temp.merge_map)`,
+        ).get() as { n: number };
+        if (c.n) rowsRepointed[t] = c.n;
+      }
+    }
 
-        // Unique-per-company tables: drop the loser's row rather than
-        // repointing it (a repoint would violate the unique index).
-        for (const t of UNIQUE_PER_COMPANY) {
-          if (!tableExists(t)) continue;
-          if (apply) {
-            const r = sqlite.prepare(`DELETE FROM ${t} WHERE company_id = ?`).run(loser.id);
-            rowsRepointed[`${t} (removed)`] = (rowsRepointed[`${t} (removed)`] ?? 0) + r.changes;
-          }
-        }
+    if (apply) {
+      // Rescue anything the keeper is missing BEFORE the losers are gone —
+      // above all shopify_customer_id, or the webhook recreates this dupe.
+      for (const col of backfillKeeperFields()) fieldsBackfilled.push(col);
 
-        // Rescue anything the keeper is missing BEFORE the loser is gone —
-        // above all shopify_customer_id, or the webhook recreates this dupe.
-        if (apply) {
-          const filled = backfillKeeperFields(g.keepId, loser.id);
-          if (filled.length) fieldsBackfilled.push(`${keep.name}: ${filled.join(",")}`);
-          sqlite.prepare("DELETE FROM companies WHERE id = ?").run(loser.id);
-        }
-        companiesRemoved++;
-        recoveredJaxy += loser.jaxyRevenue;
-        recoveredAjm += loser.ajmRevenue;
+      // Unique-per-company tables: drop the loser's row where the keeper
+      // already has one, then repoint whatever is left so the keeper inherits
+      // a listing/account it was missing instead of losing it outright.
+      for (const t of UNIQUE_PER_COMPANY) {
+        if (!tableExists(t) || !hasColumn(t, "company_id")) continue;
+        const dropped = sqlite.prepare(
+          `DELETE FROM ${t} WHERE company_id IN (SELECT loser FROM temp.merge_map)
+             AND EXISTS (SELECT 1 FROM ${t} k JOIN temp.merge_map m ON m.keep = k.company_id
+                         WHERE m.loser = ${t}.company_id)`,
+        ).run();
+        if (dropped.changes) rowsRepointed[`${t} (removed)`] = dropped.changes;
+        const moved = sqlite.prepare(
+          `UPDATE ${t} SET company_id = (SELECT m.keep FROM temp.merge_map m WHERE m.loser = ${t}.company_id)
+           WHERE company_id IN (SELECT loser FROM temp.merge_map)`,
+        ).run();
+        if (moved.changes) rowsRepointed[t] = (rowsRepointed[t] ?? 0) + moved.changes;
       }
 
-      details.push({
-        keep: g.keepId, keepName: keep.name,
-        merged: losers.map((l) => ({ id: l.id, name: l.name })),
-      });
+      sqlite.prepare("DELETE FROM companies WHERE id IN (SELECT loser FROM temp.merge_map)").run();
     }
+    sqlite.exec("DROP TABLE IF EXISTS temp.merge_map");
   };
 
   if (apply) sqlite.transaction(run)(); else run();
