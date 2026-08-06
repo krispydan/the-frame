@@ -270,7 +270,7 @@ export function validateProductsForShopify(exportProducts: ExportProduct[], chan
     if (!ep.retailPrice) issues.push({ field: "retailPrice", message: "Retail price is required", severity: "blocked" });
     if (channel === "wholesale" && !ep.wholesalePrice) issues.push({ field: "wholesalePrice", message: "Wholesale price required", severity: "blocked" });
     const hasApproved = ep.images.some((i) => i.status === "approved");
-    if (!hasApproved) issues.push({ field: "images", message: "At least one approved image required", severity: "blocked" });
+    if (!hasApproved) issues.push({ field: "images", message: "No approved images — will export with empty image columns", severity: "warning" });
     if (!ep.product.category) issues.push({ field: "category", message: "Category is not set", severity: "warning" });
     const hasError = issues.some((i) => i.severity === "blocked");
     const hasWarning = issues.some((i) => i.severity === "warning");

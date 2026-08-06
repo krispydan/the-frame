@@ -696,6 +696,10 @@ try {
   )`);
 } catch { /* exists */ }
 try { sqlite.exec("CREATE UNIQUE INDEX idx_seq_steps_order ON sequence_steps (sequence_id, step_no)"); } catch { /* exists */ }
+// Stable identity for seeded sequences. Matching on name meant renaming one in
+// the UI made the next seed create a duplicate that competed for candidates.
+try { sqlite.exec("ALTER TABLE sequences ADD COLUMN seed_key TEXT"); } catch { /* exists */ }
+try { sqlite.exec("CREATE UNIQUE INDEX idx_sequences_seed_key ON sequences (seed_key) WHERE seed_key IS NOT NULL"); } catch { /* exists */ }
 
 try {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS sequence_enrollments (

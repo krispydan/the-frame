@@ -25,6 +25,8 @@
 import type { ExportProduct, ProductValidationResult, ValidationIssue } from "./types";
 import { catalogImageUrl } from "@/lib/storage/image-url";
 import { DEFAULT_WHOLESALE_PRICE_STR, DEFAULT_RETAIL_PRICE_STR } from "@/modules/catalog/lib/pricing";
+import { isReadingProduct, variantSkus } from "./types";
+import { strengthLabel } from "@/modules/catalog/lib/reading-glasses";
 import * as XLSX from "xlsx";
 
 // ── Constants ──
@@ -209,8 +211,11 @@ function genderPhrase(gender: string | null): string {
   return "for Women & Men"; // safe default
 }
 
-function mapFaireProductType(gender: string | null): string {
+function mapFaireProductType(gender: string | null, isReader = false): string {
   const g = gender?.toLowerCase().trim();
+  // Readers are a distinct Faire category — they must not be filed under
+  // Sunglasses or they surface in the wrong buyer browse.
+  if (isReader) return "Reading Glasses";
   if (g === "women" || g === "womens" || g === "women's") return "Sunglasses - Women's";
   if (g === "men" || g === "mens" || g === "men's") return "Sunglasses - Men's";
   return "Sunglasses - Unisex";
@@ -233,11 +238,13 @@ export function buildFaireTitle(ep: ExportProduct): string {
   const polar = isPolarized(ep, tagSet);
   const gPhrase = genderPhrase(ep.product.gender);
 
+  const reader = isReadingProduct(ep);
   const keywordParts: string[] = [];
   if (style) keywordParts.push(capitalize(style));
-  if (polar) keywordParts.push("Polarized");
+  // "Polarized" is a sunglasses claim — never on readers.
+  if (polar && !reader) keywordParts.push("Polarized");
   if (shape) keywordParts.push(formatShape(shape));
-  keywordParts.push("Sunglasses");
+  keywordParts.push(reader ? "Reading Glasses" : "Sunglasses");
 
   // Try full version first
   let title = `${keywordParts.join(" ")} ${gPhrase} - ${name}`;
@@ -260,7 +267,9 @@ export function buildFaireTitle(ep: ExportProduct): string {
 function padTitle(title: string, name: string): string {
   // Already has "Sunglasses" — add descriptive adjective if < 35 chars
   if (title.length >= TITLE_MIN) return title;
-  const padded = title.replace(" Sunglasses", " Retro Sunglasses");
+  const padded = title.includes(" Reading Glasses")
+    ? title.replace(" Reading Glasses", " Classic Reading Glasses")
+    : title.replace(" Sunglasses", " Retro Sunglasses");
   if (padded.length <= TITLE_MAX) return padded;
   return title;
 }
@@ -414,7 +423,7 @@ export function validateForFaire(product: ExportProduct): ProductValidationResul
   }
   const approvedImages = product.images.filter((i) => i.status === "approved" && i.filePath);
   if (approvedImages.length === 0) {
-    issues.push({ field: "images", message: "At least one approved image required", severity: "blocked" });
+    issues.push({ field: "images", message: "No approved images — will export with empty image columns", severity: "warning" });
   }
 
   return {
@@ -522,7 +531,7 @@ export function generateFaireCsv(exportProducts: ExportProduct[]): string {
 
     const title = buildFaireTitle(ep);
     const description = buildFaireDescription(ep);
-    const productType = mapFaireProductType(ep.product.gender);
+    const productType = mapFaireProductType(ep.product.gender, isReadingProduct(ep));
 
     // Faire image strategy:
     //   product_images = collection image (all colors in one frame) as hero,
@@ -531,9 +540,17 @@ export function generateFaireCsv(exportProducts: ExportProduct[]): string {
     const faireProductImages = buildFaireImageList(ep);
     const productImagesStr = faireProductImages.join(" ");
 
-    for (const sku of ep.skus) {
+    // Reading-glasses power SKUs carry no images of their own — the
+    // photos live on the power-less colorway row — so resolve a power
+    // SKU's image via its colorway sibling.
+    const imageSkuIdFor = (s: ExportProduct["skus"][number]) =>
+      s.readingPower == null
+        ? s.id
+        : (ep.skus.find((o) => o.colorName === s.colorName && o.readingPower == null)?.id ?? s.id);
+
+    for (const sku of variantSkus(ep)) {
       // Best image for this specific variant — prefer cropped, then square, then any
-      const variantImg = pickVariantImage(ep.images, sku.id);
+      const variantImg = pickVariantImage(ep.images, imageSkuIdFor(sku));
       const optionImageUrl = absoluteImageUrl(variantImg ?? null);
 
       const row = blankRow();
@@ -552,6 +569,12 @@ export function generateFaireCsv(exportProducts: ExportProduct[]): string {
       row.gtin = validGtin(sku.upc);
       row.option_1_name = "Color";
       row.option_1_value = sku.colorName || "Default";
+      // Readers carry a second buyer-facing axis: diopter strength.
+      const strength = strengthLabel(sku);
+      if (strength) {
+        row.option_2_name = "Strength";
+        row.option_2_value = strength;
+      }
       row.price_wholesale = JAXY_WHOLESALE_PRICE;
       row.price_retail = JAXY_RETAIL_PRICE;
       row.option_image = optionImageUrl;
@@ -588,12 +611,18 @@ export function generateFaireXlsx(exportProducts: ExportProduct[]): Buffer {
 
     const title = buildFaireTitle(ep);
     const description = buildFaireDescription(ep);
-    const productType = mapFaireProductType(ep.product.gender);
+    const productType = mapFaireProductType(ep.product.gender, isReadingProduct(ep));
     const faireProductImages = buildFaireImageList(ep);
     const productImagesStr = faireProductImages.join(" ");
 
-    for (const sku of ep.skus) {
-      const variantImg = pickVariantImage(ep.images, sku.id);
+    // Same colorway-image resolution as the CSV path above.
+    const imageSkuIdFor = (s: ExportProduct["skus"][number]) =>
+      s.readingPower == null
+        ? s.id
+        : (ep.skus.find((o) => o.colorName === s.colorName && o.readingPower == null)?.id ?? s.id);
+
+    for (const sku of variantSkus(ep)) {
+      const variantImg = pickVariantImage(ep.images, imageSkuIdFor(sku));
       const optionImageUrl = absoluteImageUrl(variantImg ?? null);
 
       const row = blankRow();
@@ -612,6 +641,12 @@ export function generateFaireXlsx(exportProducts: ExportProduct[]): Buffer {
       row.gtin = validGtin(sku.upc);
       row.option_1_name = "Color";
       row.option_1_value = sku.colorName || "Default";
+      // Readers carry a second buyer-facing axis: diopter strength.
+      const strength = strengthLabel(sku);
+      if (strength) {
+        row.option_2_name = "Strength";
+        row.option_2_value = strength;
+      }
       row.price_wholesale = JAXY_WHOLESALE_PRICE;
       row.price_retail = JAXY_RETAIL_PRICE;
       row.option_image = optionImageUrl;

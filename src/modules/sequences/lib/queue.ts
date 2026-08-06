@@ -8,6 +8,8 @@
  */
 
 import { sqlite } from "@/lib/db";
+import { randomUUID } from "crypto";
+import { checkSuppression } from "@/modules/sales/lib/suppression";
 
 export interface QueueItem {
   id: string;
@@ -100,13 +102,40 @@ export function queueCounts(): { review: number; tasks: number; approved: number
  * what every cooldown and the "never double-touch" rule reads — the sequence
  * table alone would leave those blind to sequence sends.
  */
-export function markSent(id: string, by: string, editedBody?: string): { ok: boolean } {
+export function markSent(id: string, by: string, editedBody?: string): { ok: boolean; reason?: string } {
   const m = sqlite
     .prepare("SELECT * FROM sequence_messages WHERE id = ?")
     .get(id) as Record<string, unknown> | undefined;
-  if (!m) return { ok: false };
+  if (!m) return { ok: false, reason: "not_found" };
+
+  // Idempotent: a double-click or retried POST must not write a second ledger
+  // row or push sent_at forward.
+  if (m.status === "sent") return { ok: true };
+
   const at = new Date().toISOString();
   const body = editedBody ?? (m.rendered_body as string);
+
+  // LAST GATE. This row may have been rendered days ago; a lot can change in
+  // between, and the queue is the final point where we can still decline.
+  const sup = checkSuppression(m.company_id as string, (m.brand as string) || undefined);
+  if (sup.suppressed) {
+    sqlite.prepare("UPDATE sequence_messages SET status='skipped', error=? WHERE id=?")
+      .run(`suppressed: ${sup.reason}`, id);
+    return { ok: false, reason: `suppressed: ${sup.reason}` };
+  }
+  const enr = sqlite
+    .prepare("SELECT status FROM sequence_enrollments WHERE id = ?")
+    .get(m.enrollment_id as string) as { status: string } | undefined;
+  if (enr && !["active", "paused_t0"].includes(enr.status)) {
+    sqlite.prepare("UPDATE sequence_messages SET status='skipped', error=? WHERE id=?")
+      .run(`enrollment ${enr.status}`, id);
+    return { ok: false, reason: `enrollment ${enr.status}` };
+  }
+  // An unresolved merge field must never reach a retailer. The body is
+  // editable right there in the queue, so this is a fixable stop, not a dead end.
+  if (/\{\w+\}/.test(body)) {
+    return { ok: false, reason: "unresolved merge field — edit the message before sending" };
+  }
   const tx = sqlite.transaction(() => {
     sqlite
       .prepare(
@@ -117,25 +146,68 @@ export function markSent(id: string, by: string, editedBody?: string): { ok: boo
       .run(at, by, body, editedBody && editedBody !== m.rendered_body ? 1 : (m.edited as number) || 0, id);
     const token = sqlite
       .prepare("SELECT retailer_token FROM company_faire_accounts WHERE company_id=? AND brand=?")
-      .get(m.company_id as string, m.brand as string) as { retailer_token: string } | undefined;
+      .get(m.company_id as string, ((m.brand as string) || "").toLowerCase()) as { retailer_token: string } | undefined;
     sqlite
       .prepare(
         `INSERT INTO outreach_messages
            (id, company_id, faire_retailer_id, brand, channel, direction, status, body, campaign, sent_at, source)
          VALUES (?, ?, ?, ?, ?, 'outbound', 'sent', ?, ?, ?, 'sequence_engine')`,
       )
-      .run(crypto.randomUUID(), m.company_id, token?.retailer_token ?? null, m.brand, m.channel,
+      .run(randomUUID(), m.company_id, token?.retailer_token ?? null, m.brand, m.channel,
            body, m.sequence_id, at);
     sqlite
       .prepare("UPDATE company_faire_accounts SET last_messaged_at=? WHERE company_id=? AND brand=?")
       .run(at, m.company_id as string, m.brand as string);
+
+    // Schedule the NEXT step from this send — delays anchor on completion, so
+    // a queue cleared late shifts the whole follow-up chain with it.
+    const step = sqlite
+      .prepare("SELECT sequence_id, step_no FROM sequence_steps WHERE id = ?")
+      .get(m.step_id as string) as { sequence_id: string; step_no: number } | undefined;
+    if (step) {
+      const next = sqlite
+        .prepare("SELECT delay_days, delay_business_days FROM sequence_steps WHERE sequence_id=? AND step_no>? ORDER BY step_no ASC LIMIT 1")
+        .get(step.sequence_id, step.step_no) as { delay_days: number; delay_business_days: number } | undefined;
+      if (next) {
+        let due = new Date(Date.parse(at) + (next.delay_days || 0) * 86400000);
+        if (next.delay_business_days) {
+          while (due.getUTCDay() === 0 || due.getUTCDay() === 6) due = new Date(due.getTime() + 86400000);
+        }
+        sqlite.prepare("UPDATE sequence_enrollments SET next_step_due_at=? WHERE id=? AND status='active'")
+          .run(due.toISOString(), m.enrollment_id as string);
+      } else {
+        sqlite.prepare("UPDATE sequence_enrollments SET status='completed', exited_at=?, exit_reason='completed', next_step_due_at=NULL WHERE id=? AND status='active'")
+          .run(at, m.enrollment_id as string);
+      }
+    }
   });
   tx();
   return { ok: true };
 }
 
 export function markSkipped(id: string, reason: string): { ok: boolean } {
-  sqlite.prepare("UPDATE sequence_messages SET status='skipped', error=? WHERE id=?").run(reason, id);
+  const m = sqlite.prepare("SELECT enrollment_id, step_id FROM sequence_messages WHERE id=?")
+    .get(id) as { enrollment_id: string; step_id: string } | undefined;
+  const tx = sqlite.transaction(() => {
+    sqlite.prepare("UPDATE sequence_messages SET status='skipped', error=? WHERE id=?").run(reason, id);
+    if (!m) return;
+    // Skipping one touch must not strand the enrollment — schedule the next
+    // step from now, or complete if this was the last one.
+    const step = sqlite.prepare("SELECT sequence_id, step_no FROM sequence_steps WHERE id=?")
+      .get(m.step_id) as { sequence_id: string; step_no: number } | undefined;
+    if (!step) return;
+    const next = sqlite
+      .prepare("SELECT delay_days FROM sequence_steps WHERE sequence_id=? AND step_no>? ORDER BY step_no ASC LIMIT 1")
+      .get(step.sequence_id, step.step_no) as { delay_days: number } | undefined;
+    if (next) {
+      sqlite.prepare("UPDATE sequence_enrollments SET next_step_due_at=? WHERE id=? AND status='active'")
+        .run(new Date(Date.now() + (next.delay_days || 0) * 86400000).toISOString(), m.enrollment_id);
+    } else {
+      sqlite.prepare("UPDATE sequence_enrollments SET status='completed', exited_at=?, exit_reason='completed', next_step_due_at=NULL WHERE id=? AND status='active'")
+        .run(new Date().toISOString(), m.enrollment_id);
+    }
+  });
+  tx();
   return { ok: true };
 }
 

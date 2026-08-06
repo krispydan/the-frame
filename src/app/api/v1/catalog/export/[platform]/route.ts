@@ -39,7 +39,8 @@ export async function GET(
 
     // Cross-check: every approved image's file must exist on disk, or the
     // platform's fetcher will 404 on upload. Fold any missing files into
-    // the per-product validations as blocked issues.
+    // the per-product validations as warnings — they don't block the
+    // export, but the operator should know before uploading.
     //
     // Shopify validates against the exact list the exporter will emit
     // (front per SKU + main SKU angles + lifestyle + collection), so we
@@ -72,25 +73,27 @@ export async function GET(
         v.issues.push({
           field: "images",
           message: `${mf.missing.length} image file${mf.missing.length === 1 ? "" : "s"} missing on disk (${breakdown}) — will 404 on upload`,
-          severity: "blocked",
+          severity: "warning",
         });
-        v.status = "blocked";
+        if (v.status === "ready") v.status = "warning";
       }
     }
 
     return NextResponse.json({ validations, platform, imageBlockers, missingFiles });
   }
 
-  if (imageBlockers.length > 0 && !force) {
-    return NextResponse.json(
-      {
-        error: "Image precheck failed",
-        message: `${imageBlockers.length} product${imageBlockers.length === 1 ? "" : "s"} have no approved images. Approve images in the Image Management tab, or retry with ?force=true to export anyway.`,
-        imageBlockers,
-      },
-      { status: 422 },
-    );
-  }
+  // Missing images are a WARNING, not a blocker. A product with no
+  // approved image still exports (its image columns come out empty) —
+  // operators routinely need the sheet before photography is finished,
+  // and the validate view already lists exactly which products are
+  // short. The count rides back on a response header so the caller can
+  // surface it next to the download.
+  const imageWarningHeaders: Record<string, string> = imageBlockers.length
+    ? {
+        "X-Image-Warning-Count": String(imageBlockers.length),
+        "X-Image-Warning": `${imageBlockers.length} product${imageBlockers.length === 1 ? "" : "s"} exported without approved images`,
+      }
+    : {};
 
   // Save export record
   const exportId = crypto.randomUUID();
@@ -108,6 +111,7 @@ export async function GET(
         headers: {
           "Content-Type": "text/csv",
           "Content-Disposition": `attachment; filename="jaxy_shopify_${datestamp}.csv"`,
+          ...imageWarningHeaders,
         },
       });
     }
@@ -123,6 +127,7 @@ export async function GET(
         headers: {
           "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           "Content-Disposition": `attachment; filename="jaxy_faire_${datestamp}.xlsx"`,
+          ...imageWarningHeaders,
         },
       });
     }
@@ -137,6 +142,7 @@ export async function GET(
         headers: {
           "Content-Type": "text/tab-separated-values",
           "Content-Disposition": `attachment; filename="jaxy_amazon_${datestamp}.tsv"`,
+          ...imageWarningHeaders,
         },
       });
     }

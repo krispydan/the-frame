@@ -170,25 +170,28 @@ export const SEQUENCES: SeedSequence[] = [
 export function seedSequences(): { created: number; updated: number; steps: number } {
   let created = 0, updated = 0, steps = 0;
   for (const s of SEQUENCES) {
-    const existing = sqlite.prepare("SELECT id FROM sequences WHERE name = ?").get(s.name) as { id: string } | undefined;
+    // Match on the stable seed_key, falling back to name for rows seeded before
+    // the key existed. Renaming in the UI must not spawn a rival sequence.
+    const existing = (sqlite.prepare("SELECT id FROM sequences WHERE seed_key = ?").get(s.key)
+      || sqlite.prepare("SELECT id FROM sequences WHERE seed_key IS NULL AND name = ?").get(s.name)) as { id: string } | undefined;
     let id = existing?.id;
     if (id) {
       sqlite
         .prepare(
-          `UPDATE sequences SET brand=?, trigger=?, class=?, priority=?, description=?,
+          `UPDATE sequences SET seed_key=?, brand=?, trigger=?, class=?, priority=?, description=?,
                   enrollment_mode=?, updated_at=? WHERE id=?`,
         )
-        .run(s.brand, s.trigger, s.class, s.priority, s.description, s.enrollment_mode, new Date().toISOString(), id);
+        .run(s.key, s.brand, s.trigger, s.class, s.priority, s.description, s.enrollment_mode, new Date().toISOString(), id);
       updated++;
     } else {
       id = randomUUID();
       sqlite
         .prepare(
-          `INSERT INTO sequences (id, name, brand, trigger, class, status, enrollment_mode,
+          `INSERT INTO sequences (id, seed_key, name, brand, trigger, class, status, enrollment_mode,
                                   propose_only, priority, max_touches, description)
-           VALUES (?, ?, ?, ?, ?, 'draft', ?, 1, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, 1, ?, ?, ?)`,
         )
-        .run(id, s.name, s.brand, s.trigger, s.class, s.enrollment_mode, s.priority, s.steps.length, s.description);
+        .run(id, s.key, s.name, s.brand, s.trigger, s.class, s.enrollment_mode, s.priority, s.steps.length, s.description);
       created++;
     }
     for (const st of s.steps) {

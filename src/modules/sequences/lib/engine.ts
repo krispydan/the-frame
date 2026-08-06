@@ -27,7 +27,12 @@ export function getSetting(key: string, fallback: string): string {
   const r = sqlite.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string | null } | undefined;
   return r?.value ?? fallback;
 }
-const num = (key: string, fallback: number) => Number(getSetting(key, String(fallback))) || fallback;
+// A configured 0 must MEAN zero — `|| fallback` would turn "stop queueing"
+// (review_daily_cap = 0) back into the default of 20.
+const num = (key: string, fallback: number) => {
+  const n = Number(getSetting(key, String(fallback)));
+  return Number.isFinite(n) ? n : fallback;
+};
 
 export interface TickResult {
   enabled: boolean;
@@ -105,8 +110,18 @@ export function runTick(opts: { dryRun?: boolean } = {}): TickResult {
     if (reason) {
       res.exited++;
       if (!dry) {
-        sqlite.prepare("UPDATE sequence_enrollments SET status = ?, exited_at = ?, exit_reason = ? WHERE id = ?")
-          .run(reason, now(), reason, e.id);
+        const tx = sqlite.transaction(() => {
+          sqlite.prepare("UPDATE sequence_enrollments SET status = ?, exited_at = ?, exit_reason = ?, next_step_due_at = NULL WHERE id = ?")
+            .run(reason, now(), reason, e.id);
+          // Void anything already waiting in the queue for this enrollment.
+          // Otherwise a shop that just ordered, replied, or asked us to stop
+          // still gets yesterday's drafted nudge when the queue is cleared.
+          sqlite.prepare(
+            `UPDATE sequence_messages SET status = 'skipped', error = ?
+              WHERE enrollment_id = ? AND status IN ('queued_review','approved','task_open')`,
+          ).run(`enrollment ${reason}`, e.id);
+        });
+        tx();
       }
     }
   }
@@ -133,10 +148,13 @@ export function runTick(opts: { dryRun?: boolean } = {}): TickResult {
         .get(companyId);
       if (busy) continue;
       // Same sequence in the last 90 days?
+      // 'proposed' rows are shadow-mode records, not real touches. Counting them
+      // here would mean two weeks of shadow running silently blocks every
+      // candidate for 90 days the moment the sequence goes live.
       const recentSame = sqlite
         .prepare(
           `SELECT 1 FROM sequence_enrollments WHERE company_id = ? AND sequence_id = ?
-             AND enrolled_at > ? LIMIT 1`,
+             AND status != 'proposed' AND enrolled_at > ? LIMIT 1`,
         )
         .get(companyId, seq.id, addDays(now(), -90));
       if (recentSame) continue;
@@ -153,7 +171,17 @@ export function runTick(opts: { dryRun?: boolean } = {}): TickResult {
       }
 
       const proposed = seq.propose_only === 1;
-      if (proposed) res.proposed++; else { res.enrolled++; enrolledThisTick++; }
+      // Proposals count against the cap too, or shadow mode writes a row for
+      // every candidate on every tick.
+      enrolledThisTick++;
+      if (proposed) res.proposed++; else res.enrolled++;
+      // Don't stack duplicate proposals for the same account.
+      if (proposed) {
+        const already = sqlite
+          .prepare("SELECT 1 FROM sequence_enrollments WHERE company_id=? AND sequence_id=? AND status='proposed' LIMIT 1")
+          .get(companyId, seq.id);
+        if (already) { res.proposed--; enrolledThisTick--; continue; }
+      }
       if (!dry) {
         const firstStep = sqlite
           .prepare("SELECT * FROM sequence_steps WHERE sequence_id = ? ORDER BY step_no ASC LIMIT 1")
@@ -181,10 +209,13 @@ export function runTick(opts: { dryRun?: boolean } = {}): TickResult {
   for (const e of due) {
     const seq = sequences.find((s) => s.id === e.sequence_id);
     if (!seq) continue;
+    // "The next step after this one" — not current+1. A deleted or renumbered
+    // step would otherwise silently truncate the sequence.
     const step = sqlite
-      .prepare("SELECT * FROM sequence_steps WHERE sequence_id = ? AND step_no = ? LIMIT 1")
-      .get(seq.id, e.current_step + 1) as StepRow | undefined;
-    if (!step) {
+      .prepare("SELECT * FROM sequence_steps WHERE sequence_id = ? AND step_no > ? ORDER BY step_no ASC LIMIT 1")
+      .get(seq.id, e.current_step) as StepRow | undefined;
+    // No further step, or the touch cap is reached: this enrollment is done.
+    if (!step || (seq.max_touches && step.step_no > seq.max_touches)) {
       if (!dry) {
         sqlite.prepare("UPDATE sequence_enrollments SET status='completed', exited_at=?, exit_reason='completed', next_step_due_at=NULL WHERE id=?")
           .run(now(), e.id);
@@ -192,14 +223,21 @@ export function runTick(opts: { dryRun?: boolean } = {}): TickResult {
       continue;
     }
 
-    const r = renderTemplate(step.template_body, { companyId: e.company_id, offerCode: step.offer_code });
+    let r: { text: string; missing: string[]; warnings: string[] };
+    try {
+      r = renderTemplate(step.template_body, { companyId: e.company_id, offerCode: step.offer_code });
+    } catch (err) {
+      // One unrenderable account must never stop the whole tick.
+      res.errors.push(`render ${e.company_id}: ${(err as Error).message}`);
+      continue;
+    }
     // Fail closed: an unresolved merge field can never auto-send.
     const mode = r.missing.length && step.send_mode === "auto" ? "review" : step.send_mode;
     const status = mode === "task" ? "task_open" : mode === "auto" ? "approved" : "queued_review";
 
     const link = sqlite
       .prepare("SELECT retailer_token FROM company_faire_accounts WHERE company_id = ? AND brand = ?")
-      .get(e.company_id, seq.brand) as { retailer_token: string } | undefined;
+      .get(e.company_id, (seq.brand || "").toLowerCase()) as { retailer_token: string } | undefined;
     const threadUrl = step.channel === "faire" && link
       ? `https://www.faire.com/brand-portal/messages?retailerToken=${link.retailer_token}`
       : null;
@@ -216,12 +254,13 @@ export function runTick(opts: { dryRun?: boolean } = {}): TickResult {
           )
           .run(randomUUID(), e.id, step.id, seq.id, e.company_id, seq.brand, step.channel, status,
                step.template_subject, r.text, step.attachment_key, threadUrl, now());
-        const next = sqlite
-          .prepare("SELECT * FROM sequence_steps WHERE sequence_id = ? AND step_no = ? LIMIT 1")
-          .get(seq.id, step.step_no + 1) as StepRow | undefined;
+        // Park the enrollment: the NEXT step is scheduled when THIS one is
+        // actually sent (queue.ts), because delays anchor on completion. If we
+        // scheduled from queue time, a queue cleared a week late would fire
+        // touch 1 and touch 2 minutes apart.
         sqlite
-          .prepare("UPDATE sequence_enrollments SET current_step = ?, next_step_due_at = ? WHERE id = ?")
-          .run(step.step_no, next ? scheduleFrom(now(), next) : null, e.id);
+          .prepare("UPDATE sequence_enrollments SET current_step = ?, next_step_due_at = NULL WHERE id = ?")
+          .run(step.step_no, e.id);
       });
       try { tx(); } catch (err) { res.errors.push(`advance ${e.id}: ${(err as Error).message}`); }
     }

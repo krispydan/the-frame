@@ -65,12 +65,11 @@ export function buildMergeFields(ctx: RenderContext): Record<string, string> {
   // Primary contact first name (contacts is the canonical people store).
   const contact = sqlite
     .prepare(
-      `SELECT first_name, name FROM contacts WHERE company_id = ?
+      `SELECT first_name, last_name FROM contacts WHERE company_id = ?
         ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
     )
-    .get(ctx.companyId) as { first_name?: string | null; name?: string | null } | undefined;
-  const rawFirst = contact?.first_name || (contact?.name || "").split(" ")[0];
-  f.first_name = cleanFirstName(rawFirst, company?.name || "");
+    .get(ctx.companyId) as { first_name?: string | null; last_name?: string | null } | undefined;
+  f.first_name = cleanFirstName(contact?.first_name, company?.name || "");
 
   // Multi-location shops get a different opener ("Hi Guys!").
   const stores = sqlite

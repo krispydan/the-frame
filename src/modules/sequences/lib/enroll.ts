@@ -27,36 +27,37 @@ export interface EnrollOutcome {
 
 const addDays = (days: number) => new Date(Date.now() + days * 86400000).toISOString();
 
-export function enrollOne(
+/**
+ * The whole guard chain, in one place, so a preview and a real run can never
+ * disagree about what would happen. Returns null when enrollment is allowed.
+ */
+export function checkEnrollable(
   sequenceId: string,
   companyId: string,
-  opts: { by?: string; force?: boolean } = {},
-): EnrollOutcome {
+  opts: { force?: boolean } = {},
+): { reason: EnrollSkipReason; detail?: string } | null {
   const seq = sqlite
     .prepare("SELECT id, brand, class FROM sequences WHERE id = ?")
     .get(sequenceId) as { id: string; brand: string; class: string } | undefined;
-  if (!seq) return { ok: false, skipped: "no_such_sequence" };
-
+  if (!seq) return { reason: "no_such_sequence" };
   const firstStep = sqlite
-    .prepare("SELECT id, delay_days FROM sequence_steps WHERE sequence_id = ? ORDER BY step_no ASC LIMIT 1")
-    .get(sequenceId) as { delay_days: number } | undefined;
-  if (!firstStep) return { ok: false, skipped: "no_steps" };
+    .prepare("SELECT id FROM sequence_steps WHERE sequence_id = ? ORDER BY step_no ASC LIMIT 1")
+    .get(sequenceId);
+  if (!firstStep) return { reason: "no_steps" };
 
-  // Suppression is never overridable, not even by force. If a shop told us to
-  // stop, a human picking them from a list does not change that.
   const sup = checkSuppression(companyId, seq.brand);
-  if (sup.suppressed) return { ok: false, skipped: "suppressed", detail: sup.reason };
+  if (sup.suppressed) return { reason: "suppressed", detail: sup.reason };
 
   const busy = sqlite
     .prepare("SELECT id FROM sequence_enrollments WHERE company_id = ? AND status IN ('active','paused_t0') LIMIT 1")
-    .get(companyId) as { id: string } | undefined;
-  if (busy) return { ok: false, skipped: "already_enrolled" };
+    .get(companyId);
+  if (busy) return { reason: "already_enrolled" };
 
   if (!opts.force) {
     const recent = sqlite
-      .prepare("SELECT 1 FROM sequence_enrollments WHERE company_id = ? AND sequence_id = ? AND enrolled_at > ? LIMIT 1")
+      .prepare("SELECT 1 FROM sequence_enrollments WHERE company_id = ? AND sequence_id = ? AND status != 'proposed' AND enrolled_at > ? LIMIT 1")
       .get(companyId, sequenceId, addDays(-90));
-    if (recent) return { ok: false, skipped: "recently_in_sequence" };
+    if (recent) return { reason: "recently_in_sequence" };
 
     if (seq.class === "nudge") {
       const last = lastOutreach(companyId);
@@ -64,13 +65,27 @@ export function enrollOne(
       const cross = Number(getSetting("seq.cross_brand_cooldown_days", "7"));
       const sameBrand = last.byBrand[seq.brand];
       if (sameBrand && Date.parse(sameBrand) > Date.parse(addDays(-cooldown))) {
-        return { ok: false, skipped: "cooldown_same_brand", detail: sameBrand };
+        return { reason: "cooldown_same_brand", detail: sameBrand };
       }
       if (last.lastAnyAt && Date.parse(last.lastAnyAt) > Date.parse(addDays(-cross))) {
-        return { ok: false, skipped: "cooldown_cross_brand", detail: `${last.lastAnyBrand} ${last.lastAnyAt}` };
+        return { reason: "cooldown_cross_brand", detail: `${last.lastAnyBrand} ${last.lastAnyAt}` };
       }
     }
   }
+  return null;
+}
+
+export function enrollOne(
+  sequenceId: string,
+  companyId: string,
+  opts: { by?: string; force?: boolean } = {},
+): EnrollOutcome {
+  const blocked = checkEnrollable(sequenceId, companyId, opts);
+  if (blocked) return { ok: false, skipped: blocked.reason, detail: blocked.detail };
+
+  const firstStep = sqlite
+    .prepare("SELECT delay_days FROM sequence_steps WHERE sequence_id = ? ORDER BY step_no ASC LIMIT 1")
+    .get(sequenceId) as { delay_days: number };
 
   const id = randomUUID();
   sqlite
@@ -98,13 +113,16 @@ export function enrollMany(
   const res: BulkResult = { requested: companyIds.length, enrolled: 0, skipped: {}, samples: [] };
   for (const companyId of companyIds) {
     if (opts.dryRun) {
-      // Same guards, no write — so a preview tells the truth about what would happen.
-      const seq = sqlite.prepare("SELECT brand, class FROM sequences WHERE id = ?").get(sequenceId) as { brand: string } | undefined;
-      const sup = seq ? checkSuppression(companyId, seq.brand) : { suppressed: false };
-      const busy = sqlite.prepare("SELECT 1 FROM sequence_enrollments WHERE company_id = ? AND status IN ('active','paused_t0') LIMIT 1").get(companyId);
-      const reason = sup.suppressed ? "suppressed" : busy ? "already_enrolled" : null;
-      if (reason) { res.skipped[reason] = (res.skipped[reason] || 0) + 1; }
-      else res.enrolled++;
+      // Exactly the same guard chain as the real path — a preview that under-
+      // counts exclusions is worse than no preview, because it gets trusted.
+      const blocked = checkEnrollable(sequenceId, companyId, opts);
+      if (blocked) {
+        res.skipped[blocked.reason] = (res.skipped[blocked.reason] || 0) + 1;
+        if (res.samples.length < 15) {
+          const name = (sqlite.prepare("SELECT name FROM companies WHERE id = ?").get(companyId) as { name: string } | undefined)?.name;
+          res.samples.push({ company: name || companyId, reason: blocked.reason });
+        }
+      } else res.enrolled++;
       continue;
     }
     const out = enrollOne(sequenceId, companyId, opts);

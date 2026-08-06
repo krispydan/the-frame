@@ -42,23 +42,33 @@ export function sequenceMetrics(sequenceId: string): SequenceMetrics {
   // Orders within 30 days of the last sent touch for that enrollment.
   const orders = sqlite
     .prepare(
-      `SELECT COUNT(DISTINCT o.id) AS n, COALESCE(SUM(o.total), 0) AS revenue
-         FROM sequence_messages m
-         JOIN orders o ON o.company_id = m.company_id
-        WHERE m.sequence_id = ? AND m.status = 'sent' AND m.sent_at IS NOT NULL
-          AND o.placed_at > m.sent_at
-          AND julianday(o.placed_at) - julianday(m.sent_at) <= 30
-          AND o.status NOT IN ('cancelled','returned')`,
+      // De-duplicate the orders FIRST. Joining messages to orders fans one
+      // order out across every preceding touch, which would multiply revenue
+      // by the touch count and make chattier sequences look more profitable.
+      `SELECT COUNT(*) AS n, COALESCE(SUM(total), 0) AS revenue FROM (
+         SELECT DISTINCT o.id, o.total
+           FROM sequence_messages m
+           JOIN orders o ON o.company_id = m.company_id
+          WHERE m.sequence_id = ? AND m.status = 'sent' AND m.sent_at IS NOT NULL
+            AND o.placed_at > m.sent_at
+            AND julianday(o.placed_at) - julianday(m.sent_at) <= 30
+            AND o.status NOT IN ('cancelled','returned'))`,
     )
     .get(sequenceId) as { n: number; revenue: number };
 
+  // Rate denominators must be ACCOUNTS touched, not messages sent — otherwise a
+  // three-touch sequence reports a third of its true reply rate.
+  const accountsTouched = one(
+    "SELECT COUNT(DISTINCT company_id) n FROM sequence_messages WHERE sequence_id = ? AND status = 'sent'",
+    sequenceId,
+  ) || 1;
   const touched = sent || 1;
   return {
     sequenceId, enrolled, active, proposed, sent, skipped, replied,
     ordered: orders.n || 0,
     revenue: orders.revenue || 0,
-    replyRate: Math.round((replied / touched) * 1000) / 10,
-    orderRate: Math.round(((orders.n || 0) / touched) * 1000) / 10,
+    replyRate: Math.round((replied / accountsTouched) * 1000) / 10,
+    orderRate: Math.round(((orders.n || 0) / accountsTouched) * 1000) / 10,
     editRate: Math.round((edits / touched) * 1000) / 10,
   };
 }
