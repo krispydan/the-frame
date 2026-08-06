@@ -249,10 +249,26 @@ interface ChannelAdapter {
 }
 ```
 
-- **faire**: `destination` = `messagesUrl(companies.faire_retailer_id)`;
-  `send` = the Mac runner (poll `/api/admin/ops/sequences/queue?mode=auto`,
-  send with brand + recency + rate guards, POST result back). Review mode needs
-  no runner at all — the queue UI deep-links Christina into the thread.
+- **faire**: `destination` = `messagesUrl(companies.faire_retailer_id)`.
+  Delivery is a **three-rung ladder — three clients of the same queue API**,
+  adopted per Daniel 2026-08-05. Nothing is discarded climbing it:
+  1. **Queue page (manual, Phase 1).** Row = rendered message + copy button +
+     thread deep link + attachment download + Done/Skip/They-replied buttons.
+     Slack notify when the day's queue is ready. "Done" is trust-the-click;
+     staleness alerts (§9) catch forgotten rows. Any rep, any machine, zero setup.
+  2. **Chrome extension (assisted, Phase 2).** Runs in each rep's own logged-in
+     Chrome: fetches their queue, auto-fills the compose box (React-safe setter
+     from faire_dm), rep presses Faire's Send. The extension *verifies* the send
+     (box cleared + new message node) and posts status back — closing rung 1's
+     trust gap — runs the live thread guard before filling, and passively
+     detects replies while reps work. Multi-user correct: no session files,
+     each rep sends as themselves.
+  3. **Runner (auto, Phase 3).** The ported faire_dm runner under a **dedicated
+     Faire team-member account** (risk isolation from the reps' accounts), on
+     the Mac mini (residential IP — not a datacenter box), polling
+     `/api/admin/ops/sequences/queue?mode=auto` with the full guard stack.
+     Per-step opt-in (T4 first); the `seq.autosend_enabled` switch degrades
+     rung 3 back to rung 1 instantly.
 - **email**: Omnisend/Klaviyo transactional send; fully autoSend-capable;
   the **fallback channel** when `faire_retailer_id` is null but a verified email
   exists (`companies.email_verification_status='ok'`), per v0.2's routing rule.
@@ -387,15 +403,17 @@ where the polish goes); seed T0/T1/T4 with v0.2's copy; MCP tools
 review-mode; T1 auto-enrollment starts `propose_only`.
 
 **Phase 2 — reach (~1 week):**
-Email adapter (Omnisend) + channel fallback; T2 segment/bulk enrollment (reuse
-smart_lists); attachment library page; runner v1 (port faire_dm: approved-queue
-poll, guarded send, result post-back, daily reply scan); Pipedrive activity
+**Chrome extension (delivery rung 2)** — queue fetch, compose auto-fill,
+send verification + status post-back, live thread guard, passive reply
+detection; email adapter (Omnisend) + channel fallback; T2 segment/bulk
+enrollment (reuse smart_lists); attachment library page; Pipedrive activity
 mirror for sequence touches.
 
 **Phase 3 — depth:**
-T5, T6 (both propose-only first); per-step auto-send flips where copy is proven
-(T4 first); call/direct-mail task adapters; cart scrape for T3 auto-trigger;
-metrics dashboard; A/B reporting.
+**Runner (delivery rung 3)** — port faire_dm under a dedicated Faire
+team-member account on the Mac mini, per-step auto-send flips where copy is
+proven (T4 first); T5, T6 (both propose-only first); call/direct-mail task
+adapters; cart scrape for T3 auto-trigger; metrics dashboard; A/B reporting.
 
 ---
 
