@@ -42,11 +42,22 @@ const COMPANY_REF_TABLES = [
   "apify_match_log", "phoneburner_folder_pushes", "pb_call_queue",
   "outreach_messages", "lead_conversion_alerts", "pipedrive_deals",
   "pipedrive_webhook_events", "meta_leads", "meta_capi_events",
-  "company_faire_accounts",
+  "company_faire_accounts", "sequence_messages", "sequence_enrollments",
 ] as const;
 
-/** Tables with a UNIQUE constraint on company_id — merge, don't just repoint. */
-const UNIQUE_PER_COMPANY = new Set(["customer_accounts", "gmaps_listings"]);
+/**
+ * Tables with a UNIQUE constraint involving company_id — merge, don't repoint,
+ * or the UPDATE violates the index and rolls back the whole apply transaction.
+ *
+ *  - customer_accounts, gmaps_listings: UNIQUE(company_id)
+ *  - company_faire_accounts: UNIQUE(company_id, brand). Two duplicates that both
+ *    came from the Faire portal each hold an 'ajm' row, so this is the common
+ *    case, not the edge case.
+ *  - sequence_enrollments: partial UNIQUE(company_id) WHERE status is active.
+ */
+const UNIQUE_PER_COMPANY = new Set([
+  "customer_accounts", "gmaps_listings", "company_faire_accounts", "sequence_enrollments",
+]);
 
 function tableExists(name: string): boolean {
   return !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
@@ -166,7 +177,54 @@ function backfillKeeperFields(): string[] {
       if (r.changes > 0) filled.push(`${col}: ${r.changes}`);
     } catch { /* column type mismatch — skip */ }
   }
+  filled.push(...rescueSuppression());
   return filled;
+}
+
+/**
+ * Carry do-not-contact and the Faire retailer token across a merge.
+ *
+ * These cannot ride on BACKFILL_COLUMNS. That only fills a BLANK on the keeper,
+ * and do_not_contact = 0 is not blank — so a suppressed loser merging into an
+ * unsuppressed keeper would silently make a retailer who told us to stop
+ * contactable again. Suppression is therefore OR'd across the group: if any row
+ * in the group says do-not-contact, the survivor says do-not-contact. That is
+ * the only safe direction for this flag to travel.
+ */
+function rescueSuppression(): string[] {
+  const out: string[] = [];
+  if (hasColumn("companies", "do_not_contact")) {
+    try {
+      const r = sqlite.prepare(
+        `UPDATE companies SET
+           do_not_contact = 1,
+           do_not_contact_reason = COALESCE(do_not_contact_reason, (
+             SELECT l.do_not_contact_reason FROM temp.merge_map m JOIN companies l ON l.id = m.loser
+             WHERE m.keep = companies.id AND l.do_not_contact = 1 LIMIT 1))
+         WHERE COALESCE(do_not_contact, 0) = 0
+           AND id IN (SELECT keep FROM temp.merge_map)
+           AND EXISTS (SELECT 1 FROM temp.merge_map m JOIN companies l ON l.id = m.loser
+                        WHERE m.keep = companies.id AND l.do_not_contact = 1)`,
+      ).run();
+      if (r.changes > 0) out.push(`do_not_contact (inherited): ${r.changes}`);
+    } catch { /* older schema — skip */ }
+  }
+  // The Faire retailer token is the keeper's link to the Messenger thread.
+  if (hasColumn("companies", "faire_retailer_id")) {
+    try {
+      const r = sqlite.prepare(
+        `UPDATE companies SET faire_retailer_id = (
+           SELECT l.faire_retailer_id FROM temp.merge_map m JOIN companies l ON l.id = m.loser
+           WHERE m.keep = companies.id AND l.faire_retailer_id IS NOT NULL AND l.faire_retailer_id != '' LIMIT 1)
+         WHERE (faire_retailer_id IS NULL OR faire_retailer_id = '')
+           AND id IN (SELECT keep FROM temp.merge_map)
+           AND EXISTS (SELECT 1 FROM temp.merge_map m JOIN companies l ON l.id = m.loser
+                        WHERE m.keep = companies.id AND l.faire_retailer_id IS NOT NULL AND l.faire_retailer_id != '')`,
+      ).run();
+      if (r.changes > 0) out.push(`faire_retailer_id: ${r.changes}`);
+    } catch { /* older schema — skip */ }
+  }
+  return out;
 }
 
 /**
@@ -567,7 +625,55 @@ export function mergeCompanies(opts?: {
       // Unique-per-company tables: drop the loser's row where the keeper
       // already has one, then repoint whatever is left so the keeper inherits
       // a listing/account it was missing instead of losing it outright.
+      // Faire accounts are unique per (company, BRAND), so the generic
+      // "keeper has a row -> drop the loser's" rule is wrong here: it would
+      // delete the loser's A.J. Morgan link just because the keeper had a Jaxy
+      // one, losing that brand's Messenger thread. Handle brand by brand, and
+      // carry per-brand suppression to the survivor first.
+      if (tableExists("company_faire_accounts")) {
+        sqlite.prepare(
+          `UPDATE company_faire_accounts SET do_not_contact = 1,
+             do_not_contact_reason = COALESCE(do_not_contact_reason, 'inherited from merged duplicate')
+           WHERE COALESCE(do_not_contact, 0) = 0
+             AND company_id IN (SELECT keep FROM temp.merge_map)
+             AND EXISTS (SELECT 1 FROM company_faire_accounts l JOIN temp.merge_map m ON m.loser = l.company_id
+                          WHERE m.keep = company_faire_accounts.company_id
+                            AND l.brand = company_faire_accounts.brand AND l.do_not_contact = 1)`,
+        ).run();
+        const droppedCfa = sqlite.prepare(
+          `DELETE FROM company_faire_accounts WHERE company_id IN (SELECT loser FROM temp.merge_map)
+             AND EXISTS (SELECT 1 FROM company_faire_accounts k JOIN temp.merge_map m ON m.keep = k.company_id
+                          WHERE m.loser = company_faire_accounts.company_id
+                            AND k.brand = company_faire_accounts.brand)`,
+        ).run();
+        if (droppedCfa.changes) rowsRepointed["company_faire_accounts (removed)"] = droppedCfa.changes;
+        const movedCfa = sqlite.prepare(
+          `UPDATE company_faire_accounts SET company_id = (SELECT m.keep FROM temp.merge_map m WHERE m.loser = company_faire_accounts.company_id)
+           WHERE company_id IN (SELECT loser FROM temp.merge_map)`,
+        ).run();
+        if (movedCfa.changes) rowsRepointed["company_faire_accounts"] = movedCfa.changes;
+      }
+
+      // Sequence enrollments: the unique index is partial (one LIVE enrollment
+      // per company). Retire the loser's live enrollment rather than delete it,
+      // so the history survives and the index still holds.
+      if (tableExists("sequence_enrollments")) {
+        sqlite.prepare(
+          `UPDATE sequence_enrollments SET status = 'superseded_merge', exited_at = ?, exit_reason = 'company merged'
+           WHERE company_id IN (SELECT loser FROM temp.merge_map)
+             AND status IN ('active','paused_t0')
+             AND EXISTS (SELECT 1 FROM sequence_enrollments k JOIN temp.merge_map m ON m.keep = k.company_id
+                          WHERE m.loser = sequence_enrollments.company_id AND k.status IN ('active','paused_t0'))`,
+        ).run(new Date().toISOString());
+        const movedEnr = sqlite.prepare(
+          `UPDATE sequence_enrollments SET company_id = (SELECT m.keep FROM temp.merge_map m WHERE m.loser = sequence_enrollments.company_id)
+           WHERE company_id IN (SELECT loser FROM temp.merge_map)`,
+        ).run();
+        if (movedEnr.changes) rowsRepointed["sequence_enrollments"] = movedEnr.changes;
+      }
+
       for (const t of UNIQUE_PER_COMPANY) {
+        if (t === "company_faire_accounts" || t === "sequence_enrollments") continue; // handled above
         if (!tableExists(t) || !hasColumn(t, "company_id")) continue;
         const dropped = sqlite.prepare(
           `DELETE FROM ${t} WHERE company_id IN (SELECT loser FROM temp.merge_map)
