@@ -37,6 +37,7 @@ import { analyzeCallNote, type AnalyzeResult } from "./ai/call-note-analysis";
 import { getOrCreateTranscript } from "./ai/recording-transcription";
 import { loadLeadContext } from "./lead-context";
 import { resolveCallerRep } from "./phoneburner-client";
+import { loadLeadHistory, formatLeadHistory } from "./lead-history";
 import { postSlack, type SlackBlock } from "@/modules/integrations/lib/slack/client";
 
 const APP_BASE_URL =
@@ -398,6 +399,7 @@ export async function enrichInterestedLead(
           note: call.notes, connected: call.connected === 1, duration: fmtDuration(call.duration_seconds),
           disposition: call.disposition_label,
           callerLabel: resolveCallerRep(call.agent_id, call.agent_email)?.label ?? null,
+          historyLines: formatLeadHistory(loadLeadHistory(companyId)),
           writeEnabled,
           emailApplied: false, altEmail: null, contactUpdated: false, updatedName: null,
           emailUncaptured: false, transcribed,
@@ -518,6 +520,7 @@ export async function enrichInterestedLead(
         duration: fmtDuration(call.duration_seconds),
         disposition: call.disposition_label,
         callerLabel: resolveCallerRep(call.agent_id, call.agent_email)?.label ?? null,
+        historyLines: formatLeadHistory(loadLeadHistory(companyId)),
         writeEnabled,
         emailApplied: applied.emailApplied,
         altEmail: applied.newEmail,
@@ -625,6 +628,8 @@ async function postEnrichmentSlack(o: {
   disposition: string | null;
   /** Which rep's PhoneBurner account placed the call, e.g. "Sandra". */
   callerLabel: string | null;
+  /** Pre-rendered back-story lines (AJM trade, source, email, prior calls). */
+  historyLines: string[];
   writeEnabled: boolean;
   emailApplied: boolean;
   altEmail: string | null;
@@ -682,6 +687,15 @@ async function postEnrichmentSlack(o: {
         },
       });
     }
+  }
+
+  // Back-story. Sits after the AI read and before the raw note so the message
+  // reads as: what just happened → who this is to us → what was actually said.
+  if (o.historyLines.length) {
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: o.historyLines.join("\n") },
+    });
   }
 
   // Rep note
