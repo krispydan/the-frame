@@ -3,6 +3,7 @@ export const maxDuration = 300;
 import { NextRequest, NextResponse } from "next/server";
 import { requireOpsToken } from "@/lib/ops-auth";
 import { importAjmCsv, rematchAjmOrders, ajmStats, type AjmSource } from "@/modules/sales/lib/ajm/import";
+import { categorizeAjmItems } from "@/modules/sales/lib/ajm/categorize";
 
 /**
  * Token-guarded AJ Morgan history ops (x-ops-key: OPS_TOKEN).
@@ -28,6 +29,9 @@ export async function POST(req: NextRequest) {
   if (source === "rematch") {
     return NextResponse.json({ rematch: rematchAjmOrders() });
   }
+  if (source === "categorize") {
+    return NextResponse.json(categorizeAjmItems());
+  }
   if (!SOURCES.includes(source as AjmSource)) {
     return NextResponse.json({ error: `source must be one of ${SOURCES.join(", ")} or rematch` }, { status: 400 });
   }
@@ -45,7 +49,10 @@ export async function POST(req: NextRequest) {
     const text = await file.text();
     const result = importAjmCsv(source as AjmSource, text);
     const rematch = rematchAjmOrders();
-    return NextResponse.json({ ...result, rematch });
+    // Newly imported lines arrive uncategorized; classify immediately so the
+    // reader-target list is never stale relative to the data.
+    const categories = categorizeAjmItems();
+    return NextResponse.json({ ...result, rematch, categoryCoverage: categories.coverage });
   } catch (e) {
     console.error("[ops/ajm] import failed:", e);
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });

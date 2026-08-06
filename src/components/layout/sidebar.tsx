@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Glasses,
   History,
   LayoutDashboard,
   Users,
@@ -151,6 +152,7 @@ const salesNav: NavItem[] = [
       { title: "All customers", href: "/customers", icon: HeartHandshake },
       { title: "Analytics & Map", href: "/customers/analytics", icon: MapPin },
       { title: "AJ Morgan history", href: "/customers/ajm", icon: History },
+      { title: "Reader launch targets", href: "/customers/ajm/readers", icon: Glasses },
     ],
   },
 ];
@@ -286,7 +288,7 @@ const bottomNav = [
 
 const ROLE_ALLOWED_HREFS: Record<string, string[]> = {
   owner: ["*"],
-  sales_manager: ["/dashboard", "/targets", "/prospects", "/prospects/review", "/prospects/sources", "/prospects/facebook-leads", "/segments", "/campaigns", "/campaigns/inbox", "/marketing/outreach", "/pipeline", "/customers", "/customers/analytics", "/customers/ajm", "/brands", "/catalog", "/inventory/performance", "/inventory/colors"],
+  sales_manager: ["/dashboard", "/targets", "/prospects", "/prospects/review", "/prospects/sources", "/prospects/facebook-leads", "/segments", "/campaigns", "/campaigns/inbox", "/marketing/outreach", "/pipeline", "/customers", "/customers/analytics", "/customers/ajm", "/customers/ajm/readers", "/brands", "/catalog", "/inventory/performance", "/inventory/colors"],
   warehouse: ["/dashboard", "/orders", "/orders/international", "/catalog", "/catalog/intake", "/media", "/inventory", "/inventory/performance", "/inventory/colors", "/inventory/factories", "/inventory/reorder", "/inventory/purchase-orders", "/inventory/exports"],
   finance: ["/dashboard", "/orders", "/finance", "/finance/cogs", "/finance/amazon", "/finance/3pl", "/finance/xero", "/sales/outreach-roi", "/inventory/performance", "/inventory/colors", "/inventory/factories"],
   marketing: ["/dashboard", "/marketing", "/marketing/outreach", "/marketing/email", "/marketing/email/plan", "/marketing/email/calendar", "/marketing/email/designer-queue", "/marketing/email/prompts", "/marketing/videos", "/marketing/videos/clips", "/marketing/videos/recipes", "/marketing/videos/identify", "/marketing/videos/products", "/marketing/calendar", "/catalog", "/catalog/export", "/media", "/campaigns", "/campaigns/inbox", "/prospects/facebook-leads", "/inventory/performance", "/inventory/colors"],

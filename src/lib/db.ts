@@ -2994,6 +2994,14 @@ try {
   )`);
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_ajm_items_order ON ajm_order_items(order_id)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_ajm_items_sku ON ajm_order_items(sku)");
+  // Product category (sun / reading / blue_light / sunglass_reader / accessory /
+  // unclassified / no_detail) + how it was derived, so coverage is auditable.
+  // See src/modules/sales/lib/ajm/categorize.ts.
+  try { sqlite.exec("ALTER TABLE ajm_order_items ADD COLUMN category TEXT"); } catch { /* exists */ }
+  try { sqlite.exec("ALTER TABLE ajm_order_items ADD COLUMN category_source TEXT"); } catch { /* exists */ }
+  try { sqlite.exec("ALTER TABLE ajm_order_items ADD COLUMN style_code TEXT"); } catch { /* exists */ }
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_ajm_items_category ON ajm_order_items(category)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_ajm_items_style ON ajm_order_items(style_code)");
 
   // Faire retailer name → email, researched separately (AJM's Faire export has
   // no emails). Used by the matcher to connect Faire retailers to Frame
