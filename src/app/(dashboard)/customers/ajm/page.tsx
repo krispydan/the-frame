@@ -315,9 +315,20 @@ export default function AjmBenchmarkPage() {
               {orphanTop.map((o) => (
                 <TableRow key={o.companyId}>
                   <TableCell>
-                    {o.accountId
-                      ? <Link href={`/customers/${o.accountId}`} className="font-medium hover:underline">{o.name}</Link>
-                      : <span className="font-medium">{o.name}</span>}
+                    {/* Every AJM account is matched to a company, so there is
+                        always a profile to open: the full customer page when
+                        they have an account, otherwise the company/prospect
+                        record. */}
+                    <Link
+                      href={o.accountId ? `/customers/${o.accountId}` : `/prospects/${o.companyId}`}
+                      className="font-medium hover:underline"
+                      title={o.accountId ? "Open customer profile" : "Open company profile"}
+                    >
+                      {o.name}
+                    </Link>
+                    {o.jaxyFirstOrder && (
+                      <div className="text-xs text-muted-foreground">first Jaxy order {o.jaxyFirstOrder}</div>
+                    )}
                   </TableCell>
                   <TableCell className="text-right tabular-nums font-semibold">{money(o.ajmRevenue)}</TableCell>
                   <TableCell className="text-right tabular-nums">{o.ajmOrders}</TableCell>

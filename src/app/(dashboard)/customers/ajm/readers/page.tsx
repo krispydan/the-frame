@@ -193,8 +193,12 @@ export default function ReaderTargetsPage() {
                 {(data?.targets ?? []).map((t) => (
                   <TableRow key={t.groupKey}>
                     <TableCell>
-                      {t.accountId
-                        ? <Link href={`/customers/${t.accountId}`} className="font-medium hover:underline">{t.name}</Link>
+                      {t.accountId || t.companyId
+                        ? <Link
+                            href={t.accountId ? `/customers/${t.accountId}` : `/prospects/${t.companyId}`}
+                            className="font-medium hover:underline"
+                            title={t.accountId ? "Open customer profile" : "Open company profile"}
+                          >{t.name}</Link>
                         : <span className="font-medium">{t.name}</span>}
                       <div className="text-xs text-muted-foreground">
                         {[t.city, t.state].filter(Boolean).join(", ")}
