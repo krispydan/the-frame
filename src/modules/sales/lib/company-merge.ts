@@ -108,15 +108,22 @@ function companyStats() {
  *
  * Ranking by order count kept the thin stub the order webhook auto-created
  * and deleted the enriched CRM record (contacts, notes, ICP tier, owner,
- * segment). Orders and AJM history are repointed either way, so they must not
- * drive the choice — the record a human has actually worked should survive.
- * Ties fall back to more contacts, then the older record.
+ * segment), so CRM richness comes first and stays first.
+ *
+ * When richness ties, the record carrying the most trading history wins.
+ * Contact count used to break that tie and it chose badly: a stub whose only
+ * contact was the placeholder "name@email.com" outranked the Show Pony record
+ * holding $85,976 of AJM history, purely for having a contact row at all.
+ * Orders repoint either way, but keeping the record most of the history
+ * already hangs off means the fewest rows move and the surviving id is the one
+ * links point at. Contacts then age break any remaining tie.
  */
 function pickKeeper(cs: DuplicateGroup["companies"]): string {
+  const history = (c: DuplicateGroup["companies"][number]) => c.ajmRevenue + c.jaxyRevenue;
   return [...cs].sort((a, b) =>
     (b.crmRichness ?? 0) - (a.crmRichness ?? 0) ||
+    history(b) - history(a) ||
     (b.contactCount ?? 0) - (a.contactCount ?? 0) ||
-    b.ajmRevenue - a.ajmRevenue ||
     String(a.createdAt ?? "").localeCompare(String(b.createdAt ?? "")),
   )[0].id;
 }
@@ -297,6 +304,27 @@ function clusterByAnySignal(
   return { linked, unlinked };
 }
 
+/**
+ * Sibling stores of one chain look exactly like duplicates: same city, same
+ * shop@ contact address, names differing only by neighbourhood. "Lockwood
+ * Williamsburg" and "Lockwood Greenpoint" are two real Brooklyn shops, and
+ * both have their own AJM and Jaxy order history.
+ *
+ * A true duplicate is nearly always one real record plus a stub — the stub is
+ * empty precisely because its orders went to the other one. So when a cluster
+ * holds two DIFFERENTLY-named records that have each independently
+ * accumulated trading history, that is evidence of two operating businesses,
+ * not one recorded twice. Those go to review.
+ *
+ * Same-named records are exempt: five "Rockin' Rudy's" rows in Missoula each
+ * carrying orders are one shop the importers split, not five shops.
+ */
+function looksLikeSiblingLocations(cluster: Company[]): boolean {
+  const trading = cluster.filter((c) => c.jaxyOrders > 0 || c.ajmOrders > 0);
+  if (trading.length < 2) return false;
+  return new Set(trading.map((c) => normalizeCompanyName(c.name))).size > 1;
+}
+
 export interface ReviewGroup {
   key: string; reason: string; companies: DuplicateGroup["companies"];
 }
@@ -392,6 +420,14 @@ export function findDuplicateCompanies(opts?: { minEvidence?: "name" | "email" |
     const clusters = clusterByAnySignal(items, { includeName: true, includeDomain: false });
     let n = 0;
     for (const cluster of clusters.linked) {
+      if (looksLikeSiblingLocations(cluster)) {
+        needsReview.push({
+          key: `email:${e}`,
+          reason: "differently-named records that each have their own order history — likely sibling stores of one chain, not duplicates",
+          companies: cluster,
+        });
+        continue;
+      }
       const key = `email:${e}|${++n}`;
       if (!groups.has(key)) groups.set(key, { reason: "email", items: cluster });
     }

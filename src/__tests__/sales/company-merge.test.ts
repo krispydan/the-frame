@@ -145,6 +145,28 @@ describe("findDuplicateCompanies — refuses unsafe merges", () => {
     mergeCompanies({ apply: true });
     expect(survivors().size).toBe(2);
   });
+
+  it("keeps sibling stores that share a shop address but each trade", () => {
+    // Two real Brooklyn shops on one shop@ inbox, each with its own history.
+    const a = company("Lockwood Williamsburg", "brooklyn", "NY", { email: "shop@lockwoodshop.com" });
+    const b = company("Lockwood Greenpoint", "brooklyn", "NY", { email: "shop@lockwoodshop.com" });
+    db.prepare(`INSERT INTO ajm_orders (id, order_number, order_date, total, cancelled, company_id) VALUES ('a1','A1','2024-06-01',4677,0,?)`).run(a);
+    db.prepare(`INSERT INTO orders (id, order_number, company_id, channel, status, total, placed_at) VALUES ('o1','#1',?,'shopify_wholesale','shipped',1440,'2026-04-28')`).run(b);
+
+    mergeCompanies({ apply: true });
+    expect(survivors().size).toBe(2);
+    expect(getNeedsReview().some((r) => r.reason.includes("sibling stores"))).toBe(true);
+  });
+
+  it("still merges a dba stub onto the trading record", () => {
+    // Same shape as above but only ONE side has history — a real duplicate.
+    company("Water Bros, INC Dba: Quiet Storm", "rehoboth beach", "DE", { email: "info@quietstormsurf.com" });
+    const real = company("Quiet Storm Surf Shop", "rehoboth beach", "DE", { email: "info@quietstormsurf.com" });
+    db.prepare(`INSERT INTO ajm_orders (id, order_number, order_date, total, cancelled, company_id) VALUES ('a2','A2','2024-06-01',15654,0,?)`).run(real);
+
+    mergeCompanies({ apply: true });
+    expect(survivors().size).toBe(1);
+  });
 });
 
 describe("mergeCompanies", () => {
@@ -155,6 +177,17 @@ describe("mergeCompanies", () => {
     expect(res.dryRun).toBe(true);
     expect(res.companiesRemoved).toBe(1);
     expect(survivors().size).toBe(2);
+  });
+
+  it("keeps the record holding the history over a placeholder-contact stub", () => {
+    // The stub's only contact is the shared placeholder address; it must not
+    // outrank the record carrying $85,976 of AJM history.
+    const real = company("Show Pony", "seattle", "WA");
+    company("Show Pony", "seattle", "WASHINGTON", { email: "name@email.com" });
+    db.prepare(`INSERT INTO ajm_orders (id, order_number, order_date, total, cancelled, company_id) VALUES ('a3','A3','2024-06-01',85976,0,?)`).run(real);
+
+    mergeCompanies({ apply: true });
+    expect([...survivors()]).toEqual([real]);
   });
 
   it("keeps the worked CRM record and repoints its orders", () => {
