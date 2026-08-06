@@ -94,6 +94,16 @@ const TOL = 0.015; // penny rounding tolerance
 interface ChargeRow {
   id: string; charge_type: string; amount: number; quantity: number;
   order_id: string | null; order_number_raw: string | null; carrier: string | null;
+  ship_country: string | null; ship_state: string | null;
+}
+
+/** Contiguous-US destination — the only cohort postage outliers apply to.
+ *  HI/AK/territories and international always cost more (per Daniel). */
+function isContiguousUs(country: string | null, state: string | null): boolean {
+  const c = (country ?? "").trim().toUpperCase();
+  if (c && c !== "US" && c !== "USA" && c !== "UNITED STATES") return false;
+  const s = (state ?? "").trim().toUpperCase();
+  return !["HI", "AK", "PR", "GU", "VI", "AS", "MP"].includes(s);
 }
 
 export function auditInvoice(invoiceId: string): AuditReport {
@@ -120,7 +130,7 @@ export function auditInvoice(invoiceId: string): AuditReport {
   };
 
   const charges = sqlite.prepare(
-    "SELECT id, charge_type, amount, quantity, order_id, order_number_raw, carrier FROM three_pl_charges WHERE invoice_id = ?",
+    "SELECT id, charge_type, amount, quantity, order_id, order_number_raw, carrier, ship_country, ship_state FROM three_pl_charges WHERE invoice_id = ?",
   ).all(invoiceId) as ChargeRow[];
 
   // ── 1. Rate checks ──
@@ -231,22 +241,38 @@ export function auditInvoice(invoiceId: string): AuditReport {
   }
 
   // ── 5. Postage outliers (pass-through, so no contract check — flag the weird) ──
-  const postage = charges.filter((c) => c.charge_type.startsWith("shipping_") && c.amount > 0);
+  // Two rules that kill the false positives (per Daniel, Aug 2026):
+  //   - contiguous-US destinations only: HI/AK/territories/international
+  //     always cost more, so they're excluded from medians AND from flagging.
+  //   - PER-ITEM basis: a 128-unit wholesale shipment naturally costs more
+  //     than a 2-unit parcel, so postage is compared per billed unit.
+  const unitsByOrder = new Map<string, number>();
+  for (const c of charges) {
+    if (c.charge_type.startsWith("fulfillment_") && c.order_number_raw) {
+      unitsByOrder.set(c.order_number_raw, (unitsByOrder.get(c.order_number_raw) ?? 0) + c.quantity);
+    }
+  }
+  const postage = charges.filter(
+    (c) => c.charge_type.startsWith("shipping_") && c.amount > 0 && isContiguousUs(c.ship_country, c.ship_state),
+  );
+  const perItemOf = (p: ChargeRow) => p.amount / Math.max(1, unitsByOrder.get(p.order_number_raw ?? "") ?? 1);
   const byCarrier = new Map<string, number[]>();
   for (const p of postage) {
     const k = p.charge_type;
-    (byCarrier.get(k) ?? byCarrier.set(k, []).get(k)!).push(p.amount);
+    (byCarrier.get(k) ?? byCarrier.set(k, []).get(k)!).push(perItemOf(p));
   }
   for (const p of postage) {
     const arr = [...(byCarrier.get(p.charge_type) ?? [])].sort((a, b) => a - b);
     if (arr.length < 5) continue;
     const median = arr[Math.floor(arr.length / 2)];
-    if (p.amount > median * 4 && p.amount > 25) {
+    const perItem = perItemOf(p);
+    if (median > 0 && perItem > median * 4 && p.amount > 15) {
+      const units = unitsByOrder.get(p.order_number_raw ?? "") ?? 1;
       findings.push({
         check: "postage_outlier", severity: "info", chargeType: p.charge_type,
         orderNumber: p.order_number_raw,
-        message: `Postage $${r2(p.amount)} is ${r2(p.amount / median)}× the ${p.charge_type.replace("shipping_", "").toUpperCase()} median ($${r2(median)}) this invoice`,
-        charged: r2(p.amount), expected: median,
+        message: `Postage $${r2(p.amount)} (${units} unit${units === 1 ? "" : "s"} → $${r2(perItem)}/item) is ${r2(perItem / median)}× the ${p.charge_type.replace("shipping_", "").toUpperCase()} per-item median ($${r2(median)}) this invoice`,
+        charged: r2(p.amount), expected: r2(median * units),
       });
     }
   }
