@@ -24,7 +24,7 @@
  */
 import type { ExportProduct, ProductValidationResult, ValidationIssue } from "./types";
 import { catalogImageUrl } from "@/lib/storage/image-url";
-import { DEFAULT_WHOLESALE_PRICE_STR, DEFAULT_RETAIL_PRICE_STR } from "@/modules/catalog/lib/pricing";
+import { DEFAULT_WHOLESALE_PRICE_STR, DEFAULT_RETAIL_PRICE_STR, DEFAULT_WEIGHT_LB_STR } from "@/modules/catalog/lib/pricing";
 import { isReadingProduct, variantSkus } from "./types";
 import { strengthLabel } from "@/modules/catalog/lib/reading-glasses";
 import * as XLSX from "xlsx";
@@ -36,7 +36,7 @@ const JAXY_WHOLESALE_PRICE = DEFAULT_WHOLESALE_PRICE_STR;
 const JAXY_RETAIL_PRICE = DEFAULT_RETAIL_PRICE_STR;
 const JAXY_CASE_SIZE = "3";
 const JAXY_MOQ = "3";
-const JAXY_WEIGHT = "0.10";
+const JAXY_WEIGHT = DEFAULT_WEIGHT_LB_STR;  // 2 oz
 const JAXY_WEIGHT_UNIT = "lb";
 const JAXY_MADE_IN = "China";
 const JAXY_HS6 = "900410"; // HS6 code for sunglasses

@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { products, skus, purchaseOrders } from "@/modules/catalog/schema";
 import { activityFeed } from "@/modules/core/schema";
 import { eq, sql } from "drizzle-orm";
-import { DEFAULT_WHOLESALE_PRICE, DEFAULT_RETAIL_PRICE } from "@/modules/catalog/lib/pricing";
+import { DEFAULT_WHOLESALE_PRICE, DEFAULT_RETAIL_PRICE, DEFAULT_WEIGHT_OZ } from "@/modules/catalog/lib/pricing";
 
 /**
  * Product Intake — create new products from CSV data or manual entry.
@@ -90,6 +90,7 @@ export async function POST(request: NextRequest) {
             costPrice: v.costPrice || null,
             wholesalePrice: DEFAULT_WHOLESALE_PRICE,
             retailPrice: DEFAULT_RETAIL_PRICE,
+            weightOz: DEFAULT_WEIGHT_OZ,
             status: "intake",
           });
         }

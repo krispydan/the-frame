@@ -45,8 +45,8 @@ export interface TickResult {
 }
 
 interface SequenceRow {
-  id: string; name: string; brand: string; trigger: string; class: string;
-  status: string; enrollment_mode: string; enrollment_rule: string | null;
+  id: string; name: string; brand: string; trigger: string; class: string; status: string;
+  enrollment_mode: string; enrollment_rule: string | null;
   propose_only: number; priority: number; max_touches: number;
 }
 interface StepRow {
@@ -78,7 +78,18 @@ export function runTick(opts: { dryRun?: boolean } = {}): TickResult {
 
   const cooldownDays = num("seq.cooldown_days", 14);
   const crossBrandDays = num("seq.cross_brand_cooldown_days", 7);
+  // This is a DAILY cap, and the tick runs every 5 minutes — so it has to be
+  // measured against what today has already produced, not reset each tick.
   const dailyCap = num("seq.review_daily_cap", 20);
+  const today = new Date().toISOString().slice(0, 10);
+  const usedToday = (sqlite
+    .prepare("SELECT COUNT(*) n FROM sequence_enrollments WHERE enrolled_by='rule' AND enrolled_at >= ?")
+    .get(today) as { n: number }).n;
+  const queuedToday = (sqlite
+    .prepare("SELECT COUNT(*) n FROM sequence_messages WHERE queued_at >= ?")
+    .get(today) as { n: number }).n;
+  const enrollBudget = Math.max(0, dailyCap - usedToday);
+  const queueBudget = Math.max(0, dailyCap - queuedToday);
 
   // ── 1. EXIT ────────────────────────────────────────────────────────────
   // They ordered, they replied, or they became suppressed. Checked before
@@ -126,13 +137,27 @@ export function runTick(opts: { dryRun?: boolean } = {}): TickResult {
     }
   }
 
+  // Self-heal: an active enrollment with no due date and nothing outstanding in
+  // the queue is finished — it just never got closed (a deleted step, a task
+  // nobody actioned, an older bug). Left alone it would hold the
+  // one-live-enrollment lock and quietly bar that company from every sequence.
+  if (!dry) {
+    sqlite.prepare(
+      `UPDATE sequence_enrollments SET status='completed', exited_at=?, exit_reason='completed (no further steps)'
+        WHERE status='active' AND next_step_due_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM sequence_messages m
+                           WHERE m.enrollment_id = sequence_enrollments.id
+                             AND m.status IN ('queued_review','approved','task_open'))`,
+    ).run(now());
+  }
+
   // ── 2. ENROLL ──────────────────────────────────────────────────────────
   // Highest-priority sequence wins a contested account; the unique index on
   // (company_id) WHERE active is the real guarantee, this just avoids churn.
   let enrolledThisTick = 0;
   for (const seq of sequences) {
     if (seq.enrollment_mode !== "auto") continue;
-    if (enrolledThisTick >= dailyCap) break;
+    if (enrolledThisTick >= enrollBudget) break;
     let candidates: string[] = [];
     try {
       candidates = findCandidates(seq);
@@ -141,7 +166,7 @@ export function runTick(opts: { dryRun?: boolean } = {}): TickResult {
       continue;
     }
     for (const companyId of candidates) {
-      if (enrolledThisTick >= dailyCap) break;
+      if (enrolledThisTick >= enrollBudget) break;
       // Already live in something?
       const busy = sqlite
         .prepare("SELECT 1 FROM sequence_enrollments WHERE company_id = ? AND status IN ('active','paused_t0') LIMIT 1")
@@ -204,11 +229,23 @@ export function runTick(opts: { dryRun?: boolean } = {}): TickResult {
         WHERE status = 'active' AND next_step_due_at IS NOT NULL AND next_step_due_at <= ?
         ORDER BY next_step_due_at ASC LIMIT ?`,
     )
-    .all(now(), dailyCap) as Array<{ id: string; sequence_id: string; company_id: string; current_step: number }>;
+    .all(now(), queueBudget) as Array<{ id: string; sequence_id: string; company_id: string; current_step: number }>;
 
   for (const e of due) {
-    const seq = sequences.find((s) => s.id === e.sequence_id);
+    // Load by id rather than from the active list: if the sequence was paused,
+    // its enrollments must still be resolvable, or they sit active forever and
+    // lock those companies out of everything else.
+    const seq = (sequences.find((s) => s.id === e.sequence_id)
+      || sqlite.prepare("SELECT * FROM sequences WHERE id = ?").get(e.sequence_id)) as SequenceRow | undefined;
     if (!seq) continue;
+    if (seq.status === "paused") continue;          // hold, don't advance
+    if (seq.status === "archived") {
+      if (!dry) {
+        sqlite.prepare("UPDATE sequence_enrollments SET status='completed', exited_at=?, exit_reason='sequence archived', next_step_due_at=NULL WHERE id=?")
+          .run(now(), e.id);
+      }
+      continue;
+    }
     // "The next step after this one" — not current+1. A deleted or renumbered
     // step would otherwise silently truncate the sequence.
     const step = sqlite

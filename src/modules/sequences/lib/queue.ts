@@ -35,6 +35,33 @@ export interface QueueItem {
   lastMessagedAt: string | null;
 }
 
+/** One place that knows how a follow-up is scheduled. Was duplicated across
+ *  the engine, markSent and markSkipped, and the copies had already drifted. */
+function scheduleNext(enrollmentId: string, stepId: string, fromIso: string): void {
+  const step = sqlite.prepare("SELECT sequence_id, step_no FROM sequence_steps WHERE id = ?")
+    .get(stepId) as { sequence_id: string; step_no: number } | undefined;
+  const done = () => sqlite
+    .prepare("UPDATE sequence_enrollments SET status='completed', exited_at=?, exit_reason='completed', next_step_due_at=NULL WHERE id=? AND status IN ('active','paused_t0')")
+    .run(fromIso, enrollmentId);
+  // A missing step row must complete the enrollment, never leave it parked —
+  // an enrollment stuck active with no due date locks the company out of every
+  // sequence via the one-live-enrollment index.
+  if (!step) { done(); return; }
+  const next = sqlite
+    .prepare("SELECT delay_days, delay_business_days FROM sequence_steps WHERE sequence_id=? AND step_no>? ORDER BY step_no ASC LIMIT 1")
+    .get(step.sequence_id, step.step_no) as { delay_days: number; delay_business_days: number } | undefined;
+  if (!next) { done(); return; }
+  let due = new Date(Date.parse(fromIso) + (next.delay_days || 0) * 86400000);
+  if (next.delay_business_days) {
+    while (due.getUTCDay() === 0 || due.getUTCDay() === 6) due = new Date(due.getTime() + 86400000);
+  }
+  sqlite.prepare("UPDATE sequence_enrollments SET next_step_due_at=? WHERE id=? AND status IN ('active','paused_t0')")
+    .run(due.toISOString(), enrollmentId);
+}
+
+/** Statuses a queue item can still be acted on from. */
+const ACTIONABLE = ["queued_review", "approved", "task_open"];
+
 export function getQueue(opts: { limit?: number; brand?: string; status?: string } = {}): QueueItem[] {
   const limit = opts.limit ?? 100;
   const status = opts.status ?? "queued_review";
@@ -52,7 +79,7 @@ export function getQueue(opts: { limit?: number; brand?: string; status?: string
               ca.last_order_at, ca.total_orders, ca.tier,
               (SELECT MAX(sent_at) FROM outreach_messages om WHERE om.company_id = m.company_id) AS last_messaged_at
          FROM sequence_messages m
-         JOIN companies c ON c.id = m.company_id
+         LEFT JOIN companies c ON c.id = m.company_id
          LEFT JOIN sequences s ON s.id = m.sequence_id
          LEFT JOIN sequence_steps st ON st.id = m.step_id
          LEFT JOIN customer_accounts ca ON ca.company_id = m.company_id
@@ -108,9 +135,12 @@ export function markSent(id: string, by: string, editedBody?: string): { ok: boo
     .get(id) as Record<string, unknown> | undefined;
   if (!m) return { ok: false, reason: "not_found" };
 
-  // Idempotent: a double-click or retried POST must not write a second ledger
-  // row or push sent_at forward.
+  // Idempotent, and only from a state that can still be acted on. Two tabs
+  // open meant one could re-send a row a colleague had just skipped.
   if (m.status === "sent") return { ok: true };
+  if (!ACTIONABLE.includes(m.status as string)) {
+    return { ok: false, reason: `already ${m.status}` };
+  }
 
   const at = new Date().toISOString();
   const body = editedBody ?? (m.rendered_body as string);
@@ -157,70 +187,43 @@ export function markSent(id: string, by: string, editedBody?: string): { ok: boo
            body, m.sequence_id, at);
     sqlite
       .prepare("UPDATE company_faire_accounts SET last_messaged_at=? WHERE company_id=? AND brand=?")
-      .run(at, m.company_id as string, m.brand as string);
+      .run(at, m.company_id as string, ((m.brand as string) || "").toLowerCase());
 
     // Schedule the NEXT step from this send — delays anchor on completion, so
     // a queue cleared late shifts the whole follow-up chain with it.
-    const step = sqlite
-      .prepare("SELECT sequence_id, step_no FROM sequence_steps WHERE id = ?")
-      .get(m.step_id as string) as { sequence_id: string; step_no: number } | undefined;
-    if (step) {
-      const next = sqlite
-        .prepare("SELECT delay_days, delay_business_days FROM sequence_steps WHERE sequence_id=? AND step_no>? ORDER BY step_no ASC LIMIT 1")
-        .get(step.sequence_id, step.step_no) as { delay_days: number; delay_business_days: number } | undefined;
-      if (next) {
-        let due = new Date(Date.parse(at) + (next.delay_days || 0) * 86400000);
-        if (next.delay_business_days) {
-          while (due.getUTCDay() === 0 || due.getUTCDay() === 6) due = new Date(due.getTime() + 86400000);
-        }
-        sqlite.prepare("UPDATE sequence_enrollments SET next_step_due_at=? WHERE id=? AND status='active'")
-          .run(due.toISOString(), m.enrollment_id as string);
-      } else {
-        sqlite.prepare("UPDATE sequence_enrollments SET status='completed', exited_at=?, exit_reason='completed', next_step_due_at=NULL WHERE id=? AND status='active'")
-          .run(at, m.enrollment_id as string);
-      }
-    }
+    scheduleNext(m.enrollment_id as string, m.step_id as string, at);
   });
   tx();
   return { ok: true };
 }
 
-export function markSkipped(id: string, reason: string): { ok: boolean } {
-  const m = sqlite.prepare("SELECT enrollment_id, step_id FROM sequence_messages WHERE id=?")
-    .get(id) as { enrollment_id: string; step_id: string } | undefined;
+export function markSkipped(id: string, reason: string): { ok: boolean; reason?: string } {
+  const m = sqlite.prepare("SELECT enrollment_id, step_id, status FROM sequence_messages WHERE id=?")
+    .get(id) as { enrollment_id: string; step_id: string; status: string } | undefined;
+  if (!m) return { ok: false, reason: "not_found" };
+  if (!ACTIONABLE.includes(m.status)) return { ok: false, reason: `already ${m.status}` };
   const tx = sqlite.transaction(() => {
     sqlite.prepare("UPDATE sequence_messages SET status='skipped', error=? WHERE id=?").run(reason, id);
-    if (!m) return;
-    // Skipping one touch must not strand the enrollment — schedule the next
-    // step from now, or complete if this was the last one.
-    const step = sqlite.prepare("SELECT sequence_id, step_no FROM sequence_steps WHERE id=?")
-      .get(m.step_id) as { sequence_id: string; step_no: number } | undefined;
-    if (!step) return;
-    const next = sqlite
-      .prepare("SELECT delay_days FROM sequence_steps WHERE sequence_id=? AND step_no>? ORDER BY step_no ASC LIMIT 1")
-      .get(step.sequence_id, step.step_no) as { delay_days: number } | undefined;
-    if (next) {
-      sqlite.prepare("UPDATE sequence_enrollments SET next_step_due_at=? WHERE id=? AND status='active'")
-        .run(new Date(Date.now() + (next.delay_days || 0) * 86400000).toISOString(), m.enrollment_id);
-    } else {
-      sqlite.prepare("UPDATE sequence_enrollments SET status='completed', exited_at=?, exit_reason='completed', next_step_due_at=NULL WHERE id=? AND status='active'")
-        .run(new Date().toISOString(), m.enrollment_id);
-    }
+    // Skipping one touch must not strand the enrollment.
+    scheduleNext(m.enrollment_id, m.step_id, new Date().toISOString());
   });
   tx();
   return { ok: true };
 }
 
 /** They replied — exit the whole enrollment, not just this step. */
-export function markReplied(id: string): { ok: boolean } {
+export function markReplied(id: string): { ok: boolean; reason?: string } {
   const at = new Date().toISOString();
-  const m = sqlite.prepare("SELECT enrollment_id FROM sequence_messages WHERE id=?").get(id) as { enrollment_id: string } | undefined;
+  const m = sqlite.prepare("SELECT enrollment_id, status FROM sequence_messages WHERE id=?")
+    .get(id) as { enrollment_id: string; status: string } | undefined;
+  if (!m) return { ok: false, reason: "not_found" };
+  if (!ACTIONABLE.includes(m.status)) return { ok: false, reason: `already ${m.status}` };
   const tx = sqlite.transaction(() => {
     sqlite.prepare("UPDATE sequence_messages SET status='skipped', reply_detected_at=?, error='they replied' WHERE id=?").run(at, id);
-    if (m) {
-      sqlite.prepare("UPDATE sequence_enrollments SET status='exited_reply', exited_at=?, exit_reason='reply', next_step_due_at=NULL WHERE id=?")
-        .run(at, m.enrollment_id);
-    }
+    // Only exit a LIVE enrollment — never rewrite one that already exited for
+    // another reason (an order), which would lose that attribution.
+    sqlite.prepare("UPDATE sequence_enrollments SET status='exited_reply', exited_at=?, exit_reason='reply', next_step_due_at=NULL WHERE id=? AND status IN ('active','paused_t0')")
+      .run(at, m.enrollment_id);
   });
   tx();
   return { ok: true };

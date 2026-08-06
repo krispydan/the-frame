@@ -52,9 +52,27 @@ export async function POST(req: NextRequest) {
       setSetting("seq.engine_enabled", body.enabled ? "true" : "false");
       return NextResponse.json({ ok: true, engineEnabled: !!body.enabled });
     case "activate": {
-      if (!body.name) return NextResponse.json({ error: "name required" }, { status: 400 });
-      sqlite.prepare("UPDATE sequences SET status=? WHERE name=?").run(body.status || "active", body.name);
-      return NextResponse.json({ ok: true });
+      if (!body.name && !body.seedKey) return NextResponse.json({ error: "name or seedKey required" }, { status: 400 });
+      const status = body.status || "active";
+      // A typo like "actve" previously deactivated a sequence and returned 200.
+      const VALID = ["draft", "active", "paused", "archived"];
+      if (!VALID.includes(status)) {
+        return NextResponse.json({ error: `status must be one of ${VALID.join(", ")}` }, { status: 400 });
+      }
+      const r = body.seedKey
+        ? sqlite.prepare("UPDATE sequences SET status=? WHERE seed_key=?").run(status, body.seedKey)
+        : sqlite.prepare("UPDATE sequences SET status=? WHERE name=?").run(status, body.name);
+      if (!r.changes) return NextResponse.json({ error: "no matching sequence" }, { status: 404 });
+      return NextResponse.json({ ok: true, updated: r.changes, status });
+    }
+    case "set_propose_only": {
+      if (!body.seedKey && !body.name) return NextResponse.json({ error: "name or seedKey required" }, { status: 400 });
+      const v = body.proposeOnly === false ? 0 : 1;
+      const r = body.seedKey
+        ? sqlite.prepare("UPDATE sequences SET propose_only=? WHERE seed_key=?").run(v, body.seedKey)
+        : sqlite.prepare("UPDATE sequences SET propose_only=? WHERE name=?").run(v, body.name);
+      if (!r.changes) return NextResponse.json({ error: "no matching sequence" }, { status: 404 });
+      return NextResponse.json({ ok: true, proposeOnly: v === 1 });
     }
     default:
       return NextResponse.json({ error: "unknown action" }, { status: 400 });

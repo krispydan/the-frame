@@ -179,9 +179,10 @@ export function seedSequences(): { created: number; updated: number; steps: numb
       sqlite
         .prepare(
           `UPDATE sequences SET seed_key=?, brand=?, trigger=?, class=?, priority=?, description=?,
-                  enrollment_mode=?, updated_at=? WHERE id=?`,
+                  enrollment_mode=?, max_touches=?, updated_at=? WHERE id=?`,
         )
-        .run(s.key, s.brand, s.trigger, s.class, s.priority, s.description, s.enrollment_mode, new Date().toISOString(), id);
+        .run(s.key, s.brand, s.trigger, s.class, s.priority, s.description, s.enrollment_mode,
+             s.steps.length, new Date().toISOString(), id);
       updated++;
     } else {
       id = randomUUID();
@@ -218,6 +219,12 @@ export function seedSequences(): { created: number; updated: number; steps: numb
       }
       steps++;
     }
+    // Drop steps that are no longer in the seed — otherwise removing one from
+    // code leaves a live row that still gets queued.
+    const keep = s.steps.map((x) => x.step_no);
+    sqlite
+      .prepare(`DELETE FROM sequence_steps WHERE sequence_id = ? AND step_no NOT IN (${keep.map(() => "?").join(",")})`)
+      .run(id, ...keep);
   }
   return { created, updated, steps };
 }

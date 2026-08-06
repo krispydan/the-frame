@@ -4,7 +4,9 @@
 import type { ExportProduct, ValidationIssue, ProductValidationResult } from "./types";
 import Papa from "papaparse";
 import { catalogImageUrl } from "@/lib/storage/image-url";
-import { wholesaleOrDefault, retailOrDefault } from "@/modules/catalog/lib/pricing";
+import { wholesaleOrDefault, retailOrDefault, DEFAULT_WEIGHT_G_STR } from "@/modules/catalog/lib/pricing";
+import { isReadingProduct, variantSkus } from "./types";
+import { strengthLabel } from "@/modules/catalog/lib/reading-glasses";
 
 function absUrl(img: { filePath: string | null; url?: string | null } | null | undefined): string {
   // Prefer the row's absolute URL (R2 CDN) over the app-proxied path.
@@ -419,9 +421,21 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
     //   sticker price is the sticker price.
     const compareAtPrice = "";
 
-    const firstSku = ep.skus[0];
+    // Reading glasses emit a second option axis (Strength). variantRows
+    // drops the power-less colorway base row the PO import creates, so
+    // it — not ep.skus — is what the CSV iterates.
+    const isReader = isReadingProduct(ep);
+    const variantRows = variantSkus(ep);
+    // Power SKUs carry no images of their own; photos live on the
+    // colorway row, so resolve a variant image via the colorway sibling.
+    const imageSkuIdFor = (sk: ExportProduct["skus"][number]) =>
+      sk.readingPower == null
+        ? sk.id
+        : (ep.skus.find((o) => o.colorName === sk.colorName && o.readingPower == null)?.id ?? sk.id);
+
+    const firstSku = variantRows[0];
     const firstImage = productImages[0];
-    const firstVariantImage = firstSku ? frontBySkuId.get(firstSku.id) : undefined;
+    const firstVariantImage = firstSku ? frontBySkuId.get(imageSkuIdFor(firstSku)) : undefined;
 
     // Build SEO + alt context now that firstSku is known.
     const seoCtx = buildSeoContext(
@@ -488,6 +502,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
         sku: string;
         barcode: string;
         optionValue: string;
+        option2Value: string;
         price: string;
         compareAt: string;
         costPerItem: string;
@@ -524,11 +539,12 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       Status: opts.status ?? "",
       SKU: opts.sku ?? "",
       Barcode: opts.barcode ?? "",
-      "Option1 name": ep.skus.length > 1 ? "Color" : "Title",
+      "Option1 name": variantRows.length > 1 ? "Color" : "Title",
       "Option1 value": opts.optionValue ?? "",
       "Option1 Linked To": "",
-      "Option2 name": "",
-      "Option2 value": "",
+      // Readers vary on Color AND diopter — Strength is the second axis.
+      "Option2 name": isReader && variantRows.length > 1 ? "Strength" : "",
+      "Option2 value": opts.option2Value ?? "",
       "Option2 Linked To": "",
       "Option3 name": "",
       "Option3 value": "",
@@ -548,7 +564,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       // 1.5 oz per pair (typical sunglasses weight) → 1.5 × 28.3495
       // ≈ 42.52 g. Admin UI shows this back as 1.5 oz via the display
       // unit below.
-      "Weight value (grams)": opts.sku ? "42.52" : "",
+      "Weight value (grams)": opts.sku ? DEFAULT_WEIGHT_G_STR : "",
       "Weight unit for display": opts.sku ? "oz" : "",
       "Requires shipping": opts.sku ? "TRUE" : "",
       "Fulfillment service": opts.sku ? "manual" : "",
@@ -607,6 +623,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       sku: firstSku?.sku || "",
       barcode: firstSku?.upc || "",
       optionValue: firstSku?.colorName || "Default Title",
+      option2Value: firstSku ? (strengthLabel(firstSku) ?? "") : "",
       price: variantPrice,
       compareAt: compareAtPrice,
       costPerItem: landedCostFor(firstSku?.costPrice ?? null),
@@ -633,13 +650,14 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
 
     // 2. Additional variant rows (one per SKU after the first) —
     //    Shopify groups variants by URL handle.
-    for (let i = 1; i < ep.skus.length; i++) {
-      const sku = ep.skus[i];
-      const variantImage = frontBySkuId.get(sku.id);
+    for (let i = 1; i < variantRows.length; i++) {
+      const sku = variantRows[i];
+      const variantImage = frontBySkuId.get(imageSkuIdFor(sku));
       rows.push(makeRow({
         sku: sku.sku || "",
         barcode: sku.upc || "",
         optionValue: sku.colorName || "",
+        option2Value: strengthLabel(sku) ?? "",
         price: variantPrice,
         compareAt: compareAtPrice,
         costPerItem: landedCostFor(sku.costPrice ?? null),

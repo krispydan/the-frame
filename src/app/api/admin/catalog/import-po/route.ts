@@ -3,7 +3,7 @@ export const maxDuration = 120;
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
-import { DEFAULT_WHOLESALE_PRICE, DEFAULT_RETAIL_PRICE } from "@/modules/catalog/lib/pricing";
+import { DEFAULT_WHOLESALE_PRICE, DEFAULT_RETAIL_PRICE, DEFAULT_WEIGHT_OZ } from "@/modules/catalog/lib/pricing";
 
 /**
  * POST /api/admin/catalog/import-po
@@ -259,10 +259,10 @@ export async function POST(req: NextRequest) {
   const insertSku = sqlite.prepare<unknown[]>(
     `INSERT INTO catalog_skus
        (id, product_id, sku, color_name, upc, cost_price,
-        wholesale_price, retail_price,
+        wholesale_price, retail_price, weight_oz,
         reading_power, has_blue_light_filter,
         status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'intake', datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'intake', datetime('now'), datetime('now'))`,
   );
   // The productType tag is what curatedAttrsFromTags() turns into
   // ExportProduct.product.category — without it every reader falls back to
@@ -287,6 +287,7 @@ export async function POST(req: NextRequest) {
         s.costPrice,
         DEFAULT_WHOLESALE_PRICE,
         DEFAULT_RETAIL_PRICE,
+        DEFAULT_WEIGHT_OZ,
         s.readingPower,
         s.hasBlueLightFilter == null ? null : s.hasBlueLightFilter ? 1 : 0,
       );

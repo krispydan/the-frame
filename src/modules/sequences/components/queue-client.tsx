@@ -10,7 +10,7 @@
  * a clean queue never requires touching the mouse.
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { QueueItem } from "@/modules/sequences/lib/queue";
 
 interface Props {
@@ -25,33 +25,57 @@ export function QueueClient({ initialItems, initialCounts }: Props) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // A ref, not state: key auto-repeat can fire again before setBusy propagates.
+  const busyRef = useRef(false);
 
   const item = items[i];
-  useEffect(() => { setDraft(item?.body ?? ""); setCopied(false); }, [item?.id, item?.body]);
+  // Keep per-card edits when navigating back and forth — resetting on every
+  // card change silently discarded work the UI promises to record.
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!item) return;
+    setDraft(edits[item.id] ?? item.body);
+    setCopied(false);
+    setError(null);
+  }, [item?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (item && draft !== item.body) setEdits((e) => ({ ...e, [item.id]: draft }));
+  }, [draft, item?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const act = useCallback(async (action: "sent" | "skip" | "replied") => {
-    if (!item || busy) return;
+    if (!item || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
+    setError(null);
     try {
       const res = await fetch("/api/v1/sequences/queue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: item.id, action, by: "christina",
+          id: item.id, action,
           editedBody: action === "sent" && draft !== item.body ? draft : undefined,
         }),
       });
-      if (res.ok) {
-        setItems((prev) => prev.filter((x) => x.id !== item.id));
-        setI((prev) => Math.min(prev, Math.max(0, items.length - 2)));
-        setCounts((c) => ({
-          ...c,
-          review: Math.max(0, c.review - 1),
-          sentToday: action === "sent" ? c.sentToday + 1 : c.sentToday,
-        }));
+      const body = await res.json().catch(() => ({}));
+      // The server can refuse (suppressed shop, unresolved merge field, already
+      // actioned elsewhere). Keep the card and say why — silently dropping it
+      // told the user it was sent when it was not.
+      if (!res.ok || body.ok === false) {
+        setError(body.reason || body.error || `Could not ${action} (${res.status})`);
+        return;
       }
-    } finally { setBusy(false); }
-  }, [item, draft, busy, items.length]);
+      setItems((prev) => prev.filter((x) => x.id !== item.id));
+      setI((prev) => Math.min(prev, Math.max(0, items.length - 2)));
+      setCounts((c) => ({
+        ...c,
+        review: Math.max(0, c.review - 1),
+        sentToday: action === "sent" ? c.sentToday + 1 : c.sentToday,
+      }));
+    } catch {
+      setError("Network error — nothing was changed. Try again.");
+    } finally { busyRef.current = false; setBusy(false); }
+  }, [item, draft, items.length]);
 
   const copy = useCallback(async () => {
     await navigator.clipboard.writeText(draft);
@@ -63,11 +87,15 @@ export function QueueClient({ initialItems, initialCounts }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return;
+      if (e.target instanceof HTMLElement && e.target.isContentEditable) return;
+      // Cmd+R / Cmd+S would otherwise mark the card replied or sent — both
+      // irreversible from here, and Cmd+R is just "reload".
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "c") copy();
       if (e.key === "o" && item?.threadUrl) window.open(item.threadUrl, "_blank");
-      if (e.key === "s") act("sent");
-      if (e.key === "k") act("skip");
-      if (e.key === "r") act("replied");
+      if (e.key === "s") { e.preventDefault(); act("sent"); }
+      if (e.key === "k") { e.preventDefault(); act("skip"); }
+      if (e.key === "r") { e.preventDefault(); act("replied"); }
       if (e.key === "ArrowRight") setI((p) => Math.min(p + 1, items.length - 1));
       if (e.key === "ArrowLeft") setI((p) => Math.max(p - 1, 0));
     };
@@ -132,6 +160,12 @@ export function QueueClient({ initialItems, initialCounts }: Props) {
             <p className="mt-2 text-xs text-muted-foreground">📎 attach: {item.attachmentKey}</p>
           )}
         </div>
+
+        {error && (
+          <div className="mx-4 mb-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950/40 dark:text-red-200">
+            {error}
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-2 border-t p-4">
           <button onClick={copy} disabled={busy}
