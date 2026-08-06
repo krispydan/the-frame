@@ -53,7 +53,8 @@ export default function ReaderTargetsPage() {
 
   const params = useCallback(() => {
     const p = new URLSearchParams({ segment, limit: "300" });
-    p.set("sources", includeRetail ? "all" : "faire,shopify_wholesale");
+    // Omit `sources` to inherit the canonical wholesale set (ajm/channels.ts).
+    if (includeRetail) p.set("sources", "all");
     if (noJaxy) p.set("noJaxy", "1");
     if (q.trim()) p.set("q", q.trim());
     return p;

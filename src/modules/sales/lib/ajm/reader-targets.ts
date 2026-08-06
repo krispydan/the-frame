@@ -14,6 +14,7 @@
  */
 import { sqlite } from "@/lib/db";
 import { READER_CATEGORIES } from "./categorize";
+import { AJM_WHOLESALE_SOURCES } from "./channels";
 
 export type ReaderSegment = "reader_led" | "reader_heavy" | "any_reader";
 
@@ -48,15 +49,15 @@ export function getReaderTargets(opts?: {
   matchedOnly?: boolean;
   /** Only customers with no Jaxy orders (pure win-back / new-business list). */
   noJaxyOnly?: boolean;
-  /** Restrict to buyers from these AJM channels. Defaults to the wholesale
-   *  channels (faire + shopify_wholesale) because the reader launch is a
-   *  wholesale motion — retail rows are individual consumers, which would
-   *  otherwise swamp the list. Pass ["all"] to include retail. */
+  /** Restrict to buyers from these AJM channels. Defaults to the canonical
+   *  WHOLESALE set (Shopify wholesale + Faire + OMS — see channels.ts) because
+   *  the reader launch is a wholesale motion; retail rows are individual
+   *  consumers and would swamp the list. Pass ["all"] to include retail. */
   sources?: string[];
   q?: string;
   limit?: number;
 }): { total: number; totals: { readerRevenue: number; customers: number }; targets: ReaderTarget[] } {
-  const sources = opts?.sources?.length ? opts.sources : ["faire", "shopify_wholesale"];
+  const sources = opts?.sources?.length ? opts.sources : [...AJM_WHOLESALE_SOURCES];
   const sourceFilter = sources.includes("all")
     ? ""
     : `AND o.source IN (${sources.map((s) => `'${s.replace(/'/g, "")}'`).join(",")})`;

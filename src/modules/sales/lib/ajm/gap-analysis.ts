@@ -19,6 +19,7 @@
  */
 import { sqlite } from "@/lib/db";
 import { READER_CATEGORIES } from "./categorize";
+import { AJM_CHANNEL_SQL, JAXY_CHANNEL_SQL } from "./channels";
 
 const READERS = READER_CATEGORIES.map((c) => `'${c}'`).join(",");
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -229,22 +230,14 @@ export function analyzeGap(opts?: { mode?: "overlap" | "trailing12" }): GapAnaly
   const customerDelta = ajm.customers - jaxy.customers;
 
   const byChannel = (() => {
+    // Canonical model: wholesale = Shopify wholesale + Faire, both brands.
     const a = sqlite.prepare(`
-      SELECT CASE WHEN source='faire' THEN 'faire' WHEN source='shopify_retail' THEN 'retail' ELSE 'wholesale' END AS ch,
-             ROUND(SUM(total),2) AS rev
-      FROM ajm_orders WHERE cancelled=0 AND order_date >= ? AND order_date <= ? GROUP BY ch
+      SELECT ${AJM_CHANNEL_SQL("o")} AS ch, ROUND(SUM(o.total),2) AS rev
+      FROM ajm_orders o WHERE o.cancelled=0 AND o.order_date >= ? AND o.order_date <= ? GROUP BY ch
     `).all(ajm.start, ajm.end) as Array<{ ch: string; rev: number }>;
-    // Jaxy's Faire orders arrive THROUGH the Shopify wholesale store and are
-    // identified by source_name, not by channel — the same attribution the
-    // international-shipping flow relies on. Classifying by channel alone
-    // reported Jaxy Faire revenue as $0 while AJM showed $678k, which read as
-    // "we don't sell on Faire" when we do.
     const j = sqlite.prepare(`
-      SELECT CASE WHEN channel='faire' OR LOWER(COALESCE(source_name,'')) LIKE '%faire%' THEN 'faire'
-                  WHEN channel='shopify_dtc' THEN 'retail'
-                  WHEN channel='amazon' THEN 'amazon' ELSE 'wholesale' END AS ch,
-             ROUND(SUM(total),2) AS rev
-      FROM orders WHERE status NOT IN ('cancelled','returned') AND placed_at >= ? AND placed_at <= ? GROUP BY ch
+      SELECT ${JAXY_CHANNEL_SQL("o")} AS ch, ROUND(SUM(o.total),2) AS rev
+      FROM orders o WHERE o.status NOT IN ('cancelled','returned') AND o.placed_at >= ? AND o.placed_at <= ? GROUP BY ch
     `).all(jaxy.start, jaxy.end + "T23:59:59") as Array<{ ch: string; rev: number }>;
     const chans = [...new Set([...a.map((x) => x.ch), ...j.map((x) => x.ch)])];
     return chans.map((c) => {

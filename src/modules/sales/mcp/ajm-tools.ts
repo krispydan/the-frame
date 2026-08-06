@@ -12,6 +12,7 @@ import { z } from "zod";
 import { analyzeGap } from "@/modules/sales/lib/ajm/gap-analysis";
 import { getReaderTargets, getCategoryBreakdown } from "@/modules/sales/lib/ajm/reader-targets";
 import { READER_CATEGORIES } from "@/modules/sales/lib/ajm/categorize";
+import { AJM_CHANNEL_SQL, JAXY_CHANNEL_SQL, AJM_WHOLESALE_SOURCES } from "@/modules/sales/lib/ajm/channels";
 
 const READERS = READER_CATEGORIES.map((c) => `'${c}'`).join(",");
 
@@ -21,7 +22,7 @@ const ok = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.s
 // ── ajm.gap_analysis ──
 mcpRegistry.register(
   "ajm.gap_analysis",
-  "Explain why Jaxy's sales are lower than AJ Morgan's: decomposes the revenue gap into the reading-glasses category Jaxy didn't stock, fewer active customers, lower order frequency and smaller average order value. Reports the comparison basis and whether the two datasets actually overlap in time.",
+  "Explain why Jaxy's sales trail AJ Morgan's: decomposes the gap into the reading-glasses category Jaxy did not stock, fewer active customers, lower order frequency and average order value. AJ Morgan was a 40-year-old business that CEASED TRADING Dec 2025 — treat it as a seasonal benchmark and an orphaned customer book, not a live competitor. Reports the comparison basis and whether the datasets overlap in time (they do not, so figures are normalized to monthly rates).",
   z.object({
     mode: z.enum(["overlap", "trailing12"]).optional()
       .describe("overlap = same calendar window both datasets cover; trailing12 = each brand's own last 12 months (used automatically when they don't overlap)"),
@@ -32,7 +33,7 @@ mcpRegistry.register(
 // ── ajm.compare ──
 mcpRegistry.register(
   "ajm.compare",
-  "Compare AJ Morgan and Jaxy revenue/orders over time, by year or month, split into comparable channel groups (wholesale, faire, retail) plus AJM's sunglasses-vs-readers category split.",
+  "Compare AJ Morgan and Jaxy revenue/orders over time, by year or month. Channels are WHOLESALE (Shopify wholesale + Faire, both brands) and RETAIL (DTC), plus Amazon for Jaxy. Includes AJM's sunglasses-vs-readers split. NOTE: sunglasses are seasonal (AJM peaks Mar-Jun, Dec is ~a third of peak), so compare the same calendar months — pass from/to to align windows. AJ Morgan ceased trading Dec 2025.",
   z.object({
     grain: z.enum(["year", "month"]).optional().describe("Default year"),
     from: z.string().optional().describe("ISO date lower bound, e.g. 2024-01-01"),
@@ -44,14 +45,13 @@ mcpRegistry.register(
     const to = args.to ?? "9999-12-31";
     const ajm = sqlite.prepare(`
       SELECT strftime('${fmt}', o.order_date) AS period,
-             CASE WHEN o.source='faire' THEN 'faire' WHEN o.source='shopify_retail' THEN 'retail' ELSE 'wholesale' END AS channel,
+             ${AJM_CHANNEL_SQL("o")} AS channel,
              ROUND(SUM(o.total),2) AS revenue, COUNT(*) AS orders
       FROM ajm_orders o WHERE o.cancelled=0 AND o.order_date BETWEEN ? AND ?
       GROUP BY period, channel ORDER BY period`).all(from, to);
     const jaxy = sqlite.prepare(`
       SELECT strftime('${fmt}', o.placed_at) AS period,
-             CASE WHEN o.channel='faire' THEN 'faire' WHEN o.channel='shopify_dtc' THEN 'retail'
-                  WHEN o.channel='amazon' THEN 'amazon' ELSE 'wholesale' END AS channel,
+             ${JAXY_CHANNEL_SQL("o")} AS channel,
              ROUND(SUM(o.total),2) AS revenue, COUNT(*) AS orders
       FROM orders o WHERE o.status NOT IN ('cancelled','returned') AND o.placed_at BETWEEN ? AND ?
       GROUP BY period, channel ORDER BY period`).all(from, to + "T23:59:59");
@@ -80,7 +80,7 @@ mcpRegistry.register(
   }),
   async (args) => ok(getReaderTargets({
     segment: args.segment ?? "reader_led",
-    sources: args.include_retail ? ["all"] : ["faire", "shopify_wholesale"],
+    sources: args.include_retail ? ["all"] : [...AJM_WHOLESALE_SOURCES],
     noJaxyOnly: args.only_without_jaxy_orders,
     q: args.search,
     limit: Math.min(args.limit ?? 50, 500),
@@ -98,7 +98,7 @@ mcpRegistry.register(
 // ── ajm.customers ──
 mcpRegistry.register(
   "ajm.customers",
-  "Query AJ Morgan's customer base: AJM spend, order counts, date ranges, channels, reader-vs-sunglass mix, and each customer's current Jaxy lifetime value. Use filter=dormant to find accounts that bought from AJM but never from Jaxy (win-back list).",
+  "Query AJ Morgan's customer base: AJM spend, order counts, date ranges, channels, reader-vs-sunglass mix, and each customer's current Jaxy lifetime value. Use filter=dormant to find accounts that bought from AJM but never from Jaxy — these are ORPHANED (AJM ceased trading Dec 2025), not lost to a competitor, and Jaxy employs the rep who owned those relationships.",
   z.object({
     filter: z.enum(["all", "matched", "unmatched", "dormant"]).optional()
       .describe("dormant = matched to a Frame company but zero Jaxy revenue"),
