@@ -51,6 +51,9 @@ interface HealthHistoryRow {
 }
 
 async function getAccount(id: string) {
+  // Accept EITHER a customer_accounts.id (canonical) or a companies.id
+  // (what most other pages have handy — analytics rows, deal lists, order
+  // pages). WHERE clause matches both so a link from anywhere Just Works.
   return sqlite.prepare(`
     SELECT
       ca.*,
@@ -67,8 +70,9 @@ async function getAccount(id: string) {
     FROM customer_accounts ca
     JOIN companies c ON c.id = ca.company_id
     LEFT JOIN segments s ON s.id = c.segment_id
-    WHERE ca.id = ?
-  `).get(id) as AccountRow | undefined;
+    WHERE ca.id = ? OR ca.company_id = ?
+    LIMIT 1
+  `).get(id, id) as AccountRow | undefined;
 }
 
 async function getOrders(companyId: string) {
