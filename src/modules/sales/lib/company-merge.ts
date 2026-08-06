@@ -62,6 +62,7 @@ export interface DuplicateGroup {
   reason: "name" | "email";
   companies: Array<{
     id: string; name: string; createdAt: string | null;
+    city?: string; state?: string; zip?: string; domain?: string;
     jaxyOrders: number; jaxyRevenue: number;
     ajmOrders: number; ajmRevenue: number;
     email: string | null;
@@ -76,6 +77,10 @@ export interface DuplicateGroup {
 function companyStats() {
   const rows = sqlite.prepare(`
     SELECT c.id, c.name, c.created_at AS createdAt,
+      LOWER(TRIM(COALESCE(c.city,''))) AS city,
+      UPPER(TRIM(COALESCE(c.state,''))) AS state,
+      TRIM(COALESCE(c.zip,'')) AS zip,
+      LOWER(TRIM(COALESCE(c.domain,''))) AS domain,
       (SELECT COUNT(*) FROM orders o WHERE o.company_id=c.id AND o.status NOT IN ('cancelled','returned')) AS jaxyOrders,
       (SELECT COALESCE(ROUND(SUM(o.total),2),0) FROM orders o WHERE o.company_id=c.id AND o.status NOT IN ('cancelled','returned')) AS jaxyRevenue,
       (SELECT COUNT(*) FROM ajm_orders a WHERE a.company_id=c.id AND a.cancelled=0) AS ajmOrders,
@@ -95,24 +100,71 @@ function pickKeeper(cs: DuplicateGroup["companies"]): string {
   )[0].id;
 }
 
+/** Free/consumer mail providers — a shared address here proves nothing. */
+const FREE_DOMAIN = /@(gmail|hotmail|outlook|yahoo|icloud|aol|live|msn|me|proton(mail)?|gmx|mail)\./i;
+
+export interface ReviewGroup {
+  key: string; reason: string; companies: DuplicateGroup["companies"];
+}
+/** Name collisions we refused to merge; read via getNeedsReview(). */
+let needsReview: ReviewGroup[] = [];
+export function getNeedsReview(): ReviewGroup[] { return needsReview; }
+
 export function findDuplicateCompanies(opts?: { minEvidence?: "name" | "email" | "both" }): DuplicateGroup[] {
   const all = companyStats();
+  needsReview = [];
   const groups = new Map<string, { reason: "name" | "email"; items: DuplicateGroup["companies"] }>();
 
-  // 1. Identical normalized name
+  // 1. Identical normalized name — but a matching name ALONE is not enough.
+  //
+  // Shop names repeat constantly across the country: production held 11
+  // separate "Revival" records, 7 "Magpie", 7 "Frock". Those are different
+  // businesses in different cities, and merging them would corrupt the data
+  // far worse than the split it fixes. So a name group is only accepted when
+  // the members also agree on a LOCATION or DOMAIN signal:
+  //   same zip, or same city+state, or same (non-free) email domain.
+  // Members that share a name but nothing else are left alone and surfaced
+  // separately as `needsReview`, never merged automatically.
   const byName = new Map<string, DuplicateGroup["companies"]>();
   for (const c of all) {
     const k = normalizeCompanyName(c.name);
     if (k.length < 3) continue;
     (byName.get(k) ?? byName.set(k, []).get(k)!).push(c);
   }
+  const domainOf = (c: DuplicateGroup["companies"][number]) => {
+    const d = (c.domain ?? "").trim();
+    if (d) return d;
+    const e = (c.email ?? "").split("@")[1]?.toLowerCase() ?? "";
+    return FREE_DOMAIN.test(`@${e}`) ? "" : e;
+  };
   for (const [k, items] of byName) {
-    if (items.length > 1) groups.set(`name:${k}`, { reason: "name", items });
+    if (items.length < 2) continue;
+    // Sub-group by corroborating signal; only sub-groups of 2+ are duplicates.
+    const buckets = new Map<string, DuplicateGroup["companies"]>();
+    for (const c of items) {
+      const zip = (c.zip ?? "").slice(0, 5);
+      const dom = domainOf(c);
+      const sig = dom ? `d:${dom}` : zip ? `z:${zip}` : (c.city && c.state) ? `c:${c.city}|${c.state}` : "";
+      if (!sig) continue; // no corroboration available → cannot confirm
+      (buckets.get(sig) ?? buckets.set(sig, []).get(sig)!).push(c);
+    }
+    for (const [sig, bucket] of buckets) {
+      if (bucket.length > 1) groups.set(`name:${k}|${sig}`, { reason: "name", items: bucket });
+    }
+    // Name matches we deliberately did NOT merge, for human review.
+    const mergedIds = new Set([...buckets.values()].filter((b) => b.length > 1).flat().map((c) => c.id));
+    const leftovers = items.filter((c) => !mergedIds.has(c.id));
+    if (leftovers.length > 1) {
+      needsReview.push({
+        key: `name:${k}`,
+        reason: "same name, no matching location or domain — could be different businesses",
+        companies: leftovers,
+      });
+    }
   }
 
   // 2. Shared contact email (catches renamed/abbreviated records). Free-mail
   //    addresses are excluded — a shared gmail says nothing about identity.
-  const FREE = /@(gmail|hotmail|outlook|yahoo|icloud|aol|live|msn|me|proton(mail)?|gmx|mail)\./i;
   const byEmail = new Map<string, DuplicateGroup["companies"]>();
   for (const c of all) {
     const e = (c.email ?? "").trim().toLowerCase();
@@ -122,7 +174,7 @@ export function findDuplicateCompanies(opts?: { minEvidence?: "name" | "email" |
   for (const [e, items] of byEmail) {
     if (items.length < 2) continue;
     // A shared free-mail address only counts when the names also agree.
-    if (FREE.test(e)) {
+    if (FREE_DOMAIN.test(e)) {
       const names = new Set(items.map((i) => normalizeCompanyName(i.name)));
       if (names.size > 1) continue;
     }

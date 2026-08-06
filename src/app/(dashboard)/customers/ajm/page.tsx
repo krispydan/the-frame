@@ -75,7 +75,9 @@ export default function AjmBenchmarkPage() {
   const [b, setB] = useState<Bench | null>(null);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
-  const [convFilter, setConvFilter] = useState<"all" | "converted" | "not_yet">("all");
+  // Default to the unconverted list — it is the sales team's worklist, so it
+  // should be what the page opens on rather than something to click for.
+  const [convFilter, setConvFilter] = useState<"all" | "converted" | "not_yet">("not_yet");
 
   const load = useCallback(async () => {
     try {
@@ -281,9 +283,9 @@ export default function AjmBenchmarkPage() {
           <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
             <div className="inline-flex rounded-md border p-0.5 text-xs">
               {([
-                ["all", `All (${b.orphans.total.toLocaleString()})`],
+                ["not_yet", `Not yet ordered (${b.orphans.notYetCount.toLocaleString()})`],
                 ["converted", `Converted (${b.orphans.convertedCount.toLocaleString()})`],
-                ["not_yet", `Not yet (${b.orphans.notYetCount.toLocaleString()})`],
+                ["all", `All (${b.orphans.total.toLocaleString()})`],
               ] as const).map(([k, label]) => (
                 <button key={k} onClick={() => setConvFilter(k)}
                   className={`px-2.5 py-1 rounded ${convFilter === k ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}>

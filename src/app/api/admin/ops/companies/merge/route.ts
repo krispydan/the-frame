@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 import { NextRequest, NextResponse } from "next/server";
 import { requireOpsToken } from "@/lib/ops-auth";
-import { findDuplicateCompanies, mergeCompanies } from "@/modules/sales/lib/company-merge";
+import { findDuplicateCompanies, mergeCompanies, getNeedsReview } from "@/modules/sales/lib/company-merge";
 
 /**
  * Duplicate-company detection and merge (x-ops-key: OPS_TOKEN).
@@ -35,6 +35,10 @@ export async function GET(req: NextRequest) {
     hiddenJaxyRevenue: Math.round(groups.reduce((s, g) => s + g.splitJaxyRevenue, 0) * 100) / 100,
     hiddenAjmRevenue: Math.round(groups.reduce((s, g) => s + g.splitAjmRevenue, 0) * 100) / 100,
     groups: groups.slice(0, Math.min(limit, 500)),
+    // Same-name collisions we deliberately refused to merge (no shared
+    // location or domain) — e.g. the eleven unrelated "Revival" shops.
+    needsReview: getNeedsReview().slice(0, 50),
+    needsReviewCount: getNeedsReview().length,
   });
 }
 
