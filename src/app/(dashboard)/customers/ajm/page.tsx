@@ -13,8 +13,23 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { ArrowLeft, History, Users, Search, Loader2, TrendingUp } from "lucide-react";
+import { ArrowLeft, History, Users, Search, Loader2, TrendingUp, Glasses } from "lucide-react";
 import Link from "next/link";
+import { GroupedBarChart, StackedBarChart, LineChart } from "@/components/charts/simple-charts";
+
+interface TsRow {
+  period: string;
+  ajmWholesale: number; ajmFaire: number; ajmRetail: number; ajmTotal: number;
+  jaxyWholesale: number; jaxyFaire: number; jaxyRetail: number; jaxyAmazon: number; jaxyTotal: number;
+  ajmSun: number; ajmReader: number; ajmUnknown: number;
+  ajmOrders: number; jaxyOrders: number;
+}
+
+const C = {
+  ajm: "#6366f1", jaxy: "#10b981",
+  wholesale: "#3b82f6", faire: "#8b5cf6", retail: "#f59e0b", amazon: "#eab308",
+  sun: "#0ea5e9", reader: "#22c55e", unknown: "#d1d5db",
+};
 
 interface SourceStat {
   source: string; orders: number; units: number; revenue: number;
@@ -50,6 +65,8 @@ export default function AjmHistoryPage() {
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
+  const [yearly, setYearly] = useState<TsRow[]>([]);
+  const [monthly, setMonthly] = useState<TsRow[]>([]);
 
   useEffect(() => {
     fetch("/api/v1/customers/ajm?view=summary")
@@ -57,6 +74,10 @@ export default function AjmHistoryPage() {
       .then(setSummary)
       .catch(() => toast.error("Failed to load AJM summary"))
       .finally(() => setLoading(false));
+    fetch("/api/v1/customers/ajm/timeseries?grain=year")
+      .then((r) => r.json()).then((d) => setYearly(d.series ?? [])).catch(() => {});
+    fetch("/api/v1/customers/ajm/timeseries?grain=month")
+      .then((r) => r.json()).then((d) => setMonthly(d.series ?? [])).catch(() => {});
   }, []);
 
   const loadCustomers = useCallback(async () => {
@@ -79,11 +100,6 @@ export default function AjmHistoryPage() {
   }
 
   const totalRevenue = (summary?.bySource ?? []).reduce((s, r) => s + r.revenue, 0);
-  const years = [...new Set([...(summary?.ajmByYear ?? []).map((r) => r.year), ...(summary?.jaxyByYear ?? []).map((r) => r.year)])].sort();
-  const ajmYearTotal = (y: string, pred: (r: YearRow) => boolean = () => true) =>
-    (summary?.ajmByYear ?? []).filter((r) => r.year === y && pred(r)).reduce((s, r) => s + r.revenue, 0);
-  const jaxyYearTotal = (y: string, pred: (r: YearRow) => boolean = () => true) =>
-    (summary?.jaxyByYear ?? []).filter((r) => r.year === y && pred(r)).reduce((s, r) => s + r.revenue, 0);
 
   return (
     <div className="space-y-6 p-6">
@@ -108,45 +124,100 @@ export default function AjmHistoryPage() {
         ))}
       </div>
 
-      {/* AJM vs Jaxy by year */}
+      {/* ── Charts: the comparison, visually ── */}
       <Card>
-        <CardHeader><CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4" /> AJM vs Jaxy — revenue by year</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4" /> AJM vs Jaxy — total revenue by year</CardTitle>
+        </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader><TableRow>
-              <TableHead>Year</TableHead>
-              <TableHead className="text-right">AJM Wholesale</TableHead>
-              <TableHead className="text-right">AJM Faire</TableHead>
-              <TableHead className="text-right">AJM Retail</TableHead>
-              <TableHead className="text-right">AJM Total</TableHead>
-              <TableHead className="text-right border-l">Jaxy Wholesale</TableHead>
-              <TableHead className="text-right">Jaxy Faire</TableHead>
-              <TableHead className="text-right">Jaxy Retail</TableHead>
-              <TableHead className="text-right">Jaxy Total</TableHead>
-            </TableRow></TableHeader>
-            <TableBody>
-              {years.map((y) => {
-                const ajmTotal = ajmYearTotal(y);
-                const jxTotal = jaxyYearTotal(y);
-                return (
-                  <TableRow key={y}>
-                    <TableCell className="font-medium">{y}</TableCell>
-                    <TableCell className="text-right tabular-nums">{money(ajmYearTotal(y, (r) => r.source === "shopify_wholesale" || r.source === "oms"))}</TableCell>
-                    <TableCell className="text-right tabular-nums">{money(ajmYearTotal(y, (r) => r.source === "faire"))}</TableCell>
-                    <TableCell className="text-right tabular-nums">{money(ajmYearTotal(y, (r) => r.source === "shopify_retail"))}</TableCell>
-                    <TableCell className="text-right tabular-nums font-semibold">{money(ajmTotal)}</TableCell>
-                    <TableCell className="text-right tabular-nums border-l">{money(jaxyYearTotal(y, (r) => r.grp === "wholesale"))}</TableCell>
-                    <TableCell className="text-right tabular-nums">{money(jaxyYearTotal(y, (r) => r.grp === "faire"))}</TableCell>
-                    <TableCell className="text-right tabular-nums">{money(jaxyYearTotal(y, (r) => r.grp === "retail"))}</TableCell>
-                    <TableCell className={`text-right tabular-nums font-semibold ${jxTotal >= ajmTotal ? "text-green-600" : ""}`}>{money(jxTotal)}</TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+          <GroupedBarChart
+            data={yearly as unknown as Array<Record<string, string | number>>}
+            xKey="period"
+            height={280}
+            series={[
+              { key: "ajmTotal", label: "AJ Morgan", color: C.ajm },
+              { key: "jaxyTotal", label: "Jaxy", color: C.jaxy },
+            ]}
+          />
           <p className="text-xs text-muted-foreground mt-2">
-            AJM Faire revenue is wholesale-price line totals (Faire order-total where the payouts export covered it). Jaxy channels grouped to match: wholesale = Shopify Wholesale + direct + phone.
+            Side-by-side totals. AJM ran 2019–2025; Jaxy&apos;s history starts later, so early years show AJM alone —
+            the comparable window is where both bars appear.
           </p>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader><CardTitle className="text-base">AJM revenue by channel</CardTitle></CardHeader>
+          <CardContent>
+            <StackedBarChart
+              data={yearly as unknown as Array<Record<string, string | number>>}
+              xKey="period"
+              series={[
+                { key: "ajmWholesale", label: "Wholesale", color: C.wholesale },
+                { key: "ajmFaire", label: "Faire", color: C.faire },
+                { key: "ajmRetail", label: "Retail", color: C.retail },
+              ]}
+            />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base">Jaxy revenue by channel</CardTitle></CardHeader>
+          <CardContent>
+            <StackedBarChart
+              data={yearly as unknown as Array<Record<string, string | number>>}
+              xKey="period"
+              series={[
+                { key: "jaxyWholesale", label: "Wholesale", color: C.wholesale },
+                { key: "jaxyFaire", label: "Faire", color: C.faire },
+                { key: "jaxyRetail", label: "Retail", color: C.retail },
+                { key: "jaxyAmazon", label: "Amazon", color: C.amazon },
+              ]}
+            />
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* The category gap — why the totals differ */}
+      <Card className="border-green-200">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Glasses className="h-4 w-4 text-green-600" /> AJM revenue by product category — the reading-glasses gap
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <StackedBarChart
+            data={yearly as unknown as Array<Record<string, string | number>>}
+            xKey="period"
+            series={[
+              { key: "ajmSun", label: "Sunglasses", color: C.sun },
+              { key: "ajmReader", label: "Reading glasses", color: C.reader },
+              { key: "ajmUnknown", label: "Unclassified / no line detail", color: C.unknown },
+            ]}
+          />
+          <p className="text-xs text-muted-foreground mt-2">
+            Green is the category Jaxy hasn&apos;t sold — the reading-glasses line launches Aug 2026.{" "}
+            <Link href="/customers/ajm/readers" className="text-blue-600 hover:underline">See which customers bought readers →</Link>
+            {" "}Grey is revenue we couldn&apos;t attribute to a product: legacy lump-sum orders billed as one line with no
+            product detail, plus lines the classifier couldn&apos;t evidence. It is shown, not hidden, so the split stays honest.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Monthly trend */}
+      <Card>
+        <CardHeader><CardTitle className="text-base">Monthly revenue — AJM vs Jaxy</CardTitle></CardHeader>
+        <CardContent>
+          <LineChart
+            data={monthly.slice(-36) as unknown as Array<Record<string, string | number>>}
+            xKey="period"
+            height={300}
+            series={[
+              { key: "ajmTotal", label: "AJ Morgan", color: C.ajm },
+              { key: "jaxyTotal", label: "Jaxy", color: C.jaxy },
+            ]}
+          />
+          <p className="text-xs text-muted-foreground mt-2">Last 36 months. Hover any point for the exact figure.</p>
         </CardContent>
       </Card>
 
