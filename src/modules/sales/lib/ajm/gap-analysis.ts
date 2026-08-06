@@ -27,6 +27,9 @@ export interface BrandWindow {
   label: string;
   start: string;
   end: string;
+  /** First/last date with actual data inside the window (may be narrower). */
+  dataStart?: string | null;
+  dataEnd?: string | null;
   revenue: number;
   orders: number;
   customers: number;
@@ -70,13 +73,15 @@ export interface GapAnalysis {
 function ajmWindow(start: string, end: string, label: string): BrandWindow {
   const row = sqlite.prepare(`
     SELECT ROUND(SUM(total),2) AS revenue, COUNT(*) AS orders,
-           COUNT(DISTINCT COALESCE(company_id, customer_name)) AS customers
+           COUNT(DISTINCT COALESCE(company_id, customer_name)) AS customers,
+           MIN(order_date) AS firstSeen, MAX(order_date) AS lastSeen
     FROM ajm_orders
     WHERE cancelled = 0 AND order_date >= ? AND order_date <= ?
-  `).get(start, end) as { revenue: number | null; orders: number; customers: number };
+  `).get(start, end) as { revenue: number | null; orders: number; customers: number; firstSeen: string | null; lastSeen: string | null };
   const revenue = row.revenue ?? 0;
   return {
     label, start, end, revenue, orders: row.orders, customers: row.customers,
+    dataStart: row.firstSeen, dataEnd: row.lastSeen,
     aov: row.orders ? r2(revenue / row.orders) : 0,
     ordersPerCustomer: row.customers ? r2(row.orders / row.customers) : 0,
     revenuePerCustomer: row.customers ? r2(revenue / row.customers) : 0,
@@ -86,17 +91,29 @@ function ajmWindow(start: string, end: string, label: string): BrandWindow {
 function jaxyWindow(start: string, end: string, label: string): BrandWindow {
   const row = sqlite.prepare(`
     SELECT ROUND(SUM(total),2) AS revenue, COUNT(*) AS orders,
-           COUNT(DISTINCT COALESCE(company_id, id)) AS customers
+           COUNT(DISTINCT COALESCE(company_id, id)) AS customers,
+           MIN(substr(placed_at,1,10)) AS firstSeen, MAX(substr(placed_at,1,10)) AS lastSeen
     FROM orders
     WHERE status NOT IN ('cancelled','returned') AND placed_at >= ? AND placed_at <= ?
-  `).get(start, end + "T23:59:59") as { revenue: number | null; orders: number; customers: number };
+  `).get(start, end + "T23:59:59") as { revenue: number | null; orders: number; customers: number; firstSeen: string | null; lastSeen: string | null };
   const revenue = row.revenue ?? 0;
   return {
     label, start, end, revenue, orders: row.orders, customers: row.customers,
+    // Actual data extent inside the window — the divisor for monthly rates.
+    // Dividing by the requested window instead understated Jaxy's run-rate
+    // ~3.4x, because The Frame holds only ~3.5 months of orders.
+    dataStart: row.firstSeen, dataEnd: row.lastSeen,
     aov: row.orders ? r2(revenue / row.orders) : 0,
     ordersPerCustomer: row.customers ? r2(row.orders / row.customers) : 0,
     revenuePerCustomer: row.customers ? r2(revenue / row.customers) : 0,
   };
+}
+
+/** Months actually covered by data in a window (never the nominal window). */
+function activeMonths(w: BrandWindow): number {
+  const s = w.dataStart ?? w.start, e = w.dataEnd ?? w.end;
+  const days = (Date.parse(`${e}T00:00:00Z`) - Date.parse(`${s}T00:00:00Z`)) / 86_400_000;
+  return Math.max(0.5, days / 30.44);
 }
 
 const addDays = (iso: string, n: number) => {
@@ -156,8 +173,8 @@ export function analyzeGap(opts?: { mode?: "overlap" | "trailing12" }): GapAnaly
   // different lengths (AJM has years of history, The Frame holds only a few
   // months of Jaxy orders), and comparing raw totals across unequal windows
   // measures elapsed time, not performance.
-  const ajmMonths = Math.max(0.1, (Date.parse(`${ajm.end}T00:00:00Z`) - Date.parse(`${ajm.start}T00:00:00Z`)) / 86_400_000 / 30.44);
-  const jaxyMonths = Math.max(0.1, (Date.parse(`${jaxy.end}T00:00:00Z`) - Date.parse(`${jaxy.start}T00:00:00Z`)) / 86_400_000 / 30.44);
+  const ajmMonths = activeMonths(ajm);
+  const jaxyMonths = activeMonths(jaxy);
 
   const aC = ajm.customers / ajmMonths, jC = jaxy.customers / jaxyMonths;   // active customers per month
   const aF = ajm.ordersPerCustomer, jF = jaxy.ordersPerCustomer;            // orders per customer
@@ -181,8 +198,14 @@ export function analyzeGap(opts?: { mode?: "overlap" | "trailing12" }): GapAnaly
              ROUND(SUM(total),2) AS rev
       FROM ajm_orders WHERE cancelled=0 AND order_date >= ? AND order_date <= ? GROUP BY ch
     `).all(ajm.start, ajm.end) as Array<{ ch: string; rev: number }>;
+    // Jaxy's Faire orders arrive THROUGH the Shopify wholesale store and are
+    // identified by source_name, not by channel — the same attribution the
+    // international-shipping flow relies on. Classifying by channel alone
+    // reported Jaxy Faire revenue as $0 while AJM showed $678k, which read as
+    // "we don't sell on Faire" when we do.
     const j = sqlite.prepare(`
-      SELECT CASE WHEN channel='faire' THEN 'faire' WHEN channel='shopify_dtc' THEN 'retail'
+      SELECT CASE WHEN channel='faire' OR LOWER(COALESCE(source_name,'')) LIKE '%faire%' THEN 'faire'
+                  WHEN channel='shopify_dtc' THEN 'retail'
                   WHEN channel='amazon' THEN 'amazon' ELSE 'wholesale' END AS ch,
              ROUND(SUM(total),2) AS rev
       FROM orders WHERE status NOT IN ('cancelled','returned') AND placed_at >= ? AND placed_at <= ? GROUP BY ch
