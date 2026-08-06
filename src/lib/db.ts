@@ -649,6 +649,106 @@ try { sqlite.exec("CREATE INDEX idx_outreach_retailer ON outreach_messages (fair
 try { sqlite.exec("CREATE INDEX idx_outreach_brand ON outreach_messages (brand, sent_at)"); } catch { /* exists */ }
 try { sqlite.exec("CREATE UNIQUE INDEX idx_outreach_dedup ON outreach_messages (brand, faire_retailer_id, campaign, sent_at)"); } catch { /* exists */ }
 
+// ── Outreach sequence engine, Phase 1 (docs/outreach-sequence-engine.md) ──
+// A sequence is an ordered set of steps; an enrollment is one company moving
+// through them; a message is one rendered touch. Delays anchor on the PREVIOUS
+// STEP COMPLETING (Pipedrive semantics), so a late call task shifts what follows.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS sequences (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    brand TEXT NOT NULL DEFAULT 'jaxy',        -- ajm | jaxy
+    trigger TEXT NOT NULL,                     -- T0|T1|T2|T3|T4|T5|T6|manual
+    class TEXT NOT NULL DEFAULT 'nudge',       -- relationship | nudge (cooldown exemption)
+    goal TEXT,
+    status TEXT NOT NULL DEFAULT 'draft',      -- draft|active|paused|archived
+    enrollment_mode TEXT NOT NULL DEFAULT 'manual', -- auto|manual|segment
+    enrollment_rule TEXT,                      -- JSON
+    propose_only INTEGER DEFAULT 1,            -- shadow mode for new auto rules
+    priority INTEGER NOT NULL DEFAULT 50,      -- conflict ordering, higher wins
+    max_touches INTEGER DEFAULT 3,
+    owner TEXT DEFAULT 'christina',
+    description TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`);
+} catch { /* exists */ }
+
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS sequence_steps (
+    id TEXT PRIMARY KEY,
+    sequence_id TEXT NOT NULL,
+    step_no INTEGER NOT NULL,
+    delay_days INTEGER NOT NULL DEFAULT 0,     -- after previous step COMPLETED
+    delay_business_days INTEGER DEFAULT 0,     -- 1 = skip weekends
+    channel TEXT NOT NULL DEFAULT 'faire',     -- faire|email|call|direct_mail
+    send_mode TEXT NOT NULL DEFAULT 'review',  -- auto|review|task
+    send_as_reply INTEGER DEFAULT 0,
+    template_subject TEXT,
+    template_body TEXT NOT NULL,
+    template_variant_b TEXT,
+    attachment_key TEXT,
+    conditions TEXT,
+    task_note TEXT,
+    task_priority TEXT,
+    offer_code TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`);
+} catch { /* exists */ }
+try { sqlite.exec("CREATE UNIQUE INDEX idx_seq_steps_order ON sequence_steps (sequence_id, step_no)"); } catch { /* exists */ }
+
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS sequence_enrollments (
+    id TEXT PRIMARY KEY,
+    sequence_id TEXT NOT NULL,
+    company_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    -- active|completed|exited_reply|exited_order|exited_cart|suppressed|paused_t0|proposed
+    current_step INTEGER DEFAULT 0,
+    next_step_due_at TEXT,
+    trigger_context TEXT,                      -- JSON
+    enrolled_by TEXT,                          -- 'rule' | user id
+    enrolled_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    exited_at TEXT,
+    exit_reason TEXT
+  )`);
+} catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_seq_enroll_due ON sequence_enrollments (status, next_step_due_at)"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_seq_enroll_company ON sequence_enrollments (company_id, status)"); } catch { /* exists */ }
+// One live enrollment per company across ALL sequences — the "no account gets
+// two sequences at once" rule, enforced by the database rather than by code.
+try { sqlite.exec("CREATE UNIQUE INDEX idx_seq_enroll_one_active ON sequence_enrollments (company_id) WHERE status IN ('active','paused_t0')"); } catch { /* exists */ }
+
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS sequence_messages (
+    id TEXT PRIMARY KEY,
+    enrollment_id TEXT NOT NULL,
+    step_id TEXT NOT NULL,
+    sequence_id TEXT,
+    company_id TEXT NOT NULL,
+    brand TEXT,
+    channel TEXT NOT NULL,
+    status TEXT NOT NULL,
+    -- queued_review|approved|sent|skipped|skipped_recent|failed|task_open|task_done
+    rendered_subject TEXT,
+    rendered_body TEXT NOT NULL,
+    edited INTEGER DEFAULT 0,
+    attachment_key TEXT,
+    variant TEXT,
+    thread_url TEXT,
+    queued_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    approved_at TEXT,
+    sent_at TEXT,
+    sent_by TEXT,
+    reply_detected_at TEXT,
+    error TEXT
+  )`);
+} catch { /* exists */ }
+// Idempotency: a given step renders exactly once per enrollment.
+try { sqlite.exec("CREATE UNIQUE INDEX idx_seq_msg_once ON sequence_messages (enrollment_id, step_id)"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_seq_msg_queue ON sequence_messages (status, queued_at)"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_seq_msg_company ON sequence_messages (company_id, sent_at)"); } catch { /* exists */ }
+
 // Customer map: geocoded coordinates on companies
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN latitude REAL"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN longitude REAL"); } catch { /* exists */ }

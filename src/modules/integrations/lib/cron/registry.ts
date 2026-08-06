@@ -291,6 +291,18 @@ export const CRON_JOBS: CronJob[] = [
   // table. Runs daily but the function itself is idempotent (skips orders
   // already in DB) so multiple runs in a row are harmless.
   {
+    // The outreach sequence engine. Idempotent scan: exits finished enrollments,
+    // enrolls new candidates, renders due steps into the review queue. Sends
+    // nothing itself. No-ops entirely while seq.engine_enabled is false.
+    id: "sequence-engine-tick",
+    schedule: "*/5 * * * *",
+    description: "Outreach sequence engine: enroll, advance, queue messages for review",
+    handler: async () => {
+      const { runTick } = await import("@/modules/sequences/lib/engine");
+      return runTick();
+    },
+  },
+  {
     // Faire orders drive the outreach engine's timing (welcome-on-first-order,
     // review-request-after-ship). Before this job they only arrived via the
     // once-daily Shopify sync, i.e. up to 24h late. Hourly keeps those triggers
