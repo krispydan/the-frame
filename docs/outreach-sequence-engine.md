@@ -1,10 +1,15 @@
-# Outreach Sequence Engine — build spec v0.3
+# Outreach Sequence Engine — build spec v0.4
 
 Reviewed against the actual codebase (2026-08-05). v0.2's shape survives intact —
 sequence/touchpoint objects, three send modes, channel adapters, the trigger set,
 Christina's voice rules all hold. What changes is *where it plugs in*: about half
 of what v0.2 assumed we'd need to build already exists in the-frame, and three of
 its assumptions are wrong in ways that would have hurt.
+
+*(v0.4 adds §9 Failure modes — the robustness pass. Every mitigation there is
+either a lesson already paid for in the faire_dm campaign or a fail-closed
+default. Also: outreach-history import in Phase 0, send-window and A/B
+mechanics pinned down, kill switches, and propose-only graduation criteria.)*
 
 ---
 
@@ -221,11 +226,12 @@ Single idempotent pass, four stages, each a pure DB scan:
    class-aware 14-day cooldown → T0-pause (any T0 in last 7d pauses nudges).
    Sequences with `propose_only=1` write enrollments as `proposed` and touch
    nothing — the two-week shadow mode from v0.2, visible in the UI.
-3. **Advance.** Enrollments with `next_step_due_at <= now` and inside the send
-   window: render the step template (fail-closed merge, voice lint), resolve the
-   attachment, write `sequence_messages` as `queued_review` (or `approved` if
-   the step is `auto`, or `task_open` if `task`), bump `current_step`, schedule
-   the next.
+3. **Advance.** Enrollments with `next_step_due_at <= now` (auto steps
+   additionally deferred to the next valid send slot and smeared under the
+   hourly/daily caps — §8): render the step template (fail-closed merge, voice
+   lint), resolve the attachment, write `sequence_messages` as `queued_review`
+   (or `approved` if the step is `auto`, or `task_open` if `task`), bump
+   `current_step`, schedule the next. One transaction per enrollment advance.
 4. **Mirror & notify.** Slack digest of today's queue size (existing
    `postToSlack` topic); Pipedrive activity mirror piggybacks the existing
    `pipedrive-activity-sweep`.
@@ -296,12 +302,80 @@ the per-touchpoint asset map from v0.2 carries over unchanged.
 | 10 | T0 at scale? | Stays personal (review, photo attached) below `seq.t0_auto_threshold` new accounts/week (default 15); above it, revisit. Config, not code. |
 | 11 | Second channel? | **Email** — it's the fallback channel anyway (§4), Omnisend is integrated, fully automatable. Calls are third via task adapter (zero integration, immediately useful). |
 
-## 8. Build phases
+## 8. Mechanics pinned down (v0.4)
 
-**Phase 0 — prerequisites (do first, tiny):**
-`companies.faire_retailer_id` + populate in `faire-sync.ts` + backfill from
-payouts API; `do_not_contact` columns + `isSuppressed()`; register
-`faire-orders-sync` cron (hourly — function already written).
+- **Send window applies to AUTO sends only.** Review-mode items just land in the
+  daily queue — Christina sends when she works, which is inherently human-timed.
+  For auto: a step due Friday 5pm defers to the **next valid slot** (Tue-Thu
+  9-16 local), computed by a `nextSendSlot(due, tz)` helper. Timezone from
+  `country + state` (US/CA mapped; international or unknown → the account's auto
+  steps degrade to review mode rather than guess — fail closed, and Faire has UK/
+  CA/AU retailers so this is not hypothetical).
+- **Queue smearing.** When a batch of steps becomes due at once (Tuesday 9am
+  pile-up after a weekend), stage 3 releases at most `seq.review_daily_cap` into
+  the queue and `seq.faire_hourly_cap` (12, the measured limit) to the runner,
+  oldest-due first. The rest stay scheduled — no thundering herd.
+- **A/B assignment is deterministic**: djb2 hash of `company_id` picks variant
+  (the proven faire_dm pattern) — stable on re-render, unbiased, and reportable
+  without storing an assignment table.
+- **Attribution rule**: an order attributes to an enrollment if placed within 30
+  days of that enrollment's **last sent touch**; within an enrollment, credit
+  the last touch before the order. One rule, applied everywhere metrics appear.
+- **Kill switches** (settings, mirroring `pipedrive-sync`'s `isSyncEnabled`
+  pattern): `seq.engine_enabled` — master, **default off**; nothing enrolls or
+  renders until flipped. `seq.autosend_enabled` — separate; flipping it off
+  degrades every auto step to review without touching the engine. Two levers:
+  "stop everything" and "humans only," both instant, both one setting.
+- **Propose-only graduation is a checklist, not a vibe**: an auto-enrollment
+  rule flips live only after ≥14 days in shadow **and** ≥20 proposed
+  enrollments **and** a human has marked ≥90% of them "would have been
+  correct" in the review UI. The flip is logged (who, when) to `activity_feed`.
+- **Tick crash-safety**: each enrollment's advance (render → message row →
+  step bump → next schedule) is one SQLite transaction; the tick is re-entrant
+  and the cron scheduler's existing per-job lock (15-min stale timeout)
+  prevents overlap. A crash mid-tick loses nothing and duplicates nothing —
+  `UNIQUE(enrollment_id, step_id)` is the backstop.
+- **Runner postbacks are idempotent**: keyed on `sequence_messages.id`; a
+  retried postback can't double-record. One runner instance max (lock file,
+  the faire_dm pattern).
+
+## 9. Failure modes — and how the design absorbs them
+
+The engine's job is outbound messages to real customers from Christina's name.
+The failure analysis assumes everything that *can* go stale *will*: sessions
+expire, scans miss, humans forget, Faire changes their DOM. Each row below is
+either a lesson already paid for in the faire_dm campaign or a fail-closed rule.
+
+| Failure | Consequence if unhandled | Mitigation (layered) |
+|---|---|---|
+| **Double-touch: ledger says clean, reality isn't** (mislogged send, manual send outside the system, pre-engine history) | Same retailer messaged twice — the exact Taylor G. incident from faire_dm | **Two-layer rule, non-negotiable:** (1) ledger cooldown check at schedule time; (2) **live thread check at send time** — the Faire adapter reads the thread and refuses to send if the last message is ours and not provably older than `seq.cooldown_days`. Unknown date ⇒ skip (fail closed — the fail-open version of this guard is precisely what caused Taylor G.). Review mode gets layer 2 for free: Christina sees the thread. |
+| **Empty ledger at launch** | The ~1,100 accounts just messaged in the market campaign get re-touched immediately | Phase 0 imports faire_dm's `send_log` + `assist_log` as historical `sequence_messages` rows, and its skiplist (declines, dead tokens) into `do_not_contact`. The engine is born knowing what's already been said. |
+| **Reply scan down** (runner session expired — has happened) | Touch 2/3 fire at accounts that already replied: the single worst UX failure available | (1) The live thread check also detects *their* reply and exits the enrollment at send time; (2) **runner heartbeat**: if the reply scan hasn't reported in 48h, the engine auto-degrades all Faire auto steps to review and Slack-alerts (`postToSlack`). Auto-send is a privilege the runner keeps only while provably alive. |
+| **Wrong-brand send** | Messages from Jaxy/AJM when the other was intended | Port the faire_dm brand guard verbatim: assert the active brand token before *every* send; abort the run on mismatch. Already proven. |
+| **Faire rate limit / soft block** | Account restriction escalation | Hourly cap 12 (measured), randomized gaps, stop-on-block with an alert file that halts subsequent runs until cleared — all ported, all proven. |
+| **Queue neglect** (Christina away, items rot) | "Urgent" messages sent two weeks late read as broken | Queue items carry `queued_at`; items older than `seq.queue_stale_days` (default 5) are auto-skipped with status `skipped` + Slack digest note — a stale nudge is worse than no nudge. T0 is the exception: it waits (a late welcome still beats none). |
+| **Merge-field gap** (`Hi {first_name}` unresolved) | Template artifacts reach a customer | Render fails closed to review with the gap highlighted; the lint blocks *saving* templates with unknown tokens in the first place. |
+| **Stale attachment** | Old linesheet goes out for weeks | Versioned asset keys resolve at send time, not queue time; the asset page shows which sequences reference each key. |
+| **Faire DOM change** | Runner sends fail or, worse, misfire | Runner verifies each send (compose box cleared + thread re-read) and posts `failed` rather than guessing; 3 consecutive failures ⇒ runner pauses + alerts. The `left_unsent` false-negative lesson: **unverified ⇒ counted as sent** for cooldown purposes (a duplicate is worse than a missed send). |
+| **Crash mid-tick / overlapping ticks** | Skipped or duplicated steps | Transaction-per-advance, re-entrant scans, cron lock, uniqueness constraints (§8). |
+| **Runaway enrollment rule** (bad filter enrolls 800 accounts) | Mass mis-send | New rules are born `propose_only`; live rules respect `seq.review_daily_cap` at enroll time, so even a bad rule can only queue a day's cap; the master switch stops the world in one setting. |
+
+Design stance behind all of it: **the ledger is the plan, the live thread is
+the truth, and wherever they disagree the system must do less, not more.**
+
+## 10. Build phases
+
+**Phase 0 — prerequisites (do first, small but load-bearing):**
+1. `companies.faire_retailer_id` + populate in `faire-sync.ts`; backfill from
+   **two** sources: the payouts API (buyers — `retailer_id` is on every order)
+   and faire_dm's `contacts.csv` (**1,248 non-buyer prospects with retailer
+   tokens + names + cities** — coverage the API can't give us).
+2. `do_not_contact` columns + `isSuppressed()`; **import faire_dm's skiplist**
+   (declines, dead tokens) as the first suppression entries.
+3. **Import outreach history**: faire_dm `send_log` + `assist_log` →
+   historical `sequence_messages` rows, so cooldowns work from day one and the
+   ~1,100 accounts just messaged aren't immediately re-touched (§9).
+4. Register `faire-orders-sync` cron (hourly — function already written).
 
 **Phase 1 — engine + T0/T4/T1 at review-and-send (~1-2 weeks):**
 Tables (§2) in `db.ts`; `src/modules/sequences/` module: `lib/engine.ts` (tick),
