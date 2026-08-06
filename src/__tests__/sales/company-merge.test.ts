@@ -1,0 +1,186 @@
+import { describe, it, expect, beforeEach } from "vitest";
+import { getTestDb } from "../setup";
+import {
+  findDuplicateCompanies, mergeCompanies, getNeedsReview,
+  normalizeCompanyName, normalizeState,
+} from "@/modules/sales/lib/company-merge";
+
+/**
+ * Merging companies deletes rows, so every rule here earns its place by
+ * having been WRONG against production data first. Each case below is a real
+ * record set that an earlier version of the detector either wrongly merged or
+ * wrongly kept apart:
+ *
+ *   - a placeholder contact address ("name@email.com") sat on 8 unrelated
+ *     companies and pulled them into one group
+ *   - "seattle, WA" and "seattle, WASHINGTON" failed to corroborate, so two
+ *     genuine Show Pony records stayed split
+ *   - a personal telus.net address counted as a company domain and split
+ *     "Front & Company" from "Front and Company" in the same city
+ *   - eleven unrelated "Revival" shops shared nothing but a name
+ */
+const db = getTestDb();
+
+// The shared fixture's `companies` DDL predates these columns; the merge reads
+// them to rank keepers and to rescue fields off a loser before deleting it.
+const EXTRA_COMPANY_COLUMNS = [
+  "shopify_customer_id TEXT", "enrichment_text TEXT",
+  "latitude REAL", "longitude REAL", "geocoded_at TEXT",
+];
+
+function reset() {
+  for (const col of EXTRA_COMPANY_COLUMNS) {
+    try { db.exec(`ALTER TABLE companies ADD COLUMN ${col}`); } catch { /* already added */ }
+  }
+  db.exec(`CREATE TABLE IF NOT EXISTS ajm_orders (id TEXT PRIMARY KEY, source TEXT, order_number TEXT, order_date TEXT, customer_name TEXT, email TEXT, city TEXT, state TEXT, country TEXT, total REAL, status TEXT, cancelled INTEGER DEFAULT 0, units INTEGER, company_id TEXT)`);
+  db.exec(`DELETE FROM companies; DELETE FROM contacts; DELETE FROM orders; DELETE FROM customer_accounts; DELETE FROM ajm_orders;`);
+}
+
+let n = 0;
+function company(name: string, city = "", state = "", opts: { zip?: string; email?: string; notes?: string; shopifyId?: string; createdAt?: string } = {}) {
+  const id = `co${++n}`;
+  db.prepare(
+    `INSERT INTO companies (id, name, city, state, zip, notes, created_at) VALUES (?,?,?,?,?,?,?)`,
+  ).run(id, name, city, state, opts.zip ?? "", opts.notes ?? null, opts.createdAt ?? "2024-01-01");
+  if (opts.email) {
+    db.prepare(`INSERT INTO contacts (id, company_id, email) VALUES (?,?,?)`).run(`ct${n}`, id, opts.email);
+  }
+  return id;
+}
+
+const survivors = () => new Set((db.prepare("SELECT id FROM companies").all() as Array<{ id: string }>).map((r) => r.id));
+
+beforeEach(reset);
+
+describe("normalizeState", () => {
+  it("maps spelled-out states and provinces to their code", () => {
+    expect(normalizeState("WASHINGTON")).toBe("WA");
+    expect(normalizeState("Maine")).toBe("ME");
+    expect(normalizeState("new york")).toBe("NY");
+    expect(normalizeState("British Columbia")).toBe("BC");
+    expect(normalizeState("wa")).toBe("WA");
+    expect(normalizeState(null)).toBe("");
+  });
+});
+
+describe("normalizeCompanyName", () => {
+  it("ignores punctuation, case and legal suffixes", () => {
+    expect(normalizeCompanyName("Grey 56 Leather Inc")).toBe(normalizeCompanyName("Grey56 Leather"));
+    expect(normalizeCompanyName("Front & Company")).toBe(normalizeCompanyName("Front and Company"));
+    expect(normalizeCompanyName("ALTER")).toBe(normalizeCompanyName("Alter"));
+  });
+});
+
+describe("findDuplicateCompanies — merges genuine duplicates", () => {
+  it("treats WA and WASHINGTON as the same state", () => {
+    const a = company("Show Pony", "seattle", "WA");
+    const b = company("Show Pony", "seattle", "WASHINGTON", { email: "name@email.com" });
+    mergeCompanies({ apply: true });
+    const left = survivors();
+    expect(left.has(a) && left.has(b)).toBe(false);
+    expect(left.size).toBe(1);
+  });
+
+  it("does not let a personal ISP address masquerade as a company domain", () => {
+    // Same name, same city; only the contact domains differ.
+    company("Front & Company", "vancouver", "BC", { email: "flora.cheung@telus.net" });
+    company("Front and Company", "vancouver", "BC", { email: "flora@frontandcompany.ca" });
+    mergeCompanies({ apply: true });
+    expect(survivors().size).toBe(1);
+  });
+
+  it("links on a shared company domain even when the addresses differ", () => {
+    company("Alter", "brooklyn", "NY", { email: "tommy@alterbrooklyn.com" });
+    company("ALTER", "", "", { email: "info@alterbrooklyn.com" });
+    mergeCompanies({ apply: true });
+    expect(survivors().size).toBe(1);
+  });
+
+  it("matches St. and Saint spellings of a city", () => {
+    company("360 Boutique", "st. augustine", "FL");
+    company("360 Boutique", "saint augustine", "FLORIDA");
+    mergeCompanies({ apply: true });
+    expect(survivors().size).toBe(1);
+  });
+});
+
+describe("findDuplicateCompanies — refuses unsafe merges", () => {
+  it("keeps same-named shops in different cities apart", () => {
+    company("Revival", "portland", "OR", { zip: "97201" });
+    company("Revival", "austin", "TX", { zip: "78701" });
+    expect(findDuplicateCompanies()).toHaveLength(0);
+    mergeCompanies({ apply: true });
+    expect(survivors().size).toBe(2);
+    expect(getNeedsReview().some((r) => r.key === "name:revival")).toBe(true);
+  });
+
+  it("ignores a placeholder address shared by many companies", () => {
+    const shops = [
+      ["Martin Patrick 3", "minneapolis", "MN"],
+      ["Ventura Swimwear", "ventura", "CA"],
+      ["The Curator", "asheville", "NC"],
+      ["The Arrangement", "dallas", "TX"],
+      ["Pedal Bike Shop", "denver", "CO"],
+      ["Glow Med Spa", "tampa", "FL"],
+      ["Blue Door Gifts", "boise", "ID"],
+      ["Harbor Goods", "portland", "ME"],
+    ].map(([nm, city, st]) => company(nm, city, st, { email: "name@email.com" }));
+
+    mergeCompanies({ apply: true });
+    const left = survivors();
+    for (const id of shops) expect(left.has(id)).toBe(true);
+    expect(getNeedsReview().some((r) => r.reason.includes("placeholder inbox"))).toBe(true);
+  });
+
+  it("does not merge on a shared rep address alone", () => {
+    company("Sunwink", "chicago", "IL", { email: "hello@rep-agency.com" });
+    company("Northside Apothecary", "seattle", "WA", { email: "hello@rep-agency.com" });
+    mergeCompanies({ apply: true });
+    expect(survivors().size).toBe(2);
+  });
+
+  it("keeps distinct stores of one chain separate", () => {
+    company("Lockwood", "astoria", "NY", { zip: "11106" });
+    company("Lockwood Shop", "brooklyn", "NEW YORK", { zip: "11222" });
+    mergeCompanies({ apply: true });
+    expect(survivors().size).toBe(2);
+  });
+});
+
+describe("mergeCompanies", () => {
+  it("dry-runs by default", () => {
+    company("Show Pony", "seattle", "WA");
+    company("Show Pony", "seattle", "WASHINGTON");
+    const res = mergeCompanies();
+    expect(res.dryRun).toBe(true);
+    expect(res.companiesRemoved).toBe(1);
+    expect(survivors().size).toBe(2);
+  });
+
+  it("keeps the worked CRM record and repoints its orders", () => {
+    // A1 is the record a human has worked; A2 is the webhook's stub, and the
+    // stub is the one carrying the orders. The worked record must survive.
+    const worked = company("Grey56 Leather", "miami", "FL", { zip: "33101", notes: "key account" });
+    const stub = company("Grey 56 Leather Inc", "miami", "FL", { zip: "33101", createdAt: "2025-01-01" });
+    db.prepare(`INSERT INTO orders (id, order_number, company_id, channel, status, total, placed_at) VALUES ('o1','#1',?, 'shopify_wholesale','shipped',1808,'2026-05-20')`).run(stub);
+    db.prepare(`INSERT INTO orders (id, order_number, company_id, channel, status, total, placed_at) VALUES ('o2','#2',?, 'shopify_wholesale','shipped',1596,'2026-04-28')`).run(stub);
+
+    mergeCompanies({ apply: true });
+
+    const left = survivors();
+    expect(left.has(worked)).toBe(true);
+    expect(left.has(stub)).toBe(false);
+    const rolled = db.prepare("SELECT COUNT(*) n, SUM(total) rev FROM orders WHERE company_id = ?").get(worked) as { n: number; rev: number };
+    expect(rolled.n).toBe(2);
+    expect(rolled.rev).toBe(3404);
+  });
+
+  it("is stable when run twice", () => {
+    company("Show Pony", "seattle", "WA");
+    company("Show Pony", "seattle", "WASHINGTON");
+    mergeCompanies({ apply: true });
+    const after = survivors();
+    mergeCompanies({ apply: true });
+    expect(survivors()).toEqual(after);
+  });
+});

@@ -149,8 +149,14 @@ function backfillKeeperFields(keepId: string, loserId: string): string[] {
   return filled;
 }
 
-/** Free/consumer mail providers — a shared address here proves nothing. */
-const FREE_DOMAIN = /@(gmail|hotmail|outlook|yahoo|icloud|aol|live|msn|me|proton(mail)?|gmx|mail)\./i;
+/**
+ * Free/consumer mail providers AND consumer ISP domains — a shared address
+ * here proves nothing, and treating one as a company domain actively hurt:
+ * "Front & Company" was kept apart from "Front and Company" (same name, same
+ * city) because one contact used a personal telus.net address, which counted
+ * as a different company domain.
+ */
+const FREE_DOMAIN = /@(gmail|hotmail|outlook|yahoo|icloud|aol|live|msn|me|proton(mail)?|gmx|mail|comcast|verizon|telus|shaw|rogers|sbcglobal|bellsouth|cox|charter|earthlink|att|sympatico|btinternet|orange|free|web|t-online)\./i;
 
 /**
  * Above this many companies, a shared contact address is a shared or
@@ -158,8 +164,138 @@ const FREE_DOMAIN = /@(gmail|hotmail|outlook|yahoo|icloud|aol|live|msn|me|proton
  * two records are the same business. Set low deliberately: a genuine duplicate
  * pair is 2–3 records, and a chain's store locations are separate businesses
  * for our purposes anyway. Over the cap the group goes to human review.
+ *
+ * Production really does contain the literal placeholder "name@email.com" on
+ * eight unrelated companies.
  */
 const SHARED_EMAIL_MAX = 6;
+
+/**
+ * US/Canada state and province names → their two-letter code.
+ *
+ * The same retailer is stored as "seattle, WA" on one record and
+ * "seattle, WASHINGTON" on the other, depending on which importer created it.
+ * Comparing the raw strings made two records of the same shop look like two
+ * shops in different places, which blocked genuine merges (Show Pony, Daytrip
+ * Society, Alter Ego Fashions all failed on exactly this).
+ */
+const STATE_CODE: Record<string, string> = {
+  alabama: "AL", alaska: "AK", arizona: "AZ", arkansas: "AR", california: "CA",
+  colorado: "CO", connecticut: "CT", delaware: "DE", "district of columbia": "DC",
+  florida: "FL", georgia: "GA", hawaii: "HI", idaho: "ID", illinois: "IL",
+  indiana: "IN", iowa: "IA", kansas: "KS", kentucky: "KY", louisiana: "LA",
+  maine: "ME", maryland: "MD", massachusetts: "MA", michigan: "MI",
+  minnesota: "MN", mississippi: "MS", missouri: "MO", montana: "MT",
+  nebraska: "NE", nevada: "NV", "new hampshire": "NH", "new jersey": "NJ",
+  "new mexico": "NM", "new york": "NY", "north carolina": "NC",
+  "north dakota": "ND", ohio: "OH", oklahoma: "OK", oregon: "OR",
+  pennsylvania: "PA", "puerto rico": "PR", "rhode island": "RI",
+  "south carolina": "SC", "south dakota": "SD", tennessee: "TN", texas: "TX",
+  utah: "UT", vermont: "VT", virginia: "VA", washington: "WA",
+  "west virginia": "WV", wisconsin: "WI", wyoming: "WY",
+  alberta: "AB", "british columbia": "BC", manitoba: "MB",
+  "new brunswick": "NB", "newfoundland and labrador": "NL", "nova scotia": "NS",
+  ontario: "ON", "prince edward island": "PE", quebec: "QC",
+  saskatchewan: "SK",
+};
+
+/**
+ * Largest cluster we will merge without a human looking. Signals link
+ * transitively, so an unlucky chain could otherwise sweep up a whole city's
+ * worth of same-named shops.
+ */
+const MAX_AUTO_CLUSTER = 8;
+
+export function normalizeState(raw: string | null | undefined): string {
+  const s = (raw ?? "").trim().toLowerCase().replace(/\./g, "").replace(/\s+/g, " ");
+  if (!s) return "";
+  return STATE_CODE[s] ?? (s.length === 2 ? s.toUpperCase() : s.toUpperCase());
+}
+
+/** City comparison is punctuation- and spacing-insensitive ("st." vs "saint"). */
+function normalizeCity(raw: string | null | undefined): string {
+  return (raw ?? "").trim().toLowerCase()
+    .replace(/^st\.?\s+/, "saint ")
+    .replace(/^ft\.?\s+/, "fort ")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+type Company = DuplicateGroup["companies"][number];
+
+/** The company's own domain, else its contact's — blank for free/ISP mail. */
+function domainOf(c: Company): string {
+  const d = (c.domain ?? "").trim().toLowerCase();
+  if (d) return d;
+  const e = (c.email ?? "").split("@")[1]?.toLowerCase() ?? "";
+  return !e || FREE_DOMAIN.test(`@${e}`) ? "" : e;
+}
+
+/**
+ * Every corroborating signal a record offers. Two records are the same
+ * business if they agree on ANY of these — not on one chosen by priority.
+ *
+ * That distinction is not academic. Picking a single signal per record split
+ * "Front & Company" from "Front and Company": both sit in Vancouver BC, but
+ * one contact used a personal telus.net address, so a domain signal was
+ * chosen for one and a city signal for the other, and they never compared.
+ */
+function signalsOf(c: Company, includeName: boolean, includeDomain: boolean): string[] {
+  const sigs: string[] = [];
+  const dom = includeDomain ? domainOf(c) : "";
+  if (dom) sigs.push(`d:${dom}`);
+  const zip = (c.zip ?? "").trim().slice(0, 5);
+  if (zip.length === 5) sigs.push(`z:${zip}`);
+  const city = normalizeCity(c.city), state = normalizeState(c.state);
+  if (city && state) sigs.push(`c:${city}|${state}`);
+  if (includeName) {
+    const n = normalizeCompanyName(c.name);
+    if (n.length >= 3) sigs.push(`n:${n}`);
+  }
+  return sigs;
+}
+
+/**
+ * Union-find over shared signals. Returns clusters of 2+ records that are
+ * transitively linked, plus the records that linked to nothing (which are
+ * reported for human review rather than merged).
+ */
+function clusterByAnySignal(
+  items: Company[],
+  /**
+   * includeName  — add the normalized name as a signal. On for email groups
+   *                (where the name is independent evidence), off for name
+   *                groups (where every member already shares it).
+   * includeDomain — off for email groups: members share the contact address by
+   *                definition, so its domain would link everything and make
+   *                the corroboration check vacuous.
+   */
+  opts?: { includeName?: boolean; includeDomain?: boolean },
+): { linked: Company[][]; unlinked: Company[] } {
+  const parent = items.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const union = (a: number, b: number) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
+
+  const bySignal = new Map<string, number[]>();
+  items.forEach((c, i) => {
+    for (const s of signalsOf(c, opts?.includeName ?? false, opts?.includeDomain ?? true)) {
+      (bySignal.get(s) ?? bySignal.set(s, []).get(s)!).push(i);
+    }
+  });
+  for (const idxs of bySignal.values()) {
+    for (let i = 1; i < idxs.length; i++) union(idxs[0], idxs[i]);
+  }
+
+  const byRoot = new Map<number, Company[]>();
+  items.forEach((c, i) => {
+    const r = find(i);
+    (byRoot.get(r) ?? byRoot.set(r, []).get(r)!).push(c);
+  });
+  const linked: Company[][] = [], unlinked: Company[] = [];
+  for (const cluster of byRoot.values()) {
+    if (cluster.length > 1) linked.push(cluster); else unlinked.push(...cluster);
+  }
+  return { linked, unlinked };
+}
 
 export interface ReviewGroup {
   key: string; reason: string; companies: DuplicateGroup["companies"];
@@ -189,34 +325,30 @@ export function findDuplicateCompanies(opts?: { minEvidence?: "name" | "email" |
     if (k.length < 3) continue;
     (byName.get(k) ?? byName.set(k, []).get(k)!).push(c);
   }
-  const domainOf = (c: DuplicateGroup["companies"][number]) => {
-    const d = (c.domain ?? "").trim();
-    if (d) return d;
-    const e = (c.email ?? "").split("@")[1]?.toLowerCase() ?? "";
-    return FREE_DOMAIN.test(`@${e}`) ? "" : e;
-  };
   for (const [k, items] of byName) {
     if (items.length < 2) continue;
-    // Sub-group by corroborating signal; only sub-groups of 2+ are duplicates.
-    const buckets = new Map<string, DuplicateGroup["companies"]>();
-    for (const c of items) {
-      const zip = (c.zip ?? "").slice(0, 5);
-      const dom = domainOf(c);
-      const sig = dom ? `d:${dom}` : zip ? `z:${zip}` : (c.city && c.state) ? `c:${c.city}|${c.state}` : "";
-      if (!sig) continue; // no corroboration available → cannot confirm
-      (buckets.get(sig) ?? buckets.set(sig, []).get(sig)!).push(c);
-    }
-    for (const [sig, bucket] of buckets) {
-      if (bucket.length > 1) groups.set(`name:${k}|${sig}`, { reason: "name", items: bucket });
+    const clusters = clusterByAnySignal(items);
+    let n = 0;
+    for (const cluster of clusters.linked) {
+      // Signals link transitively (A shares a zip with B, B a domain with C),
+      // so a chain can pull in more records than any single pair justifies.
+      // Past MAX_AUTO_CLUSTER that is a chain, not a duplicate — hand it over.
+      if (cluster.length > MAX_AUTO_CLUSTER) {
+        needsReview.push({
+          key: `name:${k}`,
+          reason: `${cluster.length} same-named records linked in one chain — too large to merge unreviewed`,
+          companies: cluster.slice(0, 25),
+        });
+        continue;
+      }
+      groups.set(`name:${k}|${++n}`, { reason: "name", items: cluster });
     }
     // Name matches we deliberately did NOT merge, for human review.
-    const mergedIds = new Set([...buckets.values()].filter((b) => b.length > 1).flat().map((c) => c.id));
-    const leftovers = items.filter((c) => !mergedIds.has(c.id));
-    if (leftovers.length > 1) {
+    if (clusters.unlinked.length > 1) {
       needsReview.push({
         key: `name:${k}`,
         reason: "same name, no matching location or domain — could be different businesses",
-        companies: leftovers,
+        companies: clusters.unlinked,
       });
     }
   }
@@ -256,41 +388,18 @@ export function findDuplicateCompanies(opts?: { minEvidence?: "name" | "email" |
       continue;
     }
 
-    // (b) Corroborate: same normalized name, or failing that, same location.
-    //     Name is tried first because it is the stronger signal, but a record
-    //     that was renamed ("Bygones" → "Bygones Vintage Emporium") only ever
-    //     matches on location, so name-singletons fall through to a second
-    //     pass rather than being dropped.
-    const buckets = new Map<string, DuplicateGroup["companies"]>();
-    const byNameSig = new Map<string, DuplicateGroup["companies"]>();
-    for (const c of items) {
-      const nameKey = normalizeCompanyName(c.name);
-      if (nameKey.length < 3) continue;
-      (byNameSig.get(nameKey) ?? byNameSig.set(nameKey, []).get(nameKey)!).push(c);
+    // (b) Corroborate on name or location, same standard as name groups.
+    const clusters = clusterByAnySignal(items, { includeName: true, includeDomain: false });
+    let n = 0;
+    for (const cluster of clusters.linked) {
+      const key = `email:${e}|${++n}`;
+      if (!groups.has(key)) groups.set(key, { reason: "email", items: cluster });
     }
-    const unnamed: DuplicateGroup["companies"] = [];
-    for (const [nameKey, bucket] of byNameSig) {
-      if (bucket.length > 1) buckets.set(`n:${nameKey}`, bucket);
-      else unnamed.push(...bucket);
-    }
-    for (const c of items.filter((c) => normalizeCompanyName(c.name).length < 3).concat(unnamed)) {
-      const zip = (c.zip ?? "").slice(0, 5);
-      const sig = zip ? `z:${zip}` : (c.city && c.state) ? `c:${c.city}|${c.state}` : "";
-      if (!sig) continue;
-      (buckets.get(sig) ?? buckets.set(sig, []).get(sig)!).push(c);
-    }
-    for (const [sig, bucket] of buckets) {
-      if (bucket.length < 2) continue;
-      const key = `email:${e}|${sig}`;
-      if (!groups.has(key)) groups.set(key, { reason: "email", items: bucket });
-    }
-    const mergedIds = new Set([...buckets.values()].filter((b) => b.length > 1).flat().map((c) => c.id));
-    const leftovers = items.filter((c) => !mergedIds.has(c.id));
-    if (leftovers.length > 1) {
+    if (clusters.unlinked.length > 1) {
       needsReview.push({
         key: `email:${e}`,
         reason: "shared contact address but different names and locations — likely different businesses",
-        companies: leftovers,
+        companies: clusters.unlinked,
       });
     }
   }
