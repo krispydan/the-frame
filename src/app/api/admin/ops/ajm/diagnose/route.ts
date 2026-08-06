@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { requireOpsToken } from "@/lib/ops-auth";
 import { sqlite } from "@/lib/db";
+import { ajmAccountsWithJaxy } from "@/modules/sales/lib/ajm/accounts";
 
 /**
  * GET /api/admin/ops/ajm/diagnose?names=Show Pony,Sunwink,Grey56
@@ -24,6 +25,9 @@ export async function GET(req: NextRequest) {
   const names = (req.nextUrl.searchParams.get("names") ?? "")
     .split(",").map((n) => n.trim()).filter(Boolean);
   if (!names.length) return NextResponse.json({ error: "pass ?names=A,B,C" }, { status: 400 });
+
+  // Computed once — this is the page's own account list.
+  const pageRows = ajmAccountsWithJaxy();
 
   const out = names.map((name) => {
     const like = `%${name.toLowerCase()}%`;
@@ -64,11 +68,17 @@ export async function GET(req: NextRequest) {
     const jaxyCompanyIds = new Set((jaxyOrdersByShipTo as Array<{ companyId: string | null }>).map((r) => r.companyId).filter(Boolean));
     const shared = [...ajmCompanyIds].filter((id) => jaxyCompanyIds.has(id));
 
+    // What the /customers/ajm page ACTUALLY renders for this retailer — same
+    // query, not a re-implementation. If this shows Jaxy revenue but the page
+    // doesn't, the problem is the page; if this shows $0 too, it's the data.
+    const onPage = pageRows.filter((r) => r.name.toLowerCase().includes(name.toLowerCase()));
+
     return {
       name,
       companies,
       ajmByRawName,
       jaxyOrdersByShipTo,
+      onPage,
       verdict: !ajmCompanyIds.size ? "AJM history not matched to any company"
         : !jaxyCompanyIds.size ? "No Jaxy orders found by name/ship-to"
         : shared.length ? "SAME company — should already show; check date filters"

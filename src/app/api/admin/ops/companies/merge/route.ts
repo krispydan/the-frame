@@ -24,21 +24,37 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
   const minRevenue = Number(req.nextUrl.searchParams.get("minRevenue") ?? 0);
   const limit = Number(req.nextUrl.searchParams.get("limit") ?? 100);
+  // Comma-separated name search across BOTH lists. Without it the response is
+  // capped at the top groups by hidden revenue, so a small-dollar duplicate
+  // ("Alter", hiding $1,109) is invisible and easy to mistake for "not found".
+  const q = (req.nextUrl.searchParams.get("q") ?? "")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const matchesQ = (names: string[]) =>
+    !q.length || names.some((n) => q.some((t) => n.toLowerCase().includes(t)));
+
   let groups = findDuplicateCompanies();
   const totalGroups = groups.length;
+  const review = getNeedsReview();
   if (minRevenue > 0) {
     groups = groups.filter((g) => g.splitJaxyRevenue + g.splitAjmRevenue >= minRevenue);
   }
+  if (q.length) groups = groups.filter((g) => matchesQ(g.companies.map((c) => c.name)));
+  const matchedReview = q.length
+    ? review.filter((r) => matchesQ(r.companies.map((c) => c.name)))
+    : review;
+
   return NextResponse.json({
     totalGroups,
     matchingGroups: groups.length,
+    query: q.length ? q : undefined,
     hiddenJaxyRevenue: Math.round(groups.reduce((s, g) => s + g.splitJaxyRevenue, 0) * 100) / 100,
     hiddenAjmRevenue: Math.round(groups.reduce((s, g) => s + g.splitAjmRevenue, 0) * 100) / 100,
     groups: groups.slice(0, Math.min(limit, 500)),
-    // Same-name collisions we deliberately refused to merge (no shared
-    // location or domain) — e.g. the eleven unrelated "Revival" shops.
-    needsReview: getNeedsReview().slice(0, 50),
-    needsReviewCount: getNeedsReview().length,
+    // Collisions we deliberately refused to merge (no shared location or
+    // domain) — e.g. the eleven unrelated "Revival" shops, and addresses
+    // shared by too many companies to be an identity signal.
+    needsReview: matchedReview.slice(0, q.length ? 200 : 50),
+    needsReviewCount: matchedReview.length,
   });
 }
 

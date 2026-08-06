@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { READER_CATEGORIES } from "@/modules/sales/lib/ajm/categorize";
 import { AJM_DATA_FROM } from "@/modules/sales/lib/ajm/channels";
+import { ajmAccountsWithJaxy } from "@/modules/sales/lib/ajm/accounts";
 
 /**
  * GET /api/v1/customers/ajm/benchmark
@@ -109,41 +110,9 @@ export async function GET() {
   `).all() as Array<{ cat: string; revenue: number }>;
 
   // ── AJM's book, with Jaxy conversion status per account ──
-  // Order totals and line-level category sums are aggregated in SEPARATE CTEs
-  // before joining — combining them multiplies each order total by its line
-  // count (a fan-out that once inflated this list 21x).
-  const orphans = sqlite.prepare(`
-    WITH ord AS (
-      SELECT company_id, ROUND(SUM(total),2) AS ajmRevenue, COUNT(*) AS ajmOrders,
-             MAX(order_date) AS lastOrder
-      FROM ajm_orders WHERE cancelled=0 AND order_date >= '${AJM_DATA_FROM}' AND company_id IS NOT NULL GROUP BY company_id
-    ),
-    cats AS (
-      SELECT o.company_id,
-             SUM(CASE WHEN i.category IN (${READERS}) THEN i.line_total ELSE 0 END) AS readerRev,
-             SUM(i.line_total) AS lineRev
-      FROM ajm_orders o JOIN ajm_order_items i ON i.order_id=o.id
-      WHERE o.cancelled=0 AND o.order_date >= '${AJM_DATA_FROM}' AND o.company_id IS NOT NULL GROUP BY o.company_id
-    ),
-    jaxy AS (
-      SELECT company_id, ROUND(SUM(total),2) AS jaxyRevenue, COUNT(*) AS jaxyOrders,
-             MAX(substr(placed_at,1,10)) AS jaxyLastOrder, MIN(substr(placed_at,1,10)) AS jaxyFirstOrder
-      FROM orders WHERE status NOT IN ('cancelled','returned') AND company_id IS NOT NULL GROUP BY company_id
-    )
-    SELECT ord.company_id AS companyId, c.name, ca.id AS accountId,
-           ord.ajmRevenue, ord.ajmOrders, ord.lastOrder,
-           COALESCE(j.jaxyRevenue,0) AS jaxyRevenue,
-           COALESCE(j.jaxyOrders,0) AS jaxyOrders,
-           j.jaxyFirstOrder, j.jaxyLastOrder,
-           COALESCE(ca.lifetime_value,0) AS jaxyLtv,
-           ROUND(COALESCE(cats.readerRev,0)*100.0/NULLIF(cats.lineRev,0),1) AS readerShare
-    FROM ord
-    JOIN companies c ON c.id = ord.company_id
-    LEFT JOIN customer_accounts ca ON ca.company_id = ord.company_id
-    LEFT JOIN cats ON cats.company_id = ord.company_id
-    LEFT JOIN jaxy j ON j.company_id = ord.company_id
-    ORDER BY ord.ajmRevenue DESC
-  `).all() as Array<{ companyId: string; name: string; accountId: string | null; ajmRevenue: number; ajmOrders: number; lastOrder: string; jaxyRevenue: number; jaxyOrders: number; jaxyFirstOrder: string | null; jaxyLastOrder: string | null; jaxyLtv: number; readerShare: number | null }>;
+  // Shared with the ops diagnose endpoint so "why does this account show $0?"
+  // is answered by the exact query the page renders. See ajm/accounts.ts.
+  const orphans = ajmAccountsWithJaxy();
 
   // Converted = has actually ordered from Jaxy (order rows), which is more
   // reliable than lifetime_value alone (that can lag a fresh order).
