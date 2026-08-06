@@ -95,6 +95,9 @@ interface OrderDetail {
     unitCost: number | null;
     lineCost: number | null;
     lineProfit: number | null;
+    /** "fifo" = landed cost from inventory layers (authoritative);
+     *  "catalog" = static catalog cost fallback, marked with * in the UI. */
+    costSource: "fifo" | "catalog" | null;
     colorName: string | null;
     quantity: number;
     unitPrice: number;
@@ -525,8 +528,12 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                         </td>
                         <td className="px-3 py-3 text-center">{item.quantity}</td>
                         <td className="px-3 py-3 text-right">${item.unitPrice.toFixed(2)}</td>
-                        <td className="px-3 py-3 text-right text-muted-foreground">
+                        <td
+                          className="px-3 py-3 text-right text-muted-foreground"
+                          title={item.costSource === "fifo" ? "FIFO landed cost (actual inventory layers)" : item.costSource === "catalog" ? "Catalog cost — this line hasn't been FIFO-costed yet" : undefined}
+                        >
                           {item.unitCost != null ? `$${item.unitCost.toFixed(2)}` : "—"}
+                          {item.costSource === "catalog" && <span className="text-amber-600 align-top text-[10px]" title="Catalog cost — not yet FIFO-costed">*</span>}
                         </td>
                         <td className={`px-3 py-3 text-right font-medium ${item.lineProfit != null ? (item.lineProfit >= 0 ? "text-green-600" : "text-red-600") : "text-muted-foreground"}`}>
                           {item.lineProfit != null ? `$${item.lineProfit.toFixed(2)}` : "—"}
@@ -538,6 +545,11 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                 </tbody>
               </table>
             </div>
+            {order.items.some((it) => it.costSource === "catalog") && (
+              <p className="px-6 py-1.5 text-xs text-muted-foreground">
+                * catalog cost — line not yet costed by the FIFO engine (runs daily); becomes landed cost automatically.
+              </p>
+            )}
 
             {/* Totals */}
             <div className="border-t px-6 py-4 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5 text-sm">

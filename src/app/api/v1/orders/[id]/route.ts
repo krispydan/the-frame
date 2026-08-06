@@ -19,11 +19,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const items = db.select().from(orderItems).where(eq(orderItems.orderId, id)).all();
   const orderReturns = db.select().from(returns).where(eq(returns.orderId, id)).all();
 
-  // Gross profit calculation — pull catalog cost_price for every SKU on the
-  // order and attach unitCost / lineCost / lineProfit per item, plus order
-  // totals. Items missing a SKU match (e.g. shipping line items) get
-  // unitCost: null and don't contribute to profit (treated as missing data,
-  // not zero cost).
+  // Gross profit calculation. Line costs come from the FIFO engine FIRST —
+  // inventory_cost_depletions records the actual landed cost per order item
+  // (the same source as the Costing (FIFO) card), so the items table and the
+  // card can never disagree. Catalog cost_price is only the fallback for
+  // lines the FIFO engine hasn't costed (pre-FIFO orders, not-yet-run days),
+  // marked costSource: "catalog". Items with neither get unitCost: null and
+  // don't contribute to profit (missing data, not zero cost).
   const skuStrings = items.map((it) => it.sku).filter((s): s is string => !!s);
   const skuMatches = skuStrings.length
     ? db.select({ sku: catalogSkus.sku, cost: catalogSkus.costPrice }).from(catalogSkus).where(inArray(catalogSkus.sku, skuStrings)).all()
@@ -33,16 +35,54 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     if (r.sku) costBySku.set(r.sku, r.cost ?? null);
   }
 
+  const fifoByItem = new Map(
+    (sqlite.prepare(
+      `SELECT order_item_id AS itemId, SUM(quantity) AS qty,
+              SUM(quantity * landed_cost_per_unit) AS cost
+       FROM inventory_cost_depletions
+       WHERE order_id = ? AND order_item_id IS NOT NULL
+       GROUP BY order_item_id`,
+    ).all(id) as Array<{ itemId: string; qty: number; cost: number }>).map((r) => [r.itemId, r]),
+  );
+
   let totalCost = 0;
   let totalCostKnown = true;
   const itemsWithProfit = items.map((it) => {
-    const unitCost = it.sku ? costBySku.get(it.sku) ?? null : null;
-    if (unitCost == null) totalCostKnown = false;
-    const lineCost = unitCost != null ? unitCost * it.quantity : null;
+    const fifo = fifoByItem.get(it.id);
+    const catalogCost = it.sku ? costBySku.get(it.sku) ?? null : null;
+    let unitCost: number | null;
+    let lineCost: number | null;
+    let costSource: "fifo" | "catalog" | null;
+    if (fifo && fifo.qty > 0 && fifo.qty >= it.quantity) {
+      // Fully costed by FIFO — landed cost, the real number.
+      lineCost = fifo.cost;
+      unitCost = fifo.cost / fifo.qty;
+      costSource = "fifo";
+    } else if (fifo && fifo.qty > 0 && catalogCost != null) {
+      // Partially depleted (e.g. split shipment) — FIFO for the costed units,
+      // catalog for the remainder.
+      lineCost = fifo.cost + catalogCost * (it.quantity - fifo.qty);
+      unitCost = lineCost / it.quantity;
+      costSource = "fifo";
+    } else if (catalogCost != null) {
+      unitCost = catalogCost;
+      lineCost = catalogCost * it.quantity;
+      costSource = "catalog";
+    } else if (fifo && fifo.qty > 0) {
+      // FIFO covered some units and there's no catalog fallback for the rest.
+      lineCost = null;
+      unitCost = fifo.cost / fifo.qty;
+      costSource = "fifo";
+    } else {
+      unitCost = null;
+      lineCost = null;
+      costSource = null;
+    }
+    if (lineCost == null) totalCostKnown = false;
     const lineRevenue = it.unitPrice * it.quantity;
     const lineProfit = lineCost != null ? lineRevenue - lineCost : null;
     if (lineCost != null) totalCost += lineCost;
-    return { ...it, unitCost, lineCost, lineProfit };
+    return { ...it, unitCost, lineCost, lineProfit, costSource };
   });
 
   // Revenue base for gross profit:

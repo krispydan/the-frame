@@ -152,7 +152,14 @@ export function getOrderEconomics(orderIds: string[]): Map<string, OrderEconomic
     "SELECT id, channel, subtotal, shipping, status FROM orders WHERE id = ?",
   );
   const itemsStmt = sqlite.prepare(
-    "SELECT oi.sku, oi.quantity, cs.cost_price AS cost FROM order_items oi LEFT JOIN catalog_skus cs ON cs.sku = oi.sku WHERE oi.order_id = ?",
+    "SELECT oi.id, oi.sku, oi.quantity, cs.cost_price AS cost FROM order_items oi LEFT JOIN catalog_skus cs ON cs.sku = oi.sku WHERE oi.order_id = ?",
+  );
+  const fifoStmt = sqlite.prepare(
+    `SELECT order_item_id AS itemId, SUM(quantity) AS qty,
+            SUM(quantity * landed_cost_per_unit) AS cost
+     FROM inventory_cost_depletions
+     WHERE order_id = ? AND order_item_id IS NOT NULL
+     GROUP BY order_item_id`,
   );
   const chargesStmt = sqlite.prepare(
     "SELECT charge_type, amount FROM three_pl_charges WHERE order_id = ?",
@@ -162,13 +169,26 @@ export function getOrderEconomics(orderIds: string[]): Map<string, OrderEconomic
     const order = orderStmt.get(orderId) as { id: string; channel: string; subtotal: number; shipping: number; status: string } | undefined;
     if (!order) continue;
 
-    // COGS
-    const items = itemsStmt.all(orderId) as Array<{ sku: string | null; quantity: number; cost: number | null }>;
+    // COGS — FIFO landed cost first (inventory_cost_depletions, the same
+    // source as the order page's Costing card), catalog cost_price only as
+    // the fallback for lines the FIFO engine hasn't costed.
+    const items = itemsStmt.all(orderId) as Array<{ id: string; sku: string | null; quantity: number; cost: number | null }>;
+    const fifoByItem = new Map(
+      (fifoStmt.all(orderId) as Array<{ itemId: string; qty: number; cost: number }>).map((r) => [r.itemId, r]),
+    );
     let cogs = 0;
     let cogsComplete = items.length > 0;
     for (const it of items) {
-      if (it.cost == null || it.cost <= 0) { cogsComplete = false; continue; }
-      cogs += it.cost * it.quantity;
+      const fifo = fifoByItem.get(it.id);
+      if (fifo && fifo.qty > 0 && fifo.qty >= it.quantity) {
+        cogs += fifo.cost;
+      } else if (fifo && fifo.qty > 0 && it.cost != null && it.cost > 0) {
+        cogs += fifo.cost + it.cost * (it.quantity - fifo.qty);
+      } else if (it.cost != null && it.cost > 0) {
+        cogs += it.cost * it.quantity;
+      } else {
+        cogsComplete = false;
+      }
     }
 
     // 3PL: actual if any invoice charges exist for the order, else estimated.
