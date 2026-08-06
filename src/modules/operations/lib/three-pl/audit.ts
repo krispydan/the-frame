@@ -170,19 +170,13 @@ export function auditInvoice(invoiceId: string): AuditReport {
     if (units <= 0) continue;
     // Big Sky picks each frame's CASE as a separate unit (they stock JX-CASE-*
     // SKUs), so billed units land between `frames` and `2×frames (+ a couple
-    // inserts)`. Observed invoices cluster at exactly 2:1. Only bill counts
-    // OUTSIDE that envelope are anomalies worth a human look:
-    //   below frames      → they picked fewer than the order (split shipment?)
-    //   above 2×frames+2  → more picks than frames+cases can explain
+    // inserts)`. Observed invoices cluster at exactly 2:1. ONLY flag bills
+    // ABOVE that envelope — more picks than frames+cases can explain.
+    // Under-billing is deliberately NOT flagged: Jaxy edits orders in ShipHero
+    // when stock runs low, so fewer-than-ordered picks are routine and only
+    // overcharges cost money (per Daniel, Aug 2026).
     const envelopeMax = units * 2 + 2;
-    if (c.quantity < units - 0.5) {
-      findings.push({
-        check: "quantity", severity: "info", chargeType: c.charge_type,
-        orderNumber: c.order_number_raw,
-        message: `Billed for ${c.quantity} units but the order contains ${units} frames (pack-expanded) — check for split shipment.`,
-        charged: c.quantity, expected: units, delta: c.quantity - units,
-      });
-    } else if (c.quantity > envelopeMax + 0.5) {
+    if (c.quantity > envelopeMax + 0.5) {
       findings.push({
         check: "quantity", severity: "warning", chargeType: c.charge_type,
         orderNumber: c.order_number_raw,
