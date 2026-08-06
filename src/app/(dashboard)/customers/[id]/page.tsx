@@ -81,6 +81,29 @@ async function getOrders(companyId: string) {
   `).all(companyId) as OrderRow[];
 }
 
+/** AJ Morgan (acquired brand) purchase history for this company. */
+function getAjmHistory(companyId: string) {
+  const summary = sqlite.prepare(`
+    SELECT COUNT(*) AS orders, SUM(units) AS units, ROUND(SUM(total), 2) AS revenue,
+           MIN(order_date) AS firstOrder, MAX(order_date) AS lastOrder,
+           GROUP_CONCAT(DISTINCT source) AS sources
+    FROM ajm_orders WHERE company_id = ? AND cancelled = 0
+  `).get(companyId) as { orders: number; units: number | null; revenue: number | null; firstOrder: string | null; lastOrder: string | null; sources: string | null };
+  if (!summary || summary.orders === 0) return null;
+  const orders = sqlite.prepare(`
+    SELECT id, source, order_number, order_date, total, units, status
+    FROM ajm_orders WHERE company_id = ? AND cancelled = 0
+    ORDER BY order_date DESC LIMIT 100
+  `).all(companyId) as Array<{ id: string; source: string; order_number: string; order_date: string | null; total: number; units: number; status: string | null }>;
+  const topProducts = sqlite.prepare(`
+    SELECT i.product_name AS product, SUM(i.quantity) AS units, ROUND(SUM(i.line_total), 2) AS revenue
+    FROM ajm_order_items i JOIN ajm_orders o ON o.id = i.order_id
+    WHERE o.company_id = ? AND o.cancelled = 0
+    GROUP BY i.product_name ORDER BY revenue DESC LIMIT 8
+  `).all(companyId) as Array<{ product: string; units: number; revenue: number }>;
+  return { ...summary, orders: summary.orders, orderRows: orders, topProducts };
+}
+
 /**
  * Percentile benchmarks vs the whole customer base — how good/bad this
  * customer is, in numbers the sales team can act on. Percentile = share of
@@ -141,6 +164,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
     economics: econMap.get(o.id) ?? null,
   }));
   const benchmarks = getBenchmarks(account);
+  const ajmHistory = getAjmHistory(account.company_id);
 
   const reorderPrediction = predictReorder(id);
 
@@ -154,6 +178,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
       recentOrders={recentOrders}
       orderEconomics={orderEconomics}
       benchmarks={benchmarks}
+      ajmHistory={ajmHistory}
       activities={activities}
       healthHistory={healthHistory}
       reorderPrediction={reorderPrediction}

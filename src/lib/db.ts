@@ -2922,6 +2922,61 @@ try {
   }
 } catch (e) { console.error("[db] 3PL billing tables error:", e); }
 
+// ── AJ Morgan historical sales (acquired-brand order history) ──
+// Imported from AJM's Faire / Shopify (wholesale + retail) exports so Jaxy can
+// compare its own sales against AJM's per channel and per customer, browse
+// AJM's old customers, and see each Frame customer's AJM purchase history.
+// Sources: faire | shopify_wholesale | shopify_retail | oms (future).
+// See src/modules/sales/lib/ajm/import.ts.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS ajm_orders (
+    id TEXT PRIMARY KEY NOT NULL,
+    source TEXT NOT NULL,
+    order_number TEXT NOT NULL,
+    order_date TEXT,
+    customer_name TEXT,
+    email TEXT,
+    city TEXT, state TEXT, country TEXT,
+    subtotal REAL, shipping REAL, taxes REAL, total REAL NOT NULL DEFAULT 0,
+    currency TEXT DEFAULT 'USD',
+    status TEXT,
+    cancelled INTEGER NOT NULL DEFAULT 0,
+    units INTEGER NOT NULL DEFAULT 0,
+    -- Faire payout enrichment (from the payouts summary export)
+    faire_payout REAL, faire_commission REAL, faire_shipping_cost REAL,
+    company_id TEXT,
+    match_status TEXT NOT NULL DEFAULT 'unmatched',
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_ajm_orders_src_num ON ajm_orders(source, order_number)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_ajm_orders_company ON ajm_orders(company_id)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_ajm_orders_date ON ajm_orders(order_date)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_ajm_orders_customer ON ajm_orders(customer_name)");
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS ajm_order_items (
+    id TEXT PRIMARY KEY NOT NULL,
+    order_id TEXT NOT NULL REFERENCES ajm_orders(id) ON DELETE CASCADE,
+    sku TEXT,
+    product_name TEXT,
+    option_name TEXT,
+    quantity REAL NOT NULL DEFAULT 0,
+    unit_price REAL NOT NULL DEFAULT 0,
+    line_total REAL NOT NULL DEFAULT 0
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_ajm_items_order ON ajm_order_items(order_id)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_ajm_items_sku ON ajm_order_items(sku)");
+
+  // Faire retailer name → email, researched separately (AJM's Faire export has
+  // no emails). Used by the matcher to connect Faire retailers to Frame
+  // companies via contacts.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS ajm_faire_emails (
+    store_name_norm TEXT PRIMARY KEY NOT NULL,
+    store_name TEXT NOT NULL,
+    email TEXT,
+    website TEXT
+  )`);
+} catch (e) { console.error("[db] AJM history tables error:", e); }
+
 // ── Dashboard cache (L2) ──
 // The dashboard bundle is expensive (~45s cold: FIFO P&L, product performance,
 // business health) but only needs ~5h freshness. The in-process Map (L1) dies

@@ -73,6 +73,18 @@ type OrderWithEconomics = OrderRow & { economics: OrderEconomicsData | null };
 interface BenchmarkMetric { value: number; percentile: number; avg: number }
 interface Benchmarks { base: number; ltv: BenchmarkMetric; aov: BenchmarkMetric; orders: BenchmarkMetric }
 
+/** AJ Morgan (acquired brand) purchase history for this company. */
+interface AjmHistory {
+  orders: number;
+  units: number | null;
+  revenue: number | null;
+  firstOrder: string | null;
+  lastOrder: string | null;
+  sources: string | null;
+  orderRows: Array<{ id: string; source: string; order_number: string; order_date: string | null; total: number; units: number; status: string | null }>;
+  topProducts: Array<{ product: string; units: number; revenue: number }>;
+}
+
 interface ActivityRow {
   id: string;
   type: string;
@@ -129,6 +141,7 @@ export function CustomerDetail({
   recentOrders,
   orderEconomics,
   benchmarks,
+  ajmHistory,
   activities,
   healthHistory,
   reorderPrediction,
@@ -138,6 +151,7 @@ export function CustomerDetail({
   recentOrders: OrderRow[];
   orderEconomics?: OrderWithEconomics[];
   benchmarks?: Benchmarks | null;
+  ajmHistory?: AjmHistory | null;
   activities: ActivityRow[];
   healthHistory: HealthHistoryRow[];
   reorderPrediction?: ReorderPrediction | null;
@@ -385,6 +399,53 @@ export function CustomerDetail({
                 </tr>
               </tfoot>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── AJ Morgan history: what this customer bought from the acquired
+          brand — context for win-backs and share-of-wallet conversations. ── */}
+      {ajmHistory && (
+        <div className="rounded-lg border bg-white p-4">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="font-semibold">🏛️ AJ Morgan History</h2>
+            <Link href="/customers/ajm" className="text-xs text-blue-600 hover:underline">all AJM customers →</Link>
+          </div>
+          <p className="text-sm text-gray-600 mb-3">
+            Bought <span className="font-semibold">{formatCurrency(ajmHistory.revenue ?? 0)}</span> across{" "}
+            <span className="font-semibold">{ajmHistory.orders} orders</span> ({(ajmHistory.units ?? 0).toLocaleString()} units)
+            from AJ Morgan, {ajmHistory.firstOrder?.slice(0, 7)} – {ajmHistory.lastOrder?.slice(0, 7)}
+            {ajmHistory.sources ? ` · via ${ajmHistory.sources.split(",").map((s) => s.replace("shopify_", "")).join(", ")}` : ""}.
+            {account.lifetime_value > 0
+              ? ` With Jaxy so far: ${formatCurrency(account.lifetime_value)}.`
+              : " No Jaxy orders yet — win-back candidate."}
+          </p>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-1">Top AJM products</p>
+              <div className="space-y-0.5">
+                {ajmHistory.topProducts.map((p) => (
+                  <div key={p.product} className="flex justify-between text-sm">
+                    <span className="truncate mr-2">{p.product}</span>
+                    <span className="tabular-nums text-gray-600 whitespace-nowrap">{p.units.toLocaleString()}u · {formatCurrency(p.revenue)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-1">AJM orders (latest {Math.min(ajmHistory.orderRows.length, 100)})</p>
+              <div className="max-h-48 overflow-y-auto space-y-0.5 pr-1">
+                {ajmHistory.orderRows.map((o) => (
+                  <div key={o.id} className="flex justify-between text-sm py-0.5 border-b last:border-0">
+                    <span>
+                      <span className="font-medium">{o.order_number}</span>
+                      <span className="ml-1.5 text-xs text-gray-400">{o.source.replace("shopify_", "")} · {o.order_date ?? "—"}</span>
+                    </span>
+                    <span className="tabular-nums">{formatCurrency(o.total)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}
