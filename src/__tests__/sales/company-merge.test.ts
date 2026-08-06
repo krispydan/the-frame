@@ -279,6 +279,27 @@ describe("mergeCompanies", () => {
     expect(row.why).toBe("asked to stop");
   });
 
+  it("repoints a reference that is not called company_id", () => {
+    // A declared FK into companies under another name is invisible to a
+    // company_id scan; the row is left pointing at a deleted company and the
+    // DELETE trips the constraint. This is what killed the second apply.
+    db.exec(`DROP TABLE IF EXISTS company_relationships`);
+    db.exec(`CREATE TABLE company_relationships (id TEXT PRIMARY KEY, parent_company_id TEXT REFERENCES companies(id), note TEXT)`);
+    db.pragma("foreign_keys = ON");
+
+    const keep = company("Show Pony", "seattle", "WA");
+    const dup = company("Show Pony", "seattle", "WASHINGTON");
+    db.prepare(`INSERT INTO ajm_orders (id, order_number, order_date, total, cancelled, company_id) VALUES ('a7','A7','2024-06-01',85976,0,?)`).run(keep);
+    db.prepare(`INSERT INTO company_relationships VALUES ('r1',?,'parent')`).run(dup);
+
+    expect(() => mergeCompanies({ apply: true })).not.toThrow();
+    const row = db.prepare("SELECT parent_company_id AS pid FROM company_relationships WHERE id='r1'").get() as { pid: string };
+    expect(row.pid).toBe(keep);
+
+    db.pragma("foreign_keys = OFF");
+    db.exec(`DROP TABLE IF EXISTS company_relationships`);
+  });
+
   it("is stable when run twice", () => {
     company("Show Pony", "seattle", "WA");
     company("Show Pony", "seattle", "WASHINGTON");

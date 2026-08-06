@@ -35,19 +35,45 @@ export function normalizeCompanyName(raw: string | null | undefined): string {
 }
 
 /**
- * Every table carrying a company_id, read from the schema.
+ * Every (table, column) that points at a company, read from the schema.
  *
- * This used to be a hand-maintained list of 22 table names, and it drifted:
- * sequence_enrollments has a company_id and was never on it, so a merge would
- * have orphaned rows or tripped a foreign key. Discovering the set means a new
- * table with a company_id is handled the day it is added, not the day someone
- * remembers to update this file.
+ * This used to be a hand-maintained list of 22 table names and it drifted:
+ * sequence_enrollments has a company_id and was never on it. Two sources are
+ * unioned, because each misses what the other catches:
+ *
+ *   - any column named company_id — catches tables that carry the id with no
+ *     declared foreign key
+ *   - any DECLARED foreign key into companies, whatever the column is called —
+ *     catches the ones a name scan cannot see. The second production apply
+ *     died here: a reference under another name was never repointed, so
+ *     DELETE FROM companies hit the constraint and rolled the whole thing back.
  */
-function companyRefTables(): string[] {
-  const tables = sqlite.prepare(
-    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'companies'",
-  ).all() as Array<{ name: string }>;
-  return tables.map((t) => t.name).filter((t) => hasColumn(t, "company_id")).sort();
+function companyRefTables(): Array<{ table: string; column: string }> {
+  const tables = (sqlite.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+  ).all() as Array<{ name: string }>).map((t) => t.name);
+
+  const refs = new Map<string, { table: string; column: string }>();
+  for (const t of tables) {
+    // Any column literally called company_id — covers tables that carry the id
+    // without a declared foreign key.
+    if (t !== "companies" && hasColumn(t, "company_id")) {
+      refs.set(`${t}.company_id`, { table: t, column: "company_id" });
+    }
+    // Plus any DECLARED foreign key into companies, whatever the column is
+    // called. The apply died on one of these: a column pointing at companies
+    // under another name is invisible to a company_id scan, so the loser row
+    // was never repointed and DELETE FROM companies hit the constraint.
+    try {
+      const fks = sqlite.prepare(`PRAGMA foreign_key_list(${t})`).all() as Array<{ table: string; from: string }>;
+      for (const fk of fks) {
+        if (fk.table !== "companies" || !fk.from) continue;
+        if (t === "companies" && fk.from === "id") continue;
+        refs.set(`${t}.${fk.from}`, { table: t, column: fk.from });
+      }
+    } catch { /* view or unreadable table */ }
+  }
+  return [...refs.values()].sort((a, b) => `${a.table}.${a.column}`.localeCompare(`${b.table}.${b.column}`));
 }
 
 /**
@@ -59,7 +85,7 @@ function companyRefTables(): string[] {
  * phone number, and company_phones is unique on (company_id, phone). The whole
  * first apply attempt rolled back on exactly this.
  */
-function uniqueIndexesWithCompanyId(table: string): string[][] {
+function uniqueIndexesWithCompanyId(table: string, column: string): string[][] {
   try {
     const idxs = sqlite.prepare(`PRAGMA index_list(${table})`).all() as Array<{ name: string; unique: number; partial?: number }>;
     const out: string[][] = [];
@@ -71,8 +97,8 @@ function uniqueIndexesWithCompanyId(table: string): string[][] {
       if (idx.partial) continue;
       const cols = (sqlite.prepare(`PRAGMA index_info(${idx.name})`).all() as Array<{ name: string | null }>)
         .map((c) => c.name).filter((c): c is string => !!c);
-      if (!cols.includes("company_id")) continue;
-      out.push(cols.filter((c) => c !== "company_id"));
+      if (!cols.includes(column)) continue;
+      out.push(cols.filter((c) => c !== column));
     }
     return out;
   } catch { return []; }
@@ -83,9 +109,9 @@ function uniqueIndexesWithCompanyId(table: string): string[][] {
  * first losers colliding with each other, then losers colliding with the
  * keeper. Runs before the repoint. Returns how many rows were dropped.
  */
-function dropCollidingRows(table: string): number {
+function dropCollidingRows(table: string, column: string): number {
   let dropped = 0;
-  for (const cols of uniqueIndexesWithCompanyId(table)) {
+  for (const cols of uniqueIndexesWithCompanyId(table, column)) {
     // A unique index on company_id alone: the keeper may hold only one row.
     const sameOther = cols.length
       ? "AND " + cols.map((c) => `b.${c} IS a.${c}`).join(" AND ")
@@ -94,9 +120,9 @@ function dropCollidingRows(table: string): number {
     // lowest rowid so the choice is deterministic across re-runs.
     dropped += sqlite.prepare(`
       DELETE FROM ${table} WHERE rowid IN (
-        SELECT a.rowid FROM ${table} a JOIN temp.merge_map ma ON ma.loser = a.company_id
+        SELECT a.rowid FROM ${table} a JOIN temp.merge_map ma ON ma.loser = a.${column}
         WHERE EXISTS (
-          SELECT 1 FROM ${table} b JOIN temp.merge_map mb ON mb.loser = b.company_id
+          SELECT 1 FROM ${table} b JOIN temp.merge_map mb ON mb.loser = b.${column}
           WHERE mb.keep = ma.keep AND b.rowid < a.rowid ${sameOther}))
     `).run().changes;
     // Losers duplicating a row the keeper already has.
@@ -105,9 +131,9 @@ function dropCollidingRows(table: string): number {
       : "";
     dropped += sqlite.prepare(`
       DELETE FROM ${table} WHERE rowid IN (
-        SELECT a.rowid FROM ${table} a JOIN temp.merge_map ma ON ma.loser = a.company_id
+        SELECT a.rowid FROM ${table} a JOIN temp.merge_map ma ON ma.loser = a.${column}
         WHERE EXISTS (
-          SELECT 1 FROM ${table} k WHERE k.company_id = ma.keep ${sameOtherK}))
+          SELECT 1 FROM ${table} k WHERE k.${column} = ma.keep ${sameOtherK}))
     `).run().changes;
   }
   return dropped;
@@ -594,6 +620,8 @@ export interface MergeResult {
   recoveredAjmRevenue: number;
   /** Blank keeper fields filled from a loser before deletion. */
   fieldsBackfilled: string[];
+  /** Every (table.column) pointing at companies that the merge followed. */
+  referencesScanned: string[];
   details: Array<{ keep: string; keepName: string; merged: Array<{ id: string; name: string }> }>;
 }
 
@@ -655,11 +683,11 @@ export function mergeCompanies(opts?: {
     const refTables = companyRefTables();
 
     if (!apply) {
-      for (const t of refTables) {
+      for (const { table, column } of refTables) {
         const c = sqlite.prepare(
-          `SELECT COUNT(*) AS n FROM ${t} WHERE company_id IN (SELECT loser FROM temp.merge_map)`,
+          `SELECT COUNT(*) AS n FROM ${table} WHERE ${column} IN (SELECT loser FROM temp.merge_map)`,
         ).get() as { n: number };
-        if (c.n) rowsRepointed[t] = c.n;
+        if (c.n) rowsRepointed[column === "company_id" ? table : `${table}.${column}`] = c.n;
       }
     } else {
       // Rescue anything the keeper is missing BEFORE the losers are gone —
@@ -703,19 +731,20 @@ export function mergeCompanies(opts?: {
         ).run(...(exitCols ? [new Date().toISOString()] : []));
       }
 
-      for (const t of refTables) {
+      for (const { table, column } of refTables) {
+        const label = column === "company_id" ? table : `${table}.${column}`;
         // Drop rows that would collide on a unique index once repointed —
         // duplicate records of one shop share a phone, and company_phones is
         // unique on (company_id, phone).
-        const dropped = dropCollidingRows(t);
-        if (dropped) rowsRepointed[`${t} (duplicate, removed)`] = dropped;
+        const dropped = dropCollidingRows(table, column);
+        if (dropped) rowsRepointed[`${label} (duplicate, removed)`] = dropped;
         // Then repoint what's left, so the keeper inherits anything it lacked
         // rather than losing it.
         const moved = sqlite.prepare(
-          `UPDATE ${t} SET company_id = (SELECT m.keep FROM temp.merge_map m WHERE m.loser = ${t}.company_id)
-           WHERE company_id IN (SELECT loser FROM temp.merge_map)`,
+          `UPDATE ${table} SET ${column} = (SELECT m.keep FROM temp.merge_map m WHERE m.loser = ${table}.${column})
+           WHERE ${column} IN (SELECT loser FROM temp.merge_map)`,
         ).run();
-        if (moved.changes) rowsRepointed[t] = moved.changes;
+        if (moved.changes) rowsRepointed[label] = moved.changes;
       }
 
       sqlite.prepare("DELETE FROM companies WHERE id IN (SELECT loser FROM temp.merge_map)").run();
@@ -749,6 +778,7 @@ export function mergeCompanies(opts?: {
     recoveredJaxyRevenue: Math.round(recoveredJaxy * 100) / 100,
     recoveredAjmRevenue: Math.round(recoveredAjm * 100) / 100,
     fieldsBackfilled: fieldsBackfilled.slice(0, 100),
+    referencesScanned: companyRefTables().map((r) => `${r.table}.${r.column}`),
     details: details.slice(0, 100),
   };
 }
