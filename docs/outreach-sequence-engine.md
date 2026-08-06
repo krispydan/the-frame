@@ -1,4 +1,4 @@
-# Outreach Sequence Engine — build spec v0.4
+# Outreach Sequence Engine — build spec v0.5
 
 Reviewed against the actual codebase (2026-08-05). v0.2's shape survives intact —
 sequence/touchpoint objects, three send modes, channel adapters, the trigger set,
@@ -158,16 +158,29 @@ CREATE TABLE sequences (
 CREATE TABLE sequence_steps (
   id TEXT PRIMARY KEY, sequence_id TEXT NOT NULL REFERENCES sequences(id),
   step_no INTEGER NOT NULL,
-  delay_days INTEGER NOT NULL,         -- from trigger (step 1) or previous step
+  delay_days INTEGER NOT NULL,         -- ANCHOR: days after the PREVIOUS STEP
+                                       -- COMPLETED (sent / task done); step 1
+                                       -- anchors on the trigger. Pipedrive
+                                       -- semantics — a late call task shifts
+                                       -- everything downstream.
+  delay_business_days INTEGER DEFAULT 0, -- 1 = skip weekends (Pipedrive's
+                                       -- "include weekends" inverted)
   channel TEXT NOT NULL,               -- faire|email|call|direct_mail
   send_mode TEXT NOT NULL DEFAULT 'review',  -- auto|review|task
+  send_as_reply INTEGER DEFAULT 0,     -- email: thread as "Re:" on the step
+                                       -- whose subject this continues
   template_body TEXT NOT NULL,         -- with {merge_fields}
+  template_subject TEXT,               -- email only
   template_variant_b TEXT,             -- optional A/B
   attachment_key TEXT,                 -- versioned asset key (§6)
   conditions TEXT,                     -- JSON skip/only-if rules
+  task_note TEXT,                      -- task steps: script/context shown to rep
+  task_priority TEXT,                  -- task steps: priority
   offer_code TEXT,                     -- e.g. GET10 — placement testable per step
   UNIQUE(sequence_id, step_no)
 );
+-- Task steps gate the clock: the next step's delay counts from task_done,
+-- not from when the task was created.
 
 CREATE TABLE sequence_enrollments (
   id TEXT PRIMARY KEY, sequence_id TEXT NOT NULL, company_id TEXT NOT NULL,
@@ -269,9 +282,15 @@ interface ChannelAdapter {
      `/api/admin/ops/sequences/queue?mode=auto` with the full guard stack.
      Per-step opt-in (T4 first); the `seq.autosend_enabled` switch degrades
      rung 3 back to rung 1 instantly.
-- **email**: Omnisend/Klaviyo transactional send; fully autoSend-capable;
-  the **fallback channel** when `faire_retailer_id` is null but a verified email
-  exists (`companies.email_verification_status='ok'`), per v0.2's routing rule.
+- **email — two flavors, not one** (corrected after reviewing the live
+  Pipedrive sequences): (a) **personal** — 1:1 sales email from the *item
+  owner's own inbox* via Gmail API, supporting `send_as_reply` threading
+  ("Re: Jaxy Sunglasses Catalog Request") and per-user authorization of
+  automated sending, exactly matching how the catalog-request sequences work
+  today; (b) **bulk** — Omnisend for marketing-class sends. Sequence steps use
+  (a). Sender identity resolves per-enrollment from the account owner, not per
+  sequence. Email is also the **fallback channel** when `faire_retailer_id` is
+  null but a verified email exists (`email_verification_status='ok'`).
 - **call / direct_mail**: task-only. `send` undefined; advancing the step creates
   the task (surfaced in queue UI under a Tasks tab; call tasks can also push into
   the existing PhoneBurner folder flow later).
@@ -417,6 +436,46 @@ adapters; cart scrape for T3 auto-trigger; metrics dashboard; A/B reporting.
 
 ---
 
+## 11. Pipedrive sequence parity & migration (v0.5)
+
+Six sequences run live in Pipedrive today (all catalog-request follow-ups:
+email + call-task hybrids, ~540 items in progress). They work well, they stay
+untouched until the frame builder reaches parity, and **they are the
+acceptance test for the migration**: when the frame can faithfully run these
+six, Pipedrive Sequences can be retired.
+
+**Parity checklist** (from the live builder, 2026-08-05):
+
+| Pipedrive feature | Frame equivalent |
+|---|---|
+| Delays = N days after previous step *completed*, optional skip-weekends | `delay_days` completion-anchored + `delay_business_days` (§2) |
+| Email "Send as reply" threading | `send_as_reply` + Gmail adapter (§4) |
+| Per-step "Send automatically" toggle | `send_mode` auto/review — already had it |
+| From = item owner's inbox; per-user authorization to auto-send | Sender resolves per-enrollment from account owner; per-user auth flag on the Gmail connection |
+| Stop when email replied | Exit conditions — already had it |
+| Call step: type, assignee, priority, note visible to rep | Task adapter + `task_note`/`task_priority`; task completion gates the downstream clock |
+| Merge fields incl. "AI Email Opener 1" | `{ai_opener}` — the frame *generates* this field (`companies.ai_opener_email1`) and currently round-trips it to Pipedrive; native merge is direct |
+| Visual day-numbered step timeline; in-progress/completed counters | Sequences UI (Phase 1) renders computed day numbers the same way |
+| Add items (deals/leads) manually, 500 cap | Manual + segment enrollment; cap replaced by `seq.review_daily_cap` |
+
+**Migration plan (when parity lands, not before):**
+1. Recreate the six sequences in the frame (templates copy over; `{ai_opener}`
+   resolves natively).
+2. **New enrollments go to the frame; in-flight Pipedrive enrollments finish
+   where they are.** No mid-sequence transplants — the ledger import problem
+   isn't worth it for a few weeks of drain-down.
+3. The frame's Pipedrive activity mirror keeps Pipedrive's timeline complete
+   during the overlap, so reps see one history regardless of which engine sent.
+4. When Pipedrive's in-progress counts hit zero, disable its sequences.
+   Pipedrive remains as CRM display until the broader migration retires it.
+
+Channel priority stays as specced — Faire Messenger first for the new T0-T6
+triggers, since Pipedrive already covers the email/call catalog flows and
+nothing covers Faire. The email/task work in Phases 2-3 is what closes the
+parity gap; this section just makes the target explicit.
+
+---
+
 *Superseded: v0.2 §7 (Pipedrive as source of truth). Sources: codebase inventory
-2026-08-05; faire_dm production learnings (rate limits, guards, selectors) —
-see that repo's README.*
+2026-08-05; live Pipedrive Sequences review 2026-08-05; faire_dm production
+learnings (rate limits, guards, selectors) — see that repo's README.*
