@@ -34,30 +34,84 @@ export function normalizeCompanyName(raw: string | null | undefined): string {
     .trim();
 }
 
-/** Tables holding a company_id that must follow a merge. */
-const COMPANY_REF_TABLES = [
-  "orders", "ajm_orders", "contacts", "company_phones", "stores",
-  "deals", "deal_activities", "campaign_leads", "company_brand_links",
-  "prospect_llm_classifications", "phoneburner_call_log", "gmaps_listings",
-  "apify_match_log", "phoneburner_folder_pushes", "pb_call_queue",
-  "outreach_messages", "lead_conversion_alerts", "pipedrive_deals",
-  "pipedrive_webhook_events", "meta_leads", "meta_capi_events",
-  "company_faire_accounts", "sequence_messages", "sequence_enrollments",
-] as const;
+/**
+ * Every table carrying a company_id, read from the schema.
+ *
+ * This used to be a hand-maintained list of 22 table names, and it drifted:
+ * sequence_enrollments has a company_id and was never on it, so a merge would
+ * have orphaned rows or tripped a foreign key. Discovering the set means a new
+ * table with a company_id is handled the day it is added, not the day someone
+ * remembers to update this file.
+ */
+function companyRefTables(): string[] {
+  const tables = sqlite.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'companies'",
+  ).all() as Array<{ name: string }>;
+  return tables.map((t) => t.name).filter((t) => hasColumn(t, "company_id")).sort();
+}
 
 /**
- * Tables with a UNIQUE constraint involving company_id — merge, don't repoint,
- * or the UPDATE violates the index and rolls back the whole apply transaction.
+ * Unique indexes on a table that include company_id, with their OTHER columns.
  *
- *  - customer_accounts, gmaps_listings: UNIQUE(company_id)
- *  - company_faire_accounts: UNIQUE(company_id, brand). Two duplicates that both
- *    came from the Faire portal each hold an 'ajm' row, so this is the common
- *    case, not the edge case.
- *  - sequence_enrollments: partial UNIQUE(company_id) WHERE status is active.
+ * Repointing a loser's rows onto the keeper violates any such index whenever
+ * the keeper (or a sibling loser) already has a row with the same other
+ * columns — two duplicate records of one shop almost always carry the same
+ * phone number, and company_phones is unique on (company_id, phone). The whole
+ * first apply attempt rolled back on exactly this.
  */
-const UNIQUE_PER_COMPANY = new Set([
-  "customer_accounts", "gmaps_listings", "company_faire_accounts", "sequence_enrollments",
-]);
+function uniqueIndexesWithCompanyId(table: string): string[][] {
+  try {
+    const idxs = sqlite.prepare(`PRAGMA index_list(${table})`).all() as Array<{ name: string; unique: number; partial?: number }>;
+    const out: string[][] = [];
+    for (const idx of idxs) {
+      if (!idx.unique) continue;
+      // Partial indexes carry a WHERE predicate this cannot see, so dropping
+      // rows on the indexed columns alone would delete rows the index never
+      // constrained. Those tables get explicit handling in mergeCompanies().
+      if (idx.partial) continue;
+      const cols = (sqlite.prepare(`PRAGMA index_info(${idx.name})`).all() as Array<{ name: string | null }>)
+        .map((c) => c.name).filter((c): c is string => !!c);
+      if (!cols.includes("company_id")) continue;
+      out.push(cols.filter((c) => c !== "company_id"));
+    }
+    return out;
+  } catch { return []; }
+}
+
+/**
+ * Drop the loser rows that would collide on a unique index once repointed:
+ * first losers colliding with each other, then losers colliding with the
+ * keeper. Runs before the repoint. Returns how many rows were dropped.
+ */
+function dropCollidingRows(table: string): number {
+  let dropped = 0;
+  for (const cols of uniqueIndexesWithCompanyId(table)) {
+    // A unique index on company_id alone: the keeper may hold only one row.
+    const sameOther = cols.length
+      ? "AND " + cols.map((c) => `b.${c} IS a.${c}`).join(" AND ")
+      : "";
+    // Losers merging into the same keeper that duplicate each other — keep the
+    // lowest rowid so the choice is deterministic across re-runs.
+    dropped += sqlite.prepare(`
+      DELETE FROM ${table} WHERE rowid IN (
+        SELECT a.rowid FROM ${table} a JOIN temp.merge_map ma ON ma.loser = a.company_id
+        WHERE EXISTS (
+          SELECT 1 FROM ${table} b JOIN temp.merge_map mb ON mb.loser = b.company_id
+          WHERE mb.keep = ma.keep AND b.rowid < a.rowid ${sameOther}))
+    `).run().changes;
+    // Losers duplicating a row the keeper already has.
+    const sameOtherK = cols.length
+      ? "AND " + cols.map((c) => `k.${c} IS a.${c}`).join(" AND ")
+      : "";
+    dropped += sqlite.prepare(`
+      DELETE FROM ${table} WHERE rowid IN (
+        SELECT a.rowid FROM ${table} a JOIN temp.merge_map ma ON ma.loser = a.company_id
+        WHERE EXISTS (
+          SELECT 1 FROM ${table} k WHERE k.company_id = ma.keep ${sameOtherK}))
+    `).run().changes;
+  }
+  return dropped;
+}
 
 function tableExists(name: string): boolean {
   return !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
@@ -598,39 +652,28 @@ export function mergeCompanies(opts?: {
       for (const c of g.companies) if (c.id !== g.keepId) ins.run(c.id, g.keepId);
     }
 
-    for (const t of COMPANY_REF_TABLES) {
-      // Unique-per-company tables are handled below — a blind repoint would
-      // violate their unique index whenever the keeper already has a row.
-      if (UNIQUE_PER_COMPANY.has(t)) continue;
-      if (!tableExists(t) || !hasColumn(t, "company_id")) continue;
-      if (apply) {
-        const r = sqlite.prepare(
-          `UPDATE ${t} SET company_id = (SELECT m.keep FROM temp.merge_map m WHERE m.loser = ${t}.company_id)
-           WHERE company_id IN (SELECT loser FROM temp.merge_map)`,
-        ).run();
-        rowsRepointed[t] = r.changes;
-      } else {
+    const refTables = companyRefTables();
+
+    if (!apply) {
+      for (const t of refTables) {
         const c = sqlite.prepare(
           `SELECT COUNT(*) AS n FROM ${t} WHERE company_id IN (SELECT loser FROM temp.merge_map)`,
         ).get() as { n: number };
         if (c.n) rowsRepointed[t] = c.n;
       }
-    }
-
-    if (apply) {
+    } else {
       // Rescue anything the keeper is missing BEFORE the losers are gone —
       // above all shopify_customer_id, or the webhook recreates this dupe.
       for (const col of backfillKeeperFields()) fieldsBackfilled.push(col);
 
-      // Unique-per-company tables: drop the loser's row where the keeper
-      // already has one, then repoint whatever is left so the keeper inherits
-      // a listing/account it was missing instead of losing it outright.
-      // Faire accounts are unique per (company, BRAND), so the generic
-      // "keeper has a row -> drop the loser's" rule is wrong here: it would
-      // delete the loser's A.J. Morgan link just because the keeper had a Jaxy
-      // one, losing that brand's Messenger thread. Handle brand by brand, and
-      // carry per-brand suppression to the survivor first.
-      if (tableExists("company_faire_accounts")) {
+      // ── Two cases the generic collision handling cannot get right ──
+
+      // company_faire_accounts is UNIQUE(company_id, brand), so the generic
+      // rule correctly keeps a loser's A.J. Morgan link when the keeper only
+      // has a Jaxy one. What it cannot do is carry PER-BRAND suppression: a
+      // dropped same-brand loser row may be the one marked do-not-contact.
+      // Inherit that first, while the row still exists.
+      if (tableExists("company_faire_accounts") && hasColumn("company_faire_accounts", "do_not_contact")) {
         sqlite.prepare(
           `UPDATE company_faire_accounts SET do_not_contact = 1,
              do_not_contact_reason = COALESCE(do_not_contact_reason, 'inherited from merged duplicate')
@@ -640,52 +683,39 @@ export function mergeCompanies(opts?: {
                           WHERE m.keep = company_faire_accounts.company_id
                             AND l.brand = company_faire_accounts.brand AND l.do_not_contact = 1)`,
         ).run();
-        const droppedCfa = sqlite.prepare(
-          `DELETE FROM company_faire_accounts WHERE company_id IN (SELECT loser FROM temp.merge_map)
-             AND EXISTS (SELECT 1 FROM company_faire_accounts k JOIN temp.merge_map m ON m.keep = k.company_id
-                          WHERE m.loser = company_faire_accounts.company_id
-                            AND k.brand = company_faire_accounts.brand)`,
-        ).run();
-        if (droppedCfa.changes) rowsRepointed["company_faire_accounts (removed)"] = droppedCfa.changes;
-        const movedCfa = sqlite.prepare(
-          `UPDATE company_faire_accounts SET company_id = (SELECT m.keep FROM temp.merge_map m WHERE m.loser = company_faire_accounts.company_id)
-           WHERE company_id IN (SELECT loser FROM temp.merge_map)`,
-        ).run();
-        if (movedCfa.changes) rowsRepointed["company_faire_accounts"] = movedCfa.changes;
       }
 
-      // Sequence enrollments: the unique index is partial (one LIVE enrollment
-      // per company). Retire the loser's live enrollment rather than delete it,
-      // so the history survives and the index still holds.
-      if (tableExists("sequence_enrollments")) {
+      // sequence_enrollments has a PARTIAL unique index — one live enrollment
+      // per company. Partial indexes are skipped by the generic detector,
+      // because deleting on the index columns alone would ignore the predicate
+      // and destroy history. Retire the loser's live enrollment instead, which
+      // both satisfies the index and keeps the record.
+      if (tableExists("sequence_enrollments") && hasColumn("sequence_enrollments", "status")) {
+        // Record the exit only where the schema has somewhere to put it.
+        const exitCols = ["exited_at", "exit_reason"].every((c) => hasColumn("sequence_enrollments", c))
+          ? `, exited_at = ?, exit_reason = 'company merged'` : "";
         sqlite.prepare(
-          `UPDATE sequence_enrollments SET status = 'superseded_merge', exited_at = ?, exit_reason = 'company merged'
+          `UPDATE sequence_enrollments SET status = 'superseded_merge'${exitCols}
            WHERE company_id IN (SELECT loser FROM temp.merge_map)
              AND status IN ('active','paused_t0')
              AND EXISTS (SELECT 1 FROM sequence_enrollments k JOIN temp.merge_map m ON m.keep = k.company_id
                           WHERE m.loser = sequence_enrollments.company_id AND k.status IN ('active','paused_t0'))`,
-        ).run(new Date().toISOString());
-        const movedEnr = sqlite.prepare(
-          `UPDATE sequence_enrollments SET company_id = (SELECT m.keep FROM temp.merge_map m WHERE m.loser = sequence_enrollments.company_id)
-           WHERE company_id IN (SELECT loser FROM temp.merge_map)`,
-        ).run();
-        if (movedEnr.changes) rowsRepointed["sequence_enrollments"] = movedEnr.changes;
+        ).run(...(exitCols ? [new Date().toISOString()] : []));
       }
 
-      for (const t of UNIQUE_PER_COMPANY) {
-        if (t === "company_faire_accounts" || t === "sequence_enrollments") continue; // handled above
-        if (!tableExists(t) || !hasColumn(t, "company_id")) continue;
-        const dropped = sqlite.prepare(
-          `DELETE FROM ${t} WHERE company_id IN (SELECT loser FROM temp.merge_map)
-             AND EXISTS (SELECT 1 FROM ${t} k JOIN temp.merge_map m ON m.keep = k.company_id
-                         WHERE m.loser = ${t}.company_id)`,
-        ).run();
-        if (dropped.changes) rowsRepointed[`${t} (removed)`] = dropped.changes;
+      for (const t of refTables) {
+        // Drop rows that would collide on a unique index once repointed —
+        // duplicate records of one shop share a phone, and company_phones is
+        // unique on (company_id, phone).
+        const dropped = dropCollidingRows(t);
+        if (dropped) rowsRepointed[`${t} (duplicate, removed)`] = dropped;
+        // Then repoint what's left, so the keeper inherits anything it lacked
+        // rather than losing it.
         const moved = sqlite.prepare(
           `UPDATE ${t} SET company_id = (SELECT m.keep FROM temp.merge_map m WHERE m.loser = ${t}.company_id)
            WHERE company_id IN (SELECT loser FROM temp.merge_map)`,
         ).run();
-        if (moved.changes) rowsRepointed[t] = (rowsRepointed[t] ?? 0) + moved.changes;
+        if (moved.changes) rowsRepointed[t] = moved.changes;
       }
 
       sqlite.prepare("DELETE FROM companies WHERE id IN (SELECT loser FROM temp.merge_map)").run();

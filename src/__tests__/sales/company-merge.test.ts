@@ -26,6 +26,8 @@ const db = getTestDb();
 const EXTRA_COMPANY_COLUMNS = [
   "shopify_customer_id TEXT", "enrichment_text TEXT",
   "latitude REAL", "longitude REAL", "geocoded_at TEXT",
+  "do_not_contact INTEGER DEFAULT 0", "do_not_contact_reason TEXT",
+  "faire_retailer_id TEXT",
 ];
 
 function reset() {
@@ -221,6 +223,60 @@ describe("mergeCompanies", () => {
     expect(k.sid).toBe("SHOP-999");
     expect(k.domain).toBe("grey56.com");
     expect(k.notes).toBe("key account"); // never overwritten
+  });
+
+  it("survives a composite unique index the repoint would collide on", () => {
+    // company_phones is UNIQUE(company_id, phone), and two records of the same
+    // shop almost always carry the same number. Repointing both rows onto the
+    // keeper violates the index — this rolled back the first production apply.
+    db.exec(`CREATE TABLE IF NOT EXISTS company_phones (id TEXT PRIMARY KEY, company_id TEXT, phone TEXT)`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_company_phones ON company_phones (company_id, phone)`);
+    db.exec(`DELETE FROM company_phones`);
+
+    const keep = company("Show Pony", "seattle", "WA");
+    const dup = company("Show Pony", "seattle", "WASHINGTON");
+    db.prepare(`INSERT INTO ajm_orders (id, order_number, order_date, total, cancelled, company_id) VALUES ('a4','A4','2024-06-01',85976,0,?)`).run(keep);
+    db.prepare(`INSERT INTO company_phones VALUES ('p1',?,'206-555-0100')`).run(keep);
+    db.prepare(`INSERT INTO company_phones VALUES ('p2',?,'206-555-0100')`).run(dup);   // collides
+    db.prepare(`INSERT INTO company_phones VALUES ('p3',?,'206-555-0199')`).run(dup);   // survives
+
+    expect(() => mergeCompanies({ apply: true })).not.toThrow();
+
+    const phones = (db.prepare("SELECT phone FROM company_phones WHERE company_id=? ORDER BY phone").all(keep) as Array<{ phone: string }>).map((r) => r.phone);
+    expect(phones).toEqual(["206-555-0100", "206-555-0199"]);
+    expect(survivors().size).toBe(1);
+  });
+
+  it("repoints tables that were never on the hand-maintained list", () => {
+    db.exec(`CREATE TABLE IF NOT EXISTS sequence_enrollments (id TEXT PRIMARY KEY, company_id TEXT, status TEXT, exited_at TEXT, exit_reason TEXT)`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_seq_enroll_one_active ON sequence_enrollments (company_id) WHERE status IN ('active','paused_t0')`);
+    db.exec(`DELETE FROM sequence_enrollments`);
+    const keep = company("Show Pony", "seattle", "WA");
+    const dup = company("Show Pony", "seattle", "WASHINGTON");
+    db.prepare(`INSERT INTO ajm_orders (id, order_number, order_date, total, cancelled, company_id) VALUES ('a5','A5','2024-06-01',85976,0,?)`).run(keep);
+    db.prepare(`INSERT INTO sequence_enrollments (id, company_id, status) VALUES ('s1',?,'active')`).run(dup);
+
+    mergeCompanies({ apply: true });
+
+    const row = db.prepare("SELECT company_id AS cid FROM sequence_enrollments WHERE id='s1'").get() as { cid: string };
+    expect(row.cid).toBe(keep);
+  });
+
+  it("carries do-not-contact onto the survivor", () => {
+    // do_not_contact = 0 is not blank, so the blank-filling backfill cannot
+    // rescue it. Without an explicit OR across the group, merging a suppressed
+    // duplicate would quietly make a retailer who asked us to stop contactable.
+    const keep = company("Show Pony", "seattle", "WA");
+    const dup = company("Show Pony", "seattle", "WASHINGTON");
+    db.prepare(`INSERT INTO ajm_orders (id, order_number, order_date, total, cancelled, company_id) VALUES ('a6','A6','2024-06-01',85976,0,?)`).run(keep);
+    db.prepare("UPDATE companies SET do_not_contact=1, do_not_contact_reason='asked to stop' WHERE id=?").run(dup);
+
+    mergeCompanies({ apply: true });
+
+    const row = db.prepare("SELECT do_not_contact AS dnc, do_not_contact_reason AS why FROM companies WHERE id=?").get(keep) as { dnc: number; why: string };
+    expect([...survivors()]).toEqual([keep]);
+    expect(row.dnc).toBe(1);
+    expect(row.why).toBe("asked to stop");
   });
 
   it("is stable when run twice", () => {

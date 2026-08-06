@@ -93,11 +93,21 @@ export async function POST(req: NextRequest) {
   const denied = requireOpsToken(req, { mutation: true });
   if (denied) return denied;
   const p = req.nextUrl.searchParams;
-  const result = mergeCompanies({
-    apply: p.get("apply") === "1",
-    keys: p.get("keys")?.split(",").filter(Boolean),
-    minRevenue: Number(p.get("minRevenue") ?? 0) || undefined,
-    limit: Number(p.get("limit") ?? 500),
-  });
-  return NextResponse.json(result);
+  try {
+    const result = mergeCompanies({
+      apply: p.get("apply") === "1",
+      keys: p.get("keys")?.split(",").filter(Boolean),
+      minRevenue: Number(p.get("minRevenue") ?? 0) || undefined,
+      limit: Number(p.get("limit") ?? 500),
+    });
+    return NextResponse.json(result);
+  } catch (e) {
+    // The merge runs in one transaction, so a throw means nothing was written
+    // — but an empty 500 leaves no way to find out WHY. Report it.
+    const err = e as Error & { code?: string };
+    return NextResponse.json(
+      { error: err.message, code: err.code, rolledBack: true },
+      { status: 500 },
+    );
+  }
 }
