@@ -122,6 +122,42 @@ const addDays = (iso: string, n: number) => {
   return d.toISOString().slice(0, 10);
 };
 
+/**
+ * Like-for-like on BUSINESS AGE: each brand's first N months of trading.
+ *
+ * Jaxy began selling 2026-04-21 (confirmed by Daniel, Aug 2026), so comparing
+ * its first months to a mature AJM's trailing year measures company age, not
+ * execution. This puts both at the same point in their life.
+ *
+ * CAVEAT, and it matters: AJM's data starts 2019-10-31, which is where their
+ * Shopify export begins — NOT necessarily when AJ Morgan began trading. AJM
+ * was an established brand, so its "first months" here may already include an
+ * existing customer base carried over from earlier channels. Treat AJM's
+ * early-window figures as an upper bound on a true standing start.
+ */
+export function compareByAge(months = 3.5) {
+  const aStart = (sqlite.prepare(
+    "SELECT MIN(order_date) AS s FROM ajm_orders WHERE cancelled = 0 AND order_date IS NOT NULL",
+  ).get() as { s: string }).s;
+  const jStart = (sqlite.prepare(
+    "SELECT MIN(substr(placed_at,1,10)) AS s FROM orders WHERE status NOT IN ('cancelled','returned') AND placed_at IS NOT NULL",
+  ).get() as { s: string }).s;
+  const days = Math.round(months * 30.44);
+  const ajm = ajmWindow(aStart, addDays(aStart, days), `AJM first ${months}m (${aStart} →)`);
+  const jaxy = jaxyWindow(jStart, addDays(jStart, days), `Jaxy first ${months}m (${jStart} →)`);
+  return {
+    months,
+    ajm,
+    jaxy,
+    ratios: {
+      revenue: ajm.revenue > 0 ? r2((jaxy.revenue / ajm.revenue) * 100) : null,
+      customers: ajm.customers > 0 ? r2((jaxy.customers / ajm.customers) * 100) : null,
+      aov: ajm.aov > 0 ? r2((jaxy.aov / ajm.aov) * 100) : null,
+    },
+    caveat: "AJM's window starts where its Shopify export begins (2019-10-31), which may not be when AJ Morgan started trading — as an established brand it likely carried an existing customer base in. Jaxy's start (2026-04-21) is a true standing start. So AJM's figures here flatter AJM.",
+  };
+}
+
 export function analyzeGap(opts?: { mode?: "overlap" | "trailing12" }): GapAnalysis {
   const aSpan = sqlite.prepare(
     "SELECT MIN(order_date) AS start, MAX(order_date) AS end FROM ajm_orders WHERE cancelled = 0 AND order_date IS NOT NULL",
