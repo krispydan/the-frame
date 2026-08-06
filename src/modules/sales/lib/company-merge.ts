@@ -63,6 +63,7 @@ export interface DuplicateGroup {
   companies: Array<{
     id: string; name: string; createdAt: string | null;
     city?: string; state?: string; zip?: string; domain?: string;
+    contactCount?: number; crmRichness?: number; shopifyCustomerId?: string | null;
     jaxyOrders: number; jaxyRevenue: number;
     ajmOrders: number; ajmRevenue: number;
     email: string | null;
@@ -85,19 +86,67 @@ function companyStats() {
       (SELECT COALESCE(ROUND(SUM(o.total),2),0) FROM orders o WHERE o.company_id=c.id AND o.status NOT IN ('cancelled','returned')) AS jaxyRevenue,
       (SELECT COUNT(*) FROM ajm_orders a WHERE a.company_id=c.id AND a.cancelled=0) AS ajmOrders,
       (SELECT COALESCE(ROUND(SUM(a.total),2),0) FROM ajm_orders a WHERE a.company_id=c.id AND a.cancelled=0) AS ajmRevenue,
-      (SELECT ct.email FROM contacts ct WHERE ct.company_id=c.id AND ct.email IS NOT NULL AND TRIM(ct.email)!='' LIMIT 1) AS email
+      (SELECT ct.email FROM contacts ct WHERE ct.company_id=c.id AND ct.email IS NOT NULL AND TRIM(ct.email)!='' LIMIT 1) AS email,
+      (SELECT COUNT(*) FROM contacts ct WHERE ct.company_id=c.id) AS contactCount,
+      c.shopify_customer_id AS shopifyCustomerId,
+      -- CRM richness: enrichment, classification and ownership all indicate
+      -- this is the real working record rather than an order-created stub.
+      (CASE WHEN TRIM(COALESCE(c.enrichment_text,''))!='' THEN 1 ELSE 0 END
+       + CASE WHEN TRIM(COALESCE(c.notes,''))!='' THEN 1 ELSE 0 END
+       + CASE WHEN c.icp_tier IS NOT NULL THEN 1 ELSE 0 END
+       + CASE WHEN c.owner_id IS NOT NULL THEN 1 ELSE 0 END
+       + CASE WHEN c.segment_id IS NOT NULL THEN 1 ELSE 0 END
+       + CASE WHEN TRIM(COALESCE(c.website,''))!='' THEN 1 ELSE 0 END) AS crmRichness
     FROM companies c
   `).all() as DuplicateGroup["companies"];
   return rows;
 }
 
-/** Deterministic keeper: most Jaxy orders → most AJM history → oldest. */
+/**
+ * Deterministic keeper: the RICHEST CRM record, not the one that happens to
+ * carry orders.
+ *
+ * Ranking by order count kept the thin stub the order webhook auto-created
+ * and deleted the enriched CRM record (contacts, notes, ICP tier, owner,
+ * segment). Orders and AJM history are repointed either way, so they must not
+ * drive the choice — the record a human has actually worked should survive.
+ * Ties fall back to more contacts, then the older record.
+ */
 function pickKeeper(cs: DuplicateGroup["companies"]): string {
   return [...cs].sort((a, b) =>
-    b.jaxyOrders - a.jaxyOrders ||
+    (b.crmRichness ?? 0) - (a.crmRichness ?? 0) ||
+    (b.contactCount ?? 0) - (a.contactCount ?? 0) ||
     b.ajmRevenue - a.ajmRevenue ||
     String(a.createdAt ?? "").localeCompare(String(b.createdAt ?? "")),
   )[0].id;
+}
+
+/**
+ * Fields worth rescuing from a loser before it is deleted. shopify_customer_id
+ * matters most: if the record holding it is dropped, the order webhook loses
+ * its strongest match key and simply creates the duplicate again on the next
+ * order. Only ever fills a blank on the keeper — never overwrites.
+ */
+const BACKFILL_COLUMNS = [
+  "shopify_customer_id", "domain", "website", "address", "city", "state", "zip",
+  "country", "latitude", "longitude", "geocoded_at", "notes", "enrichment_text",
+  "icp_tier", "owner_id", "segment_id",
+] as const;
+
+function backfillKeeperFields(keepId: string, loserId: string): string[] {
+  const filled: string[] = [];
+  for (const col of BACKFILL_COLUMNS) {
+    if (!hasColumn("companies", col)) continue;
+    try {
+      const r = sqlite.prepare(
+        `UPDATE companies SET ${col} = (SELECT ${col} FROM companies WHERE id = ?)
+         WHERE id = ? AND (${col} IS NULL OR TRIM(CAST(${col} AS TEXT)) = '')
+           AND (SELECT ${col} FROM companies WHERE id = ?) IS NOT NULL`,
+      ).run(loserId, keepId, loserId);
+      if (r.changes > 0) filled.push(col);
+    } catch { /* column type mismatch — skip */ }
+  }
+  return filled;
 }
 
 /** Free/consumer mail providers — a shared address here proves nothing. */
@@ -209,6 +258,8 @@ export interface MergeResult {
   rowsRepointed: Record<string, number>;
   recoveredJaxyRevenue: number;
   recoveredAjmRevenue: number;
+  /** Blank keeper fields filled from a loser before deletion. */
+  fieldsBackfilled: string[];
   details: Array<{ keep: string; keepName: string; merged: Array<{ id: string; name: string }> }>;
 }
 
@@ -233,6 +284,7 @@ export function mergeCompanies(opts?: {
   groups = groups.slice(0, opts?.limit ?? 500);
 
   const rowsRepointed: Record<string, number> = {};
+  const fieldsBackfilled: string[] = [];
   const details: MergeResult["details"] = [];
   let companiesRemoved = 0, recoveredJaxy = 0, recoveredAjm = 0;
 
@@ -264,7 +316,13 @@ export function mergeCompanies(opts?: {
           }
         }
 
-        if (apply) sqlite.prepare("DELETE FROM companies WHERE id = ?").run(loser.id);
+        // Rescue anything the keeper is missing BEFORE the loser is gone —
+        // above all shopify_customer_id, or the webhook recreates this dupe.
+        if (apply) {
+          const filled = backfillKeeperFields(g.keepId, loser.id);
+          if (filled.length) fieldsBackfilled.push(`${keep.name}: ${filled.join(",")}`);
+          sqlite.prepare("DELETE FROM companies WHERE id = ?").run(loser.id);
+        }
         companiesRemoved++;
         recoveredJaxy += loser.jaxyRevenue;
         recoveredAjm += loser.ajmRevenue;
@@ -302,6 +360,7 @@ export function mergeCompanies(opts?: {
     rowsRepointed,
     recoveredJaxyRevenue: Math.round(recoveredJaxy * 100) / 100,
     recoveredAjmRevenue: Math.round(recoveredAjm * 100) / 100,
+    fieldsBackfilled: fieldsBackfilled.slice(0, 100),
     details: details.slice(0, 100),
   };
 }
