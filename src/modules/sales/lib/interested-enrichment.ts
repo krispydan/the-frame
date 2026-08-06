@@ -36,6 +36,7 @@ import { isSyncEnabled, syncStatusToPipedrive } from "./pipedrive-sync";
 import { analyzeCallNote, type AnalyzeResult } from "./ai/call-note-analysis";
 import { getOrCreateTranscript } from "./ai/recording-transcription";
 import { loadLeadContext } from "./lead-context";
+import { resolveCallerRep } from "./phoneburner-client";
 import { postSlack, type SlackBlock } from "@/modules/integrations/lib/slack/client";
 
 const APP_BASE_URL =
@@ -52,6 +53,9 @@ interface InterestedCall {
   connected: number | null;
   called_at: string | null;
   disposition_label: string | null;
+  /** Who dialled — PB's user id, and their login. See resolveCallerRep. */
+  agent_id: string | null;
+  agent_email: string | null;
 }
 
 interface CompanyRow {
@@ -339,7 +343,7 @@ export async function enrichInterestedLead(
   const call = sqlite
     .prepare(
       `SELECT id AS call_id, notes, recording_url, duration_seconds, connected,
-              called_at, disposition_label
+              called_at, disposition_label, agent_id, agent_email
          FROM phoneburner_call_log
         WHERE company_id = ?
           AND disposition_label LIKE '%Set Appointment%'
@@ -392,7 +396,9 @@ export async function enrichInterestedLead(
           dealId, dealUrl: dealId ? dealUrl(dealId) : null,
           phone, website: company.website, recordingUrl: call.recording_url,
           note: call.notes, connected: call.connected === 1, duration: fmtDuration(call.duration_seconds),
-          disposition: call.disposition_label, writeEnabled,
+          disposition: call.disposition_label,
+          callerLabel: resolveCallerRep(call.agent_id, call.agent_email)?.label ?? null,
+          writeEnabled,
           emailApplied: false, altEmail: null, contactUpdated: false, updatedName: null,
           emailUncaptured: false, transcribed,
         });
@@ -511,6 +517,7 @@ export async function enrichInterestedLead(
         connected: call.connected === 1,
         duration: fmtDuration(call.duration_seconds),
         disposition: call.disposition_label,
+        callerLabel: resolveCallerRep(call.agent_id, call.agent_email)?.label ?? null,
         writeEnabled,
         emailApplied: applied.emailApplied,
         altEmail: applied.newEmail,
@@ -616,6 +623,8 @@ async function postEnrichmentSlack(o: {
   connected: boolean;
   duration: string;
   disposition: string | null;
+  /** Which rep's PhoneBurner account placed the call, e.g. "Sandra". */
+  callerLabel: string | null;
   writeEnabled: boolean;
   emailApplied: boolean;
   altEmail: string | null;
@@ -643,6 +652,11 @@ async function postEnrichmentSlack(o: {
     type: "mrkdwn",
     text: `*Call*\n${o.connected ? "✓ Connected" : "✗ Not connected"}${o.duration ? ` · ${o.duration}` : ""}`,
   });
+  // Who dialled. Omitted rather than guessed when we can't tell — naming the
+  // wrong rep on a hot lead sends the follow-up question to the wrong person.
+  if (o.callerLabel) {
+    fields.push({ type: "mrkdwn", text: `*Called by*\n${o.callerLabel}` });
+  }
   if (o.website) fields.push({ type: "mrkdwn", text: `*Website*\n<${o.website}|${stripUrl(o.website)}>` });
   blocks.push({ type: "section", fields });
 
