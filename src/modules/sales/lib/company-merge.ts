@@ -672,6 +672,9 @@ export function mergeCompanies(opts?: {
     });
   }
 
+  // Which statement is executing, so a constraint failure names its own cause
+  // instead of surfacing as a bare "FOREIGN KEY constraint failed".
+  let step = "start";
   const run = () => {
     sqlite.exec("DROP TABLE IF EXISTS temp.merge_map");
     sqlite.exec("CREATE TABLE temp.merge_map (loser TEXT PRIMARY KEY, keep TEXT NOT NULL)");
@@ -692,6 +695,7 @@ export function mergeCompanies(opts?: {
     } else {
       // Rescue anything the keeper is missing BEFORE the losers are gone —
       // above all shopify_customer_id, or the webhook recreates this dupe.
+      step = "backfill keeper fields";
       for (const col of backfillKeeperFields()) fieldsBackfilled.push(col);
 
       // ── Two cases the generic collision handling cannot get right ──
@@ -736,10 +740,12 @@ export function mergeCompanies(opts?: {
         // Drop rows that would collide on a unique index once repointed —
         // duplicate records of one shop share a phone, and company_phones is
         // unique on (company_id, phone).
+        step = `drop colliding rows in ${label}`;
         const dropped = dropCollidingRows(table, column);
         if (dropped) rowsRepointed[`${label} (duplicate, removed)`] = dropped;
         // Then repoint what's left, so the keeper inherits anything it lacked
         // rather than losing it.
+        step = `repoint ${label}`;
         const moved = sqlite.prepare(
           `UPDATE ${table} SET ${column} = (SELECT m.keep FROM temp.merge_map m WHERE m.loser = ${table}.${column})
            WHERE ${column} IN (SELECT loser FROM temp.merge_map)`,
@@ -747,12 +753,19 @@ export function mergeCompanies(opts?: {
         if (moved.changes) rowsRepointed[label] = moved.changes;
       }
 
+      step = "delete merged companies";
       sqlite.prepare("DELETE FROM companies WHERE id IN (SELECT loser FROM temp.merge_map)").run();
     }
     sqlite.exec("DROP TABLE IF EXISTS temp.merge_map");
   };
 
-  if (apply) sqlite.transaction(run)(); else run();
+  try {
+    if (apply) sqlite.transaction(run)(); else run();
+  } catch (e) {
+    const err = e as Error;
+    err.message = `${err.message} [during: ${step}]`;
+    throw err;
+  }
 
   // Rebuild customer accounts for the keepers so LTV/health reflect the union.
   if (apply) {
