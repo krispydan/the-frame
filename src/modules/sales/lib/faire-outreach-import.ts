@@ -358,6 +358,30 @@ export function createMissingCompanies(payload: {
 }
 
 /**
+ * Repair country on the faire_outreach records. An earlier run stamped every
+ * created shop 'US'; this list includes French, UK, Spanish, Luxembourg and
+ * Canadian retailers. Re-derives country from the state (US state -> US,
+ * CA province -> CA) and nulls it when the state gives no evidence, so an
+ * unknown country reads as unknown instead of as a wrong answer.
+ */
+export function fixFaireOutreachCountry(dryRun = false): {
+  scanned: number; toUS: number; toCA: number; toNull: number;
+} {
+  const rows = sqlite
+    .prepare("SELECT id, state, country FROM companies WHERE source = 'faire_outreach'")
+    .all() as Array<{ id: string; state: string | null; country: string | null }>;
+  const upd = sqlite.prepare("UPDATE companies SET country = ? WHERE id = ?");
+  let toUS = 0, toCA = 0, toNull = 0;
+  for (const r of rows) {
+    const st = normState(r.state);
+    const want = !st ? null : CA_PROVINCES.has(st) ? "CA" : US_STATES.has(st) ? "US" : null;
+    if (want === "US") toUS++; else if (want === "CA") toCA++; else toNull++;
+    if (!dryRun && want !== r.country) upd.run(want, r.id);
+  }
+  return { scanned: rows.length, toUS, toCA, toNull };
+}
+
+/**
  * Backfill retailer tokens for companies that already have Faire orders, using
  * the tokens captured on newly-synced orders. Cheap safety net for buyers whose
  * company row predates token capture.
