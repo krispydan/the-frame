@@ -14,7 +14,7 @@
  */
 import { sqlite } from "@/lib/db";
 import { READER_CATEGORIES } from "./categorize";
-import { AJM_WHOLESALE_SOURCES } from "./channels";
+import { AJM_WHOLESALE_SOURCES, AJM_DATE_FILTER } from "./channels";
 
 export type ReaderSegment = "reader_led" | "reader_heavy" | "any_reader";
 
@@ -85,7 +85,7 @@ export function getReaderTargets(opts?: {
     LEFT JOIN customer_accounts ca ON ca.company_id = o.company_id
     LEFT JOIN ajm_faire_emails fe
       ON fe.store_name_norm = LOWER(TRIM(REPLACE(REPLACE(COALESCE(o.customer_name,''), '.', ''), ',', '')))
-    WHERE o.cancelled = 0 ${sourceFilter}
+    WHERE o.cancelled = 0 ${AJM_DATE_FILTER('o')} ${sourceFilter}
     GROUP BY groupKey
     HAVING readerRevenue > 0
     ORDER BY readerRevenue DESC
@@ -94,7 +94,7 @@ export function getReaderTargets(opts?: {
   const styleStmt = sqlite.prepare(`
     SELECT i.product_name AS n, SUM(i.quantity) AS u
     FROM ajm_orders o JOIN ajm_order_items i ON i.order_id = o.id
-    WHERE o.cancelled = 0 AND i.category IN (${READERS_SQL})
+    WHERE o.cancelled = 0 ${AJM_DATE_FILTER('o')} AND i.category IN (${READERS_SQL})
       AND (o.company_id = ? OR (? IS NULL AND LOWER(o.customer_name) = ?))
     GROUP BY i.product_name ORDER BY u DESC LIMIT 3
   `);
@@ -136,24 +136,24 @@ export function getCategoryBreakdown() {
   const overall = sqlite.prepare(`
     SELECT i.category, COUNT(*) AS lines, SUM(i.quantity) AS units, ROUND(SUM(i.line_total), 2) AS revenue
     FROM ajm_order_items i JOIN ajm_orders o ON o.id = i.order_id
-    WHERE o.cancelled = 0 GROUP BY i.category ORDER BY revenue DESC
+    WHERE o.cancelled = 0 ${AJM_DATE_FILTER('o')} GROUP BY i.category ORDER BY revenue DESC
   `).all();
   const bySource = sqlite.prepare(`
     SELECT o.source, i.category, ROUND(SUM(i.line_total), 2) AS revenue, SUM(i.quantity) AS units
     FROM ajm_order_items i JOIN ajm_orders o ON o.id = i.order_id
-    WHERE o.cancelled = 0 GROUP BY o.source, i.category
+    WHERE o.cancelled = 0 ${AJM_DATE_FILTER('o')} GROUP BY o.source, i.category
   `).all();
   const byYear = sqlite.prepare(`
     SELECT substr(o.order_date, 1, 4) AS year, i.category, ROUND(SUM(i.line_total), 2) AS revenue
     FROM ajm_order_items i JOIN ajm_orders o ON o.id = i.order_id
-    WHERE o.cancelled = 0 AND o.order_date IS NOT NULL
+    WHERE o.cancelled = 0 ${AJM_DATE_FILTER('o')} AND o.order_date IS NOT NULL
     GROUP BY year, i.category ORDER BY year
   `).all();
   const topReaderProducts = sqlite.prepare(`
     SELECT i.product_name AS product, SUM(i.quantity) AS units, ROUND(SUM(i.line_total), 2) AS revenue,
            COUNT(DISTINCT o.company_id) AS buyers
     FROM ajm_order_items i JOIN ajm_orders o ON o.id = i.order_id
-    WHERE o.cancelled = 0 AND i.category IN (${READERS_SQL})
+    WHERE o.cancelled = 0 ${AJM_DATE_FILTER('o')} AND i.category IN (${READERS_SQL})
     GROUP BY i.product_name ORDER BY revenue DESC LIMIT 25
   `).all();
   return { overall, bySource, byYear, topReaderProducts };

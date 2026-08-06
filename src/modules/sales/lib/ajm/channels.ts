@@ -61,5 +61,23 @@ export const CHANNEL_LABEL: Record<string, string> = {
 /** AJM ceased trading — anything after this is Jaxy-only territory. */
 export const AJM_CEASED_TRADING = "2025-12";
 
+/**
+ * Analysis cutoff: ignore AJM history before 2022 (per Daniel, Aug 2026 —
+ * older data isn't relevant to how the business runs today).
+ *
+ * This also removes the era that produced most of the messy data: 2019–2021
+ * is where the lump-sum legacy orders live (a single line per order with an
+ * invoice number as the product name, no SKU, averaging ~$700), which is why
+ * AJM's early AOV looked like $701 against $157 later. Excluding it makes both
+ * the category split and the AOV comparisons considerably more honest.
+ *
+ * Every AJM query should apply AJM_DATE_FILTER. Import counts and the
+ * classifier still process all rows — we simply don't report on the old ones.
+ */
+export const AJM_DATA_FROM = "2022-01-01";
+
+/** Drop-in WHERE fragment. `alias` is the ajm_orders alias in scope. */
+export const AJM_DATE_FILTER = (alias = "o") => `AND ${alias}.order_date >= '${AJM_DATA_FROM}'`;
+
 /** Peak months for sunglasses, from AJM's 2021–25 average (Mar–Jun). */
 export const PEAK_MONTHS = ["03", "04", "05", "06"];

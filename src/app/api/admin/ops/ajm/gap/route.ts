@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { requireOpsToken } from "@/lib/ops-auth";
-import { analyzeGap, compareByAge } from "@/modules/sales/lib/ajm/gap-analysis";
+import { analyzeGap } from "@/modules/sales/lib/ajm/gap-analysis";
 
 /**
  * GET /api/admin/ops/ajm/gap?mode=overlap|trailing12
@@ -10,10 +10,11 @@ import { analyzeGap, compareByAge } from "@/modules/sales/lib/ajm/gap-analysis";
 export async function GET(req: NextRequest) {
   const denied = requireOpsToken(req);
   if (denied) return denied;
+  // compareByAge was removed: AJ Morgan was a 40-year-old business, so
+  // "each brand's first N months" compared Jaxy's real standing start against
+  // an arbitrary slice of an established company — a meaningless baseline.
   const mode = req.nextUrl.searchParams.get("mode");
-  const ageMonths = Number(req.nextUrl.searchParams.get("ageMonths") ?? 3.5);
-  return NextResponse.json({
-    ...analyzeGap({ mode: mode === "overlap" || mode === "trailing12" ? mode : undefined }),
-    sameAge: compareByAge(Number.isFinite(ageMonths) && ageMonths > 0 ? ageMonths : 3.5),
-  });
+  return NextResponse.json(
+    analyzeGap({ mode: mode === "overlap" || mode === "trailing12" ? mode : undefined }),
+  );
 }

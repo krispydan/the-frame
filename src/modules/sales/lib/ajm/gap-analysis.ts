@@ -19,7 +19,7 @@
  */
 import { sqlite } from "@/lib/db";
 import { READER_CATEGORIES } from "./categorize";
-import { AJM_CHANNEL_SQL, JAXY_CHANNEL_SQL } from "./channels";
+import { AJM_CHANNEL_SQL, JAXY_CHANNEL_SQL, AJM_DATA_FROM } from "./channels";
 
 const READERS = READER_CATEGORIES.map((c) => `'${c}'`).join(",");
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -77,7 +77,7 @@ function ajmWindow(start: string, end: string, label: string): BrandWindow {
            COUNT(DISTINCT COALESCE(company_id, customer_name)) AS customers,
            MIN(order_date) AS firstSeen, MAX(order_date) AS lastSeen
     FROM ajm_orders
-    WHERE cancelled = 0 AND order_date >= ? AND order_date <= ?
+    WHERE cancelled = 0 AND order_date >= ? AND order_date <= ? AND order_date >= '${AJM_DATA_FROM}'
   `).get(start, end) as { revenue: number | null; orders: number; customers: number; firstSeen: string | null; lastSeen: string | null };
   const revenue = row.revenue ?? 0;
   return {
@@ -123,45 +123,9 @@ const addDays = (iso: string, n: number) => {
   return d.toISOString().slice(0, 10);
 };
 
-/**
- * Like-for-like on BUSINESS AGE: each brand's first N months of trading.
- *
- * Jaxy began selling 2026-04-21 (confirmed by Daniel, Aug 2026), so comparing
- * its first months to a mature AJM's trailing year measures company age, not
- * execution. This puts both at the same point in their life.
- *
- * CAVEAT, and it matters: AJM's data starts 2019-10-31, which is where their
- * Shopify export begins — NOT necessarily when AJ Morgan began trading. AJM
- * was an established brand, so its "first months" here may already include an
- * existing customer base carried over from earlier channels. Treat AJM's
- * early-window figures as an upper bound on a true standing start.
- */
-export function compareByAge(months = 3.5) {
-  const aStart = (sqlite.prepare(
-    "SELECT MIN(order_date) AS s FROM ajm_orders WHERE cancelled = 0 AND order_date IS NOT NULL",
-  ).get() as { s: string }).s;
-  const jStart = (sqlite.prepare(
-    "SELECT MIN(substr(placed_at,1,10)) AS s FROM orders WHERE status NOT IN ('cancelled','returned') AND placed_at IS NOT NULL",
-  ).get() as { s: string }).s;
-  const days = Math.round(months * 30.44);
-  const ajm = ajmWindow(aStart, addDays(aStart, days), `AJM first ${months}m (${aStart} →)`);
-  const jaxy = jaxyWindow(jStart, addDays(jStart, days), `Jaxy first ${months}m (${jStart} →)`);
-  return {
-    months,
-    ajm,
-    jaxy,
-    ratios: {
-      revenue: ajm.revenue > 0 ? r2((jaxy.revenue / ajm.revenue) * 100) : null,
-      customers: ajm.customers > 0 ? r2((jaxy.customers / ajm.customers) * 100) : null,
-      aov: ajm.aov > 0 ? r2((jaxy.aov / ajm.aov) * 100) : null,
-    },
-    caveat: "AJM's window starts where its Shopify export begins (2019-10-31), which may not be when AJ Morgan started trading — as an established brand it likely carried an existing customer base in. Jaxy's start (2026-04-21) is a true standing start. So AJM's figures here flatter AJM.",
-  };
-}
-
 export function analyzeGap(opts?: { mode?: "overlap" | "trailing12" }): GapAnalysis {
   const aSpan = sqlite.prepare(
-    "SELECT MIN(order_date) AS start, MAX(order_date) AS end FROM ajm_orders WHERE cancelled = 0 AND order_date IS NOT NULL",
+    `SELECT MIN(order_date) AS start, MAX(order_date) AS end FROM ajm_orders WHERE cancelled = 0 AND order_date IS NOT NULL AND order_date >= '${AJM_DATA_FROM}'`,
   ).get() as { start: string; end: string };
   const jSpan = sqlite.prepare(
     "SELECT MIN(substr(placed_at,1,10)) AS start, MAX(substr(placed_at,1,10)) AS end FROM orders WHERE status NOT IN ('cancelled','returned') AND placed_at IS NOT NULL",
@@ -196,7 +160,7 @@ export function analyzeGap(opts?: { mode?: "overlap" | "trailing12" }): GapAnaly
   const readerRow = sqlite.prepare(`
     SELECT ROUND(SUM(i.line_total),2) AS rev
     FROM ajm_orders o JOIN ajm_order_items i ON i.order_id = o.id
-    WHERE o.cancelled = 0 AND o.order_date >= ? AND o.order_date <= ? AND i.category IN (${READERS})
+    WHERE o.cancelled = 0 AND o.order_date >= ? AND o.order_date <= ? AND o.order_date >= '${AJM_DATA_FROM}' AND i.category IN (${READERS})
   `).get(ajm.start, ajm.end) as { rev: number | null };
   const categoryReaders = readerRow.rev ?? 0;
 
@@ -233,7 +197,7 @@ export function analyzeGap(opts?: { mode?: "overlap" | "trailing12" }): GapAnaly
     // Canonical model: wholesale = Shopify wholesale + Faire, both brands.
     const a = sqlite.prepare(`
       SELECT ${AJM_CHANNEL_SQL("o")} AS ch, ROUND(SUM(o.total),2) AS rev
-      FROM ajm_orders o WHERE o.cancelled=0 AND o.order_date >= ? AND o.order_date <= ? GROUP BY ch
+      FROM ajm_orders o WHERE o.cancelled=0 AND o.order_date >= ? AND o.order_date <= ? AND o.order_date >= '${AJM_DATA_FROM}' GROUP BY ch
     `).all(ajm.start, ajm.end) as Array<{ ch: string; rev: number }>;
     const j = sqlite.prepare(`
       SELECT ${JAXY_CHANNEL_SQL("o")} AS ch, ROUND(SUM(o.total),2) AS rev
@@ -258,7 +222,7 @@ export function analyzeGap(opts?: { mode?: "overlap" | "trailing12" }): GapAnaly
       SELECT company_id, ROUND(SUM(total),2) AS ajmRevenue,
              COUNT(*) AS ajmOrders, MAX(order_date) AS lastOrder
       FROM ajm_orders
-      WHERE cancelled = 0 AND company_id IS NOT NULL
+      WHERE cancelled = 0 AND company_id IS NOT NULL AND order_date >= '${AJM_DATA_FROM}'
       GROUP BY company_id
     ),
     line_cats AS (
@@ -266,7 +230,7 @@ export function analyzeGap(opts?: { mode?: "overlap" | "trailing12" }): GapAnaly
              SUM(CASE WHEN i.category IN (${READERS}) THEN i.line_total ELSE 0 END) AS readerRev,
              SUM(i.line_total) AS lineRev
       FROM ajm_orders o JOIN ajm_order_items i ON i.order_id = o.id
-      WHERE o.cancelled = 0 AND o.company_id IS NOT NULL
+      WHERE o.cancelled = 0 AND o.company_id IS NOT NULL AND o.order_date >= '${AJM_DATA_FROM}'
       GROUP BY o.company_id
     )
     SELECT t.company_id AS companyId, c.name AS name, ca.id AS accountId,

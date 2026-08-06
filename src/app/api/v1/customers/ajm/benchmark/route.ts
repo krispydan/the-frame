@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { READER_CATEGORIES } from "@/modules/sales/lib/ajm/categorize";
+import { AJM_DATA_FROM } from "@/modules/sales/lib/ajm/channels";
 
 /**
  * GET /api/v1/customers/ajm/benchmark
@@ -50,7 +51,7 @@ export async function GET() {
            COUNT(*) AS orders,
            COUNT(DISTINCT COALESCE(company_id, customer_name)) AS customers
     FROM ajm_orders
-    WHERE cancelled=0 AND substr(order_date,6) BETWEEN ? AND ?
+    WHERE cancelled=0 AND order_date >= '${AJM_DATA_FROM}' AND substr(order_date,6) BETWEEN ? AND ?
     GROUP BY year ORDER BY year
   `).all(seasonStart, seasonEnd) as Array<Record<string, number | string>>;
 
@@ -68,7 +69,7 @@ export async function GET() {
   const seasonality = sqlite.prepare(`
     SELECT mo, ROUND(AVG(t),0) AS ajmAvg FROM (
       SELECT substr(order_date,6,2) AS mo, substr(order_date,1,7) AS ym, SUM(total) AS t
-      FROM ajm_orders WHERE cancelled=0 AND order_date>='2021-01-01' AND order_date<'2025-12-01'
+      FROM ajm_orders WHERE cancelled=0 AND order_date>='${AJM_DATA_FROM}' AND order_date<'2025-12-01'
       GROUP BY ym
     ) GROUP BY mo ORDER BY mo
   `).all() as Array<{ mo: string; ajmAvg: number }>;
@@ -104,7 +105,7 @@ export async function GET() {
                 ELSE 'unattributed' END AS cat,
            ROUND(SUM(i.line_total),2) AS revenue
     FROM ajm_orders o JOIN ajm_order_items i ON i.order_id=o.id
-    WHERE o.cancelled=0 GROUP BY cat
+    WHERE o.cancelled=0 AND o.order_date >= '${AJM_DATA_FROM}' GROUP BY cat
   `).all() as Array<{ cat: string; revenue: number }>;
 
   // ── Orphaned accounts: AJM's book, and how much Jaxy has converted ──
@@ -112,14 +113,14 @@ export async function GET() {
     WITH ord AS (
       SELECT company_id, ROUND(SUM(total),2) AS ajmRevenue, COUNT(*) AS ajmOrders,
              MAX(order_date) AS lastOrder
-      FROM ajm_orders WHERE cancelled=0 AND company_id IS NOT NULL GROUP BY company_id
+      FROM ajm_orders WHERE cancelled=0 AND order_date >= '${AJM_DATA_FROM}' AND company_id IS NOT NULL GROUP BY company_id
     ),
     cats AS (
       SELECT o.company_id,
              SUM(CASE WHEN i.category IN (${READERS}) THEN i.line_total ELSE 0 END) AS readerRev,
              SUM(i.line_total) AS lineRev
       FROM ajm_orders o JOIN ajm_order_items i ON i.order_id=o.id
-      WHERE o.cancelled=0 AND o.company_id IS NOT NULL GROUP BY o.company_id
+      WHERE o.cancelled=0 AND o.order_date >= '${AJM_DATA_FROM}' AND o.company_id IS NOT NULL GROUP BY o.company_id
     )
     SELECT ord.company_id AS companyId, c.name, ca.id AS accountId,
            ord.ajmRevenue, ord.ajmOrders, ord.lastOrder,

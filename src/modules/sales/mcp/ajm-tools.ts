@@ -12,7 +12,7 @@ import { z } from "zod";
 import { analyzeGap } from "@/modules/sales/lib/ajm/gap-analysis";
 import { getReaderTargets, getCategoryBreakdown } from "@/modules/sales/lib/ajm/reader-targets";
 import { READER_CATEGORIES } from "@/modules/sales/lib/ajm/categorize";
-import { AJM_CHANNEL_SQL, JAXY_CHANNEL_SQL, AJM_WHOLESALE_SOURCES } from "@/modules/sales/lib/ajm/channels";
+import { AJM_CHANNEL_SQL, JAXY_CHANNEL_SQL, AJM_WHOLESALE_SOURCES, AJM_DATA_FROM, AJM_DATE_FILTER } from "@/modules/sales/lib/ajm/channels";
 
 const READERS = READER_CATEGORIES.map((c) => `'${c}'`).join(",");
 
@@ -41,13 +41,13 @@ mcpRegistry.register(
   }),
   async (args) => {
     const fmt = args.grain === "month" ? "%Y-%m" : "%Y";
-    const from = args.from ?? "0000-01-01";
+    const from = args.from ?? AJM_DATA_FROM;
     const to = args.to ?? "9999-12-31";
     const ajm = sqlite.prepare(`
       SELECT strftime('${fmt}', o.order_date) AS period,
              ${AJM_CHANNEL_SQL("o")} AS channel,
              ROUND(SUM(o.total),2) AS revenue, COUNT(*) AS orders
-      FROM ajm_orders o WHERE o.cancelled=0 AND o.order_date BETWEEN ? AND ?
+      FROM ajm_orders o WHERE o.cancelled=0 AND o.order_date BETWEEN ? AND ? ${AJM_DATE_FILTER('o')}
       GROUP BY period, channel ORDER BY period`).all(from, to);
     const jaxy = sqlite.prepare(`
       SELECT strftime('${fmt}', o.placed_at) AS period,
@@ -60,7 +60,7 @@ mcpRegistry.register(
              CASE WHEN i.category='sun' THEN 'sunglasses' WHEN i.category IN (${READERS}) THEN 'readers' ELSE 'other/unknown' END AS category,
              ROUND(SUM(i.line_total),2) AS revenue
       FROM ajm_orders o JOIN ajm_order_items i ON i.order_id=o.id
-      WHERE o.cancelled=0 AND o.order_date BETWEEN ? AND ?
+      WHERE o.cancelled=0 AND o.order_date BETWEEN ? AND ? ${AJM_DATE_FILTER('o')}
       GROUP BY period, category ORDER BY period`).all(from, to);
     return ok({ ajm, jaxy, ajmCategory });
   },
@@ -117,14 +117,14 @@ mcpRegistry.register(
                COUNT(*) AS ajmOrders, ROUND(SUM(total),2) AS ajmRevenue,
                MIN(order_date) AS firstOrder, MAX(order_date) AS lastOrder,
                GROUP_CONCAT(DISTINCT source) AS channels
-        FROM ajm_orders WHERE cancelled = 0 GROUP BY groupKey
+        FROM ajm_orders o WHERE cancelled = 0 ${AJM_DATE_FILTER('o')} GROUP BY groupKey
       ),
       cats AS (
         SELECT COALESCE(o.company_id, 'raw:' || LOWER(COALESCE(o.customer_name,'?'))) AS groupKey,
                ROUND(SUM(CASE WHEN i.category IN (${READERS}) THEN i.line_total ELSE 0 END),2) AS readerRevenue,
                ROUND(SUM(CASE WHEN i.category='sun' THEN i.line_total ELSE 0 END),2) AS sunRevenue
         FROM ajm_orders o JOIN ajm_order_items i ON i.order_id = o.id
-        WHERE o.cancelled = 0 GROUP BY groupKey
+        WHERE o.cancelled = 0 ${AJM_DATE_FILTER('o')} GROUP BY groupKey
       )
       SELECT ord.groupKey, ord.company_id AS companyId,
              COALESCE(c.name, ord.rawName) AS name,
@@ -168,7 +168,7 @@ mcpRegistry.register(
              ROUND(SUM(i.line_total),2) AS revenue,
              COUNT(DISTINCT COALESCE(o.company_id, o.customer_name)) AS buyers
       FROM ajm_order_items i JOIN ajm_orders o ON o.id = i.order_id
-      WHERE o.cancelled = 0 ${where}
+      WHERE o.cancelled = 0 ${AJM_DATE_FILTER('o')} ${where}
       GROUP BY i.product_name ORDER BY revenue DESC LIMIT ?
     `).all(Math.min(args.limit ?? 30, 200)));
   },
