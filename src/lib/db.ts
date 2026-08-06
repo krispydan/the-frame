@@ -597,15 +597,42 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN do_not_contact INTEGER DEFAU
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN do_not_contact_reason TEXT"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN do_not_contact_at TEXT"); } catch { /* exists */ }
 
+// We sell on Faire under TWO brand accounts (A.J. Morgan and Jaxy). A retailer
+// relationship — the Messenger thread, whether we've messaged them, whether
+// they declined — is per BRAND, not global. So the mapping is a table, not a
+// column: one row per (company, brand) with that brand portal's retailer token.
+// companies.faire_retailer_id above is kept only as a fast-lookup mirror of the
+// primary (AJM) token; this table is authoritative.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS company_faire_accounts (
+    id TEXT PRIMARY KEY,
+    company_id TEXT NOT NULL,
+    brand TEXT NOT NULL,                     -- 'ajm' | 'jaxy'
+    retailer_token TEXT NOT NULL,            -- r_… as seen in THAT brand's portal
+    do_not_contact INTEGER DEFAULT 0,        -- per-brand suppression
+    do_not_contact_reason TEXT,
+    first_seen_at TEXT,
+    last_messaged_at TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`);
+} catch { /* exists */ }
+try { sqlite.exec("CREATE UNIQUE INDEX idx_cfa_company_brand ON company_faire_accounts (company_id, brand)"); } catch { /* exists */ }
+try { sqlite.exec("CREATE UNIQUE INDEX idx_cfa_brand_token ON company_faire_accounts (brand, retailer_token)"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_cfa_token ON company_faire_accounts (retailer_token)"); } catch { /* exists */ }
+
 // Outreach history ledger. Pre-seeded from the Faire Market campaign so the
 // sequence engine launches knowing what has already been said (and to whom),
 // which is what makes cooldowns and the "never double-touch" rule work on
 // day one. The engine will write to this same table going forward.
+// `brand` records WHICH of our Faire accounts sent it — a message from A.J.
+// Morgan must not suppress a Jaxy sequence (or vice versa) unless we decide
+// it should; that's a cross-brand courtesy setting, not a data assumption.
 try {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS outreach_messages (
     id TEXT PRIMARY KEY,
     company_id TEXT,
     faire_retailer_id TEXT,
+    brand TEXT,
     channel TEXT NOT NULL DEFAULT 'faire',
     direction TEXT NOT NULL DEFAULT 'outbound',
     status TEXT NOT NULL,
@@ -616,9 +643,11 @@ try {
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`);
 } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE outreach_messages ADD COLUMN brand TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_outreach_company ON outreach_messages (company_id, sent_at)"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_outreach_retailer ON outreach_messages (faire_retailer_id, sent_at)"); } catch { /* exists */ }
-try { sqlite.exec("CREATE UNIQUE INDEX idx_outreach_dedup ON outreach_messages (faire_retailer_id, campaign, sent_at)"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_outreach_brand ON outreach_messages (brand, sent_at)"); } catch { /* exists */ }
+try { sqlite.exec("CREATE UNIQUE INDEX idx_outreach_dedup ON outreach_messages (brand, faire_retailer_id, campaign, sent_at)"); } catch { /* exists */ }
 
 // Customer map: geocoded coordinates on companies
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN latitude REAL"); } catch { /* exists */ }

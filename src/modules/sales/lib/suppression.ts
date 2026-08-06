@@ -18,6 +18,7 @@ import { sqlite } from "@/lib/db";
 
 export type SuppressionReason =
   | "do_not_contact"
+  | "brand_do_not_contact"
   | "status_not_interested"
   | "status_ghosted"
   | "unsubscribed"
@@ -29,7 +30,31 @@ export interface SuppressionResult {
   detail?: string | null;
 }
 
-export function checkSuppression(companyId: string): SuppressionResult {
+/**
+ * We sell on Faire under two brand accounts. Suppression is two-level:
+ *   - GLOBAL (companies.do_not_contact): never contact this shop, any brand.
+ *   - PER-BRAND (company_faire_accounts.do_not_contact): they declined THIS
+ *     brand. Declining A.J. Morgan does not mean declining Jaxy.
+ * Pass `brand` to apply both; omit it to check only the global rules.
+ */
+export function checkSuppression(companyId: string, brand?: string): SuppressionResult {
+  if (brand) {
+    const link = sqlite
+      .prepare(
+        `SELECT do_not_contact, do_not_contact_reason FROM company_faire_accounts
+          WHERE company_id = ? AND brand = ?`,
+      )
+      .get(companyId, brand.toLowerCase()) as
+      | { do_not_contact: number | null; do_not_contact_reason: string | null }
+      | undefined;
+    if (link?.do_not_contact) {
+      return { suppressed: true, reason: "brand_do_not_contact", detail: link.do_not_contact_reason };
+    }
+  }
+  return checkGlobalSuppression(companyId);
+}
+
+function checkGlobalSuppression(companyId: string): SuppressionResult {
   const row = sqlite
     .prepare(
       `SELECT c.id, c.status, c.do_not_contact, c.do_not_contact_reason,
@@ -52,8 +77,49 @@ export function checkSuppression(companyId: string): SuppressionResult {
 }
 
 /** Convenience boolean form. */
-export function isSuppressed(companyId: string): boolean {
-  return checkSuppression(companyId).suppressed;
+export function isSuppressed(companyId: string, brand?: string): boolean {
+  return checkSuppression(companyId, brand).suppressed;
+}
+
+/** Suppress a company for ONE brand only (they declined that brand). */
+export function setBrandDoNotContact(companyId: string, brand: string, reason: string): void {
+  sqlite
+    .prepare(
+      `UPDATE company_faire_accounts SET do_not_contact = 1, do_not_contact_reason = ?
+        WHERE company_id = ? AND brand = ?`,
+    )
+    .run(reason, companyId, brand.toLowerCase());
+}
+
+/**
+ * When did we last message this shop, and from which brand?
+ *
+ * Cooldowns are per-brand by default, but the retailer is ONE human reading
+ * both inboxes — so the engine also needs to see cross-brand recency to avoid
+ * A.J. Morgan and Jaxy landing on the same shop in the same week. Returns both
+ * so the caller can apply a hard per-brand rule and a softer cross-brand one.
+ */
+export function lastOutreach(companyId: string): {
+  lastAnyAt: string | null;
+  lastAnyBrand: string | null;
+  byBrand: Record<string, string>;
+} {
+  const rows = sqlite
+    .prepare(
+      `SELECT brand, MAX(sent_at) AS last_at FROM outreach_messages
+        WHERE company_id = ? AND status IN ('sent','sent_unverified') AND sent_at IS NOT NULL
+        GROUP BY brand`,
+    )
+    .all(companyId) as Array<{ brand: string | null; last_at: string }>;
+  const byBrand: Record<string, string> = {};
+  let lastAnyAt: string | null = null;
+  let lastAnyBrand: string | null = null;
+  for (const r of rows) {
+    const b = r.brand || "unknown";
+    byBrand[b] = r.last_at;
+    if (!lastAnyAt || r.last_at > lastAnyAt) { lastAnyAt = r.last_at; lastAnyBrand = b; }
+  }
+  return { lastAnyAt, lastAnyBrand, byBrand };
 }
 
 /** Flag a company as do-not-contact. Idempotent. */

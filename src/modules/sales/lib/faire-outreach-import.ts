@@ -118,11 +118,21 @@ export function importFaireOutreach(payload: {
   skips?: ImportSkip[];
   sends?: ImportSend[];
   campaign?: string;
+  /** Which of our Faire brand accounts this history belongs to. */
+  brand?: string;
   dryRun?: boolean;
 }): ImportSummary {
   const campaign = payload.campaign || "faire_market_2026_07";
+  // The Faire Market campaign was sent from the A.J. Morgan brand portal.
+  const brand = (payload.brand || "ajm").toLowerCase();
   const dry = !!payload.dryRun;
   const idx = buildIndex();
+  const linkUpsert = sqlite.prepare(
+    `INSERT INTO company_faire_accounts (id, company_id, brand, retailer_token, first_seen_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(company_id, brand) DO UPDATE SET
+       retailer_token = COALESCE(NULLIF(company_faire_accounts.retailer_token,''), excluded.retailer_token)`,
+  );
   const unmatchedSamples: string[] = [];
   const summary: ImportSummary = {
     contacts: { received: 0, matchedByToken: 0, matchedByName: 0, stamped: 0, unmatched: 0 },
@@ -142,7 +152,12 @@ export function importFaireOutreach(payload: {
     }
     if (r.how === "token") summary.contacts.matchedByToken++;
     else summary.contacts.matchedByName++;
-    if (!dry && r.how === "name") {
+    if (!dry) {
+      // Authoritative per-brand link.
+      try {
+        linkUpsert.run(randomUUID(), r.id, brand, c.retailer_token, new Date().toISOString());
+      } catch { /* token already linked to another company for this brand */ }
+      // Mirror onto companies for fast lookup (primary brand only).
       const res = sqlite
         .prepare(
           `UPDATE companies SET faire_retailer_id = ?
@@ -159,15 +174,17 @@ export function importFaireOutreach(payload: {
     const r = resolveCompany(idx, s);
     if (!r.id) { summary.skips.unmatched++; continue; }
     if (!dry) {
+      // Per-BRAND suppression: declining A.J. Morgan does not mean declining
+      // Jaxy. A global do_not_contact is reserved for "never contact us again"
+      // and is set deliberately, not inferred from one brand's campaign.
+      linkUpsert.run(randomUUID(), r.id, brand, s.retailer_token, new Date().toISOString());
       sqlite
         .prepare(
-          `UPDATE companies
-              SET do_not_contact = 1,
-                  do_not_contact_reason = ?,
-                  do_not_contact_at = COALESCE(do_not_contact_at, ?)
-            WHERE id = ?`,
+          `UPDATE company_faire_accounts
+              SET do_not_contact = 1, do_not_contact_reason = ?
+            WHERE company_id = ? AND brand = ?`,
         )
-        .run(`faire campaign: ${s.reason || "skiplist"}`, new Date().toISOString(), r.id);
+        .run(`faire campaign: ${s.reason || "skiplist"}`, r.id, brand);
     }
     summary.skips.applied++;
   }
@@ -177,8 +194,8 @@ export function importFaireOutreach(payload: {
   //    check, which is the whole point of importing this.
   const insert = sqlite.prepare(
     `INSERT OR IGNORE INTO outreach_messages
-       (id, company_id, faire_retailer_id, channel, direction, status, body, campaign, sent_at, source)
-     VALUES (?, ?, ?, 'faire', 'outbound', ?, ?, ?, ?, 'faire_dm_import')`,
+       (id, company_id, faire_retailer_id, brand, channel, direction, status, body, campaign, sent_at, source)
+     VALUES (?, ?, ?, ?, 'faire', 'outbound', ?, ?, ?, ?, 'faire_dm_import')`,
   );
   for (const m of payload.sends || []) {
     summary.sends.received++;
@@ -189,7 +206,7 @@ export function importFaireOutreach(payload: {
     if (!r.id) summary.sends.unmatchedButKept++;
     if (!dry) {
       const res = insert.run(
-        randomUUID(), r.id, m.retailer_token, status, m.message || null, campaign, m.at || null,
+        randomUUID(), r.id, m.retailer_token, brand, status, m.message || null, campaign, m.at || null,
       );
       if (res.changes) summary.sends.inserted++;
       else summary.sends.duplicates++;

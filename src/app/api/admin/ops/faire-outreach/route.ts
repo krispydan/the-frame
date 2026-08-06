@@ -30,11 +30,17 @@ export async function GET(req: NextRequest) {
         withFaireToken: one("SELECT COUNT(*) n FROM companies WHERE faire_retailer_id IS NOT NULL AND faire_retailer_id <> ''"),
         doNotContact: one("SELECT COUNT(*) n FROM companies WHERE do_not_contact = 1"),
       },
+      faireBrandLinks: sqlite.prepare(
+        `SELECT brand, COUNT(*) AS companies, SUM(do_not_contact) AS suppressed
+           FROM company_faire_accounts GROUP BY brand`).all(),
       outreachMessages: {
         total: one("SELECT COUNT(*) n FROM outreach_messages"),
         sent: one("SELECT COUNT(*) n FROM outreach_messages WHERE status IN ('sent','sent_unverified')"),
         linkedToCompany: one("SELECT COUNT(*) n FROM outreach_messages WHERE company_id IS NOT NULL"),
         lastSentAt: (sqlite.prepare("SELECT MAX(sent_at) v FROM outreach_messages").get() as { v: string | null }).v,
+        byBrand: sqlite.prepare(
+          `SELECT brand, COUNT(*) AS n, MAX(sent_at) AS last_at
+             FROM outreach_messages GROUP BY brand`).all(),
       },
       faireOrders: {
         orders: one("SELECT COUNT(*) n FROM orders WHERE channel = 'faire'"),
@@ -60,6 +66,7 @@ export async function POST(req: NextRequest) {
       skips: body.skips,
       sends: body.sends,
       campaign: body.campaign,
+      brand: body.brand,
       dryRun: body.dryRun !== false && body.dryRun !== undefined ? !!body.dryRun : false,
     });
     return NextResponse.json({ ok: true, dryRun: !!body.dryRun, summary });
