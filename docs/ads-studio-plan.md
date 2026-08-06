@@ -6,8 +6,16 @@ recipe. Every ad renders in each Meta aspect ratio under a naming convention
 that encodes what the ad *is*, so performance in Ads Manager can be sliced by
 recipe, product, model, copy and format without any extra tooling on day one.
 
-Status: **scoping — not yet built.** This doc is the agreed shape; phases at
-the bottom are the build order.
+Status: **scoped, decisions locked (Aug 2026), building.**
+
+- **Video ads first** — the asset library is video-heavy; the image path
+  follows using the same card renderer.
+- **Manual Meta upload at launch** — the naming convention is the tracking
+  key; API metrics sync stays a later phase.
+- **Drag-and-drop canvas editor** — the card and text are dragged/scaled on
+  a live preview. Placement is stored as *normalized* coordinates (0–1 of
+  frame width/height) per ratio, and the server render consumes the same
+  numbers — what you drag is what ffmpeg composites.
 
 ## What we're building
 
@@ -22,10 +30,11 @@ An **Ad Studio** section under Marketing:
    Meta ratio. The layout adapts per ratio (card scale/position are
    per-ratio parameters, not one absolute layout stretched).
 3. **A naming convention** that is the tracking system (below).
-4. **Minor edits** — structured controls (card position/scale, swap product
-   image, edit/hide the name text, shift the background crop, optional
-   headline), each stored as overrides and re-rendered. Not a freeform
-   canvas editor.
+4. **Minor edits** — a drag-and-drop canvas: drag/scale the card and any
+   text on a live preview of each ratio, swap the card's product image,
+   edit/hide the name text, shift the background crop. Edits persist as
+   normalized per-ratio overrides and re-render on save (video edits
+   preview instantly against the poster frame).
 
 ## Concepts & schema
 
@@ -146,11 +155,11 @@ side.
 
 | Phase | Scope | Notes |
 |---|---|---|
-| **A0** | Schema + migration; recipe registry; `ad-naming.ts` | pure libs, fully unit-tested |
-| **A1** | Image renderer (sharp card + ratio crops, shared crop lib) + APIs + library page + wizard + download | first usable end-to-end: image ads |
-| **A2** | Video renderer (`ad_render` jobs, ffmpeg overlay) | reuses A1's card pixel-for-pixel |
-| **A3** | Edit controls + re-render + AI copy + versioning | |
+| **A0** | Schema + migration; recipe registry; `ad-naming.ts`; card builder (sharp) | pure libs, fully unit-tested |
+| **A1** | Video renderer (`ad_render` jobs, ffmpeg overlay + ratio crops in a shared crop lib) + APIs + library page + wizard + download | first usable end-to-end: video ads |
+| **A2** | Image renderer (sharp composite, same card) | fast follow — the card builder already exists |
+| **A3** | Canvas editor (drag/scale on live preview, normalized coords) + re-render + AI copy + versioning | |
 | **A4** | Carousel kind; Meta metrics sync + report | optional / later |
 
-Non-goals for now: freeform drag-and-drop canvas, auto-publishing via the
-Meta API, non-Meta channels (the ratio system doesn't preclude them).
+Non-goals for now: auto-publishing via the Meta API, non-Meta channels (the
+ratio system doesn't preclude them).

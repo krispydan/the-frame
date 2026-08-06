@@ -133,6 +133,11 @@ export type { VideoRecipe, VideoPost, VideoPostInsert, RecipeSlot } from "./vide
 export { videoSources } from "./video-sources";
 export type { VideoSource, VideoSourceInsert } from "./video-sources";
 
+// Ad Studio — generated Meta ad creatives (recipe + inputs → one render
+// per aspect ratio). See ./ads.ts and docs/ads-studio-plan.md.
+export { ads, adRenders, adCopyVariants } from "./ads";
+export type { Ad, AdInsert, AdRender, AdCopyVariant } from "./ads";
+
 // AI SKU identification for media (clips + images).
 export { mediaMatches } from "./media-match";
 export type { MediaMatch, MediaMatchInsert } from "./media-match";

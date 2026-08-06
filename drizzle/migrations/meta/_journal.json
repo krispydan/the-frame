@@ -64,6 +64,13 @@
       "when": 1783555200000,
       "tag": "0008_video_sources",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1785974400000,
+      "tag": "0009_ad_studio",
+      "breakpoints": true
     }
   ]
 }
