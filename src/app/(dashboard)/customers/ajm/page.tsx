@@ -37,12 +37,19 @@ interface Bench {
   categories: Array<{ cat: string; revenue: number }>;
   orphans: {
     total: number; totalAjmRevenue: number;
-    convertedCount: number; convertedAjmRevenue: number;
+    convertedCount: number; convertedAjmRevenue: number; convertedJaxyRevenue: number;
     notYetCount: number; notYetAjmRevenue: number;
-    top: Array<{ companyId: string; name: string; accountId: string | null; ajmRevenue: number; ajmOrders: number; lastOrder: string; jaxyLtv: number; readerShare: number | null }>;
+    top: Array<{
+      companyId: string; name: string; accountId: string | null;
+      ajmRevenue: number; ajmOrders: number; lastOrder: string;
+      jaxyRevenue: number; jaxyOrders: number;
+      jaxyFirstOrder: string | null; jaxyLastOrder: string | null;
+      jaxyLtv: number; readerShare: number | null;
+    }>;
   };
 }
 
+const AJM_SINCE = "2022";
 const MON = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const money = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
 const C = { ajm: "#94a3b8", ajm2: "#6366f1", jaxy: "#10b981", bench: "#f59e0b" };
@@ -68,6 +75,7 @@ export default function AjmBenchmarkPage() {
   const [b, setB] = useState<Bench | null>(null);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+  const [convFilter, setConvFilter] = useState<"all" | "converted" | "not_yet">("all");
 
   const load = useCallback(async () => {
     try {
@@ -87,7 +95,10 @@ export default function AjmBenchmarkPage() {
   const catTotal = b.categories.reduce((s, c) => s + c.revenue, 0);
   const readers = b.categories.find((c) => c.cat === "readers")?.revenue ?? 0;
   const sun = b.categories.find((c) => c.cat === "sunglasses")?.revenue ?? 0;
-  const orphanTop = b.orphans.top.filter((o) => !q.trim() || o.name.toLowerCase().includes(q.trim().toLowerCase()));
+  const orphanTop = b.orphans.top
+    .filter((o) => !q.trim() || o.name.toLowerCase().includes(q.trim().toLowerCase()))
+    .filter((o) => convFilter === "all" || (convFilter === "converted" ? o.jaxyOrders > 0 : o.jaxyOrders === 0));
+  const captureRate = b.orphans.total > 0 ? (b.orphans.convertedCount / b.orphans.total) * 100 : 0;
   const playbookTop2 = RETAIL_PLAYBOOK.channels[0].sales + RETAIL_PLAYBOOK.channels[1].sales;
 
   return (
@@ -262,14 +273,29 @@ export default function AjmBenchmarkPage() {
             <div><p className="text-xs text-muted-foreground">AJM accounts</p><p className="text-xl font-bold">{b.orphans.total.toLocaleString()}</p></div>
             <div><p className="text-xs text-muted-foreground">Converted to Jaxy</p><p className="text-xl font-bold text-green-600">{b.orphans.convertedCount.toLocaleString()}</p></div>
             <div><p className="text-xs text-muted-foreground">Not yet buying</p><p className="text-xl font-bold text-amber-600">{b.orphans.notYetCount.toLocaleString()}</p></div>
-            <div><p className="text-xs text-muted-foreground">Their AJM revenue</p><p className="text-xl font-bold">{money(b.orphans.notYetAjmRevenue)}</p></div>
+            <div><p className="text-xs text-muted-foreground">Jaxy revenue from converted</p><p className="text-xl font-bold text-green-600">{money(b.orphans.convertedJaxyRevenue)}</p></div>
           </div>
           <div className="h-2 rounded-full bg-muted overflow-hidden">
             <div className="h-full bg-green-500" style={{ width: `${(b.orphans.convertedCount / Math.max(1, b.orphans.total)) * 100}%` }} />
           </div>
-          <div className="relative max-w-xs">
-            <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search accounts…" className="w-full rounded-md border pl-8 pr-2 py-1.5 text-sm" />
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+            <div className="inline-flex rounded-md border p-0.5 text-xs">
+              {([
+                ["all", `All (${b.orphans.total.toLocaleString()})`],
+                ["converted", `Converted (${b.orphans.convertedCount.toLocaleString()})`],
+                ["not_yet", `Not yet (${b.orphans.notYetCount.toLocaleString()})`],
+              ] as const).map(([k, label]) => (
+                <button key={k} onClick={() => setConvFilter(k)}
+                  className={`px-2.5 py-1 rounded ${convFilter === k ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="relative max-w-xs flex-1">
+              <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search accounts…" className="w-full rounded-md border pl-8 pr-2 py-1.5 text-sm" />
+            </div>
+            <span className="text-xs text-muted-foreground">{captureRate.toFixed(0)}% of accounts captured</span>
           </div>
         </CardHeader>
         <CardContent>
@@ -277,9 +303,13 @@ export default function AjmBenchmarkPage() {
             <TableHeader><TableRow>
               <TableHead>Account</TableHead>
               <TableHead className="text-right">AJM revenue</TableHead>
-              <TableHead className="text-right">Orders</TableHead>
-              <TableHead className="text-right">Reader share</TableHead>
+              <TableHead className="text-right">AJM orders</TableHead>
               <TableHead className="text-right">Last AJM order</TableHead>
+              <TableHead className="text-right">Reader share</TableHead>
+              <TableHead className="text-center border-l">Ordered with Jaxy?</TableHead>
+              <TableHead className="text-right">Jaxy revenue</TableHead>
+              <TableHead className="text-right">Jaxy orders</TableHead>
+              <TableHead className="text-right">% of AJM</TableHead>
             </TableRow></TableHeader>
             <TableBody>
               {orphanTop.map((o) => (
@@ -291,19 +321,35 @@ export default function AjmBenchmarkPage() {
                   </TableCell>
                   <TableCell className="text-right tabular-nums font-semibold">{money(o.ajmRevenue)}</TableCell>
                   <TableCell className="text-right tabular-nums">{o.ajmOrders}</TableCell>
+                  <TableCell className="text-right text-sm">{o.lastOrder}</TableCell>
                   <TableCell className="text-right tabular-nums">
                     {o.readerShare != null && o.readerShare >= 40
                       ? <span className="text-green-700 font-medium">{o.readerShare}%</span>
                       : <span className="text-muted-foreground">{o.readerShare ?? 0}%</span>}
                   </TableCell>
-                  <TableCell className="text-right text-sm">{o.lastOrder}</TableCell>
+                  <TableCell className="text-center border-l">
+                    {o.jaxyOrders > 0
+                      ? <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">Yes</span>
+                      : <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">Not yet</span>}
+                  </TableCell>
+                  <TableCell className={`text-right tabular-nums font-semibold ${o.jaxyRevenue > 0 ? "text-green-600" : "text-muted-foreground"}`}>
+                    {o.jaxyRevenue > 0 ? money(o.jaxyRevenue) : "—"}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{o.jaxyOrders || "—"}</TableCell>
+                  <TableCell className="text-right tabular-nums text-sm">
+                    {o.jaxyRevenue > 0 && o.ajmRevenue > 0
+                      ? <span className={o.jaxyRevenue / o.ajmRevenue >= 0.5 ? "text-green-600 font-medium" : ""}>{Math.round((o.jaxyRevenue / o.ajmRevenue) * 100)}%</span>
+                      : "—"}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
           <p className="text-xs text-muted-foreground mt-2">
-            Accounts with no Jaxy revenue yet, largest AJM spend first. Green reader share = lead with the reading-glasses
-            launch. AJM ceased trading Dec 2025, so these are unserved, not lost to a competitor.
+            AJM&apos;s accounts, largest AJM spend first, showing whether we&apos;ve won them back and what they&apos;ve spent
+            with Jaxy. &quot;% of AJM&quot; is Jaxy revenue against their historical AJM revenue — a recovery rate per account
+            (their AJM figure covers {AJM_SINCE}+, Jaxy&apos;s covers ~3.5 months, so anything approaching parity is strong).
+            Green reader share = lead with the reading-glasses launch.
           </p>
         </CardContent>
       </Card>

@@ -108,7 +108,10 @@ export async function GET() {
     WHERE o.cancelled=0 AND o.order_date >= '${AJM_DATA_FROM}' GROUP BY cat
   `).all() as Array<{ cat: string; revenue: number }>;
 
-  // ── Orphaned accounts: AJM's book, and how much Jaxy has converted ──
+  // ── AJM's book, with Jaxy conversion status per account ──
+  // Order totals and line-level category sums are aggregated in SEPARATE CTEs
+  // before joining — combining them multiplies each order total by its line
+  // count (a fan-out that once inflated this list 21x).
   const orphans = sqlite.prepare(`
     WITH ord AS (
       SELECT company_id, ROUND(SUM(total),2) AS ajmRevenue, COUNT(*) AS ajmOrders,
@@ -121,20 +124,31 @@ export async function GET() {
              SUM(i.line_total) AS lineRev
       FROM ajm_orders o JOIN ajm_order_items i ON i.order_id=o.id
       WHERE o.cancelled=0 AND o.order_date >= '${AJM_DATA_FROM}' AND o.company_id IS NOT NULL GROUP BY o.company_id
+    ),
+    jaxy AS (
+      SELECT company_id, ROUND(SUM(total),2) AS jaxyRevenue, COUNT(*) AS jaxyOrders,
+             MAX(substr(placed_at,1,10)) AS jaxyLastOrder, MIN(substr(placed_at,1,10)) AS jaxyFirstOrder
+      FROM orders WHERE status NOT IN ('cancelled','returned') AND company_id IS NOT NULL GROUP BY company_id
     )
     SELECT ord.company_id AS companyId, c.name, ca.id AS accountId,
            ord.ajmRevenue, ord.ajmOrders, ord.lastOrder,
+           COALESCE(j.jaxyRevenue,0) AS jaxyRevenue,
+           COALESCE(j.jaxyOrders,0) AS jaxyOrders,
+           j.jaxyFirstOrder, j.jaxyLastOrder,
            COALESCE(ca.lifetime_value,0) AS jaxyLtv,
            ROUND(COALESCE(cats.readerRev,0)*100.0/NULLIF(cats.lineRev,0),1) AS readerShare
     FROM ord
     JOIN companies c ON c.id = ord.company_id
     LEFT JOIN customer_accounts ca ON ca.company_id = ord.company_id
     LEFT JOIN cats ON cats.company_id = ord.company_id
+    LEFT JOIN jaxy j ON j.company_id = ord.company_id
     ORDER BY ord.ajmRevenue DESC
-  `).all() as Array<{ companyId: string; name: string; accountId: string | null; ajmRevenue: number; ajmOrders: number; lastOrder: string; jaxyLtv: number; readerShare: number | null }>;
+  `).all() as Array<{ companyId: string; name: string; accountId: string | null; ajmRevenue: number; ajmOrders: number; lastOrder: string; jaxyRevenue: number; jaxyOrders: number; jaxyFirstOrder: string | null; jaxyLastOrder: string | null; jaxyLtv: number; readerShare: number | null }>;
 
-  const converted = orphans.filter((o) => o.jaxyLtv > 0);
-  const notYet = orphans.filter((o) => o.jaxyLtv <= 0);
+  // Converted = has actually ordered from Jaxy (order rows), which is more
+  // reliable than lifetime_value alone (that can lag a fresh order).
+  const converted = orphans.filter((o) => o.jaxyOrders > 0);
+  const notYet = orphans.filter((o) => o.jaxyOrders <= 0);
 
   return NextResponse.json({
     context: {
@@ -151,9 +165,12 @@ export async function GET() {
       totalAjmRevenue: Math.round(orphans.reduce((s, o) => s + o.ajmRevenue, 0) * 100) / 100,
       convertedCount: converted.length,
       convertedAjmRevenue: Math.round(converted.reduce((s, o) => s + o.ajmRevenue, 0) * 100) / 100,
+      convertedJaxyRevenue: Math.round(converted.reduce((s, o) => s + o.jaxyRevenue, 0) * 100) / 100,
       notYetCount: notYet.length,
       notYetAjmRevenue: Math.round(notYet.reduce((s, o) => s + o.ajmRevenue, 0) * 100) / 100,
-      top: notYet.slice(0, 40),
+      /** ALL accounts (largest AJM spend first), converted or not, so the
+       *  table can show conversion status and Jaxy revenue side by side. */
+      top: orphans.slice(0, 300),
     },
   });
 }
