@@ -90,6 +90,14 @@ const STATE_ABBR: Record<string, string> = {
   "newfoundland and labrador": "NL", "nova scotia": "NS", ontario: "ON",
   "prince edward island": "PE", quebec: "QC", saskatchewan: "SK",
 };
+const CA_PROVINCES = new Set(["AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE", "QC", "SK", "YT"]);
+const US_STATES = new Set([
+  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA",
+  "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM",
+  "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA",
+  "WV", "WI", "WY", "PR", "VI", "GU",
+]);
+
 const normState = (s: string | null | undefined): string => {
   const t = (s || "").trim();
   if (!t) return "";
@@ -332,9 +340,13 @@ export function createMissingCompanies(payload: {
     if (!dry) {
       const now = new Date().toISOString();
       const id = randomUUID();
+      // Don't assume US: this list includes French, UK and Luxembourg shops.
+      // Infer country only from a recognized state/province, else leave null.
+      const st = normState(c.state);
+      const country = !st ? null : CA_PROVINCES.has(st) ? "CA" : US_STATES.has(st) ? "US" : null;
       try {
         insertCompany.run(id, c.retailer || "(unnamed Faire retailer)", c.city || null,
-          c.state || null, "US", now, now, c.retailer_token);
+          c.state || null, country, now, now, c.retailer_token);
         linkUpsert.run(randomUUID(), id, brand, c.retailer_token, now);
         // Attach the outreach history we imported by token to the new company.
         relink.run(id, c.retailer_token);
