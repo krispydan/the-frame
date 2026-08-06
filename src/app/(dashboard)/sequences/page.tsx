@@ -67,7 +67,7 @@ export default function SequencesPage() {
               {rows.map((r) => (
                 <tr key={r.id} className="border-t hover:bg-muted/30">
                   <td className="p-3">
-                    <div className="font-medium">{r.name}</div>
+                    <Link href={`/sequences/${r.id}`} className="font-medium hover:underline">{r.name}</Link>
                     {r.description && <div className="text-xs text-muted-foreground">{r.description}</div>}
                   </td>
                   <td className="p-3 uppercase">{r.brand}</td>

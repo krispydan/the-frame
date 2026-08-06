@@ -4,6 +4,7 @@
 import type { ExportProduct, ValidationIssue, ProductValidationResult } from "./types";
 import Papa from "papaparse";
 import { catalogImageUrl } from "@/lib/storage/image-url";
+import { wholesaleOrDefault, retailOrDefault } from "@/modules/catalog/lib/pricing";
 
 function absUrl(img: { filePath: string | null; url?: string | null } | null | undefined): string {
   // Prefer the row's absolute URL (R2 CDN) over the app-proxied path.
@@ -409,8 +410,8 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
     const altRoleByImageId = new Map<string, AltRole>();
 
     const variantPrice = channel === "wholesale"
-      ? ((ep.wholesalePrice && ep.wholesalePrice > 0) ? ep.wholesalePrice.toFixed(2) : "8.00")
-      : ((ep.retailPrice && ep.retailPrice > 0) ? ep.retailPrice.toFixed(2) : "28.00");
+      ? wholesaleOrDefault(ep.wholesalePrice).toFixed(2)
+      : retailOrDefault(ep.retailPrice).toFixed(2);
     // Compare-at is always empty for both channels.
     // - Wholesale: retailers set their own margin, so any strike-through we
     //   emit would be misleading.

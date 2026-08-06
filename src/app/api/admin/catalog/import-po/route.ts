@@ -3,6 +3,7 @@ export const maxDuration = 120;
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
+import { DEFAULT_WHOLESALE_PRICE, DEFAULT_RETAIL_PRICE } from "@/modules/catalog/lib/pricing";
 
 /**
  * POST /api/admin/catalog/import-po
@@ -252,15 +253,16 @@ export async function POST(req: NextRequest) {
   // ── Write phase ──
   const insertProduct = sqlite.prepare<unknown[]>(
     `INSERT INTO catalog_products
-       (id, sku_prefix, name, status, created_at, updated_at)
-     VALUES (?, ?, ?, 'intake', datetime('now'), datetime('now'))`,
+       (id, sku_prefix, name, wholesale_price, retail_price, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'intake', datetime('now'), datetime('now'))`,
   );
   const insertSku = sqlite.prepare<unknown[]>(
     `INSERT INTO catalog_skus
        (id, product_id, sku, color_name, upc, cost_price,
+        wholesale_price, retail_price,
         reading_power, has_blue_light_filter,
         status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'intake', datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'intake', datetime('now'), datetime('now'))`,
   );
   // The productType tag is what curatedAttrsFromTags() turns into
   // ExportProduct.product.category — without it every reader falls back to
@@ -272,7 +274,7 @@ export async function POST(req: NextRequest) {
 
   const txn = sqlite.transaction(() => {
     for (const p of productInsertPlan) {
-      insertProduct.run(p.id, p.entry.skuPrefix, p.entry.name);
+      insertProduct.run(p.id, p.entry.skuPrefix, p.entry.name, DEFAULT_WHOLESALE_PRICE, DEFAULT_RETAIL_PRICE);
       insertTypeTag.run(p.id, p.entry.type === "reading_glasses" ? "reading" : "sunglasses");
     }
     for (const s of skuInsertPlan) {
@@ -283,6 +285,8 @@ export async function POST(req: NextRequest) {
         s.colorName,
         s.upc,
         s.costPrice,
+        DEFAULT_WHOLESALE_PRICE,
+        DEFAULT_RETAIL_PRICE,
         s.readingPower,
         s.hasBlueLightFilter == null ? null : s.hasBlueLightFilter ? 1 : 0,
       );

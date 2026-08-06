@@ -154,6 +154,7 @@ export function ensureAllToolsRegistered() {
   } catch {}
   // Side-effect registrations
   try { require("@/modules/sales/mcp/tools"); } catch {}
+  try { require("@/modules/sequences/mcp/tools"); } catch {}
   try { require("@/modules/sales/mcp/ajm-tools"); } catch {}
   try { require("@/modules/catalog/mcp/tools"); } catch {}
   try { require("@/modules/catalog/mcp/image-tools"); } catch {}

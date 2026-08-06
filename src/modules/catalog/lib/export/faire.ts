@@ -24,12 +24,14 @@
  */
 import type { ExportProduct, ProductValidationResult, ValidationIssue } from "./types";
 import { catalogImageUrl } from "@/lib/storage/image-url";
+import { DEFAULT_WHOLESALE_PRICE_STR, DEFAULT_RETAIL_PRICE_STR } from "@/modules/catalog/lib/pricing";
 import * as XLSX from "xlsx";
 
 // ── Constants ──
 
-const JAXY_WHOLESALE_PRICE = "8.00";
-const JAXY_RETAIL_PRICE = "28.00";
+// Jaxy standard pricing — single source of truth in lib/pricing.ts
+const JAXY_WHOLESALE_PRICE = DEFAULT_WHOLESALE_PRICE_STR;
+const JAXY_RETAIL_PRICE = DEFAULT_RETAIL_PRICE_STR;
 const JAXY_CASE_SIZE = "3";
 const JAXY_MOQ = "3";
 const JAXY_WEIGHT = "0.10";

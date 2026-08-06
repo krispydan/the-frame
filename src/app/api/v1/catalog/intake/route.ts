@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { products, skus, purchaseOrders } from "@/modules/catalog/schema";
 import { activityFeed } from "@/modules/core/schema";
 import { eq, sql } from "drizzle-orm";
+import { DEFAULT_WHOLESALE_PRICE, DEFAULT_RETAIL_PRICE } from "@/modules/catalog/lib/pricing";
 
 /**
  * Product Intake — create new products from CSV data or manual entry.
@@ -57,8 +58,10 @@ export async function POST(request: NextRequest) {
         // value isn't lost.
         factoryName: item.factoryName || null,
         factorySku: item.factorySku || null,
-        wholesalePrice: item.wholesalePrice || null,
-        retailPrice: item.retailPrice || null,
+        // Jaxy standard pricing is the default for every new product —
+        // an explicit value on the intake row still wins.
+        wholesalePrice: item.wholesalePrice || DEFAULT_WHOLESALE_PRICE,
+        retailPrice: item.retailPrice || DEFAULT_RETAIL_PRICE,
         purchaseOrderId: purchaseOrderId || null,
         status: "intake",
       });
@@ -85,6 +88,8 @@ export async function POST(request: NextRequest) {
             colorHex: v.colorHex || null,
             upc: v.upc || null,
             costPrice: v.costPrice || null,
+            wholesalePrice: DEFAULT_WHOLESALE_PRICE,
+            retailPrice: DEFAULT_RETAIL_PRICE,
             status: "intake",
           });
         }

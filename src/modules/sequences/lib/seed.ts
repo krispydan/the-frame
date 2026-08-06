@@ -95,6 +95,76 @@ export const SEQUENCES: SeedSequence[] = [
       },
     ],
   },
+  {
+    key: "t5-sellthrough",
+    name: "Sell-through check-in",
+    brand: "jaxy",
+    trigger: "T5",
+    class: "relationship",
+    priority: 40,
+    enrollment_mode: "manual",
+    description: "Six weeks after delivery — long enough that 'how is it selling' has a real answer.",
+    steps: [
+      {
+        step_no: 1, delay_days: 0, channel: "faire", send_mode: "review",
+        attachment_key: "outreach/display-guide",
+        body:
+          "Hi {first_name},\n\nHope you are doing great! You have had the sunglasses on the floor about six weeks now, how is it selling? " +
+          "If anything is sitting, please let me know and I can suggest a swap or send over display ideas, sometimes it is just placement. " +
+          "And if something is flying, I would love to know so I can flag it for you before it sells out." + SIGNOFF,
+      },
+    ],
+  },
+  {
+    key: "t6-winback",
+    name: "Lapsed win-back",
+    brand: "jaxy",
+    trigger: "T6",
+    class: "nudge",
+    priority: 50,
+    enrollment_mode: "manual",
+    description: "Past 1.5x their normal reorder gap. Asks what happened rather than assuming.",
+    steps: [
+      {
+        step_no: 1, delay_days: 0, channel: "faire", send_mode: "review",
+        attachment_key: "outreach/linesheet",
+        body:
+          "Hi {first_name},\n\nHope you are doing great! It has been a while since your last order and I wanted to check in rather than assume. " +
+          "If the sunglasses did not move the way you hoped, I would really like to know. If they did and it just slipped by, " +
+          "I am happy to rebuild your last order for you, and we have NEW styles and READERS since you last ordered!" + SIGNOFF,
+      },
+      {
+        step_no: 2, delay_days: 10, channel: "call", send_mode: "task",
+        task_note: "Follow up on the win-back message. Ask what changed, and whether a smaller opening order would work.",
+        body: "Call: lapsed account follow-up. Ask what changed; offer to rebuild their last order.",
+      },
+    ],
+  },
+  {
+    key: "t2-campaign",
+    name: "Campaign / market push",
+    brand: "jaxy",
+    trigger: "T2",
+    class: "nudge",
+    priority: 30,
+    enrollment_mode: "manual",
+    description: "Manual or segment enrollment for a market, drop or promo. One send plus a reminder.",
+    steps: [
+      {
+        step_no: 1, delay_days: 0, channel: "faire", send_mode: "review",
+        attachment_key: "outreach/linesheet",
+        body:
+          "Hi {first_name},\n\nHope you are doing great! I wanted to make sure you saw what we have running right now. " +
+          "I am attaching our linesheet, and please let me know if you would like more details or a fill-in order." + SIGNOFF,
+      },
+      {
+        step_no: 2, delay_days: 5, channel: "faire", send_mode: "review",
+        body:
+          "Hi {first_name},\n\nHope you are doing great! Just a quick reminder before this one closes. " +
+          "Please let me know if you would like me to put an order together for you." + SIGNOFF,
+      },
+    ],
+  },
 ];
 
 export function seedSequences(): { created: number; updated: number; steps: number } {
