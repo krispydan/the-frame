@@ -810,6 +810,47 @@ export function pbOwnerFor(rep: PbRep): string | null {
   return pbGetSetting(PB_ACCOUNTS[rep].ownerSetting);
 }
 
+/** Display names for the reps, for anywhere a human reads the result. */
+const REP_LABELS: Record<PbRep, string> = {
+  sandra: "Sandra",
+  christina: "Christina",
+};
+
+/**
+ * Work out which rep placed a call, from what PhoneBurner stamps on it.
+ *
+ * Order matters. owner_id is checked FIRST because the two reps normally share
+ * one PhoneBurner account and are distinguished only by owner — in that setup
+ * agent_email is the same for both and would name the wrong person. The email
+ * fallback covers the separate-account case (and older rows logged before
+ * agent_id was captured).
+ *
+ * Returns null rather than guessing when neither signal matches: "Sandra" on a
+ * call Christina made is worse than no attribution at all, since the point of
+ * showing it is knowing who to ask about the lead.
+ */
+export function resolveCallerRep(
+  agentId: string | null | undefined,
+  agentEmail: string | null | undefined,
+): { rep: PbRep; label: string } | null {
+  const id = (agentId ?? "").trim();
+  if (id) {
+    for (const rep of Object.keys(PB_ACCOUNTS) as PbRep[]) {
+      const owner = pbGetSetting(PB_ACCOUNTS[rep].ownerSetting);
+      if (owner && owner.trim() === id) return { rep, label: REP_LABELS[rep] };
+    }
+  }
+
+  const email = (agentEmail ?? "").toLowerCase();
+  if (email) {
+    for (const rep of Object.keys(PB_ACCOUNTS) as PbRep[]) {
+      if (email.includes(rep)) return { rep, label: REP_LABELS[rep] };
+    }
+  }
+
+  return null;
+}
+
 /** All configured accounts (Christina only if her key is set). Used by the call
  *  poller so BOTH callers' call results sync into the frame. */
 export function phoneBurnerAccounts(): Array<{ rep: PbRep; client: PhoneBurnerClient; ownerSetting: string }> {
