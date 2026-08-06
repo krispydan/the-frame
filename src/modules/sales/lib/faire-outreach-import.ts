@@ -32,11 +32,15 @@ export interface ImportContact {
 export interface ImportSkip {
   retailer_token: string;
   retailer?: string;
+  state?: string;
+  city?: string;
   reason?: string;
 }
 export interface ImportSend {
   retailer_token: string;
   retailer?: string;
+  state?: string;
+  city?: string;
   status: string;           // sent | left_unsent | skipped | redirected | …
   at?: string;              // ISO timestamp
   message?: string;
@@ -66,33 +70,86 @@ const norm = (s: string | undefined | null): string =>
  * table scans in a single request — it timed the endpoint out. One pass to
  * build two maps turns each lookup into a hash hit.
  */
+/**
+ * State normalization. companies.state is inconsistent — ~93k rows use "CA",
+ * ~136k use "California". Comparing raw strings made every tie-break fail.
+ */
+const STATE_ABBR: Record<string, string> = {
+  alabama: "AL", alaska: "AK", arizona: "AZ", arkansas: "AR", california: "CA", colorado: "CO",
+  connecticut: "CT", delaware: "DE", "district of columbia": "DC", florida: "FL", georgia: "GA",
+  hawaii: "HI", idaho: "ID", illinois: "IL", indiana: "IN", iowa: "IA", kansas: "KS", kentucky: "KY",
+  louisiana: "LA", maine: "ME", maryland: "MD", massachusetts: "MA", michigan: "MI", minnesota: "MN",
+  mississippi: "MS", missouri: "MO", montana: "MT", nebraska: "NE", nevada: "NV",
+  "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+  "north carolina": "NC", "north dakota": "ND", ohio: "OH", oklahoma: "OK", oregon: "OR",
+  pennsylvania: "PA", "rhode island": "RI", "south carolina": "SC", "south dakota": "SD",
+  tennessee: "TN", texas: "TX", utah: "UT", vermont: "VT", virginia: "VA", washington: "WA",
+  "west virginia": "WV", wisconsin: "WI", wyoming: "WY",
+  // Canada (Faire retailers include CA provinces)
+  alberta: "AB", "british columbia": "BC", manitoba: "MB", "new brunswick": "NB",
+  "newfoundland and labrador": "NL", "nova scotia": "NS", ontario: "ON",
+  "prince edward island": "PE", quebec: "QC", saskatchewan: "SK",
+};
+const normState = (s: string | null | undefined): string => {
+  const t = (s || "").trim();
+  if (!t) return "";
+  if (t.length === 2) return t.toUpperCase();
+  return STATE_ABBR[t.toLowerCase()] || t.toUpperCase();
+};
+const normCity = (s: string | null | undefined): string =>
+  (s || "").toLowerCase().replace(/[^a-z\s]/g, "").replace(/\s+/g, " ").trim();
+
+// Which duplicate row to prefer when the SAME shop exists more than once.
+// Higher = better: a customer record beats an unqualified scrape.
+const STATUS_RANK: Record<string, number> = {
+  customer: 100, interested: 80, catalog_sent: 70, qualified_lead: 60, qualified: 55,
+  revisit_later: 40, prospect: 30, ghosted: 10, not_interested: 5, not_qualified: 1,
+};
+
+interface IndexRow { id: string; state: string; city: string; rank: number }
 interface MatchIndex {
-  byToken: Map<string, string>;                                   // r_… -> company id
-  byName: Map<string, Array<{ id: string; state: string }>>;      // normalized name -> rows
+  byToken: Map<string, string>;              // r_… -> company id
+  byName: Map<string, IndexRow[]>;           // normalized name -> rows
 }
 
 function buildIndex(): MatchIndex {
   const byToken = new Map<string, string>();
-  const byName = new Map<string, Array<{ id: string; state: string }>>();
+  const byName = new Map<string, IndexRow[]>();
   const rows = sqlite
-    .prepare("SELECT id, name, state, faire_retailer_id FROM companies")
-    .all() as Array<{ id: string; name: string | null; state: string | null; faire_retailer_id: string | null }>;
+    .prepare("SELECT id, name, state, city, status, faire_retailer_id FROM companies")
+    .all() as Array<{ id: string; name: string | null; state: string | null; city: string | null; status: string | null; faire_retailer_id: string | null }>;
   for (const r of rows) {
     if (r.faire_retailer_id) byToken.set(r.faire_retailer_id, r.id);
     const n = norm(r.name);
     if (!n || n.length < 3) continue;
+    const entry: IndexRow = {
+      id: r.id,
+      state: normState(r.state),
+      city: normCity(r.city),
+      rank: STATUS_RANK[r.status || ""] ?? 20,
+    };
     const list = byName.get(n);
-    const entry = { id: r.id, state: (r.state || "").toUpperCase() };
     if (list) list.push(entry);
     else byName.set(n, [entry]);
   }
   return { byToken, byName };
 }
 
-/** Resolve a campaign contact to a company id, conservatively. */
+/**
+ * Resolve a campaign contact to a company id.
+ *
+ * Same-name rows are one of two very different things:
+ *   - the SAME shop duplicated in our data (same city/state, e.g. "Terston"
+ *     appears twice, both Kent CT) -> safe to pick the best row;
+ *   - genuinely DIFFERENT shops sharing a name ("Bella Boutique" in Ottawa vs
+ *     Keller TX) -> must refuse rather than guess.
+ * Location is what separates them, so that's the rule: narrow by state, then
+ * city; if what remains is all one location, take the best-status row,
+ * otherwise refuse.
+ */
 function resolveCompany(
   idx: MatchIndex,
-  c: { retailer_token?: string; retailer?: string; state?: string },
+  c: { retailer_token?: string; retailer?: string; state?: string; city?: string },
 ): { id: string | null; how: "token" | "name" | null } {
   if (c.retailer_token) {
     const hit = idx.byToken.get(c.retailer_token);
@@ -101,14 +158,32 @@ function resolveCompany(
   const n = norm(c.retailer);
   if (!n || n.length < 3) return { id: null, how: null };
 
-  const exact = idx.byName.get(n);
-  if (!exact || !exact.length) return { id: null, how: null };
-  if (exact.length === 1) return { id: exact[0].id, how: "name" };
-  // Ambiguous on name alone — only state can break the tie, else refuse.
-  const wantState = c.state?.toUpperCase();
+  let cands = idx.byName.get(n);
+  if (!cands || !cands.length) return { id: null, how: null };
+  if (cands.length === 1) return { id: cands[0].id, how: "name" };
+
+  // Narrow by state, then city. A row that POSITIVELY matches the location
+  // beats one that merely lacks contradicting data — a confirmed Oregon shop
+  // is a better link than a duplicate with no address at all. Only fall back
+  // to keeping blanks when nothing positively matches.
+  const wantState = normState(c.state);
   if (wantState) {
-    const byState = exact.filter((x) => x.state === wantState);
-    if (byState.length === 1) return { id: byState[0].id, how: "name" };
+    const hit = cands.filter((x) => x.state === wantState);
+    cands = hit.length ? hit : cands.filter((x) => !x.state).length ? cands.filter((x) => !x.state) : cands;
+  }
+  const wantCity = normCity(c.city);
+  if (cands.length > 1 && wantCity) {
+    const hit = cands.filter((x) => x.city === wantCity);
+    cands = hit.length ? hit : cands.filter((x) => !x.city).length ? cands.filter((x) => !x.city) : cands;
+  }
+  if (cands.length === 1) return { id: cands[0].id, how: "name" };
+
+  // Still several. If they're all the same place, it's one shop duplicated —
+  // take the richest record. If they sit in different places, refuse.
+  const places = new Set(cands.filter((x) => x.state || x.city).map((x) => `${x.state}|${x.city}`));
+  if (places.size <= 1) {
+    const best = cands.reduce((a, b) => (b.rank > a.rank ? b : a));
+    return { id: best.id, how: "name" };
   }
   return { id: null, how: null };
 }
