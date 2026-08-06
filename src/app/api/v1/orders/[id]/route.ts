@@ -221,11 +221,36 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     }
   }
 
-  // The customer account for this order's company — lets the page link to
-  // /customers/[accountId] (the customer show page keys on account id).
-  const customerAccountId = order.companyId
-    ? ((sqlite.prepare("SELECT id FROM customer_accounts WHERE company_id = ?").get(order.companyId) as { id: string } | undefined)?.id ?? null)
+  // The customer account for this order's company — link target for
+  // /customers/[accountId], plus a small snapshot (tier / health / LTV /
+  // order count) so the page's Customer card gives sales real context.
+  const customerSnapshot = order.companyId
+    ? ((sqlite.prepare(
+        `SELECT id, tier, health_status AS healthStatus, lifetime_value AS lifetimeValue, total_orders AS totalOrders
+         FROM customer_accounts WHERE company_id = ?`,
+      ).get(order.companyId) as { id: string; tier: string; healthStatus: string; lifetimeValue: number; totalOrders: number } | undefined) ?? null)
     : null;
+  const customerAccountId = customerSnapshot?.id ?? null;
+
+  // Thumbnails for the line-items table: best approved catalog image per SKU.
+  const thumbBySku = new Map<string, string>();
+  if (skuStrings.length) {
+    const placeholders = skuStrings.map(() => "?").join(",");
+    const rows = sqlite.prepare(
+      `SELECT cs.sku AS sku, i.url AS url
+       FROM catalog_skus cs
+       JOIN catalog_images i ON i.sku_id = cs.id
+       WHERE cs.sku IN (${placeholders}) AND i.status = 'approved' AND i.url IS NOT NULL
+       ORDER BY i.is_best DESC, i.position ASC`,
+    ).all(...skuStrings) as Array<{ sku: string; url: string }>;
+    for (const r of rows) {
+      if (!thumbBySku.has(r.sku)) thumbBySku.set(r.sku, r.url);
+    }
+  }
+  const itemsWithThumbs = itemsWithProfit.map((it) => ({
+    ...it,
+    thumbnailUrl: it.sku ? thumbBySku.get(it.sku) ?? null : null,
+  }));
 
   const pdBase = getPipedriveConnectionStatus().apiDomain ?? null;
   const pipedrive = pdBase
@@ -242,7 +267,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     company: company ? { ...company, segment: companySegment || company.segment || null } : null,
     pipedrive,
     contact,
-    items: itemsWithProfit,
+    items: itemsWithThumbs,
     returns: orderReturns,
     timeline,
     externalUrl,
@@ -252,6 +277,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     threePl,
     threePlEstimate,
     customerAccountId,
+    customerSnapshot,
     profit: {
       itemsRevenue,
       totalCost: totalCostKnown ? totalCost : null,

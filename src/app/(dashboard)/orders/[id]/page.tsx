@@ -24,6 +24,10 @@ import {
   StickyNote,
   RefreshCw,
   Layers3,
+  Copy,
+  Check,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 
 // ── Types ──
@@ -98,6 +102,8 @@ interface OrderDetail {
     /** "fifo" = landed cost from inventory layers (authoritative);
      *  "catalog" = static catalog cost fallback, marked with * in the UI. */
     costSource: "fifo" | "catalog" | null;
+    /** Best approved catalog image for the SKU (R2 CDN), for the thumbnail. */
+    thumbnailUrl: string | null;
     colorName: string | null;
     quantity: number;
     unitPrice: number;
@@ -123,6 +129,8 @@ interface OrderDetail {
   threePlEstimate: { fulfillment: number; postage: number; total: number; shippingMargin: number } | null;
   /** Customer account id for the order's company → /customers/[id]. */
   customerAccountId: string | null;
+  /** Who this customer is to us — tier / health / LTV / order count. */
+  customerSnapshot: { id: string; tier: string; healthStatus: string; lifetimeValue: number; totalOrders: number } | null;
   returns: Array<{
     id: string;
     reason: string | null;
@@ -144,6 +152,55 @@ interface OrderDetail {
 /** "$4.19", negatives as "-$3.50" (used by the 3PL cost card). */
 function fmtCurrency(n: number): string {
   return `${n < 0 ? "-" : ""}$${Math.abs(n).toFixed(2)}`;
+}
+
+/**
+ * One computation of the order's bottom line, shared by the hero and the
+ * Financials card so the two can never disagree. 3PL basis is actual
+ * (invoice) or estimated (rate card) — exactly one, never mixed.
+ */
+function orderProfitSummary(order: OrderDetail): {
+  basis: "actual" | "estimated" | null;
+  cogs: number | null;
+  tplTotal: number;
+  netProfit: number | null;
+  netMarginPct: number | null;
+} {
+  const tpl = order.threePl;
+  const est = order.threePlEstimate;
+  const basis: "actual" | "estimated" | null = tpl ? "actual" : est ? "estimated" : null;
+  const tplTotal = tpl?.total ?? est?.total ?? 0;
+  const cogs = order.profit?.hasFullCostData ? order.profit.totalCost : null;
+  const netProfit = cogs != null && basis ? order.subtotal + order.shipping - cogs - tplTotal : null;
+  return {
+    basis,
+    cogs,
+    tplTotal,
+    netProfit,
+    netMarginPct: netProfit != null && order.subtotal > 0 ? (netProfit / order.subtotal) * 100 : null,
+  };
+}
+
+/** Click-to-copy for order numbers / tracking numbers — ops paste these all day. */
+function CopyButton({ text, label }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        navigator.clipboard?.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+      title={copied ? "Copied!" : `Copy ${label ?? text}`}
+      className="inline-flex items-center text-muted-foreground hover:text-foreground align-middle"
+      aria-label={`Copy ${label ?? text}`}
+    >
+      {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  );
 }
 
 const channelConfig: Record<string, { label: string; color: string }> = {
@@ -278,6 +335,8 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   const [showReturnForm, setShowReturnForm] = useState(false);
   const [returnReason, setReturnReason] = useState("");
   const [returnItems, setReturnItems] = useState<Record<string, number>>({});
+  // FIFO cost-layer detail, collapsed under the Financials COGS row.
+  const [showFifo, setShowFifo] = useState(false);
   const [submittingReturn, setSubmittingReturn] = useState(false);
   const backHref = searchParams.toString() ? `/orders?${searchParams.toString()}` : "/orders";
 
@@ -379,7 +438,10 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           {/* Order info + external links */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-2xl font-bold">{order.orderNumber}</h1>
+              <h1 className="text-2xl font-bold inline-flex items-center gap-2">
+                {order.orderNumber}
+                <CopyButton text={order.orderNumber.replace(/^#/, "")} label="order number" />
+              </h1>
               <StatusBadge status={order.status} size="lg" />
               <ChannelBadge channel={order.channel} />
             </div>
@@ -425,20 +487,69 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             </div>
           </div>
 
-          {/* Hero number — Revenue. Gross Profit lives in the line-items
-              totals where it accounts for shipping/discounts; surfacing it
-              here was misleading because the hero figure didn't include
-              all the costs the bottom calculation does. */}
-          <div className="flex items-stretch gap-4 sm:gap-6 lg:border-l lg:pl-6 shrink-0">
-            <div className="text-right">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Revenue</p>
-              <p className="text-3xl sm:text-4xl font-bold tabular-nums mt-1">
-                ${order.total.toFixed(2)}
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">{order.currency}</p>
-            </div>
-          </div>
+          {/* Hero numbers — Order Total (what the customer paid, incl.
+              shipping + tax; the old "Revenue" label was wrong for that) and
+              Net Profit from the same computation the Financials card uses. */}
+          {(() => {
+            const ps = orderProfitSummary(order);
+            return (
+              <div className="flex items-stretch gap-4 sm:gap-6 lg:border-l lg:pl-6 shrink-0">
+                <div className="text-right">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium">Order Total</p>
+                  <p className="text-3xl sm:text-4xl font-bold tabular-nums mt-1">
+                    ${order.total.toFixed(2)}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{order.currency}</p>
+                </div>
+                <div className="text-right border-l pl-4 sm:pl-6">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium inline-flex items-center gap-1.5">
+                    Net Profit
+                    {ps.basis === "estimated" && (
+                      <span className="px-1 py-0 rounded text-[9px] font-semibold bg-amber-100 text-amber-700" title="3PL costs estimated from the contract rate card — becomes actual when the month's invoice imports">EST</span>
+                    )}
+                  </p>
+                  <p className={`text-3xl sm:text-4xl font-bold tabular-nums mt-1 ${ps.netProfit == null ? "text-muted-foreground" : ps.netProfit >= 0 ? "text-green-600" : "text-red-600"}`}>
+                    {ps.netProfit != null ? fmtCurrency(ps.netProfit) : "—"}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {ps.netProfit != null && ps.netMarginPct != null ? `${ps.netMarginPct.toFixed(0)}% of revenue` : "needs COGS"}
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
         </div>
+
+        {/* Status stepper — the #1 question on an ops page, so it lives in the
+            hero instead of two-thirds down the sidebar. Cancelled/returned
+            orders get a flat banner (they're off the pipeline). */}
+        {order.status === "cancelled" || order.status === "returned" ? (
+          <div className={`border-t px-6 py-2.5 text-sm font-medium ${order.status === "cancelled" ? "bg-gray-50 text-gray-600 dark:bg-gray-900" : "bg-red-50 text-red-700 dark:bg-red-950"}`}>
+            {order.status === "cancelled" ? "This order was cancelled." : "This order was returned."}
+          </div>
+        ) : (
+          <div className="border-t px-6 py-3 overflow-x-auto">
+            <ol className="flex items-center min-w-max">
+              {statusPipeline.map((s, i) => {
+                const reachedIdx = statusPipeline.indexOf(order.status);
+                const reached = reachedIdx >= i;
+                const isCurrent = order.status === s;
+                const ts = s === "shipped" ? order.shippedAt : s === "delivered" ? order.deliveredAt : null;
+                return (
+                  <li key={s} className="flex items-center">
+                    {i > 0 && <div className={`h-0.5 w-6 sm:w-10 ${reached ? "bg-green-500" : "bg-gray-200 dark:bg-gray-700"}`} />}
+                    <div className="flex flex-col items-center px-1" title={ts ? new Date(ts).toLocaleString() : undefined}>
+                      <div className={`w-3 h-3 rounded-full border-2 ${isCurrent ? "bg-green-500 border-green-500 ring-2 ring-green-200" : reached ? "bg-green-500 border-green-500" : "bg-background border-gray-300 dark:border-gray-600"}`} />
+                      <span className={`mt-1 text-[10px] sm:text-xs ${isCurrent ? "font-semibold text-foreground" : reached ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
+                        {statusConfig[s]?.label ?? s}
+                      </span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
+        )}
 
         {/* Secondary metrics strip — smaller, supporting info */}
         <div className="grid grid-cols-2 sm:grid-cols-3 border-t divide-x">
@@ -518,14 +629,27 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                     return (
                       <tr key={item.id} className="hover:bg-muted/30">
                         <td className="px-6 py-3">
-                          {skuPrefix ? (
-                            <Link href={`/catalog/${skuPrefix}`} className="font-medium hover:underline">
-                              {item.productName}
-                            </Link>
-                          ) : (
-                            <span className="font-medium">{item.productName}</span>
-                          )}
-                          {item.colorName && <p className="text-muted-foreground text-xs">{item.colorName}</p>}
+                          <div className="flex items-center gap-2.5">
+                            {item.thumbnailUrl && (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={item.thumbnailUrl}
+                                alt=""
+                                loading="lazy"
+                                className="w-8 h-8 rounded object-cover border shrink-0 bg-muted"
+                              />
+                            )}
+                            <div className="min-w-0">
+                              {skuPrefix ? (
+                                <Link href={`/catalog/${skuPrefix}`} className="font-medium hover:underline">
+                                  {item.productName}
+                                </Link>
+                              ) : (
+                                <span className="font-medium">{item.productName}</span>
+                              )}
+                              {item.colorName && <p className="text-muted-foreground text-xs">{item.colorName}</p>}
+                            </div>
+                          </div>
                         </td>
                         <td className="px-3 py-3 font-mono text-xs text-muted-foreground">
                           {item.sku ? (
@@ -616,8 +740,11 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                 Fulfillment
               </h2>
 
-              {/* Top-level tracking from order record */}
-              {(order.trackingNumber || order.shippedAt || order.deliveredAt) && (
+              {/* Top-level tracking from order record. Skipped when a ShipHero
+                  shipment below already carries the same number — showing it
+                  twice added nothing. */}
+              {(order.trackingNumber || order.shippedAt || order.deliveredAt) &&
+               !(order.trackingNumber && order.shipments?.some((s) => (s as { tracking_number?: string | null }).tracking_number === order.trackingNumber)) && (
                 <div className="bg-muted/30 rounded-lg p-4 text-sm grid grid-cols-2 gap-3">
                   {order.trackingCarrier && (
                     <div>
@@ -628,7 +755,10 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                   {order.trackingNumber && (
                     <div>
                       <p className="text-muted-foreground">Tracking #</p>
-                      <p className="font-medium font-mono">{order.trackingNumber}</p>
+                      <p className="font-medium font-mono inline-flex items-center gap-1.5">
+                        {order.trackingNumber}
+                        <CopyButton text={order.trackingNumber} label="tracking number" />
+                      </p>
                     </div>
                   )}
                   {order.shippedAt && (
@@ -688,8 +818,10 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                 </div>
               )}
 
-              {/* Fulfillment costs */}
-              {order.fulfillmentCosts?.length > 0 && (
+              {/* Legacy ShipHero invoice costs — superseded by the Big Sky 3PL
+                  import. Only shown when the order has NO 3PL invoice data,
+                  so two different cost sources never appear side by side. */}
+              {!order.threePl && order.fulfillmentCosts?.length > 0 && (
                 <div>
                   <h3 className="text-sm font-medium text-muted-foreground mb-2">Fulfillment Costs</h3>
                   <div className="border rounded-lg overflow-hidden">
@@ -827,8 +959,6 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           {/* International shipping (only renders for non-US Faire orders) */}
           <OrderIntlShippingCard orderId={order.id} />
 
-          {/* COGS / Costing */}
-          <OrderCogsCard orderId={order.id} />
 
           {/* ── Financials — the order's full economics in one place.
               3PL costs are ACTUAL (Big Sky invoice) or ESTIMATED (contract
@@ -836,17 +966,12 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           {(() => {
             const tpl = order.threePl;
             const est = order.threePlEstimate;
-            const basis: "actual" | "estimated" | null = tpl ? "actual" : est ? "estimated" : null;
             const fulfillment = tpl?.fulfillment ?? est?.fulfillment ?? 0;
             const postage = tpl?.postage ?? est?.postage ?? 0;
             const other = tpl?.other ?? 0;
-            const tplTotal = tpl?.total ?? est?.total ?? 0;
             const shipMargin = tpl?.shippingMargin ?? est?.shippingMargin ?? order.shipping;
-            const cogs = order.profit?.hasFullCostData ? order.profit.totalCost : null;
-            const netProfit = cogs != null && basis
-              ? order.subtotal + order.shipping - cogs - tplTotal
-              : null;
-            const netMargin = netProfit != null && order.subtotal > 0 ? (netProfit / order.subtotal) * 100 : null;
+            // Shared with the hero so the two can never disagree.
+            const { basis, cogs, netProfit, netMarginPct: netMargin } = orderProfitSummary(order);
             const shipDetail = tpl?.charges.find((c) => c.chargeType.startsWith("shipping_") && c.amount > 0);
             return (
               <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
@@ -872,9 +997,24 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                     <span className="text-muted-foreground">Shipping charged</span>
                     <span className="tabular-nums">{fmtCurrency(order.shipping)}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Product COGS</span>
-                    <span className="tabular-nums">{cogs != null ? <>−{fmtCurrency(cogs)}</> : <span className="text-amber-600 text-xs">incomplete</span>}</span>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowFifo((v) => !v)}
+                      className="w-full flex justify-between items-center group"
+                      title="Show FIFO cost-layer detail"
+                    >
+                      <span className="text-muted-foreground inline-flex items-center gap-0.5 group-hover:text-foreground">
+                        {showFifo ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                        Product COGS
+                      </span>
+                      <span className="tabular-nums">{cogs != null ? <>−{fmtCurrency(cogs)}</> : <span className="text-amber-600 text-xs">incomplete</span>}</span>
+                    </button>
+                    {showFifo && (
+                      <div className="mt-2 mb-1 pl-3.5 border-l">
+                        <FifoCostDetail orderId={order.id} />
+                      </div>
+                    )}
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Fulfillment labor{basis === "estimated" ? " (est.)" : ""}</span>
@@ -915,54 +1055,23 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             );
           })()}
 
-          {/* Status Timeline (compact) */}
-          <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
-            <h2 className="text-base font-semibold mb-3">Status</h2>
-            <ol className="relative border-l border-gray-200 dark:border-gray-700 ml-2.5">
-              {statusPipeline.map((s, i) => {
-                const reached = statusPipeline.indexOf(order.status) >= i;
-                const isCurrent = order.status === s;
-                const isLast = i === statusPipeline.length - 1;
-                return (
-                  <li key={s} className={`ml-5 ${isLast ? "" : "mb-3"}`}>
-                    <span className={`absolute flex items-center justify-center w-5 h-5 rounded-full -left-2.5 ring-4 ring-white dark:ring-gray-800 ${
-                      isCurrent ? "bg-primary text-primary-foreground" : reached ? "bg-green-500 text-white" : "bg-gray-200 dark:bg-gray-600"
-                    }`}>
-                      {reached && !isCurrent ? (
-                        <CheckCircle2 className="h-3 w-3" />
-                      ) : (
-                        <span className="text-[10px] font-bold">{i + 1}</span>
-                      )}
-                    </span>
-                    <p className={`text-xs font-medium ${isCurrent ? "text-foreground" : reached ? "text-green-600" : "text-muted-foreground"}`}>
-                      {statusConfig[s]?.label || s}
-                    </p>
-                    {s === "shipped" && order.shippedAt && (
-                      <time className="text-[11px] text-muted-foreground">{new Date(order.shippedAt).toLocaleDateString()}</time>
-                    )}
-                    {s === "delivered" && order.deliveredAt && (
-                      <time className="text-[11px] text-muted-foreground">{new Date(order.deliveredAt).toLocaleDateString()}</time>
-                    )}
-                    {s === "pending" && order.placedAt && (
-                      <time className="text-[11px] text-muted-foreground">{new Date(order.placedAt).toLocaleDateString()}</time>
-                    )}
-                  </li>
-                );
-              })}
-              {["cancelled", "returned"].includes(order.status) && (
-                <li className="ml-5">
-                  <span className="absolute flex items-center justify-center w-5 h-5 rounded-full -left-2.5 ring-4 ring-white dark:ring-gray-800 bg-red-500 text-white">
-                    <XCircle className="h-3 w-3" />
-                  </span>
-                  <p className="text-xs font-medium text-red-600">{statusConfig[order.status]?.label}</p>
-                </li>
-              )}
-            </ol>
-          </div>
-
-          {/* Customer */}
+          {/* Customer — who they are AND what they're worth to us (tier /
+              health / LTV snapshot), with the CRM links folded in. */}
           <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
             <h2 className="text-base font-semibold mb-3">Customer</h2>
+            {order.customerSnapshot && (
+              <div className="flex flex-wrap items-center gap-1.5 mb-3 text-xs">
+                <span className={`px-1.5 py-0.5 rounded font-medium capitalize ${
+                  { platinum: "bg-purple-100 text-purple-700", gold: "bg-yellow-100 text-yellow-700", silver: "bg-gray-100 text-gray-600", bronze: "bg-orange-100 text-orange-700" }[order.customerSnapshot.tier] ?? "bg-gray-100"
+                }`}>{order.customerSnapshot.tier}</span>
+                <span className={`px-1.5 py-0.5 rounded font-medium ${
+                  { healthy: "bg-green-100 text-green-700", at_risk: "bg-amber-100 text-amber-700", churning: "bg-red-100 text-red-700", churned: "bg-gray-200 text-gray-600" }[order.customerSnapshot.healthStatus] ?? "bg-gray-100"
+                }`}>{order.customerSnapshot.healthStatus.replace("_", " ")}</span>
+                <span className="text-muted-foreground">
+                  ${Math.round(order.customerSnapshot.lifetimeValue).toLocaleString()} LTV · {order.customerSnapshot.totalOrders} order{order.customerSnapshot.totalOrders === 1 ? "" : "s"}
+                </span>
+              </div>
+            )}
             <div className="space-y-2 text-sm">
               <div className="flex items-start gap-2">
                 <Building2 className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
@@ -1015,37 +1124,23 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                   </div>
                 </div>
               )}
+              {/* Pipedrive links, folded in (used to be their own card) */}
+              {order.pipedrive && (order.pipedrive.dealUrl || order.pipedrive.orgUrl || order.pipedrive.personUrl) && (
+                <div className="flex flex-wrap gap-x-3 gap-y-1 pt-2 border-t text-xs">
+                  <span className="text-muted-foreground inline-flex items-center gap-1"><span className="text-green-600">●</span> Pipedrive:</span>
+                  {order.pipedrive.dealUrl && (
+                    <a href={order.pipedrive.dealUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">deal</a>
+                  )}
+                  {order.pipedrive.orgUrl && (
+                    <a href={order.pipedrive.orgUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">organization</a>
+                  )}
+                  {order.pipedrive.personUrl && (
+                    <a href={order.pipedrive.personUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">contact</a>
+                  )}
+                </div>
+              )}
             </div>
           </div>
-
-          {/* Pipedrive — deep links to the CRM record */}
-          {order.pipedrive && (order.pipedrive.dealUrl || order.pipedrive.orgUrl || order.pipedrive.personUrl) && (
-            <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
-              <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
-                <span className="text-green-600">●</span> Pipedrive
-              </h2>
-              <div className="space-y-2 text-sm">
-                {order.pipedrive.dealUrl && (
-                  <a href={order.pipedrive.dealUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-blue-600 hover:underline w-full">
-                    <ExternalLink className="h-3.5 w-3.5" /> View deal
-                  </a>
-                )}
-                {order.pipedrive.orgUrl && (
-                  <a href={order.pipedrive.orgUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-blue-600 hover:underline w-full">
-                    <Building2 className="h-3.5 w-3.5" /> View organization
-                  </a>
-                )}
-                {order.pipedrive.personUrl && (
-                  <a href={order.pipedrive.personUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-blue-600 hover:underline w-full">
-                    <User className="h-3.5 w-3.5" /> View contact
-                  </a>
-                )}
-                {!order.pipedrive.dealUrl && (
-                  <p className="text-xs text-muted-foreground">No deal linked yet — created on the next Pipedrive sync.</p>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* Faire details (channel-specific) */}
           {order.channel === "faire" && (
@@ -1208,7 +1303,13 @@ const COGS_EXC_LABEL: Record<string, string> = {
   unmapped_sku: "Unmapped SKU",
 };
 
-function OrderCogsCard({ orderId }: { orderId: string }) {
+/**
+ * FIFO cost-layer detail — rendered inside the Financials card behind the
+ * Product COGS disclosure (it used to be its own "Costing (FIFO)" sidebar
+ * card, which made the money story read from two places). Lazy: fetches on
+ * first expand.
+ */
+function FifoCostDetail({ orderId }: { orderId: string }) {
   const [data, setData] = useState<OrderCogsData | null>(null);
   const [err, setErr] = useState(false);
 
@@ -1221,14 +1322,14 @@ function OrderCogsCard({ orderId }: { orderId: string }) {
     return () => { active = false; };
   }, [orderId]);
 
-  if (err) return null;
+  if (err) return <p className="text-xs text-muted-foreground">FIFO detail unavailable.</p>;
   const money = (n: number) => `$${n.toFixed(2)}`;
   const badge = data ? (COGS_STATUS[data.status] ?? COGS_STATUS.pending) : null;
 
   return (
-    <div className="bg-white dark:bg-gray-800 border rounded-lg p-6">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold">Costing (FIFO)</h2>
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-medium text-muted-foreground">FIFO cost layers</span>
         {badge && <span className={`px-2 py-0.5 rounded text-xs font-medium ${badge.cls}`}>{badge.label}</span>}
       </div>
 
