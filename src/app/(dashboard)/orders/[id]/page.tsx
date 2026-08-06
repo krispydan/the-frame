@@ -538,11 +538,17 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                         </td>
                         <td className="px-3 py-3 text-center">{item.quantity}</td>
                         <td className="px-3 py-3 text-right">${item.unitPrice.toFixed(2)}</td>
+                        {/* LINE cost (× qty) — Profit and Total are line-level,
+                            so Cost must be too; a per-unit figure here read as
+                            "4 units cost $1.42". Per-unit lives in the tooltip. */}
                         <td
                           className="px-3 py-3 text-right text-muted-foreground"
-                          title={item.costSource === "fifo" ? "FIFO landed cost (actual inventory layers)" : item.costSource === "catalog" ? "Catalog cost — this line hasn't been FIFO-costed yet" : undefined}
+                          title={[
+                            item.unitCost != null ? `$${item.unitCost.toFixed(2)}/unit` : null,
+                            item.costSource === "fifo" ? "FIFO landed cost (actual inventory layers)" : item.costSource === "catalog" ? "Catalog cost — this line hasn't been FIFO-costed yet" : null,
+                          ].filter(Boolean).join(" · ") || undefined}
                         >
-                          {item.unitCost != null ? `$${item.unitCost.toFixed(2)}` : "—"}
+                          {item.lineCost != null ? `$${item.lineCost.toFixed(2)}` : "—"}
                           {item.costSource === "catalog" && <span className="text-amber-600 align-top text-[10px]" title="Catalog cost — not yet FIFO-costed">*</span>}
                         </td>
                         <td className={`px-3 py-3 text-right font-medium ${item.lineProfit != null ? (item.lineProfit >= 0 ? "text-green-600" : "text-red-600") : "text-muted-foreground"}`}>
