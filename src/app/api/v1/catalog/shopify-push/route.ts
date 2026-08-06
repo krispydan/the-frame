@@ -17,6 +17,9 @@ import { syncProductMetafields } from "@/modules/catalog/lib/shopify-metafields/
 import { syncProductDimensions } from "@/modules/catalog/lib/shopify-metafields/dimensions";
 import type { AiCategorizationOutput } from "@/modules/catalog/lib/shopify-metafields/handles";
 import { buildVariantTitle } from "@/modules/catalog/lib/prompt-engine";
+import { isReadingProduct, variantSkus } from "@/modules/catalog/lib/export/types";
+import { strengthLabel } from "@/modules/catalog/lib/reading-glasses";
+import { wholesaleOrDefault, retailOrDefault } from "@/modules/catalog/lib/pricing";
 
 /**
  * POST /api/v1/catalog/shopify-push
@@ -134,8 +137,8 @@ export async function POST(request: NextRequest) {
         // Determine pricing based on store
         const isWholesale = store === "wholesale";
         const variantPrice = isWholesale
-          ? ((ep.wholesalePrice && ep.wholesalePrice > 0) ? ep.wholesalePrice.toFixed(2) : "8.00")
-          : ((ep.retailPrice && ep.retailPrice > 0) ? ep.retailPrice.toFixed(2) : "24.00");
+          ? wholesaleOrDefault(ep.wholesalePrice).toFixed(2)
+          : retailOrDefault(ep.retailPrice).toFixed(2);
         const compareAtPrice = isWholesale
           ? ((ep.retailPrice && ep.retailPrice > 0) ? ep.retailPrice.toFixed(2) : undefined)
           : ((ep.msrp && ep.msrp > 0) ? ep.msrp.toFixed(2) : undefined);
@@ -158,22 +161,34 @@ export async function POST(request: NextRequest) {
         // slash-form parsing ("Tort/Green" → "Tort Frame / Green Lens")
         // when SKUs carry the combined name. The product option list
         // stays a single "Color" axis for backward compat.
-        const variantTitles = ep.skus.map((s) =>
-          buildVariantTitle(
-            s.colorName,
-            s.lensColorName,
-            s.readingPower,
-            s.hasBlueLightFilter,
-          ),
-        );
-        const colorValues = variantTitles.filter(Boolean);
-        const hasMultipleVariants = ep.skus.length > 1;
+        // Reading glasses are a genuine two-axis product: Color × Strength.
+        // Every other product keeps the single collapsed "Color" axis.
+        const isReader = isReadingProduct(ep);
+        const pushSkus = variantSkus(ep);
 
-        const variants = ep.skus.map((s, i) => ({
+        const variantTitles = pushSkus.map((s) =>
+          isReader
+            ? (s.colorName ?? "")
+            : buildVariantTitle(
+                s.colorName,
+                s.lensColorName,
+                s.readingPower,
+                s.hasBlueLightFilter,
+              ),
+        );
+        const strengthValues = pushSkus.map((s) => strengthLabel(s) ?? "");
+        // Option values must be the DISTINCT set, in first-seen order —
+        // Shopify rejects duplicates, and readers repeat each color once
+        // per strength.
+        const uniq = (xs: string[]) => [...new Set(xs.filter(Boolean))];
+        const hasMultipleVariants = pushSkus.length > 1;
+
+        const variants = pushSkus.map((s, i) => ({
           sku: s.sku || "",
           price: variantPrice,
           compare_at_price: compareAtPrice,
           option1: variantTitles[i],
+          ...(isReader ? { option2: strengthValues[i] } : {}),
           inventory_management: "shopify" as const,
           barcode: s.upc || undefined,
         }));
@@ -186,7 +201,12 @@ export async function POST(request: NextRequest) {
           tags: tagString,
           variants,
           options: hasMultipleVariants
-            ? [{ name: "Color", values: colorValues }]
+            ? isReader
+              ? [
+                  { name: "Color", values: uniq(variantTitles) },
+                  { name: "Strength", values: uniq(strengthValues) },
+                ]
+              : [{ name: "Color", values: uniq(variantTitles) }]
             : undefined,
           images: approvedImages.map((img) => ({
             src: img.filePath!,
