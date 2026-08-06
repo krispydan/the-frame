@@ -41,23 +41,30 @@ export interface GapAnalysis {
   comparisonBasis: string;
   ajm: BrandWindow;
   jaxy: BrandWindow;
+  monthlyRates: {
+    ajmMonths: number; jaxyMonths: number;
+    ajmRevenuePerMonth: number; jaxyRevenuePerMonth: number;
+    gapPerMonth: number; note: string;
+  };
   gap: {
     revenue: number;
+    revenueNote: string;
     /** Reader revenue AJM earned in its window — a category Jaxy could not sell. */
     categoryReaders: number;
     categoryReadersNote: string;
-    /** Gap attributable to having fewer active customers, at Jaxy's own revenue/customer. */
-    fewerCustomers: number;
     customerCountDelta: number;
-    /** Gap from lower order frequency among the customers we do have. */
-    lowerFrequency: number;
-    /** Gap from a smaller average basket. */
-    lowerAov: number;
-    unexplained: number;
+    decomposition: {
+      basis: string;
+      customerEffect: number;
+      frequencyEffect: number;
+      aovEffect: number;
+      residual: number;
+      residualNote: string;
+    };
   };
   byChannel: Array<{ channel: string; ajmRevenue: number; jaxyRevenue: number; delta: number }>;
   /** Customers AJM had that Jaxy has never sold to, sized by AJM spend. */
-  lostCustomers: { count: number; ajmRevenue: number; topAccounts: Array<{ name: string; companyId: string | null; accountId: string | null; ajmRevenue: number; lastOrder: string | null; readerShare: number }> };
+  lostCustomers: { count: number; ajmRevenue: number; topAccounts: Array<{ name: string; companyId: string | null; accountId: string | null; ajmRevenue: number; ajmOrders: number; lastOrder: string | null; readerShare: number }> };
 }
 
 function ajmWindow(start: string, end: string, label: string): BrandWindow {
@@ -130,6 +137,8 @@ export function analyzeGap(opts?: { mode?: "overlap" | "trailing12" }): GapAnaly
   }
 
   // Reader revenue in AJM's window — the category Jaxy could not sell.
+  // Summed at LINE level (line_total), never SUM(order.total) across a join to
+  // items, which would multiply each order's total by its line count.
   const readerRow = sqlite.prepare(`
     SELECT ROUND(SUM(i.line_total),2) AS rev
     FROM ajm_orders o JOIN ajm_order_items i ON i.order_id = o.id
@@ -137,15 +146,34 @@ export function analyzeGap(opts?: { mode?: "overlap" | "trailing12" }): GapAnaly
   `).get(ajm.start, ajm.end) as { rev: number | null };
   const categoryReaders = readerRow.rev ?? 0;
 
-  // Decompose the remaining gap. Each term is computed holding the others at
-  // Jaxy's actual rates, so they sum without double-counting.
+  // ── Decomposition ───────────────────────────────────────────────────────
+  // Revenue = customers × orders-per-customer × AOV, so the gap decomposes by
+  // sequential substitution — swapping one factor at a time from Jaxy's value
+  // to AJM's. Unlike computing each term independently, these sum EXACTLY to
+  // the gap (no negative "unexplained" residual).
+  //
+  // Both sides are normalized to a MONTHLY RATE first: the windows are
+  // different lengths (AJM has years of history, The Frame holds only a few
+  // months of Jaxy orders), and comparing raw totals across unequal windows
+  // measures elapsed time, not performance.
+  const ajmMonths = Math.max(0.1, (Date.parse(`${ajm.end}T00:00:00Z`) - Date.parse(`${ajm.start}T00:00:00Z`)) / 86_400_000 / 30.44);
+  const jaxyMonths = Math.max(0.1, (Date.parse(`${jaxy.end}T00:00:00Z`) - Date.parse(`${jaxy.start}T00:00:00Z`)) / 86_400_000 / 30.44);
+
+  const aC = ajm.customers / ajmMonths, jC = jaxy.customers / jaxyMonths;   // active customers per month
+  const aF = ajm.ordersPerCustomer, jF = jaxy.ordersPerCustomer;            // orders per customer
+  const aV = ajm.aov, jV = jaxy.aov;                                        // average order value
+
+  const ajmMonthly = r2(ajm.revenue / ajmMonths);
+  const jaxyMonthly = r2(jaxy.revenue / jaxyMonths);
+  const monthlyGap = r2(ajmMonthly - jaxyMonthly);
+
+  const customerEffect = r2((aC - jC) * jF * jV);
+  const frequencyEffect = r2(aC * (aF - jF) * jV);
+  const aovEffect = r2(aC * aF * (aV - jV));
+  const residual = r2(monthlyGap - customerEffect - frequencyEffect - aovEffect);
+
   const revenueGap = r2(ajm.revenue - jaxy.revenue);
   const customerDelta = ajm.customers - jaxy.customers;
-  const fewerCustomers = r2(Math.max(0, customerDelta) * jaxy.revenuePerCustomer);
-  const freqDelta = Math.max(0, ajm.ordersPerCustomer - jaxy.ordersPerCustomer);
-  const lowerFrequency = r2(freqDelta * jaxy.customers * jaxy.aov);
-  const aovDelta = Math.max(0, ajm.aov - jaxy.aov);
-  const lowerAov = r2(aovDelta * ajm.orders);
 
   const byChannel = (() => {
     const a = sqlite.prepare(`
@@ -168,35 +196,63 @@ export function analyzeGap(opts?: { mode?: "overlap" | "trailing12" }): GapAnaly
   })();
 
   // AJM customers (matched to a Frame company) that Jaxy has never sold to.
+  //
+  // Order totals and line-level category shares are aggregated in SEPARATE
+  // CTEs before being joined. Doing it in one query — joining orders to items
+  // and summing order.total — multiplies each order's total by its line count
+  // (it inflated this list to $142M against a $9.6M dataset before the fix).
   const lost = sqlite.prepare(`
-    SELECT o.company_id AS companyId, MAX(c.name) AS name, MAX(ca.id) AS accountId,
-           ROUND(SUM(o.total),2) AS ajmRevenue, MAX(o.order_date) AS lastOrder,
-           ROUND(SUM(CASE WHEN i.category IN (${READERS}) THEN i.line_total ELSE 0 END) * 100.0
-                 / NULLIF(SUM(i.line_total),0), 1) AS readerShare
-    FROM ajm_orders o
-    JOIN ajm_order_items i ON i.order_id = o.id
-    JOIN companies c ON c.id = o.company_id
-    LEFT JOIN customer_accounts ca ON ca.company_id = o.company_id
-    WHERE o.cancelled = 0 AND o.company_id IS NOT NULL
-    GROUP BY o.company_id
-    HAVING COALESCE(MAX(ca.lifetime_value), 0) = 0
-    ORDER BY ajmRevenue DESC
-  `).all() as Array<{ companyId: string; name: string; accountId: string | null; ajmRevenue: number; lastOrder: string | null; readerShare: number | null }>;
+    WITH order_totals AS (
+      SELECT company_id, ROUND(SUM(total),2) AS ajmRevenue,
+             COUNT(*) AS ajmOrders, MAX(order_date) AS lastOrder
+      FROM ajm_orders
+      WHERE cancelled = 0 AND company_id IS NOT NULL
+      GROUP BY company_id
+    ),
+    line_cats AS (
+      SELECT o.company_id AS company_id,
+             SUM(CASE WHEN i.category IN (${READERS}) THEN i.line_total ELSE 0 END) AS readerRev,
+             SUM(i.line_total) AS lineRev
+      FROM ajm_orders o JOIN ajm_order_items i ON i.order_id = o.id
+      WHERE o.cancelled = 0 AND o.company_id IS NOT NULL
+      GROUP BY o.company_id
+    )
+    SELECT t.company_id AS companyId, c.name AS name, ca.id AS accountId,
+           t.ajmRevenue, t.ajmOrders, t.lastOrder,
+           ROUND(COALESCE(lc.readerRev,0) * 100.0 / NULLIF(lc.lineRev,0), 1) AS readerShare
+    FROM order_totals t
+    JOIN companies c ON c.id = t.company_id
+    LEFT JOIN customer_accounts ca ON ca.company_id = t.company_id
+    LEFT JOIN line_cats lc ON lc.company_id = t.company_id
+    WHERE COALESCE(ca.lifetime_value, 0) = 0
+    ORDER BY t.ajmRevenue DESC
+  `).all() as Array<{ companyId: string; name: string; accountId: string | null; ajmRevenue: number; ajmOrders: number; lastOrder: string | null; readerShare: number | null }>;
 
   return {
     dataSpans: { ajm: aSpan, jaxy: jSpan },
     overlap: { exists: overlapExists, start: overlapExists ? oStart : null, end: overlapExists ? oEnd : null, days },
     comparisonBasis: basis,
     ajm, jaxy,
+    monthlyRates: {
+      ajmMonths: r2(ajmMonths), jaxyMonths: r2(jaxyMonths),
+      ajmRevenuePerMonth: ajmMonthly, jaxyRevenuePerMonth: jaxyMonthly,
+      gapPerMonth: monthlyGap,
+      note: "Windows differ in length, so all decomposition below uses monthly rates. Raw totals across unequal windows measure elapsed time, not performance.",
+    },
     gap: {
       revenue: revenueGap,
+      revenueNote: "Raw totals over unequal windows — NOT a like-for-like figure. Use monthlyRates for comparison.",
       categoryReaders,
-      categoryReadersNote: "Reader revenue AJM earned in this window. Jaxy sold no readers until the Aug 2026 launch, so this portion of the gap was structurally unavailable to us.",
-      fewerCustomers,
+      categoryReadersNote: "Reader revenue AJM earned in this window. Jaxy sold no readers until the Aug 2026 launch, so this portion of AJM's revenue was structurally unavailable to us. Shown as an overlay on the decomposition below, not an additional term — it is already inside the customer/frequency/AOV effects.",
       customerCountDelta: customerDelta,
-      lowerFrequency,
-      lowerAov,
-      unexplained: r2(revenueGap - categoryReaders - fewerCustomers - lowerFrequency - lowerAov),
+      decomposition: {
+        basis: "monthly rate; revenue = active customers/month × orders per customer × AOV; sequential substitution, terms sum exactly to gapPerMonth",
+        customerEffect,
+        frequencyEffect,
+        aovEffect,
+        residual,
+        residualNote: "Rounding only; should be ~0.",
+      },
     },
     byChannel,
     lostCustomers: {
@@ -204,7 +260,8 @@ export function analyzeGap(opts?: { mode?: "overlap" | "trailing12" }): GapAnaly
       ajmRevenue: r2(lost.reduce((s, x) => s + x.ajmRevenue, 0)),
       topAccounts: lost.slice(0, 25).map((x) => ({
         name: x.name, companyId: x.companyId, accountId: x.accountId,
-        ajmRevenue: x.ajmRevenue, lastOrder: x.lastOrder, readerShare: x.readerShare ?? 0,
+        ajmRevenue: x.ajmRevenue, ajmOrders: x.ajmOrders,
+        lastOrder: x.lastOrder, readerShare: x.readerShare ?? 0,
       })),
     },
   };

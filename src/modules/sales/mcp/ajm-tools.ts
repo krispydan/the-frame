@@ -107,21 +107,36 @@ mcpRegistry.register(
     limit: z.number().optional().describe("Default 50"),
   }),
   async (args) => {
+    // Order totals and line-level category sums are aggregated SEPARATELY
+    // then joined: doing both in one query (orders JOIN items, SUM(o.total))
+    // multiplies each order total by its line count.
     const rows = sqlite.prepare(`
-      SELECT COALESCE(o.company_id, 'raw:' || LOWER(COALESCE(o.customer_name,'?'))) AS groupKey,
-             o.company_id AS companyId, MAX(COALESCE(c.name, o.customer_name)) AS name,
-             MAX(ca.id) AS accountId, MAX(ca.lifetime_value) AS jaxyLtv, MAX(ca.last_order_at) AS jaxyLastOrder,
-             COUNT(DISTINCT o.id) AS ajmOrders, ROUND(SUM(o.total),2) AS ajmRevenue,
-             MIN(o.order_date) AS firstOrder, MAX(o.order_date) AS lastOrder,
-             GROUP_CONCAT(DISTINCT o.source) AS channels,
-             ROUND(SUM(CASE WHEN i.category IN (${READERS}) THEN i.line_total ELSE 0 END),2) AS readerRevenue,
-             ROUND(SUM(CASE WHEN i.category='sun' THEN i.line_total ELSE 0 END),2) AS sunRevenue
-      FROM ajm_orders o
-      LEFT JOIN ajm_order_items i ON i.order_id = o.id
-      LEFT JOIN companies c ON c.id = o.company_id
-      LEFT JOIN customer_accounts ca ON ca.company_id = o.company_id
-      WHERE o.cancelled = 0
-      GROUP BY groupKey ORDER BY ajmRevenue DESC
+      WITH ord AS (
+        SELECT COALESCE(company_id, 'raw:' || LOWER(COALESCE(customer_name,'?'))) AS groupKey,
+               company_id, MAX(customer_name) AS rawName,
+               COUNT(*) AS ajmOrders, ROUND(SUM(total),2) AS ajmRevenue,
+               MIN(order_date) AS firstOrder, MAX(order_date) AS lastOrder,
+               GROUP_CONCAT(DISTINCT source) AS channels
+        FROM ajm_orders WHERE cancelled = 0 GROUP BY groupKey
+      ),
+      cats AS (
+        SELECT COALESCE(o.company_id, 'raw:' || LOWER(COALESCE(o.customer_name,'?'))) AS groupKey,
+               ROUND(SUM(CASE WHEN i.category IN (${READERS}) THEN i.line_total ELSE 0 END),2) AS readerRevenue,
+               ROUND(SUM(CASE WHEN i.category='sun' THEN i.line_total ELSE 0 END),2) AS sunRevenue
+        FROM ajm_orders o JOIN ajm_order_items i ON i.order_id = o.id
+        WHERE o.cancelled = 0 GROUP BY groupKey
+      )
+      SELECT ord.groupKey, ord.company_id AS companyId,
+             COALESCE(c.name, ord.rawName) AS name,
+             ca.id AS accountId, ca.lifetime_value AS jaxyLtv, ca.last_order_at AS jaxyLastOrder,
+             ord.ajmOrders, ord.ajmRevenue, ord.firstOrder, ord.lastOrder, ord.channels,
+             COALESCE(cats.readerRevenue,0) AS readerRevenue,
+             COALESCE(cats.sunRevenue,0) AS sunRevenue
+      FROM ord
+      LEFT JOIN cats ON cats.groupKey = ord.groupKey
+      LEFT JOIN companies c ON c.id = ord.company_id
+      LEFT JOIN customer_accounts ca ON ca.company_id = ord.company_id
+      ORDER BY ord.ajmRevenue DESC
     `).all() as Array<Record<string, unknown>>;
     let out = rows;
     const f = args.filter ?? "all";
