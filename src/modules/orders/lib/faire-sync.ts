@@ -163,12 +163,43 @@ async function faireApiFetch(path: string): Promise<Response> {
 }
 
 /**
+ * Record Faire's retailer token on a company (never overwrite a differing one —
+ * that would mean two Faire accounts collapsed onto one company, which we want
+ * to notice rather than silently paper over).
+ */
+function stampRetailerToken(companyId: string, token: string | null): void {
+  if (!token) return;
+  try {
+    sqlite
+      .prepare(
+        `UPDATE companies SET faire_retailer_id = ?
+          WHERE id = ? AND (faire_retailer_id IS NULL OR faire_retailer_id = '')`,
+      )
+      .run(token, companyId);
+  } catch { /* column may not exist on an old DB; non-fatal */ }
+}
+
+/**
  * Find or create a company from Faire retailer data.
  */
 function findOrCreateRetailerCompany(retailer: FaireRetailer): string {
+  // Faire's retailer token (r_…) deep-links their Messenger thread and is the
+  // strongest identity we get — match on it first, and stamp it on whichever
+  // company we resolve so the outreach engine can find the conversation.
+  const token = retailer.id || null;
+  if (token) {
+    const tokenMatch = sqlite
+      .prepare("SELECT id FROM companies WHERE faire_retailer_id = ? LIMIT 1")
+      .get(token) as { id: string } | undefined;
+    if (tokenMatch) return tokenMatch.id;
+  }
+
   // Try matching by name first
   const nameMatch = db.select().from(companies).where(eq(companies.name, retailer.name)).get();
-  if (nameMatch) return nameMatch.id;
+  if (nameMatch) {
+    stampRetailerToken(nameMatch.id, token);
+    return nameMatch.id;
+  }
 
   // Try matching by email — case-insensitive lookup against contacts
   // (the canonical email store). Fixes the case-sensitivity bug where
@@ -182,7 +213,10 @@ function findOrCreateRetailerCompany(retailer: FaireRetailer): string {
           LIMIT 1`,
       )
       .get(retailer.email) as { id: string } | undefined;
-    if (emailMatch) return emailMatch.id;
+    if (emailMatch) {
+      stampRetailerToken(emailMatch.id, token);
+      return emailMatch.id;
+    }
   }
 
   // Create new company from retailer data — email is no longer on the
@@ -195,6 +229,8 @@ function findOrCreateRetailerCompany(retailer: FaireRetailer): string {
     country: retailer.address?.country || null,
     source: "faire",
   }).returning().get();
+
+  stampRetailerToken(newCompany.id, token);
 
   if (retailer.email) {
     addCompanyEmail(newCompany.id, retailer.email, "faire_webhook");

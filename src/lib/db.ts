@@ -584,6 +584,42 @@ try { sqlite.exec("ALTER TABLE companies ADD COLUMN pipedrive_org_id INTEGER"); 
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN pipedrive_person_id INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN pipedrive_synced_at TEXT"); } catch { /* exists */ }
 
+// Outreach sequence engine — Phase 0 (docs/outreach-sequence-engine.md).
+// faire_retailer_id is the r_… token that deep-links a retailer's Faire
+// Messenger thread (faire.com/brand-portal/messages?retailerToken=r_x). It
+// comes from the Faire orders API (buyers) and from the prospect list we
+// already built (non-buyers). Without it the outreach queue can't link a rep
+// to the right conversation.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN faire_retailer_id TEXT"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_companies_faire_retailer ON companies (faire_retailer_id)"); } catch { /* exists */ }
+// Suppression: the single do-not-contact flag every outreach path must honor.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN do_not_contact INTEGER DEFAULT 0"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN do_not_contact_reason TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN do_not_contact_at TEXT"); } catch { /* exists */ }
+
+// Outreach history ledger. Pre-seeded from the Faire Market campaign so the
+// sequence engine launches knowing what has already been said (and to whom),
+// which is what makes cooldowns and the "never double-touch" rule work on
+// day one. The engine will write to this same table going forward.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS outreach_messages (
+    id TEXT PRIMARY KEY,
+    company_id TEXT,
+    faire_retailer_id TEXT,
+    channel TEXT NOT NULL DEFAULT 'faire',
+    direction TEXT NOT NULL DEFAULT 'outbound',
+    status TEXT NOT NULL,
+    body TEXT,
+    campaign TEXT,
+    sent_at TEXT,
+    source TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`);
+} catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_outreach_company ON outreach_messages (company_id, sent_at)"); } catch { /* exists */ }
+try { sqlite.exec("CREATE INDEX idx_outreach_retailer ON outreach_messages (faire_retailer_id, sent_at)"); } catch { /* exists */ }
+try { sqlite.exec("CREATE UNIQUE INDEX idx_outreach_dedup ON outreach_messages (faire_retailer_id, campaign, sent_at)"); } catch { /* exists */ }
+
 // Customer map: geocoded coordinates on companies
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN latitude REAL"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN longitude REAL"); } catch { /* exists */ }

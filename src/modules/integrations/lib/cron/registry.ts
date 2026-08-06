@@ -291,6 +291,21 @@ export const CRON_JOBS: CronJob[] = [
   // table. Runs daily but the function itself is idempotent (skips orders
   // already in DB) so multiple runs in a row are harmless.
   {
+    // Faire orders drive the outreach engine's timing (welcome-on-first-order,
+    // review-request-after-ship). Before this job they only arrived via the
+    // once-daily Shopify sync, i.e. up to 24h late. Hourly keeps those triggers
+    // honest. syncFaireOrders() already existed; it just had no schedule.
+    id: "faire-orders-sync",
+    schedule: "5 * * * *",
+    description: "Pull recent Faire orders into the-frame (hourly; feeds outreach triggers)",
+    handler: async () => {
+      const res = await fetch(`${baseUrl()}/api/v1/orders/faire-sync`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `faire-sync failed (${res.status})`);
+      return data;
+    },
+  },
+  {
     id: "shopify-orders-sync",
     schedule: "0 14 * * *",  // 14:00 UTC ≈ 7am PT
     description: "Pull recent orders from each connected Shopify shop into the-frame DB",
