@@ -461,9 +461,19 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           <KpiTile
             label="Customer"
             value={
-              <span className="text-base font-semibold leading-tight block truncate">
-                {order.shipToName || order.contact?.name || order.company?.name || "—"}
-              </span>
+              order.customerAccountId ? (
+                <Link
+                  href={`/customers/${order.customerAccountId}`}
+                  className="text-base font-semibold leading-tight block truncate hover:underline"
+                  title="Open customer profile"
+                >
+                  {order.shipToName || order.contact?.name || order.company?.name || "—"}
+                </Link>
+              ) : (
+                <span className="text-base font-semibold leading-tight block truncate">
+                  {order.shipToName || order.contact?.name || order.company?.name || "—"}
+                </span>
+              )
             }
             sub={
               order.contact?.name && order.contact.name !== order.shipToName
