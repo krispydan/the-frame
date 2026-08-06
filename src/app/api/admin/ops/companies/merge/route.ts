@@ -43,6 +43,37 @@ export async function GET(req: NextRequest) {
     ? review.filter((r) => matchesQ(r.companies.map((c) => c.name)))
     : review;
 
+  // ?format=csv exports the WHOLE plan, one row per company, so the merge can
+  // be reviewed in a spreadsheet before anything is deleted. The JSON response
+  // is capped at 500 groups and is no basis for approving 6,000 merges.
+  if (req.nextUrl.searchParams.get("format") === "csv") {
+    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const lines = [
+      "group_key,reason,role,company_id,name,city,state,zip,email,jaxy_orders,jaxy_revenue,ajm_orders,ajm_revenue",
+    ];
+    for (const g of groups) {
+      for (const c of g.companies) {
+        lines.push([
+          esc(g.key), g.reason, c.id === g.keepId ? "KEEP" : "merge-into-keeper",
+          esc(c.id), esc(c.name), esc(c.city), esc(c.state), esc(c.zip), esc(c.email),
+          c.jaxyOrders, c.jaxyRevenue, c.ajmOrders, c.ajmRevenue,
+        ].join(","));
+      }
+    }
+    for (const r of matchedReview) {
+      for (const c of r.companies) {
+        lines.push([
+          esc(r.key), "NEEDS REVIEW", esc(r.reason),
+          esc(c.id), esc(c.name), esc(c.city), esc(c.state), esc(c.zip), esc(c.email),
+          c.jaxyOrders, c.jaxyRevenue, c.ajmOrders, c.ajmRevenue,
+        ].join(","));
+      }
+    }
+    return new NextResponse(lines.join("\n"), {
+      headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="company-merge-plan.csv"' },
+    });
+  }
+
   return NextResponse.json({
     totalGroups,
     matchingGroups: groups.length,
