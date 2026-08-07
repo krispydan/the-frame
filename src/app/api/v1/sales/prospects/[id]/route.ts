@@ -22,6 +22,25 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // companies.email and companies.phone were dropped on 2026-06-19 in favour
+  // of contacts.email and company_phones. `SELECT c.*` therefore returns
+  // neither, but the page still reads company.email / company.phone — so a
+  // retailer with a perfectly good contact on file rendered a blank Email and
+  // Phone row. Resolve both from their canonical tables.
+  const primaryEmail = sqlite.prepare(
+    `SELECT email FROM contacts
+      WHERE company_id = ? AND TRIM(COALESCE(email,'')) != ''
+        AND LOWER(email) NOT LIKE '%@relay.faire.com%'
+      ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
+  ).get(id) as { email: string } | undefined;
+  const primaryPhone = sqlite.prepare(
+    `SELECT phone FROM company_phones
+      WHERE company_id = ? AND TRIM(COALESCE(phone,'')) != ''
+      ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
+  ).get(id) as { phone: string } | undefined;
+  company.email = primaryEmail?.email ?? null;
+  company.phone = primaryPhone?.phone ?? null;
+
   // Get stores
   const storeRows = sqlite.prepare(`
     SELECT * FROM stores WHERE company_id = ? ORDER BY is_primary DESC, name ASC
