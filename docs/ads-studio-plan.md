@@ -153,13 +153,22 @@ side.
 
 ## Build phases
 
-| Phase | Scope | Notes |
+| Phase | Scope | Status |
 |---|---|---|
-| **A0** | Schema + migration; recipe registry; `ad-naming.ts`; card builder (sharp) | pure libs, fully unit-tested |
-| **A1** | Video renderer (`ad_render` jobs, ffmpeg overlay + ratio crops in a shared crop lib) + APIs + library page + wizard + download | first usable end-to-end: video ads |
-| **A2** | Image renderer (sharp composite, same card) | fast follow — the card builder already exists |
-| **A3** | Canvas editor (drag/scale on live preview, normalized coords) + re-render + AI copy + versioning | |
-| **A4** | Carousel kind; Meta metrics sync + report | optional / later |
+| **A0** | Schema + migration 0009; recipe registry; `ad-naming.ts`; card builder (sharp) | ✅ shipped Aug 2026 |
+| **A1** | Video renderer (`marketing.ads.render` jobs, one ffmpeg pass per ratio) + APIs + library page + wizard + download zip | ✅ shipped — first real ad: `JX_PCARD_VID_WINDSOR-TOR_SHIA_C00_v01` |
+| **A2** | Image ads — same ffmpeg filtergraph, single-frame jpg; catalog-image or uploaded backgrounds (content-addressed, ≥800px short side) | ✅ shipped |
+| **A3** | Canvas editor (drag card / scale / reframe crop — client imports the renderer's own pure libs so preview = render), copy variants C## with AI generation, rename-on-copy-change, version-bump on published edits | ✅ shipped |
+| **A4** | Carousel kind; Meta metrics sync + report | later / on demand |
+
+Operational notes from the first renders:
+- Catalog images live in two generations (volume `file_path` vs R2 `url`)
+  — card + background loaders handle both.
+- Ad renders share the single-file job queue; hung jobs elsewhere (e.g.
+  scrape jobs stranded by deploy restarts) block renders until the
+  jobs-health reset clears them (`/api/admin/jobs/health`, ops token).
+- The marketing/catalog AI default model was retired upstream and
+  404ing; now `claude-sonnet-4-6` (same as sales), env-overridable.
 
 Non-goals for now: auto-publishing via the Meta API, non-Meta channels (the
 ratio system doesn't preclude them).
