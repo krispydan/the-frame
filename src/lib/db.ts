@@ -3245,6 +3245,31 @@ try {
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_email_outbox_status ON email_outbox(status, scheduled_for)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_email_outbox_company ON email_outbox(company_id)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_email_outbox_user ON email_outbox(created_by, status)");
+
+  // Saved messages ("macros"): reusable subject+body a rep pastes into the
+  // composer. Visibility is deliberately two-state — a private scratchpad
+  // template and a team-blessed one are different things, and a rep should be
+  // able to draft the former without publishing house style they haven't
+  // agreed on. Bodies share the sequence engine's {merge_field} vocabulary
+  // (src/modules/sequences/lib/render.ts) so there is ONE token language.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS email_templates (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    category TEXT,
+    subject TEXT,
+    body_html TEXT,
+    body_text TEXT,
+    owner_id TEXT NOT NULL,
+    owner_name TEXT,
+    visibility TEXT NOT NULL DEFAULT 'private',   -- private | team
+    usage_count INTEGER NOT NULL DEFAULT 0,
+    last_used_at TEXT,
+    archived_at TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_email_templates_vis ON email_templates(visibility, archived_at)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_email_templates_owner ON email_templates(owner_id, archived_at)");
 } catch (e) { console.error("[db] gmail tables error:", e); }
 
 }  // end if (!IS_BUILD_PHASE)
