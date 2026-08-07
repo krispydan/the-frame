@@ -28,10 +28,46 @@ Code) instead of pasting `fetch()` snippets into the browser console.
 | POST | `/api/admin/ops/three-pl?confirm=1` | Import a Big Sky invoice xlsx (multipart `file`) |
 | GET | `/api/admin/ops/amazon?view=status\|health\|month-end\|xero\|settlements` | Amazon channel diagnostics (read-only) |
 | POST | `/api/admin/ops/amazon?confirm=1` | Amazon operations — see below |
+| GET | `/api/admin/ops/companies/merge?q=&minRevenue=&limit=&format=csv` | Duplicate-company groups + `needsReview` (read-only) |
+| POST | `/api/admin/ops/companies/merge?confirm=1[&apply=1]` | Merge duplicates — **dry run unless `apply=1` is ALSO set** |
+| GET | `/api/admin/ops/ajm/diagnose?names=a,b` | Why a named AJM account shows no Jaxy revenue |
+| GET | `/api/admin/ops/ajm/gap` | AJM vs Jaxy gap decomposition |
+| GET | `/api/admin/ops/cogs` | COGS / FIFO coverage diagnostics |
+| GET | `/api/admin/ops/purchase-orders` | Open purchase-order commitments (cash flow) |
 
 The shared logic behind these lives in libs (`address-backfill.ts`,
 `geocoding.ts`, `order-lookup.ts`) and is also used by the session-guarded
 `/api/v1/*` equivalents the UI calls — one implementation, two front doors.
+
+## Company merge
+
+Deletes company records, so `apply=1` is deliberately separate from
+`confirm=1` — a confirmed call still dry-runs. Take a backup first
+(`POST /api/admin/ops/db-backup?confirm=1`) and read the plan
+(`?format=csv`) before applying. Full model: `src/modules/sales/lib/company-merge.ts`.
+
+What it will and won't do, all of it learned from production data:
+
+- Groups only on an identical normalized name or a shared contact address, and
+  either way the members must corroborate on **name, zip, or domain**. Location
+  alone never merges an email group — "shared inbox + same city" wanted to fold
+  `Shell` into `Timewise Car Wash`.
+- An address on more than `SHARED_EMAIL_MAX` (6) companies is a placeholder, not
+  identity. Production really does have `name@email.com` on eight companies.
+- Differently-named records that **each** have their own order history are
+  treated as sibling stores of a chain (Lockwood Williamsburg vs Greenpoint) and
+  are reviewed, not merged.
+- Overlapping groups are fused so no company is ever a keeper in one group and a
+  loser in another — otherwise rows repoint onto a record that is then deleted.
+- Keeper = richest CRM record, then most trading history. Blank keeper fields
+  are backfilled from losers first; `do_not_contact` is OR'd across the group so
+  suppression can only ever travel in the safe direction.
+- References are discovered from the schema (any `company_id` column plus any
+  declared FK into `companies`), and rows that would collide on a unique index
+  are dropped before repointing.
+
+Anything refused lands in `needsReview` — currently ~9,100 rows, mostly
+same-name shops in different cities. That list is for humans, not automation.
 
 ## Amazon channel operations
 
