@@ -1,7 +1,10 @@
 # Lead scoring and GTM — a proposal grounded in our own numbers
 
-*August 2026. Prompted by Alex Vacca's signal-scoring thread; written against
-the 251,083 leads and 255 customers actually in The Frame.*
+*August 2026. Written against the 251,083 leads and 255 customers actually in
+The Frame. Part 1 originally reconstructed Alex Vacca's framework from his
+published material because the thread itself was unfetchable; **Part 4 revises
+it against the full text**, which is more specific and changes several
+recommendations.*
 
 ---
 
@@ -401,3 +404,227 @@ table above with denominators. The two reverse-causal artifacts (`source =
 shopify`, "has a Google listing") are present in the output and are *not*
 filtered out — they are left visible precisely so the next person to read it
 has to reckon with them rather than rediscover them.
+
+
+---
+
+# Part 4 — Revised against the full thread
+
+The complete post supplies a seven-step build, a scoring spec, copy specs and a
+symptom-to-broken-step diagnostic. Three things in it change what I wrote
+above, and one thing in it is wrong for us.
+
+## 4.1 The post names the mechanism behind our broken ICP score
+
+Its Rule 1, verbatim in substance:
+
+> When a category has no data behind it, cap that category at half its points…
+> models are agreeable, and that's the dangerous property here. Ask one to score
+> a company it knows nothing about and it returns a confident 78. Nothing in the
+> output tells you it was invented. Every scoring setup I've watched fail,
+> failed there.
+
+That is exactly our failure, and our coverage table is the proof:
+
+| Signal | Coverage |
+|---|---|
+| StoreLeads firmographics | **2%** |
+| Google listing | **2%** |
+| Eyewear inventory | **5%** |
+
+We asked a model to tier 251,083 companies while holding real firmographics on
+about one in fifty. It returned **118,518 tier-A** ratings — 87% of everything
+it scored — and those tier-A accounts convert at **0.02%**, ten times worse than
+tier C. That is 118,518 confident 78s.
+
+Both of the post's rules were missing from my Part 3 model and both are now in
+it:
+
+- **Rule 1 — half-points on absent data.** A bucket with no underlying evidence
+  caps at half. Non-negotiable given our coverage.
+- **Rule 2 — a reasoning column beside every score, read every time.** "The
+  number just ranks the account. The reasoning is where you find out what the
+  model thinks your market is." Our inverted tier would have been caught in a
+  week if anyone had been reading why.
+
+## 4.2 Our email is below the floor, and it is not a copy problem
+
+The post's benchmarks: **3.43%** reply for cold email with no signal, **15–25%**
+written off a real signal.
+
+Ours, measured:
+
+| | |
+|---|---|
+| Enrolled | 14,500 |
+| Sent | 10,092 |
+| **Replied** | **135 — 1.34%** |
+| Opens recorded | **0** |
+
+We are at **39% of his no-signal floor**. But the replies we do get are good:
+
+| Reply | Count | Share |
+|---|---|---|
+| Interested | 79 | 58% |
+| Question | 36 | 27% |
+| Not interested | 12 | 9% |
+| Wrong person / OOO / auto | 4 | 3% |
+
+**85% of replies are positive.** A list that produces mostly-positive replies at
+a below-floor rate is not a copy problem — it is a targeting problem. That is
+precisely the post's step-2 symptom, and it agrees with Part 2: we are mailing
+a population, not a segment.
+
+One gap worth naming: **we record zero opens**. The post's headline diagnostic
+is "opens healthy, replies aren't", and we cannot run it. Open tracking should
+be switched on or synced before the next campaign, if only so the diagnostic is
+available.
+
+## 4.3 The finding nobody has said out loud: the phone is 13× better
+
+| Channel | Companies touched | Positive outcome | Rate |
+|---|---|---|---|
+| Email | 10,092 sends | 115 positive replies | **1.14%** |
+| **Phone** | **3,257 companies** | **484 appointments set** | **14.86%** |
+
+4,552 calls, **959 connected (21%)**, and **50% of every connected call set an
+appointment**. Per company touched the phone is **13× more productive than
+email**, and it is the channel with no automation attached to it.
+
+The entire seven-step build in the post is an *email* machine. For this business
+the evidence says the machine should feed a phone queue.
+
+## 4.4 We are sitting on the reference layer and have never opened it
+
+The post is blunt that step 3 is where copied systems die, and that the
+reference files are the part competitors cannot take. Ours:
+
+| What the post asks for | What we hold | Status |
+|---|---|---|
+| Won-deal language, from recordings | **4,552 calls, all with notes and recording URLs**; 484 marked *Set Appointment* | **Unused** |
+| Lost-deal reasons, the buyer's sentence | 131 calls marked *Not Interested*, with notes | **Unused** |
+| Objections + how they were handled | In the notes of 4,552 calls | **Unused** |
+| Reply language | 135 stored reply texts, 79 *interested* | **Unused** |
+| Our own signals | Part 2 of this document | Now written |
+
+And the copy layer that would consume it is empty: **`ai_opener_email1` is
+generated for zero companies.** The field exists, the page renders it, nothing
+has ever written to it.
+
+Our disqualification reasons are the failure mode the post warns about — every
+one is *our theory*, not a buyer's words:
+
+| Reason | Companies |
+|---|---|
+| Brand-level DQ: 75%+ of reviewed stores not qualified | 17,470 |
+| Jewelry store — off ICP | 16,361 |
+| Auto-DQ: no state, no website, no email | 7,904 |
+| Non-US/CA location | 6,650 |
+| Keyword: spa | 2,716 |
+
+Not one is a sentence a buyer said. The buyers' sentences are in 4,552 call
+recordings nobody has transcribed.
+
+## 4.5 Where the post is wrong for us: step 1
+
+> Step 1: Kill the list subscription. Do this first. Everything after it
+> inherits whatever comes out.
+
+The reasoning is sound and the conclusion is inverted for us. His step 1 solves
+*"we keep mailing the same names everyone else bought."* Our problem is that we
+already built 251,083 records ourselves and **99.3% of them are inert** — 249,275
+non-A.J.-Morgan leads produced 98 customers at 0.04%.
+
+**Our step 1 is the mirror image: stop acquiring, and cut the list to 1,808.**
+
+His warning about why teams don't do this applies to us exactly, though —
+"once a team has worked it for two quarters… swapping the source means telling
+everyone the last six months of coverage was aimed at the wrong set." We have
+96,168 crawled Shopify records that produced five customers. That is the
+conversation.
+
+## 4.6 The revised scoring file
+
+Rebuilt to the post's spec — **exactly 100 points, three buckets, four tiers** —
+with our measured rates as the weights, and the third bucket replaced. His third
+bucket is LinkedIn engagement; a boutique owner does not post on LinkedIn.
+Ours is **relationship**, which we can actually measure and which the call data
+says is worth more.
+
+**Fit — 45 points.** *Can they buy?*
+
+| Input | Points |
+|---|---|
+| A.J. Morgan spend ≥ $20k | 30 |
+| A.J. Morgan $5k–20k | 22 |
+| A.J. Morgan $1k–5k | 15 |
+| A.J. Morgan under $1k | 6 |
+| No A.J. Morgan history | 0 |
+| Estimated yearly sales ≥ $1M | 8 |
+| United States | 7 |
+
+**Signal — 30 points.** *Why today?*
+
+| Trigger | Points |
+|---|---|
+| Replied to outreach (5.07% observed, 50× baseline) | 12 |
+| Lapsed vs their own A.J. Morgan cadence | 8 |
+| In-season for their category | 6 |
+| Reader-led buyer, readers just launched | 4 |
+
+**Relationship — 25 points.** *Can we reach a human?*
+
+| Input | Points |
+|---|---|
+| Connected on a call before | 10 |
+| Named contact with a direct phone | 8 |
+| Deliverable email | 7 |
+
+**Rule 1 applies to all three:** a bucket with no underlying data caps at half.
+No A.J. Morgan record and no StoreLeads means fit tops out at 22, not a
+confident 45.
+
+**Rule 2:** every score carries its reasoning, stored beside it, and it gets
+read at the weekly review.
+
+**Tiers, on his thresholds:**
+
+| Score | Tier | Treatment |
+|---|---|---|
+| 80–100 | 1 | **Call today.** The phone is 13× email; tier 1 is a call queue, not a mail merge. |
+| 60–79 | 2 | Call this week, sequence in parallel. |
+| 40–59 | 3 | Nurture. Wait for a signal. |
+| 0–39 | 4 | **Off the queue.** ~249,000 records. |
+
+## 4.7 Which of the seven steps is broken here
+
+Running his own diagnostic against our numbers:
+
+| Step | State | Evidence |
+|---|---|---|
+| 1 — the list | **Broken, inverted** | 251k records, 0.10% conversion, 99.3% inert |
+| 2 — scoring | **Broken** | Tier A converts 10× worse than tier C |
+| 3 — reference files | **Empty** | 4,552 recordings unused; 0 AI openers generated |
+| 4 — specialists | Not built | — |
+| 5 — chaining | Partly | Campaigns and calls run; nothing connects scoring to either |
+| 6 — model routing | Not built | — |
+| 7 — governance | **Present** | Every ops mutation needs `confirm=1`; merges dry-run first |
+
+Five of seven need work, and **the order matters**: 1, 2 and 3 are the
+foundation, and they are the three that are broken. Building 4, 5 and 6 on top
+of an inverted score and an empty reference layer is precisely the failure the
+post opens with — a sequencer faithfully repeating a weak decision, faster.
+
+## 4.8 Revised order of work
+
+1. **Re-qualify the 130 wrongly disqualified A.J. Morgan accounts.** Unchanged
+   from Part 3, still the highest expected value, still an afternoon.
+2. **Turn off ICP tier as a prioritisation input.** It is inverted; leaving it
+   visible is a trap.
+3. **Transcribe the 484 appointment-setting calls and the 131 not-interested
+   ones.** That is the reference layer, it already exists, and it is the one
+   asset no competitor can copy.
+4. **Build the 100-point score with both rules**, and make tier 1 a *call*
+   queue.
+5. **Switch on open tracking** so the standard diagnostic works next quarter.
+6. Only then: specialists, chaining, model routing.
