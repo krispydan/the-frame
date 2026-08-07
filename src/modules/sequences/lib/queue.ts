@@ -9,7 +9,7 @@
 
 import { sqlite } from "@/lib/db";
 import { randomUUID } from "crypto";
-import { checkSuppression } from "@/modules/sales/lib/suppression";
+import { checkSuppression, setDoNotContact } from "@/modules/sales/lib/suppression";
 
 export interface QueueItem {
   id: string;
@@ -33,6 +33,8 @@ export interface QueueItem {
   totalOrders: number | null;
   tier: string | null;
   lastMessagedAt: string | null;
+  /** Tokens still unfilled in the body. Non-empty = must not be sent as-is. */
+  unresolved: string[];
 }
 
 /** One place that knows how a follow-up is scheduled. Was duplicated across
@@ -110,6 +112,7 @@ export function getQueue(opts: { limit?: number; brand?: string; status?: string
     totalOrders: r.total_orders as number | null,
     tier: r.tier as string | null,
     lastMessagedAt: r.last_messaged_at as string | null,
+    unresolved: [...new Set(((r.rendered_body as string) || "").match(/\{(\w+)\}/g) || [])],
   }));
 }
 
@@ -206,6 +209,42 @@ export function markSkipped(id: string, reason: string): { ok: boolean; reason?:
     sqlite.prepare("UPDATE sequence_messages SET status='skipped', error=? WHERE id=?").run(reason, id);
     // Skipping one touch must not strand the enrollment.
     scheduleNext(m.enrollment_id, m.step_id, new Date().toISOString());
+  });
+  tx();
+  return { ok: true };
+}
+
+/**
+ * "Take us off your list." Suppresses the shop globally, voids this message and
+ * exits the enrollment. Without this she had no way in the product to honour an
+ * opt-out — the one request that most needs to be easy to act on.
+ */
+export function markDoNotContact(id: string, reason = "asked us to stop"): { ok: boolean; reason?: string } {
+  const m = sqlite.prepare("SELECT enrollment_id, company_id, status FROM sequence_messages WHERE id=?")
+    .get(id) as { enrollment_id: string; company_id: string; status: string } | undefined;
+  if (!m) return { ok: false, reason: "not_found" };
+  const at = new Date().toISOString();
+  const tx = sqlite.transaction(() => {
+    setDoNotContact(m.company_id, reason);
+    sqlite.prepare("UPDATE sequence_messages SET status='skipped', error=? WHERE id=? AND status IN ('queued_review','approved','task_open')")
+      .run(`do not contact: ${reason}`, id);
+    sqlite.prepare("UPDATE sequence_enrollments SET status='suppressed', exited_at=?, exit_reason='do not contact', next_step_due_at=NULL WHERE id=?")
+      .run(at, m.enrollment_id);
+  });
+  tx();
+  return { ok: true };
+}
+
+/** A call/direct-mail task is done — advance the chain like a send would. */
+export function markTaskDone(id: string): { ok: boolean; reason?: string } {
+  const m = sqlite.prepare("SELECT enrollment_id, step_id, status FROM sequence_messages WHERE id=?")
+    .get(id) as { enrollment_id: string; step_id: string; status: string } | undefined;
+  if (!m) return { ok: false, reason: "not_found" };
+  if (m.status !== "task_open") return { ok: false, reason: `already ${m.status}` };
+  const at = new Date().toISOString();
+  const tx = sqlite.transaction(() => {
+    sqlite.prepare("UPDATE sequence_messages SET status='task_done', sent_at=? WHERE id=?").run(at, id);
+    scheduleNext(m.enrollment_id, m.step_id, at);
   });
   tx();
   return { ok: true };

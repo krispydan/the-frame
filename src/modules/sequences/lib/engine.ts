@@ -151,6 +151,18 @@ export function runTick(opts: { dryRun?: boolean } = {}): TickResult {
     ).run(now());
   }
 
+  // Queue staleness (spec §9): an unsent nudge that has sat for a week is worse
+  // than no nudge — the moment it referred to has passed. T0 is exempt: a late
+  // welcome still beats none.
+  if (!dry) {
+    const staleDays = num("seq.queue_stale_days", 5);
+    sqlite.prepare(
+      `UPDATE sequence_messages SET status='skipped', error='stale - sat in the queue too long'
+        WHERE status='queued_review' AND queued_at < ?
+          AND sequence_id IN (SELECT id FROM sequences WHERE trigger != 'T0')`,
+    ).run(addDays(now(), -staleDays));
+  }
+
   // ── 2. ENROLL ──────────────────────────────────────────────────────────
   // Highest-priority sequence wins a contested account; the unique index on
   // (company_id) WHERE active is the real guarantee, this just avoids churn.
@@ -188,11 +200,16 @@ export function runTick(opts: { dryRun?: boolean } = {}): TickResult {
       // Cooldown: hard per-brand for nudges, softer across brands. Relationship
       // sequences (welcome, review request) are exempt — they follow a real
       // event and should not be blocked by an unrelated nudge.
+      const last = lastOutreach(companyId);
       if (seq.class === "nudge") {
-        const last = lastOutreach(companyId);
-        const sameBrand = last.byBrand[seq.brand];
+        const sameBrand = last.byBrand[(seq.brand || "").toLowerCase()];
         if (sameBrand && Date.parse(sameBrand) > Date.parse(addDays(now(), -cooldownDays))) { res.skippedRecent++; continue; }
-        if (last.lastAnyAt && Date.parse(last.lastAnyAt) > Date.parse(addDays(now(), -crossBrandDays))) { res.skippedRecent++; continue; }
+      }
+      // Cross-brand courtesy applies to EVERY class: the retailer is one human
+      // reading both inboxes, so A.J. Morgan and Jaxy must not land the same
+      // week even when one of them is a "relationship" message.
+      if (last.lastAnyAt && Date.parse(last.lastAnyAt) > Date.parse(addDays(now(), -crossBrandDays))) {
+        res.skippedRecent++; continue;
       }
 
       const proposed = seq.propose_only === 1;
@@ -314,6 +331,10 @@ function findCandidates(seq: SequenceRow): string[] {
   const limit = 200;
   switch (seq.trigger) {
     // T0 — first order placed, any status.
+    // 14 days, not 30: "thank you for your first order, it is being processed
+    // now" is factually wrong a month later, and a trailing window means the
+    // day this goes live it would sweep up a month of backlog and say exactly
+    // that to every one of them.
     case "T0":
       return (sqlite
         .prepare(
@@ -321,7 +342,7 @@ function findCandidates(seq: SequenceRow): string[] {
             WHERE ca.total_orders = 1 AND ca.first_order_at > ?
             ORDER BY ca.first_order_at DESC LIMIT ?`,
         )
-        .all(addDays(now(), -30), limit) as Array<{ id: string }>).map((r) => r.id);
+        .all(addDays(now(), -14), limit) as Array<{ id: string }>).map((r) => r.id);
 
     // T4 — review request. Delivery + 3 when we know delivery, else ship + 8.
     case "T4":
@@ -334,13 +355,15 @@ function findCandidates(seq: SequenceRow): string[] {
                 OR (o.delivered_at IS NULL AND o.shipped_at IS NOT NULL AND o.shipped_at <= ? AND o.shipped_at > ?))
             LIMIT ?`,
         )
-        .all(addDays(now(), -3), addDays(now(), -30), addDays(now(), -8), addDays(now(), -35), limit) as Array<{ id: string }>)
+        // Tight window (delivered 3-12d / shipped 8-17d): "did everything
+        // arrive OK" three weeks late reads as inattentive, not attentive.
+        .all(addDays(now(), -3), addDays(now(), -12), addDays(now(), -8), addDays(now(), -17), limit) as Array<{ id: string }>)
         .map((r) => r.id);
 
     // T1 — reorder due in 5 days. Gated on prediction confidence: at least
     // three orders, so the average gap means something.
-    case "T1":
-      return (sqlite
+    case "T1": {
+      const cands = (sqlite
         .prepare(
           `SELECT ca.company_id AS id FROM customer_accounts ca
             WHERE ca.next_reorder_estimate IS NOT NULL
@@ -350,6 +373,24 @@ function findCandidates(seq: SequenceRow): string[] {
             LIMIT ?`,
         )
         .all(addDays(now(), 5).slice(0, 10), now().slice(0, 10), limit) as Array<{ id: string }>).map((r) => r.id);
+      // Confidence gate (spec §0.3): the prediction is a mean of order gaps, so
+      // it is only meaningful when those gaps are consistent. An account that
+      // ordered at 20, 200 and 40 day intervals has an average that predicts
+      // nothing, and "your fill-in is due" on a meaningless date is worse than
+      // silence.
+      return cands.filter((id) => {
+        const gaps = (sqlite
+          .prepare(`SELECT placed_at FROM orders WHERE company_id=? AND status NOT IN ('cancelled','returned') ORDER BY placed_at ASC`)
+          .all(id) as Array<{ placed_at: string }>)
+          .map((r) => Date.parse(r.placed_at))
+          .reduce<number[]>((acc, t, i, arr) => (i ? [...acc, (t - arr[i - 1]) / 86400000] : acc), []);
+        if (gaps.length < 2) return false;
+        const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+        if (mean <= 0) return false;
+        const sd = Math.sqrt(gaps.reduce((a, g) => a + (g - mean) ** 2, 0) / gaps.length);
+        return sd / mean < 0.5;
+      });
+    }
 
     // T6 — lapsed: past 1.5x their normal gap.
     case "T6":

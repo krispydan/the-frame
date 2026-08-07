@@ -69,7 +69,11 @@ export function buildMergeFields(ctx: RenderContext): Record<string, string> {
         ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
     )
     .get(ctx.companyId) as { first_name?: string | null; last_name?: string | null } | undefined;
-  f.first_name = cleanFirstName(contact?.first_name, company?.name || "");
+  // "there" is a deliberate fallback, not a blank. Faire prospects frequently
+  // have no contact row, and cleanFirstName also (correctly) rejects store
+  // acronyms and junk — without this, "Hi {first_name}," is the common case
+  // rather than the rare one, and a literal token is far worse than "Hi there".
+  f.first_name = cleanFirstName(contact?.first_name, company?.name || "") || "there";
 
   // Multi-location shops get a different opener ("Hi Guys!").
   const stores = sqlite

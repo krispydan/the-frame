@@ -43,7 +43,7 @@ export function QueueClient({ initialItems, initialCounts }: Props) {
     if (item && draft !== item.body) setEdits((e) => ({ ...e, [item.id]: draft }));
   }, [draft, item?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const act = useCallback(async (action: "sent" | "skip" | "replied") => {
+  const act = useCallback(async (action: "sent" | "skip" | "replied" | "do_not_contact") => {
     if (!item || busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
@@ -77,11 +77,19 @@ export function QueueClient({ initialItems, initialCounts }: Props) {
     } finally { busyRef.current = false; setBusy(false); }
   }, [item, draft, items.length]);
 
+  // The clipboard IS the send channel: she copies, pastes into Faire, sends.
+  // So this — not "mark sent" — is the last point where broken text can be
+  // stopped. Guarding only the mark-sent step told her after the damage.
+  const blockedTokens = draft.match(/\{\w+\}/g) || [];
   const copy = useCallback(async () => {
+    if (blockedTokens.length) {
+      setError(`Not copied — this message still has ${blockedTokens.join(", ")} in it. Edit it first.`);
+      return;
+    }
     await navigator.clipboard.writeText(draft);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
-  }, [draft]);
+  }, [draft, blockedTokens.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keyboard: c copy, o open thread, s sent, k skip, r replied, arrows navigate.
   useEffect(() => {
@@ -147,6 +155,12 @@ export function QueueClient({ initialItems, initialCounts }: Props) {
         </div>
 
         <div className="p-4">
+          {blockedTokens.length > 0 && (
+            <div className="mb-3 rounded-md border border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+              <strong>Do not send yet.</strong> This message still contains {blockedTokens.join(", ")}.
+              Edit the text below before copying.
+            </div>
+          )}
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -168,8 +182,9 @@ export function QueueClient({ initialItems, initialCounts }: Props) {
         )}
 
         <div className="flex flex-wrap gap-2 border-t p-4">
-          <button onClick={copy} disabled={busy}
-            className="rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted">
+          <button onClick={copy} disabled={busy || blockedTokens.length > 0}
+            title={blockedTokens.length ? "Fix the highlighted placeholders first" : "Copy to clipboard"}
+            className="rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-40">
             {copied ? "Copied" : "Copy message"}
           </button>
           {item.threadUrl && (
@@ -181,10 +196,16 @@ export function QueueClient({ initialItems, initialCounts }: Props) {
           <div className="ml-auto flex gap-2">
             <button onClick={() => act("replied")} disabled={busy}
               className="rounded-md border px-3 py-2 text-sm hover:bg-muted">They replied</button>
+            <button
+              onClick={() => { if (confirm(`Stop all future outreach to ${item.companyName}?`)) act("do_not_contact"); }}
+              disabled={busy}
+              className="rounded-md border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30">
+              Do not contact
+            </button>
             <button onClick={() => act("skip")} disabled={busy}
               className="rounded-md border px-3 py-2 text-sm hover:bg-muted">Skip</button>
-            <button onClick={() => act("sent")} disabled={busy}
-              className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50">
+            <button onClick={() => act("sent")} disabled={busy || blockedTokens.length > 0}
+              className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-40">
               Mark sent
             </button>
           </div>

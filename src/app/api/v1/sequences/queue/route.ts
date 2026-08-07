@@ -1,6 +1,6 @@
 /** Review queue: list items, and act on one (sent / skip / replied). */
 import { NextRequest, NextResponse } from "next/server";
-import { getQueue, queueCounts, markSent, markSkipped, markReplied } from "@/modules/sequences/lib/queue";
+import { getQueue, queueCounts, markSent, markSkipped, markReplied, markDoNotContact, markTaskDone } from "@/modules/sequences/lib/queue";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +29,8 @@ export async function POST(req: NextRequest) {
     case "sent":    return respond(markSent(id, by || "user", editedBody));
     case "skip":    return respond(markSkipped(id, reason || "skipped by user"));
     case "replied": return respond(markReplied(id));
+    case "do_not_contact": return respond(markDoNotContact(id, reason || "asked us to stop"));
+    case "task_done": return respond(markTaskDone(id));
     default:        return NextResponse.json({ error: `unknown action: ${action}` }, { status: 400 });
   }
 }
