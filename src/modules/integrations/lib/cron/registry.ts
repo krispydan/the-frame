@@ -59,6 +59,8 @@ import { drainMetaLeads, reconcileMetaLeads } from "@/modules/integrations/lib/m
 import { runCapiSyncAndDrain } from "@/modules/integrations/lib/meta/capi";
 import { runMetaLeadCsvReminder } from "@/modules/integrations/lib/meta/daily-reminder";
 import { suppressBuyersFromMail } from "@/modules/sales/lib/shopify-wholesale-customer";
+import { syncAllConnections } from "@/modules/email/lib/sync";
+import { drainOutbox } from "@/modules/email/lib/outbox";
 import { refreshStaleCustomerListings, captureListings, countRemaining, countControlListings } from "@/modules/sales/lib/gmaps-profile";
 
 /**
@@ -258,6 +260,25 @@ export const CRON_JOBS: CronJob[] = [
       }
       return { cohort, ...res };
     },
+    fireAndForget: true,
+  },
+  // ── Gmail (send + read from the webapp) ──
+  // Read-sync every 5 min (the cron floor): new replies land in threads and
+  // on record timelines. Scheduled sends drain on the same cadence — a
+  // "schedule for 9am" email leaves between 9:00 and 9:05, which the
+  // composer's UI copy states plainly.
+  {
+    id: "gmail-sync",
+    schedule: "*/5 * * * *",
+    description: "Incremental Gmail read-sync for all connected mailboxes (threads + record timelines)",
+    handler: () => syncAllConnections(),
+    fireAndForget: true,
+  },
+  {
+    id: "email-outbox-drain",
+    schedule: "*/5 * * * *",
+    description: "Send due scheduled emails; flag any send stranded mid-flight for human review",
+    handler: () => drainOutbox(),
     fireAndForget: true,
   },
   {

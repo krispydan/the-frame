@@ -17,6 +17,7 @@ import {
 // a TDZ crash at server startup).
 import "@/modules/sales/lib/status-sync";
 import "@/modules/marketing/lib/video/job-handlers";
+import "@/modules/email/lib/job-handlers";
 
 // Re-export so existing callers (route.ts files, tests, etc.) that
 // import registerJobHandler from job-worker keep working unchanged.

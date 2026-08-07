@@ -3151,4 +3151,100 @@ try {
   )`);
 } catch (e) { console.error("[db] dashboard_cache table error:", e); }
 
+
+// ── Gmail integration (send + read from the webapp) ──
+// Read-sync architecture ported from trycompai/crm (cursor-on-historyId,
+// RFC-message-id threading, one thread writer); the send/compose/schedule
+// side is ours — compai reads mail but cannot send it.
+try {
+  // One row per connected Google account (each rep connects their own).
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS gmail_connections (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    access_token TEXT,
+    refresh_token TEXT,
+    token_expires_at TEXT,
+    scopes TEXT,
+    status TEXT NOT NULL DEFAULT 'connected',  -- connected | needs_reconnect | disconnected
+    status_reason TEXT,
+    history_cursor TEXT,          -- Gmail historyId; NULL = start from "now" on first sync
+    last_synced_at TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(user_id, email)
+  )`);
+
+  // Threads keyed on the ROOT RFC message id — provider-neutral, so a reply
+  // from any client lands on the same thread. company/contact links let the
+  // prospect/customer pages show correspondence.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS email_threads (
+    id TEXT PRIMARY KEY,
+    root_message_id TEXT NOT NULL UNIQUE,
+    subject TEXT,
+    company_id TEXT,
+    contact_id TEXT,
+    first_message_at TEXT,
+    last_message_at TEXT,
+    message_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_email_threads_company ON email_threads(company_id, last_message_at)");
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS email_messages (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL,
+    rfc_message_id TEXT UNIQUE,     -- NULL only for drafts never sent
+    gmail_message_id TEXT,
+    connection_id TEXT,             -- whose mailbox observed/sent it
+    direction TEXT NOT NULL,        -- inbound | outbound
+    from_email TEXT,
+    from_name TEXT,
+    to_json TEXT,                   -- ["a@x.com", ...]
+    cc_json TEXT,
+    subject TEXT,
+    snippet TEXT,
+    body_text TEXT,
+    body_html TEXT,
+    has_attachments INTEGER NOT NULL DEFAULT 0,
+    attachments_json TEXT,          -- [{filename,size,mime, gmailAttachmentId?}]
+    sent_at TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_email_messages_thread ON email_messages(thread_id, sent_at)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_email_messages_gmail ON email_messages(gmail_message_id)");
+
+  // Outbox: drafts, scheduled sends, and the send ledger. status transitions:
+  //   draft -> scheduled -> queued -> sending -> sent
+  //                     \-> cancelled            \-> failed
+  // 'sending' is the intent row written BEFORE the Gmail API call — on a
+  // crash/deploy mid-send it is flagged for human review, never auto-retried
+  // (the double-send lesson from the sequence-engine spec).
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS email_outbox (
+    id TEXT PRIMARY KEY,
+    connection_id TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    company_id TEXT,
+    contact_id TEXT,
+    reply_to_message_id TEXT,       -- email_messages.id being replied to (threading)
+    to_json TEXT NOT NULL,
+    cc_json TEXT,
+    bcc_json TEXT,
+    subject TEXT,
+    body_html TEXT,
+    body_text TEXT,
+    attachments_json TEXT,          -- [{id,filename,size,mime}] stored on disk
+    status TEXT NOT NULL DEFAULT 'draft',
+    scheduled_for TEXT,
+    sent_at TEXT,
+    sent_rfc_message_id TEXT,
+    gmail_message_id TEXT,
+    error TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_email_outbox_status ON email_outbox(status, scheduled_for)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_email_outbox_company ON email_outbox(company_id)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_email_outbox_user ON email_outbox(created_by, status)");
+} catch (e) { console.error("[db] gmail tables error:", e); }
+
 }  // end if (!IS_BUILD_PHASE)
