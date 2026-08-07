@@ -380,12 +380,23 @@ function normalizeCity(raw: string | null | undefined): string {
 
 type Company = DuplicateGroup["companies"][number];
 
-/** The company's own domain, else its contact's — blank for free/ISP mail. */
-function domainOf(c: Company): string {
+/**
+ * BOTH domains a company offers: its own `domain` column and its contact's
+ * email domain. Free/consumer and ISP mail is excluded.
+ *
+ * Returning only the first non-empty one was the priority-collapse bug again:
+ * the two "Alter" records both have contacts at alterbrooklyn.com, but their
+ * stored domain columns differ, so the stored value won for each and the
+ * matching contact domains were never compared. Emitting both lets union-find
+ * link on whichever they actually share.
+ */
+function domainsOf(c: Company): string[] {
+  const out: string[] = [];
   const d = (c.domain ?? "").trim().toLowerCase();
-  if (d) return d;
+  if (d && !FREE_DOMAIN.test(`@${d}`)) out.push(d);
   const e = (c.email ?? "").split("@")[1]?.toLowerCase() ?? "";
-  return !e || FREE_DOMAIN.test(`@${e}`) ? "" : e;
+  if (e && !FREE_DOMAIN.test(`@${e}`) && e !== d) out.push(e);
+  return out;
 }
 
 /**
@@ -399,8 +410,7 @@ function domainOf(c: Company): string {
  */
 function signalsOf(c: Company, includeName: boolean, includeDomain: boolean, includeCityState: boolean): string[] {
   const sigs: string[] = [];
-  const dom = includeDomain ? domainOf(c) : "";
-  if (dom) sigs.push(`d:${dom}`);
+  if (includeDomain) for (const dom of domainsOf(c)) sigs.push(`d:${dom}`);
   const zip = (c.zip ?? "").trim().slice(0, 5);
   if (zip.length === 5) sigs.push(`z:${zip}`);
   if (includeCityState) {

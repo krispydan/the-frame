@@ -98,6 +98,19 @@ describe("findDuplicateCompanies — merges genuine duplicates", () => {
     expect(survivors().size).toBe(1);
   });
 
+  it("links on a contact domain even when the stored domain columns differ", () => {
+    // Both Alter records have contacts at alterbrooklyn.com, but their stored
+    // domain columns disagree. Preferring the stored value meant the matching
+    // contact domains were never compared.
+    const a = company("Alter", "brooklyn", "NY", { email: "tommy@alterbrooklyn.com" });
+    const b = company("ALTER", "", "", { email: "info@alterbrooklyn.com" });
+    db.prepare("UPDATE companies SET domain='shopalter.com' WHERE id=?").run(a);
+    db.prepare("UPDATE companies SET domain='alter-nyc.com' WHERE id=?").run(b);
+
+    mergeCompanies({ apply: true });
+    expect(survivors().size).toBe(1);
+  });
+
   it("matches St. and Saint spellings of a city", () => {
     company("360 Boutique", "st. augustine", "FL");
     company("360 Boutique", "saint augustine", "FLORIDA");
