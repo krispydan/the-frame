@@ -190,8 +190,62 @@ export async function GET(req: NextRequest) {
     FROM companies c
   `).get();
 
+  // ── The list this analysis exists to produce ──
+  const AJM_REV = `(SELECT COALESCE(SUM(a.total),0) FROM ajm_orders a
+     WHERE a.company_id = c.id AND a.cancelled = 0 AND a.order_date >= '2022-01-01')`;
+
+  const targetPool = sqlite.prepare(`
+    SELECT
+      CASE WHEN ${AJM_REV} >= 20000 THEN 'AJM $20k+'
+           WHEN ${AJM_REV} >= 5000  THEN 'AJM $5k–20k'
+           ELSE 'AJM $1k–5k' END AS band,
+      COUNT(*) AS accounts,
+      ROUND(SUM(${AJM_REV}), 2) AS ajmRevenue,
+      SUM(CASE WHEN EXISTS (SELECT 1 FROM contacts ct WHERE ct.company_id = c.id
+            AND TRIM(COALESCE(ct.email,'')) != '' AND LOWER(ct.email) NOT LIKE '%@relay.faire.com%')
+          THEN 1 ELSE 0 END) AS withEmail,
+      SUM(CASE WHEN EXISTS (SELECT 1 FROM company_phones p WHERE p.company_id = c.id) THEN 1 ELSE 0 END) AS withPhone,
+      SUM(CASE WHEN c.status = 'not_qualified' THEN 1 ELSE 0 END) AS markedNotQualified
+    FROM companies c
+    WHERE ${AJM_REV} >= 1000 AND NOT ${CONVERTED}
+    GROUP BY band
+  `).all();
+
+  // What share of Jaxy revenue already comes from the A.J. Morgan book?
+  const revenueShare = sqlite.prepare(`
+    SELECT
+      ROUND(SUM(CASE WHEN ${AJM_REV} > 0 THEN ${REVENUE} ELSE 0 END), 2) AS fromAjmAccounts,
+      ROUND(SUM(${REVENUE}), 2) AS total,
+      SUM(CASE WHEN ${AJM_REV} > 0 AND ${CONVERTED} THEN 1 ELSE 0 END) AS ajmCustomers,
+      SUM(CASE WHEN ${CONVERTED} THEN 1 ELSE 0 END) AS customers
+    FROM companies c
+  `).get();
+
+  // Why does ICP tier A convert worse than tier C? Where did each tier come from?
+  const tierBySource = sqlite.prepare(`
+    SELECT c.icp_tier AS tier, COALESCE(c.source_type,'(none)') AS source,
+           COUNT(*) AS leads, SUM(CASE WHEN ${CONVERTED} THEN 1 ELSE 0 END) AS converted
+    FROM companies c WHERE c.icp_tier IS NOT NULL
+    GROUP BY tier, source HAVING leads >= 200 ORDER BY leads DESC LIMIT 20
+  `).all();
+
+  // Retention: a second order is cheaper than a first one.
+  const repeat = sqlite.prepare(`
+    SELECT CASE WHEN n = 1 THEN '1 order' WHEN n <= 3 THEN '2–3 orders'
+                WHEN n <= 6 THEN '4–6 orders' ELSE '7+ orders' END AS bucket,
+           COUNT(*) AS customers, ROUND(SUM(rev), 2) AS revenue
+    FROM (SELECT c.id, COUNT(o.id) AS n, SUM(o.total) AS rev
+          FROM companies c JOIN orders o ON o.company_id = c.id
+          WHERE o.status NOT IN ('cancelled','returned') GROUP BY c.id)
+    GROUP BY bucket
+  `).all();
+
   return NextResponse.json({
     generatedFor: "GTM signal analysis",
+    targetPool,
+    revenueShare,
+    tierBySource,
+    repeat,
     overall,
     byStatus,
     ajmSignal: ajm.map((r) => ({
