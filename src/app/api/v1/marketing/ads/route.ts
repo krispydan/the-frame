@@ -96,22 +96,39 @@ export async function POST(request: NextRequest) {
   const recipeSlug = typeof body.recipe === "string" ? body.recipe : "pcard";
   const recipe = getAdRecipe(recipeSlug);
   if (!recipe) return NextResponse.json({ error: `Unknown recipe '${recipeSlug}'` }, { status: 400 });
-  // A1 scope: clip-backed video ads. Image backgrounds arrive with the
-  // image renderer — reject rather than accept-and-fail-at-render.
-  if (backgroundType !== "clip" || typeof backgroundRef !== "string" || !backgroundRef) {
-    return NextResponse.json({ error: "backgroundType must be 'clip' with a clip id" }, { status: 400 });
+  const validBg = backgroundType === "clip" || backgroundType === "catalog_image" || backgroundType === "upload";
+  if (!validBg || typeof backgroundRef !== "string" || !backgroundRef) {
+    return NextResponse.json(
+      { error: "backgroundType must be 'clip', 'catalog_image' or 'upload' with a reference" },
+      { status: 400 },
+    );
   }
   if (typeof skuId !== "string" || !skuId) {
     return NextResponse.json({ error: "skuId is required" }, { status: 400 });
   }
 
-  const clip = sqlite.prepare(
-    `SELECT id, status, talent, duration_sec FROM marketing_video_clips WHERE id = ?`,
-  ).get(backgroundRef) as { id: string; status: string; talent: string | null; duration_sec: number | null } | undefined;
-  if (!clip) return NextResponse.json({ error: "Background clip not found" }, { status: 404 });
-  if (clip.status !== "ready") {
-    return NextResponse.json({ error: `Clip is not ready (status=${clip.status})` }, { status: 400 });
+  const bgType = backgroundType as "clip" | "catalog_image" | "upload";
+  // The background decides the ad kind: moving background = video ad.
+  const kind: "video" | "image" = bgType === "clip" ? "video" : "image";
+
+  let talent: string | null = null;
+  if (backgroundType === "clip") {
+    const clip = sqlite.prepare(
+      `SELECT id, status, talent FROM marketing_video_clips WHERE id = ?`,
+    ).get(backgroundRef) as { id: string; status: string; talent: string | null } | undefined;
+    if (!clip) return NextResponse.json({ error: "Background clip not found" }, { status: 404 });
+    if (clip.status !== "ready") {
+      return NextResponse.json({ error: `Clip is not ready (status=${clip.status})` }, { status: 400 });
+    }
+    talent = clip.talent;
+  } else if (backgroundType === "catalog_image") {
+    const img = sqlite.prepare(
+      `SELECT id FROM catalog_images WHERE id = ? AND (file_path IS NOT NULL OR url IS NOT NULL)`,
+    ).get(backgroundRef);
+    if (!img) return NextResponse.json({ error: "Background image not found (or has no file)" }, { status: 404 });
   }
+  // 'upload' refs are validated at render — the key was just written by
+  // the background upload route.
   const sku = sqlite.prepare(`
     SELECT s.id, s.sku, p.name AS productName FROM catalog_skus s
     JOIN catalog_products p ON p.id = s.product_id WHERE s.id = ?
@@ -135,10 +152,10 @@ export async function POST(request: NextRequest) {
   // Same inputs → same name; the unique index makes duplicates explicit.
   const name = buildAdName({
     recipe: recipe.code,
-    kind: "video",
+    kind,
     productName: sku.productName,
     sku: sku.sku,
-    talent: clip.talent,
+    talent,
     copyVariant,
     version: 1,
   });
@@ -153,21 +170,21 @@ export async function POST(request: NextRequest) {
   const inserted = db.insert(ads).values({
     name,
     recipe: recipe.slug,
-    kind: "video",
-    backgroundType: "clip",
+    kind,
+    backgroundType: bgType,
     backgroundRef,
     skuId: sku.id,
     cardImageId: typeof body.cardImageId === "string" ? body.cardImageId : null,
     displayNameOverride: typeof body.displayNameOverride === "string" ? body.displayNameOverride : null,
     headline: typeof body.headline === "string" && body.headline.trim() ? body.headline.trim() : null,
-    talent: clip.talent ?? "none",
+    talent: talent ?? "none",
     copyVariant,
     ratios: JSON.stringify(ratios),
     status: "rendering",
   }).returning({ id: ads.id }).get();
 
   for (const ratio of ratios) {
-    db.insert(adRenders).values({ adId: inserted.id, ratio, kind: "video", status: "queued" }).run();
+    db.insert(adRenders).values({ adId: inserted.id, ratio, kind, status: "queued" }).run();
     jobQueue.enqueue("marketing.ads.render", "marketing", { adId: inserted.id, ratio }, { priority: 3 });
   }
 

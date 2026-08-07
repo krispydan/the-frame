@@ -244,8 +244,8 @@ registerJobHandler("marketing.ads.render", async (input) => {
   if (!adId || typeof adId !== "string" || !ratio || typeof ratio !== "string") {
     throw new Error("adId and ratio are required for marketing.ads.render jobs");
   }
-  const { renderVideoAd } = await import("../ads/render-video");
-  return (await renderVideoAd(adId, ratio)) as unknown as Record<string, unknown>;
+  const { renderAd } = await import("../ads/render-ad");
+  return (await renderAd(adId, ratio)) as unknown as Record<string, unknown>;
 });
 
 // Re-bake the on-screen hook after a hook edit or burn-toggle (no full

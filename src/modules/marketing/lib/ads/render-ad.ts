@@ -1,16 +1,20 @@
 /**
- * Video ad renderer — one ffmpeg pass per (ad × ratio):
+ * Ad renderer — one ffmpeg pass per (ad × ratio), for BOTH kinds:
  *
- *   clip → crop to ratio (shared crop engine, upper-centre gravity +
- *   the ad's stored nudge) → scale to output px → overlay the card PNG
- *   (built by card.ts at final pixel size) → drawtext the product name
- *   into the card's text band (+ optional headline on the media) →
- *   H.264/AAC, faststart → ads/{yyyy-mm}/{convention-named file}.
+ *   video: clip → crop (shared engine: upper-centre gravity + stored
+ *          nudge) → scale → overlay card PNG → drawtext name/headline →
+ *          H.264/AAC faststart mp4 + poster jpg
+ *   image: background image → same filtergraph → single-frame jpg
+ *          (the jpg doubles as its own poster)
  *
- * Idempotent per render row: re-running a done render overwrites the
- * same key and updates the same row (queue is at-least-once).
+ * One ffmpeg pipeline for both is deliberate: the card, the crop and
+ * the text land pixel-identically whether the background moves or not.
+ *
+ * Idempotent per render row: deterministic output key, row updated in
+ * place (queue is at-least-once).
  */
 import { writeFile, unlink } from "fs/promises";
+import sharp from "sharp";
 import { eq, and } from "drizzle-orm";
 import { db, sqlite } from "@/lib/db";
 import { ads, adRenders, videoClips } from "@/modules/marketing/schema";
@@ -20,6 +24,9 @@ import { AD_RATIOS, cropWindow, isAdRatio, type AdRatio } from "./ratios";
 import { getAdRecipe, effectiveLayout, parseLayoutOverrides } from "./recipes";
 import { buildCard, resolveCardImage, loadCardImageBuffer, AD_FONT } from "./card";
 import { renderFileName } from "./ad-naming";
+import { getFullPath } from "@/lib/storage/local";
+import { existsSync } from "fs";
+import { readFile } from "fs/promises";
 
 /** R2/volume key for a render: ads/{YYYY-MM}/{convention file name}. */
 export function adRenderPath(adName: string, ratio: AdRatio, kind: "video" | "image", createdAt: Date): string {
@@ -41,10 +48,10 @@ export interface AdRenderResult {
   sizeBytes: number;
 }
 
-export async function renderVideoAd(adId: string, ratio: string): Promise<AdRenderResult> {
+export async function renderAd(adId: string, ratio: string): Promise<AdRenderResult> {
   if (!isAdRatio(ratio)) throw new Error(`Unknown ratio: ${ratio}`);
   try {
-    return await renderVideoAdInner(adId, ratio);
+    return await renderAdInner(adId, ratio);
   } catch (e) {
     // Mark the render row failed for ANY error — a validation failure
     // (clip archived, image deleted) must not leave the row 'queued'
@@ -58,21 +65,78 @@ export async function renderVideoAd(adId: string, ratio: string): Promise<AdRend
   }
 }
 
-async function renderVideoAdInner(adId: string, ratio: AdRatio): Promise<AdRenderResult> {
+/**
+ * The background pixels for an IMAGE ad: a catalog image (volume or
+ * R2, same two-generation reality as the card image) or an upload
+ * sitting in ads/backgrounds/ on the videos storage.
+ */
+async function loadImageBackground(ad: { backgroundType: string; backgroundRef: string }): Promise<Buffer> {
+  if (ad.backgroundType === "catalog_image") {
+    const img = sqlite.prepare(
+      `SELECT id, file_path, url FROM catalog_images WHERE id = ?`,
+    ).get(ad.backgroundRef) as { id: string; file_path: string | null; url: string | null } | undefined;
+    if (!img) throw new Error(`Background catalog image ${ad.backgroundRef} not found`);
+    const abs = img.file_path ? getFullPath(img.file_path) : null;
+    if (abs && existsSync(abs)) return readFile(abs);
+    if (img.url) {
+      const res = await fetch(img.url);
+      if (!res.ok) throw new Error(`Background image ${img.id}: fetch returned ${res.status}`);
+      return Buffer.from(await res.arrayBuffer());
+    }
+    throw new Error(`Background image ${img.id} has no readable bytes (local missing, no R2 url)`);
+  }
+  if (ad.backgroundType === "upload") {
+    const m = await materializeVideo(ad.backgroundRef);
+    try {
+      return await readFile(m.path);
+    } finally {
+      await m.cleanup();
+    }
+  }
+  throw new Error(`Unsupported image-ad background type '${ad.backgroundType}'`);
+}
+
+async function renderAdInner(adId: string, ratio: AdRatio): Promise<AdRenderResult> {
   const ad = db.select().from(ads).where(eq(ads.id, adId)).get();
   if (!ad) throw new Error(`Ad ${adId} not found`);
-  if (ad.kind !== "video" || ad.backgroundType !== "clip") {
-    throw new Error(`Ad ${adId} is not a clip-backed video ad`);
+  if (ad.kind !== "video" && ad.kind !== "image") {
+    throw new Error(`Ad ${adId} kind '${ad.kind}' cannot render yet`);
   }
+  const isVideo = ad.kind === "video";
   const recipe = getAdRecipe(ad.recipe);
   if (!recipe) throw new Error(`Ad ${adId} uses unknown recipe '${ad.recipe}'`);
 
-  const clip = db.select().from(videoClips).where(eq(videoClips.id, ad.backgroundRef)).get();
-  if (!clip || clip.status !== "ready" || !clip.normalizedPath) {
-    throw new Error(`Background clip ${ad.backgroundRef} is not ready`);
+  // ── Background source ──
+  let clipPath: string | null = null;
+  let srcW: number, srcH: number;
+  let bgTmp: string | null = null;
+  const cleanups: Array<() => Promise<void>> = [];
+
+  if (isVideo) {
+    if (ad.backgroundType !== "clip") throw new Error(`Video ad ${adId} must have a clip background`);
+    const clip = db.select().from(videoClips).where(eq(videoClips.id, ad.backgroundRef)).get();
+    if (!clip || clip.status !== "ready" || !clip.normalizedPath) {
+      throw new Error(`Background clip ${ad.backgroundRef} is not ready`);
+    }
+    srcW = clip.width ?? 1080;
+    srcH = clip.height ?? 1920;
+    const src = await materializeVideo(clip.normalizedPath);
+    cleanups.push(src.cleanup);
+    clipPath = src.path;
+  } else {
+    const bg = await loadImageBackground(ad);
+    const meta = await sharp(bg).metadata();
+    if (!meta.width || !meta.height) throw new Error(`Background image for ad ${adId} is unreadable`);
+    srcW = meta.width;
+    srcH = meta.height;
+    bgTmp = videoScratchPath(`ad-${adId}-${ratio}-bg.png`);
+    // Normalize exotic formats (HEIC/webp/CMYK) to png for ffmpeg.
+    await writeFile(bgTmp, await sharp(bg).rotate().png().toBuffer());
+    const bgTmpFixed = bgTmp;
+    cleanups.push(async () => unlink(bgTmpFixed).catch(() => {}));
   }
 
-  // Card contents: product name + front image.
+  // ── Card ──
   const sku = sqlite.prepare(`
     SELECT s.id, p.name AS productName FROM catalog_skus s
     JOIN catalog_products p ON p.id = s.product_id WHERE s.id = ?
@@ -81,30 +145,28 @@ async function renderVideoAdInner(adId: string, ratio: AdRatio): Promise<AdRende
   const cardImage = resolveCardImage(ad.skuId, ad.cardImageId);
   if (!cardImage) throw new Error(`SKU ${ad.skuId} has no catalog image for the card`);
   const cardImageBuf = await loadCardImageBuffer(cardImage);
-  // '' override = hide the name entirely.
+  // Product name only on the card (no colourway — deliberate); '' hides it.
   const cardText = (ad.displayNameOverride ?? sku.productName).trim();
 
   const frame = AD_RATIOS[ratio];
   const layout = effectiveLayout(recipe, ratio, parseLayoutOverrides(ad.layoutOverrides)[ratio]);
   const card = await buildCard({ recipe, ratio, layout, productImage: cardImageBuf });
+  const crop = cropWindow(srcW, srcH, ratio, layout.bgOffsetX, layout.bgOffsetY);
 
-  const crop = cropWindow(clip.width ?? 1080, clip.height ?? 1920, ratio, layout.bgOffsetX, layout.bgOffsetY);
-
+  const ext = isVideo ? "mp4" : "jpg";
   const cardTmp = videoScratchPath(`ad-${adId}-${ratio}-card.png`);
-  const outTmp = videoScratchPath(`ad-${adId}-${ratio}.mp4`);
+  const outTmp = videoScratchPath(`ad-${adId}-${ratio}.${ext}`);
   const posterTmp = videoScratchPath(`ad-${adId}-${ratio}-poster.jpg`);
-  const cleanups: Array<() => Promise<void>> = [
+  cleanups.push(
     async () => unlink(cardTmp).catch(() => {}),
     async () => unlink(outTmp).catch(() => {}),
     async () => unlink(posterTmp).catch(() => {}),
-  ];
+  );
 
   try {
     await writeFile(cardTmp, card.png);
-    const src = await materializeVideo(clip.normalizedPath);
-    cleanups.push(src.cleanup);
 
-    // Filtergraph: crop+scale the clip, overlay the card, then text.
+    // ── Filtergraph — identical for both kinds ──
     const filters: string[] = [
       `[0:v]crop=${crop.width}:${crop.height}:${crop.x}:${crop.y},` +
         `scale=${frame.width}:${frame.height},setsar=1[bg]`,
@@ -135,14 +197,19 @@ async function renderVideoAdInner(adId: string, ratio: AdRatio): Promise<AdRende
 
     await runFfmpeg([
       "-y",
-      "-i", src.path,
+      "-i", isVideo ? clipPath! : bgTmp!,
       "-i", cardTmp,
       "-filter_complex", filters.join(";"),
-      "-map", `[${last}]`, "-map", "0:a?",
-      "-c:v", "libx264", "-profile:v", "high", "-level", "4.1",
-      "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
-      "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "128k",
-      "-movflags", "+faststart",
+      "-map", `[${last}]`,
+      ...(isVideo
+        ? [
+            "-map", "0:a?",
+            "-c:v", "libx264", "-profile:v", "high", "-level", "4.1",
+            "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "128k",
+            "-movflags", "+faststart",
+          ]
+        : ["-frames:v", "1", "-q:v", "2"]),
       outTmp,
     ]);
 
@@ -151,19 +218,26 @@ async function renderVideoAdInner(adId: string, ratio: AdRatio): Promise<AdRende
       throw new Error(`Render came out ${probe.width}x${probe.height}, expected ${frame.width}x${frame.height}`);
     }
 
-    await runFfmpeg(["-y", "-i", outTmp, "-frames:v", "1", "-q:v", "3", posterTmp]);
-
     const createdAt = new Date();
-    const r2Key = adRenderPath(ad.name, ratio, "video", createdAt);
-    const posterKey = r2Key.replace(/\.mp4$/, "_poster.jpg");
-    await storeVideoFile(outTmp, r2Key);
-    await storeVideoFile(posterTmp, posterKey);
+    const r2Key = adRenderPath(ad.name, ratio, ad.kind, createdAt);
+    let posterKey: string;
+    if (isVideo) {
+      await runFfmpeg(["-y", "-i", outTmp, "-frames:v", "1", "-q:v", "3", posterTmp]);
+      posterKey = r2Key.replace(/\.mp4$/, "_poster.jpg");
+      await storeVideoFile(outTmp, r2Key);
+      await storeVideoFile(posterTmp, posterKey);
+    } else {
+      // The jpg IS its own poster — one file, two roles.
+      posterKey = r2Key;
+      await storeVideoFile(outTmp, r2Key);
+    }
 
     db.update(adRenders)
       .set({
         status: "done", r2Key, posterKey,
         width: probe.width, height: probe.height,
-        durationSec: probe.durationSec, sizeBytes: probe.sizeBytes,
+        durationSec: isVideo ? probe.durationSec : null,
+        sizeBytes: probe.sizeBytes,
         error: null, updatedAt: new Date().toISOString(),
       })
       .where(and(eq(adRenders.adId, adId), eq(adRenders.ratio, ratio)))
@@ -173,7 +247,8 @@ async function renderVideoAdInner(adId: string, ratio: AdRatio): Promise<AdRende
     return {
       ratio, r2Key,
       width: probe.width, height: probe.height,
-      durationSec: probe.durationSec, sizeBytes: probe.sizeBytes,
+      durationSec: isVideo ? probe.durationSec : 0,
+      sizeBytes: probe.sizeBytes,
     };
   } finally {
     for (const c of cleanups) await c();

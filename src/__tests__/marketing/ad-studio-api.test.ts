@@ -18,10 +18,10 @@ import { getTestDb, resetTestDb } from "../setup";
 import { createRequest, parseResponse } from "../api-helpers";
 import { GET as listAds, POST as createAd } from "@/app/api/v1/marketing/ads/route";
 import { GET as getAdDetail, PATCH as patchAd, DELETE as archiveAd } from "@/app/api/v1/marketing/ads/[id]/route";
-import { POST as renderAd } from "@/app/api/v1/marketing/ads/[id]/render/route";
+import { POST as queueRenders } from "@/app/api/v1/marketing/ads/[id]/render/route";
 import { GET as downloadAd } from "@/app/api/v1/marketing/ads/[id]/download/route";
 import { GET as adOptions } from "@/app/api/v1/marketing/ads/options/route";
-import { renderVideoAd, settleAdStatus, escapeDrawtext, adRenderPath } from "@/modules/marketing/lib/ads/render-video";
+import { renderAd, settleAdStatus, escapeDrawtext, adRenderPath } from "@/modules/marketing/lib/ads/render-ad";
 
 const FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
 const sh = (args: string[]) =>
@@ -205,7 +205,7 @@ describe("status roll-up + lifecycle", () => {
     expect(ad.status).toBe("failed");
     expect(ad.error).toBe("boom");
 
-    const res = await renderAd(createRequest("POST", `x`, { body: {} }), routeParams(created.id));
+    const res = await queueRenders(createRequest("POST", `x`, { body: {} }), routeParams(created.id));
     expect((await parseResponse(res)).status).toBe(200);
     const r = d.prepare(`SELECT status, error FROM marketing_ad_renders WHERE ad_id = ?`).get(created.id) as { status: string; error: string | null };
     expect(r.status).toBe("queued");
@@ -278,11 +278,129 @@ describe("render helpers", () => {
   });
 });
 
-describe("renderVideoAd — real ffmpeg E2E", () => {
+describe("image ads (A2)", () => {
+  async function createImageAd() {
+    const res = await createAd(
+      createRequest("POST", "/api/v1/marketing/ads", {
+        body: {
+          recipe: "pcard",
+          backgroundType: "catalog_image",
+          backgroundRef: "img1",
+          skuId: "s1",
+          ratios: ["4x5"],
+        },
+      }),
+    );
+    return parseResponse<{ id: string; name: string; error?: string }>(res);
+  }
+
+  it("creates with FMT=IMG, model NONE, and image-kind renders", async () => {
+    const { status, data } = await createImageAd();
+    expect(status).toBe(201);
+    expect(data.name).toBe("JX_PCARD_IMG_SHIPO-TIGYEL_NONE_C00_v01");
+    const r = getTestDb().prepare(`SELECT kind FROM marketing_ad_renders WHERE ad_id = ?`).get(data.id) as { kind: string };
+    expect(r.kind).toBe("image");
+  });
+
+  it("rejects a background image that has no file", async () => {
+    getTestDb().prepare(`UPDATE catalog_images SET file_path = NULL, url = NULL WHERE id = 'img1'`).run();
+    const { status } = await createImageAd();
+    expect(status).toBe(404);
+  });
+
+  it("renders a real jpg through the same ffmpeg pipeline", async () => {
+    const { data: created } = await createImageAd();
+    const result = await renderAd(created.id, "4x5");
+    expect(result.width).toBe(1080);
+    expect(result.height).toBe(1350);
+    expect(result.r2Key).toMatch(/JX_PCARD_IMG_SHIPO-TIGYEL_NONE_C00_v01_4x5\.jpg$/);
+
+    const d = getTestDb();
+    const render = d.prepare(`SELECT * FROM marketing_ad_renders WHERE ad_id = ?`).get(created.id) as Record<string, unknown>;
+    expect(render.status).toBe("done");
+    // The jpg is its own poster — one file, two roles.
+    expect(render.poster_key).toBe(render.r2_key);
+    expect((d.prepare(`SELECT status FROM marketing_ads WHERE id = ?`).get(created.id) as { status: string }).status).toBe("ready");
+
+    // Card pixels present in the jpg, same sampling as the video E2E.
+    const raw = await sharp(path.join(videosRoot, render.r2_key as string)).raw().toBuffer({ resolveWithObject: true });
+    const at = (fx: number, fy: number) => {
+      const i = (Math.round(fy * raw.info.height) * raw.info.width + Math.round(fx * raw.info.width)) * raw.info.channels;
+      return [raw.data[i], raw.data[i + 1], raw.data[i + 2]];
+    };
+    // 4x5 defaults: card x 0.07–0.93, y 0.66–0.947. Left padding strip = white.
+    const [wr, wg, wb] = at(0.085, 0.78);
+    expect(wr).toBeGreaterThan(200);
+    expect(wg).toBeGreaterThan(200);
+    expect(wb).toBeGreaterThan(200);
+  }, 60_000);
+});
+
+describe("background routes (A2)", () => {
+  it("uploads a background content-addressed and lists catalog images", async () => {
+    const { POST: uploadBg, GET: listBg } = await import("@/app/api/v1/marketing/ads/backgrounds/route");
+    const { NextRequest } = await import("next/server");
+    const jpg = await sharp({ create: { width: 1200, height: 1500, channels: 3, background: "#357" } })
+      .jpeg().toBuffer();
+    const req = new NextRequest("http://t/api/v1/marketing/ads/backgrounds", {
+      method: "POST",
+      body: new Uint8Array(jpg),
+    });
+    const { status, data } = await parseResponse<{ key: string; width: number }>(await uploadBg(req));
+    expect(status).toBe(201);
+    expect(data.key).toMatch(/^ads\/backgrounds\/[0-9a-f]{16}\.jpg$/);
+    expect(data.width).toBe(1200);
+
+    const tiny = await sharp({ create: { width: 300, height: 300, channels: 3, background: "#000" } }).jpeg().toBuffer();
+    const req2 = new NextRequest("http://t/x", { method: "POST", body: new Uint8Array(tiny) });
+    expect((await uploadBg(req2)).status).toBe(400); // too small to crop at 1080
+
+    const list = await parseResponse<{ images: Array<{ id: string; productName: string }> }>(
+      await listBg(createRequest("GET", "/api/v1/marketing/ads/backgrounds", { searchParams: { search: "Shipo" } })),
+    );
+    expect(list.data.images.map((i) => i.id)).toContain("img1");
+  });
+});
+
+describe("copy variants (A3)", () => {
+  it("assigns sequential codes and lists with usage counts", async () => {
+    const { insertCopyVariant, nextCopyCode } = await import("@/modules/marketing/lib/ads/ad-copy");
+    expect(nextCopyCode()).toBe("C01");
+    expect(insertCopyVariant({ primaryText: "Sunnies that survive the beach." }).code).toBe("C01");
+    expect(insertCopyVariant({ primaryText: "Two pairs, one price.", headline: "Deal" }).code).toBe("C02");
+
+    const { GET: listCopy } = await import("@/app/api/v1/marketing/ads/copy/route");
+    const { data } = await parseResponse<{ variants: Array<{ code: string; usedBy: number }> }>(await listCopy());
+    expect(data.variants.map((v) => v.code)).toEqual(["C01", "C02"]);
+  });
+
+  it("renames a NOT-yet-published ad when its copy changes (same version)", async () => {
+    const { data: created } = await createTestAd();
+    const res = await patchAd(
+      createRequest("PATCH", "x", { body: { copyVariant: "C05" } }), routeParams(created.id),
+    );
+    expect((await parseResponse(res)).status).toBe(200);
+    const ad = getTestDb().prepare(`SELECT name, version FROM marketing_ads WHERE id = ?`).get(created.id) as
+      { name: string; version: number };
+    expect(ad.name).toBe("JX_PCARD_VID_SHIPO-TIGYEL_JADE_C05_v01");
+    expect(ad.version).toBe(1); // rename, not a new creative — it never ran
+  });
+
+  it("409s when a copy change collides with an existing ad's name", async () => {
+    const { data: a } = await createTestAd();
+    await patchAd(createRequest("PATCH", "x", { body: { copyVariant: "C05" } }), routeParams(a.id));
+    // Second ad with same inputs at C00, then try to move it to C05 too.
+    const { data: b } = await createTestAd();
+    const res = await patchAd(createRequest("PATCH", "x", { body: { copyVariant: "C05" } }), routeParams(b.id));
+    expect((await parseResponse(res)).status).toBe(409);
+  });
+});
+
+describe("renderAd — real ffmpeg E2E", () => {
   it("renders 1x1 with the card + name burned in, settles the ad ready, and zips", async () => {
     const { data: created } = await createTestAd();
 
-    const result = await renderVideoAd(created.id, "1x1");
+    const result = await renderAd(created.id, "1x1");
     expect(result.width).toBe(1080);
     expect(result.height).toBe(1080);
     expect(result.durationSec).toBeGreaterThan(1.5);
@@ -323,7 +441,7 @@ describe("renderVideoAd — real ffmpeg E2E", () => {
   it("marks the render failed when the background is gone", async () => {
     const { data: created } = await createTestAd();
     getTestDb().prepare(`UPDATE marketing_video_clips SET normalized_path = NULL WHERE id = 'clip1'`).run();
-    await expect(renderVideoAd(created.id, "1x1")).rejects.toThrow(/not ready/);
+    await expect(renderAd(created.id, "1x1")).rejects.toThrow(/not ready/);
     const r = getTestDb().prepare(`SELECT status, error FROM marketing_ad_renders WHERE ad_id = ?`).get(created.id) as
       { status: string; error: string };
     expect(r.status).toBe("failed");

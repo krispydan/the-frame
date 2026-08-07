@@ -54,6 +54,26 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     : undefined;
   if (clip?.poster_path) clip.posterUrl = videoUrl(clip.poster_path as string);
 
+  // Background preview + source dimensions for the canvas editor: the
+  // raw (un-cropped) source it drags the crop window across, and the
+  // dims that make the preview's crop math exact.
+  let backgroundUrl: string | null = null;
+  let srcDims: { width: number; height: number } | null = null;
+  if (ad.background_type === "clip" && clip) {
+    if (clip.poster_path) backgroundUrl = videoUrl(clip.poster_path as string);
+    if (clip.width && clip.height) srcDims = { width: clip.width as number, height: clip.height as number };
+  } else if (ad.background_type === "catalog_image") {
+    const bg = sqlite.prepare(`SELECT file_path, url, width, height FROM catalog_images WHERE id = ?`)
+      .get(ad.background_ref as string) as
+      { file_path: string | null; url: string | null; width: number | null; height: number | null } | undefined;
+    if (bg) {
+      backgroundUrl = catalogImageUrl(bg.file_path, bg.url);
+      if (bg.width && bg.height) srcDims = { width: bg.width, height: bg.height };
+    }
+  } else if (ad.background_type === "upload") {
+    backgroundUrl = videoUrl(ad.background_ref as string);
+  }
+
   const cardImage = resolveCardImage(ad.sku_id as string, ad.card_image_id as string | null);
   return NextResponse.json({
     ad: {
@@ -63,6 +83,8 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     },
     renders,
     clip: clip ?? null,
+    backgroundUrl,
+    srcDims,
     cardImage: cardImage
       ? { imageId: cardImage.imageId, source: cardImage.source, url: catalogImageUrl(cardImage.relPath, cardImage.url) }
       : null,
@@ -130,39 +152,59 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
   // Version bump: editing the visuals or copy of a PUBLISHED ad makes it
   // a new creative — same inputs, next version, regenerated name. The ad
   // returns to rendering and its renders are requeued below.
-  const editingPublished = ad.status === "published" && (visualsChanged || typeof body.copyVariant === "string") && statusChange === null;
-  if (editingPublished) {
+  const copyChanged = typeof body.copyVariant === "string" && body.copyVariant !== ad.copy_variant;
+  const editingPublished = ad.status === "published" && (visualsChanged || copyChanged) && statusChange === null;
+  const regenName = (version: number) => {
     const recipe = getAdRecipe(ad.recipe as string);
-    const nextVersion = (ad.version as number) + 1;
-    const nextName = buildAdName({
+    return buildAdName({
       recipe: recipe?.code ?? (ad.recipe as string),
       kind: ad.kind as "video" | "image" | "carousel",
       productName: (ad.product_name as string) ?? "PRODUCT",
       sku: (ad.sku as string) ?? "NA-NA",
       talent: ad.talent as string,
       copyVariant: typeof body.copyVariant === "string" ? body.copyVariant : (ad.copy_variant as string),
-      version: nextVersion,
+      version,
     });
+  };
+  if (editingPublished) {
+    const nextVersion = (ad.version as number) + 1;
     sets.push("version = ?", "name = ?", "status = 'rendering'", "published_at = NULL");
-    params.push(nextVersion, nextName);
+    params.push(nextVersion, regenName(nextVersion));
+  } else if (copyChanged) {
+    // Not yet published: the name must still tell the truth about the
+    // copy code — same version, regenerated name.
+    sets.push("name = ?");
+    params.push(regenName(ad.version as number));
   }
 
   if (!sets.length) return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   sets.push("updated_at = datetime('now')");
-  sqlite.prepare(`UPDATE marketing_ads SET ${sets.join(", ")} WHERE id = ?`).run(...params, id);
+  try {
+    sqlite.prepare(`UPDATE marketing_ads SET ${sets.join(", ")} WHERE id = ?`).run(...params, id);
+  } catch (e) {
+    if (String(e).includes("UNIQUE")) {
+      // Name regeneration collided — an ad with these exact inputs (and
+      // copy code) already exists.
+      return NextResponse.json(
+        { error: "An ad with these inputs and copy variant already exists" },
+        { status: 409 },
+      );
+    }
+    throw e;
+  }
 
   // Re-render when visuals changed and the caller asked for it (the
   // canvas editor batches drag edits and re-renders once on save).
   const wantsRerender = request.nextUrl.searchParams.get("rerender") === "1" || editingPublished;
-  if (visualsChanged && wantsRerender && ad.kind === "video") {
+  if (visualsChanged && wantsRerender && (ad.kind === "video" || ad.kind === "image")) {
     const ratios = (JSON.parse((ad.ratios as string) || "[]") as string[]).filter(isAdRatio);
     for (const ratio of ratios) {
       sqlite.prepare(`
         INSERT INTO marketing_ad_renders (id, ad_id, ratio, kind, status)
-        VALUES (lower(hex(randomblob(16))), ?, ?, 'video', 'queued')
+        VALUES (lower(hex(randomblob(16))), ?, ?, ?, 'queued')
         ON CONFLICT (ad_id, ratio)
         DO UPDATE SET status = 'queued', error = NULL, updated_at = datetime('now')
-      `).run(id, ratio);
+      `).run(id, ratio, ad.kind);
       jobQueue.enqueue("marketing.ads.render", "marketing", { adId: id, ratio }, { priority: 3 });
     }
     if (!editingPublished) {

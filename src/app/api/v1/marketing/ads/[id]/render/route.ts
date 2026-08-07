@@ -16,8 +16,8 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
   const ad = sqlite.prepare(`SELECT id, kind, ratios, status FROM marketing_ads WHERE id = ?`).get(id) as
     | { id: string; kind: string; ratios: string; status: string } | undefined;
   if (!ad) return NextResponse.json({ error: "Ad not found" }, { status: 404 });
-  if (ad.kind !== "video") {
-    return NextResponse.json({ error: "Only video ads render yet" }, { status: 400 });
+  if (ad.kind !== "video" && ad.kind !== "image") {
+    return NextResponse.json({ error: `Kind '${ad.kind}' cannot render yet` }, { status: 400 });
   }
 
   const body = await request.json().catch(() => ({}));
@@ -30,10 +30,10 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
   for (const ratio of requested) {
     sqlite.prepare(`
       INSERT INTO marketing_ad_renders (id, ad_id, ratio, kind, status)
-      VALUES (lower(hex(randomblob(16))), ?, ?, 'video', 'queued')
+      VALUES (lower(hex(randomblob(16))), ?, ?, ?, 'queued')
       ON CONFLICT (ad_id, ratio)
       DO UPDATE SET status = 'queued', error = NULL, updated_at = datetime('now')
-    `).run(id, ratio);
+    `).run(id, ratio, ad.kind);
     jobQueue.enqueue("marketing.ads.render", "marketing", { adId: id, ratio }, { priority: 3 });
   }
   sqlite.prepare(
