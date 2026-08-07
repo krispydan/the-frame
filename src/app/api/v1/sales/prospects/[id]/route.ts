@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
 import { getPipedriveConnectionStatus } from "@/modules/sales/lib/pipedrive-client";
+import { getAjmHistory } from "@/modules/sales/lib/ajm/history";
 
 export async function GET(
   request: NextRequest,
@@ -139,9 +140,15 @@ export async function GET(
     relayEmail: relayContact?.email ?? null,
   };
 
+  // A.J. Morgan purchase history. AJM ceased trading Dec 2025, so a retailer
+  // with history here is a warm prospect with a known buying record — the most
+  // actionable thing on the page for anyone about to call them.
+  const ajmHistory = getAjmHistory(id);
+
   const pdStatus = getPipedriveConnectionStatus();
 
   return NextResponse.json({
+    ajmHistory,
     company: {
       ...company,
       tags: company.tags ? JSON.parse(company.tags as string) : [],

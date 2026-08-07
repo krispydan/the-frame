@@ -160,6 +160,14 @@ interface OrderSummary {
   last_order_at: string | null; first_order_at: string | null;
 }
 
+/** A.J. Morgan purchase history for this company (null when they never bought). */
+interface AjmHistory {
+  orders: number; units: number | null; revenue: number | null;
+  firstOrder: string | null; lastOrder: string | null; sources: string | null;
+  orderRows: Array<{ id: string; source: string; order_number: string; order_date: string | null; total: number; units: number; status: string | null }>;
+  topProducts: Array<{ product: string; units: number; revenue: number }>;
+}
+
 interface Activity {
   id: string; event_type: string; module: string;
   entity_type: string; entity_id: string;
@@ -190,6 +198,7 @@ export default function CompanyDetailPage() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [orderSummary, setOrderSummary] = useState<OrderSummary | null>(null);
+  const [ajmHistory, setAjmHistory] = useState<AjmHistory | null>(null);
   const [faireMapping, setFaireMapping] = useState<{ needed: boolean; relayEmail: string | null } | null>(null);
   const [faireForm, setFaireForm] = useState<{ website: string; email: string }>({ website: "", email: "" });
   const [faireSaving, setFaireSaving] = useState(false);
@@ -334,6 +343,7 @@ export default function CompanyDetailPage() {
         setContacts(data.contacts || []);
         setOrders(data.orders || []);
         setOrderSummary(data.orderSummary || null);
+        setAjmHistory(data.ajmHistory || null);
         setFaireMapping(data.faireMapping || null);
         setActivities(data.activities || []);
         setCampaigns(data.campaigns || []);
@@ -1654,6 +1664,90 @@ export default function CompanyDetailPage() {
                   );
                 })}
               </div>
+            </CardContent>
+          </Card>
+          )}
+
+          {/* A.J. Morgan history — AJM ceased trading Dec 2025, so a retailer
+              with a buying record here is the warmest kind of prospect. */}
+          {ajmHistory && (
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-amber-600" />
+                  A.J. Morgan history
+                </CardTitle>
+                <Link href="/customers/ajm" className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
+                  All AJM accounts →
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <p className="text-xs text-gray-500">Revenue</p>
+                  <p className="text-xl font-bold text-amber-700 dark:text-amber-500">
+                    ${Number(ajmHistory.revenue || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Orders</p>
+                  <p className="text-xl font-bold">{ajmHistory.orders}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Units</p>
+                  <p className="text-xl font-bold">{Number(ajmHistory.units || 0).toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Bought</p>
+                  <p className="text-sm font-medium">
+                    {ajmHistory.firstOrder?.slice(0, 7) ?? "—"} → {ajmHistory.lastOrder?.slice(0, 7) ?? "—"}
+                  </p>
+                  <p className="text-xs text-gray-500">{ajmHistory.sources?.replace(/_/g, " ").replace(/,/g, ", ")}</p>
+                </div>
+              </div>
+
+              {ajmHistory.topProducts.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-gray-500 mb-1.5">What they bought</p>
+                  <div className="space-y-1">
+                    {ajmHistory.topProducts.map((p) => (
+                      <div key={p.product} className="flex items-center justify-between gap-2 text-sm">
+                        <span className="truncate">{p.product}</span>
+                        <span className="whitespace-nowrap text-gray-500 text-xs">
+                          {p.units.toLocaleString()} units · ${Number(p.revenue).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <details>
+                <summary className="text-xs font-medium text-gray-500 cursor-pointer hover:text-gray-700 dark:hover:text-gray-300">
+                  {ajmHistory.orderRows.length} order{ajmHistory.orderRows.length === 1 ? "" : "s"}
+                  {ajmHistory.orderRows.length === 100 ? " (most recent 100)" : ""}
+                </summary>
+                <div className="mt-2 space-y-1 max-h-72 overflow-y-auto">
+                  {ajmHistory.orderRows.map((o) => (
+                    <div key={o.id} className="flex items-center justify-between gap-2 rounded-md border p-2 text-sm">
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">
+                          {o.order_number}
+                          <span className="ml-2 text-xs font-normal text-gray-500">{o.source?.replace(/_/g, " ")}</span>
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {o.order_date ?? "—"}{o.units ? ` · ${o.units} units` : ""}
+                        </div>
+                      </div>
+                      <div className="text-right font-medium whitespace-nowrap">
+                        ${Number(o.total || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </details>
             </CardContent>
           </Card>
           )}
