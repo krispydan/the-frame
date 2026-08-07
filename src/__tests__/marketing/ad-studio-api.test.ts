@@ -228,6 +228,45 @@ describe("status roll-up + lifecycle", () => {
   });
 });
 
+describe("card image loading (volume vs R2)", () => {
+  // Production has two generations of catalog images: older rows have
+  // bytes on the images volume (file_path), newer MCP uploads live on
+  // R2 only (url). The first real ad in production failed on exactly
+  // this — these tests pin the fallback.
+  it("prefers the local file when it exists", async () => {
+    const { resolveCardImage, loadCardImageBuffer } = await import("@/modules/marketing/lib/ads/card");
+    const resolved = resolveCardImage("s1", null)!;
+    expect(resolved.source).toBe("base");
+    const buf = await loadCardImageBuffer(resolved);
+    expect((await sharp(buf).metadata()).width).toBe(600);
+  });
+
+  it("falls back to the R2 url when the volume file is gone", async () => {
+    const d = getTestDb();
+    d.prepare(`UPDATE catalog_images SET file_path = NULL, url = 'https://r2.example/front.png' WHERE id = 'img1'`).run();
+    const { resolveCardImage, loadCardImageBuffer } = await import("@/modules/marketing/lib/ads/card");
+    const resolved = resolveCardImage("s1", null)!;
+    expect(resolved.url).toBe("https://r2.example/front.png");
+
+    const png = await sharp({ create: { width: 10, height: 10, channels: 4, background: "#fff" } }).png().toBuffer();
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(new Uint8Array(png), { status: 200 })) as typeof fetch;
+    try {
+      const buf = await loadCardImageBuffer(resolved);
+      expect((await sharp(buf).metadata()).width).toBe(10);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it("names the image and what was tried when nothing is readable", async () => {
+    const d = getTestDb();
+    d.prepare(`UPDATE catalog_images SET file_path = 'skus/s1/DELETED.png', url = NULL WHERE id = 'img1'`).run();
+    const { resolveCardImage, loadCardImageBuffer } = await import("@/modules/marketing/lib/ads/card");
+    await expect(loadCardImageBuffer(resolveCardImage("s1", null)!)).rejects.toThrow(/img1.*DELETED\.png.*no R2 url/);
+  });
+});
+
 describe("render helpers", () => {
   it("escapes drawtext metacharacters", () => {
     expect(escapeDrawtext("It's 50%: fine")).toBe("It\\'s 50\\%\\: fine");

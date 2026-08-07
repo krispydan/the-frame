@@ -64,7 +64,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     renders,
     clip: clip ?? null,
     cardImage: cardImage
-      ? { imageId: cardImage.imageId, source: cardImage.source, url: catalogImageUrl(cardImage.relPath) }
+      ? { imageId: cardImage.imageId, source: cardImage.source, url: catalogImageUrl(cardImage.relPath, cardImage.url) }
       : null,
   });
 }

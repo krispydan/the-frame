@@ -15,7 +15,9 @@ import { AD_RATIOS, DEFAULT_RATIOS } from "@/modules/marketing/lib/ads/ratios";
 export async function GET() {
   const skus = sqlite.prepare(`
     SELECT s.id, s.sku, s.color_name AS colorName, p.name AS productName,
-           EXISTS (SELECT 1 FROM catalog_images i WHERE i.sku_id = s.id AND i.file_path IS NOT NULL) AS hasImage
+           EXISTS (SELECT 1 FROM catalog_images i
+                    WHERE i.sku_id = s.id
+                      AND (i.file_path IS NOT NULL OR i.url IS NOT NULL)) AS hasImage
     FROM catalog_skus s
     JOIN catalog_products p ON p.id = s.product_id
     WHERE s.sku IS NOT NULL

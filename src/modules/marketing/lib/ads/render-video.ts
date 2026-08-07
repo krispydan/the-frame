@@ -18,7 +18,7 @@ import { materializeVideo, storeVideoFile, videoScratchPath } from "@/lib/storag
 import { runFfmpeg, ffprobe } from "../video/ffmpeg";
 import { AD_RATIOS, cropWindow, isAdRatio, type AdRatio } from "./ratios";
 import { getAdRecipe, effectiveLayout, parseLayoutOverrides } from "./recipes";
-import { buildCard, resolveCardImage, AD_FONT } from "./card";
+import { buildCard, resolveCardImage, loadCardImageBuffer, AD_FONT } from "./card";
 import { renderFileName } from "./ad-naming";
 
 /** R2/volume key for a render: ads/{YYYY-MM}/{convention file name}. */
@@ -80,12 +80,13 @@ async function renderVideoAdInner(adId: string, ratio: AdRatio): Promise<AdRende
   if (!sku) throw new Error(`SKU ${ad.skuId} not found`);
   const cardImage = resolveCardImage(ad.skuId, ad.cardImageId);
   if (!cardImage) throw new Error(`SKU ${ad.skuId} has no catalog image for the card`);
+  const cardImageBuf = await loadCardImageBuffer(cardImage);
   // '' override = hide the name entirely.
   const cardText = (ad.displayNameOverride ?? sku.productName).trim();
 
   const frame = AD_RATIOS[ratio];
   const layout = effectiveLayout(recipe, ratio, parseLayoutOverrides(ad.layoutOverrides)[ratio]);
-  const card = await buildCard({ recipe, ratio, layout, productImagePath: cardImage.absPath });
+  const card = await buildCard({ recipe, ratio, layout, productImage: cardImageBuf });
 
   const crop = cropWindow(clip.width ?? 1080, clip.height ?? 1920, ratio, layout.bgOffsetX, layout.bgOffsetY);
 

@@ -11,6 +11,8 @@
  * frame-absolute pixels so the renderer can place drawtext exactly.
  */
 import path from "path";
+import { existsSync } from "fs";
+import { readFile } from "fs/promises";
 import sharp from "sharp";
 import { sqlite } from "@/lib/db";
 import { getFullPath } from "@/lib/storage/local";
@@ -23,10 +25,12 @@ export const AD_FONT = path.join(
 );
 
 export interface ResolvedCardImage {
-  /** Absolute path on the images volume. */
-  absPath: string;
+  /** Absolute path on the images volume — may not exist (see url). */
+  absPath: string | null;
   /** IMAGES_PATH-relative path (what catalogImageUrl serves). */
-  relPath: string;
+  relPath: string | null;
+  /** R2/public URL fallback — newer catalog images live on R2 only. */
+  url: string | null;
   imageId: string;
   /** Which artifact won: pipeline cutout or the base photo. */
   source: "final" | "no_bg" | "base";
@@ -38,20 +42,26 @@ export interface ResolvedCardImage {
  * SKU reference uses), preferring its background-removed pipeline
  * artifact (`final` = cutout + shadow, then `no_bg`) over the raw
  * photo, since the card is a white surface.
+ *
+ * A catalog image's bytes live EITHER on the images volume (file_path,
+ * older uploads + all pipeline artifacts) OR on R2 (url, newer uploads
+ * via the MCP tool) — production has both generations, so the render
+ * must be able to feed on either (loadCardImageBuffer).
  */
 export function resolveCardImage(skuId: string, cardImageId?: string | null): ResolvedCardImage | null {
   const image = cardImageId
     ? sqlite.prepare(
-        `SELECT id, file_path FROM catalog_images WHERE id = ? AND file_path IS NOT NULL`,
-      ).get(cardImageId) as { id: string; file_path: string } | undefined
+        `SELECT id, file_path, url FROM catalog_images
+          WHERE id = ? AND (file_path IS NOT NULL OR url IS NOT NULL)`,
+      ).get(cardImageId) as { id: string; file_path: string | null; url: string | null } | undefined
     : sqlite.prepare(`
-        SELECT id, file_path FROM catalog_images
-         WHERE sku_id = ? AND file_path IS NOT NULL
+        SELECT id, file_path, url FROM catalog_images
+         WHERE sku_id = ? AND (file_path IS NOT NULL OR url IS NOT NULL)
          ORDER BY is_best DESC,
                   CASE status WHEN 'approved' THEN 0 WHEN 'review' THEN 1 ELSE 2 END,
                   position ASC
          LIMIT 1
-      `).get(skuId) as { id: string; file_path: string } | undefined;
+      `).get(skuId) as { id: string; file_path: string | null; url: string | null } | undefined;
   if (!image) return null;
 
   const artifact = sqlite.prepare(`
@@ -63,11 +73,36 @@ export function resolveCardImage(skuId: string, cardImageId?: string | null): Re
 
   const rel = artifact?.file_path ?? image.file_path;
   return {
-    absPath: getFullPath(rel),
+    absPath: rel ? getFullPath(rel) : null,
     relPath: rel,
+    // Pipeline artifacts are always local; the R2 url belongs to the
+    // BASE image, so it only stands in when we're using the base.
+    url: artifact ? null : image.url,
     imageId: image.id,
     source: artifact?.stage ?? "base",
   };
+}
+
+/**
+ * The actual pixels for the card: local file when it exists, else the
+ * R2 url. The explicit existence check turns "sharp: Input file is
+ * missing" into an error that names the image and what was tried.
+ */
+export async function loadCardImageBuffer(resolved: ResolvedCardImage): Promise<Buffer> {
+  if (resolved.absPath && existsSync(resolved.absPath)) {
+    return readFile(resolved.absPath);
+  }
+  if (resolved.url) {
+    const res = await fetch(resolved.url);
+    if (!res.ok) {
+      throw new Error(`Card image ${resolved.imageId}: fetch of ${resolved.url} returned ${res.status}`);
+    }
+    return Buffer.from(await res.arrayBuffer());
+  }
+  throw new Error(
+    `Card image ${resolved.imageId} has no readable bytes ` +
+    `(local ${resolved.relPath ?? "—"} missing, no R2 url)`,
+  );
 }
 
 export interface BuiltCard {
@@ -93,7 +128,8 @@ export async function buildCard(opts: {
   recipe: AdRecipe;
   ratio: AdRatio;
   layout: RatioLayout;
-  productImagePath: string;
+  /** Path on disk or the image bytes (R2-backed images arrive as buffers). */
+  productImage: string | Buffer;
 }): Promise<BuiltCard> {
   const frame = AD_RATIOS[opts.ratio];
   const width = Math.round(opts.layout.cardW * frame.width);
@@ -113,7 +149,7 @@ export async function buildCard(opts: {
     `<svg width="${width}" height="${height}"><rect width="${width}" height="${height}" rx="${radius}" ry="${radius}" fill="#ffffff"/></svg>`,
   );
 
-  const product = await sharp(opts.productImagePath)
+  const product = await sharp(opts.productImage)
     .trim({ threshold: 12 }) // tighten around the cutout/photo
     .resize(imgBoxW, imgBoxH, { fit: "inside", withoutEnlargement: false })
     .png()

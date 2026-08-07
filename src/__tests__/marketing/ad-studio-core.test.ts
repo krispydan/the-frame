@@ -140,7 +140,7 @@ describe("card builder", () => {
       recipe: PCARD,
       ratio: "4x5",
       layout: effectiveLayout(PCARD, "4x5", undefined),
-      productImagePath: productPath,
+      productImage: productPath,
     });
 
     expect(card.width).toBe(Math.round(0.86 * 1080));
