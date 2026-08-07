@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { DetailPageSkeleton } from "@/components/ui/page-skeleton";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -157,7 +158,7 @@ export default function BrandDetailPage() {
   };
 
   if (loading) {
-    return <div className="p-6 text-muted-foreground">Loading brand...</div>;
+    return <DetailPageSkeleton />;
   }
 
   if (!brand) {

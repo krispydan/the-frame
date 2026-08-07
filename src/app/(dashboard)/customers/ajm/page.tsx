@@ -16,12 +16,13 @@
  *   - Every chart should answer a decision, not just describe the past.
  */
 import { useState, useEffect, useCallback } from "react";
+import { ListPageSkeleton } from "@/components/ui/page-skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { ArrowLeft, History, Search, Loader2, Glasses, Target, TrendingUp, ShoppingBag } from "lucide-react";
+import { ArrowLeft, History, Search, Glasses, Target, TrendingUp, ShoppingBag } from "lucide-react";
 import Link from "next/link";
 import { GroupedBarChart, LineChart } from "@/components/charts/simple-charts";
 
@@ -89,7 +90,7 @@ export default function AjmBenchmarkPage() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
+  if (loading) return <ListPageSkeleton kpis={3} rows={8} cols={9} />;
   if (!b) return <div className="p-6 text-muted-foreground">No data.</div>;
 
   const latestAjm = b.season.ajmYears[b.season.ajmYears.length - 1];

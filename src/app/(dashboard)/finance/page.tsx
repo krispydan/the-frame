@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useState, useEffect, useCallback } from "react";
+import { HeaderSkeleton, KpiSkeleton, ChartSkeleton } from "@/components/ui/page-skeleton";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -425,9 +426,15 @@ function FinancePageContent() {
   };
 
   if (loading) {
+    // 3 KPI tiles then paired cards — matches the live layout below.
     return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="space-y-6">
+        <HeaderSkeleton action />
+        <KpiSkeleton count={3} />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ChartSkeleton height="h-64" />
+          <ChartSkeleton height="h-64" />
+        </div>
       </div>
     );
   }

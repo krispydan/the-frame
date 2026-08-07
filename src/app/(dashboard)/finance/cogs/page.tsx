@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, Fragment } from "react";
+import { ListPageSkeleton } from "@/components/ui/page-skeleton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -356,11 +357,7 @@ export default function CogsPage() {
     .reduce((sum, j) => sum + j.totalCogs, 0);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <ListPageSkeleton kpis={4} rows={8} cols={7} />;
   }
 
   return (

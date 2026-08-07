@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ListPageSkeleton } from "@/components/ui/page-skeleton";
 import Link from "next/link";
 import { Layers3, Target, DollarSign, Users, ChevronRight, Loader2, Pencil, Plus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -174,7 +175,7 @@ export default function SegmentsPage() {
   }
 
   if (loading) {
-    return <div className="p-6 text-muted-foreground">Loading segments...</div>;
+    return <ListPageSkeleton kpis={4} rows={8} cols={10} />;
   }
 
   const segments = payload?.data || [];

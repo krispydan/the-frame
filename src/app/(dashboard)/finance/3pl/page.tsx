@@ -9,6 +9,7 @@
  * - Contract rate card (drives the audit engine) with inline editing
  */
 import { useState, useEffect, useCallback, useRef } from "react";
+import { ListPageSkeleton } from "@/components/ui/page-skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -132,7 +133,7 @@ export default function ThreePlPage() {
   }, [load]);
 
   if (loading) {
-    return <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
+    return <ListPageSkeleton kpis={4} rows={8} cols={8} />;
   }
 
   return (
