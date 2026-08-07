@@ -106,7 +106,9 @@ export function ChatPanel() {
       <Button
         onClick={() => setOpen(true)}
         size="icon"
-        className="fixed bottom-6 right-6 z-50 h-14 w-14 rounded-full shadow-lg"
+        // bottom-24 on phones clears the company page's fixed action bar;
+        // at md: that bar is gone and the button returns to the corner.
+        className="fixed bottom-24 right-6 z-50 h-14 w-14 rounded-full shadow-lg md:bottom-6"
       >
         <MessageCircle className="h-6 w-6" />
       </Button>

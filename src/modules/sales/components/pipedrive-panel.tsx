@@ -148,28 +148,11 @@ export function PipedrivePanel({ companyId }: { companyId: string; companyName?:
     }
   }
 
-  if (!data) {
-    return (
-      <Card>
-        <CardContent className="pt-6 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin inline mr-2" />Loading Pipedrive…
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!data.connected) {
-    return (
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2"><Plug className="w-4 h-4" /> Pipedrive</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          Not connected. <a href="/settings/integrations/pipedrive" className="text-blue-600 hover:underline">Connect Pipedrive →</a>
-        </CardContent>
-      </Card>
-    );
-  }
+  // A panel with nothing to say renders nothing. Both of these previously
+  // spent a full card of vertical space announcing their own absence, which
+  // on a phone is most of a screenful for no information.
+  if (!data) return null;
+  if (!data.connected) return null;
 
   const config_ok = !!config?.pipelineConfig;
   const stagesFor = (key: "ajm" | "catalog" | "customers") =>

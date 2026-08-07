@@ -15,6 +15,12 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "The Frame — Wholesale CRM",
   description: "AI-powered wholesale CRM for Jaxy Eyewear",
+  // Without this, mobile Safari auto-detects postal addresses and phone
+  // numbers in plain text and renders them as underlined links we did not
+  // author and cannot style — sitting next to real links, so nothing on the
+  // page reads as trustworthy. Where a number should be tappable we author an
+  // explicit <a href="tel:">.
+  formatDetection: { telephone: false, address: false, email: false },
 };
 
 export default function RootLayout({

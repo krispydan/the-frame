@@ -25,6 +25,13 @@ export interface AjmHistory {
     order_date: string | null; total: number; units: number; status: string | null;
   }>;
   topProducts: Array<{ product: string; units: number; revenue: number }>;
+  /**
+   * Legacy lump-sum orders billed as a single line whose "product name" is an
+   * invoice number (categorised `no_detail` on import). They are not products
+   * and listing them reads as a wall of meaningless digits — 324803, 299444 —
+   * so they are excluded from topProducts and reported as one honest total.
+   */
+  noDetail: { orders: number; revenue: number } | null;
 }
 
 /** Null when this company has no AJM history, so callers can skip the section. */
@@ -43,12 +50,27 @@ export function getAjmHistory(companyId: string): AjmHistory | null {
     ORDER BY order_date DESC LIMIT 100
   `).all(companyId) as AjmHistory["orderRows"];
 
+  // COALESCE the category: rows imported before categorisation ran are NULL,
+  // and a bare invoice number is recognisable by shape regardless.
+  const NOT_A_PRODUCT = `(COALESCE(i.category,'') = 'no_detail' OR i.product_name GLOB '[0-9]*' AND i.product_name NOT GLOB '*[^0-9]*')`;
+
   const topProducts = sqlite.prepare(`
     SELECT i.product_name AS product, SUM(i.quantity) AS units, ROUND(SUM(i.line_total), 2) AS revenue
     FROM ajm_order_items i JOIN ajm_orders o ON o.id = i.order_id
-    WHERE o.company_id = ? AND o.cancelled = 0
+    WHERE o.company_id = ? AND o.cancelled = 0 AND NOT ${NOT_A_PRODUCT}
     GROUP BY i.product_name ORDER BY revenue DESC LIMIT 8
   `).all(companyId) as AjmHistory["topProducts"];
 
-  return { ...summary, orderRows, topProducts };
+  const nd = sqlite.prepare(`
+    SELECT COUNT(DISTINCT o.id) AS orders, ROUND(SUM(i.line_total), 2) AS revenue
+    FROM ajm_order_items i JOIN ajm_orders o ON o.id = i.order_id
+    WHERE o.company_id = ? AND o.cancelled = 0 AND ${NOT_A_PRODUCT}
+  `).get(companyId) as { orders: number; revenue: number | null };
+
+  return {
+    ...summary,
+    orderRows,
+    topProducts,
+    noDetail: nd && nd.orders > 0 ? { orders: nd.orders, revenue: nd.revenue ?? 0 } : null,
+  };
 }

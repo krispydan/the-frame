@@ -64,12 +64,34 @@ for (const vp of VIEWPORTS) {
     const overflowing = [...document.querySelectorAll("*")]
       .filter((el) => el.getBoundingClientRect().right > window.innerWidth + 1)
       .slice(0, 12)
-      .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).split(" ").slice(0, 3).join(".")} → ${Math.round(el.getBoundingClientRect().right)}px`);
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        const txt = (el.textContent || "").trim().slice(0, 24);
+        const label = el.getAttribute("aria-label") || "";
+        const parent = el.parentElement ? el.parentElement.tagName.toLowerCase() + "." + String(el.parentElement.className).slice(0, 60) : "";
+        return `${el.tagName.toLowerCase()} "${txt || label}" [${String(el.className).slice(0, 70)}] left=${Math.round(r.left)} right=${Math.round(r.right)} parent=${parent}`;
+      });
 
     // Leaf text nodes whose boxes overlap — this is what made the email and
     // phone read as one string.
+    // Only elements a user can actually see. Rows scrolled out of an
+    // overflow container still have boxes that overlap whatever follows —
+    // real geometry, but not a visible collision. Hit-testing the centre
+    // point filters those out.
+    const visible = (el) => {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return false;
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      if (cx < 0 || cy < 0 || cx > window.innerWidth || cy > window.innerHeight) {
+        el.scrollIntoView({ block: "center" });
+      }
+      const rr = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(rr.left + rr.width / 2, rr.top + rr.height / 2);
+      return !!hit && (hit === el || el.contains(hit) || hit.contains(el));
+    };
     const leaves = [...document.querySelectorAll("span, p, a, div")]
-      .filter((el) => el.children.length === 0 && el.textContent.trim().length > 2);
+      .filter((el) => el.children.length === 0 && el.textContent.trim().length > 2)
+      .filter(visible);
     const collisions = [];
     for (let i = 0; i < leaves.length && collisions.length < 12; i++) {
       const a = leaves[i].getBoundingClientRect();

@@ -8,7 +8,7 @@ import {
   ArrowLeft, ArrowRight, Building2, Globe, Phone, Mail, MapPin, Tag, Star,
   Edit, UserPlus, MessageSquare, Clock, ExternalLink, Plus, Save, X,
   Briefcase, Sparkles, Loader2, CheckCircle2, XCircle, AlertCircle, Search, Store, Eye,
-  Send, Megaphone, ShoppingCart,
+  Send, Megaphone, ShoppingCart, MoreHorizontal, Settings2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,10 +33,23 @@ import {
   MANUAL_STATUS_OPTIONS,
   getCompanyStatusBadge,
 } from "@/modules/sales/lib/company-status-display";
-import { ProspectActivityTimeline } from "@/modules/sales/components/prospect-activity-timeline";
+import { ProspectActivityTimeline, activityLabel } from "@/modules/sales/components/prospect-activity-timeline";
 import { PipedrivePanel } from "@/modules/sales/components/pipedrive-panel";
 import { GmapsPanel } from "@/modules/sales/components/gmaps-panel";
 import { ThinkingInline } from "@/components/ui/thinking";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { CompanyRibbon } from "@/modules/companies/components/company-ribbon";
+import { Section } from "@/modules/companies/components/section";
+import {
+  CompanyBrief, CompanyActionBar, resolveTalkingPoint, type BriefAlert,
+} from "@/modules/companies/components/company-brief";
+import {
+  joinPlace, pluralize, contactLabel, telHref, formatPhone,
+} from "@/modules/companies/lib/format";
+import { cn } from "@/lib/utils";
 
 interface Company {
   id: string; name: string; type: string; website: string; domain: string;
@@ -167,6 +180,7 @@ interface AjmHistory {
   firstOrder: string | null; lastOrder: string | null; sources: string | null;
   orderRows: Array<{ id: string; source: string; order_number: string; order_date: string | null; total: number; units: number; status: string | null }>;
   topProducts: Array<{ product: string; units: number; revenue: number }>;
+  noDetail: { orders: number; revenue: number } | null;
 }
 
 interface Activity {
@@ -200,6 +214,13 @@ export default function CompanyDetailPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [orderSummary, setOrderSummary] = useState<OrderSummary | null>(null);
   const [ajmHistory, setAjmHistory] = useState<AjmHistory | null>(null);
+  /** Which terminal outcome is awaiting confirmation. window.confirm is
+   *  blocked in several in-app browsers and looks like a system error on iOS. */
+  const [confirmOutcome, setConfirmOutcome] = useState<"customer" | "not_interested" | null>(null);
+  const [gmapsListing, setGmapsListing] = useState<{
+    permanentlyClosed?: boolean; temporarilyClosed?: boolean;
+    rating?: number | null; reviewCount?: number | null; categoryName?: string | null;
+  } | null>(null);
   const [faireMapping, setFaireMapping] = useState<{ needed: boolean; relayEmail: string | null } | null>(null);
   const [faireForm, setFaireForm] = useState<{ website: string; email: string }>({ website: "", email: "" });
   const [faireSaving, setFaireSaving] = useState(false);
@@ -511,22 +532,49 @@ export default function CompanyDetailPage() {
 
   const isSingleStore = stores.length <= 1;
   const primaryStore = stores.find(s => s.is_primary) || stores[0];
+
+  // ── What the Brief needs, resolved once ──
+  const gmapsKind = gmapsListing?.categoryName ?? null;
+  const briefPhone = company?.phone || primaryStore?.phone || contacts.find(c => c.phone)?.phone || null;
+  const briefEmail = company?.email || contacts.find(c => c.is_primary && c.email)?.email
+    || contacts.find(c => c.email)?.email || null;
+
+  const briefAlerts: BriefAlert[] = [];
+  if (gmapsListing?.permanentlyClosed) {
+    briefAlerts.push({ tone: "danger", text: "Permanently closed per Google — do not call." });
+  } else if (gmapsListing?.temporarilyClosed) {
+    briefAlerts.push({ tone: "warning", text: "Temporarily closed per Google." });
+  }
+  if (company?.status === "not_qualified") {
+    briefAlerts.push({
+      tone: "warning",
+      text: company.disqualify_reason
+        ? `Not qualified — ${company.disqualify_reason}`
+        : "Marked not qualified.",
+    });
+  }
+  if (faireMapping?.needed) {
+    briefAlerts.push({ tone: "warning", text: "Anonymous Faire customer — needs a real email or website." });
+  }
+
+  const lastActivity = activities[0];
+  const talkingPoint = company ? resolveTalkingPoint({
+    ajmRevenue: ajmHistory?.revenue ?? null,
+    jaxyOrders: Number(orderSummary?.order_count ?? 0),
+    aiOpener: company.ai_opener_email1 ?? null,
+    topBrand: company.top_brand ?? null,
+    categories: company.eyewear_categories ?? null,
+    googleCategory: gmapsKind,
+    description: company.description ?? null,
+  }) : null;
   const filterQs = searchParams.toString();
   const navSuffix = filterQs ? `?${filterQs}` : "";
 
   // Source badge colors
-  const sourceColorMap: Record<string, string> = {
-    "expansion-v1": "bg-blue-100 text-blue-700",
-    "expansion-v2": "bg-blue-100 text-blue-700",
-    "stockist": "bg-purple-100 text-purple-700",
-    "storemapper": "bg-orange-100 text-orange-700",
-    "goodr": "bg-green-100 text-green-700",
-    "car-wash": "bg-red-100 text-red-700",
-    "original": "bg-gray-100 text-gray-600",
-  };
 
   return (
-    <div className="p-4 md:p-6 max-w-full xl:max-w-[1200px] mx-auto">
+    <>
+    <div className="max-w-full xl:max-w-[1200px] mx-auto pb-24 md:pb-0">
       {/* Prev/Next Navigation. In pipeline-walk mode (when the URL
           carries ?pipeline=<stage>) the bar is themed slightly and
           links back to the kanban instead of the prospect list. */}
@@ -582,96 +630,67 @@ export default function CompanyDetailPage() {
         );
       })()}
 
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
-        <Link href={`/prospects${navSuffix}`} className="flex items-center gap-1 hover:text-gray-700">
-          <ArrowLeft className="w-4 h-4" /> Prospects
-        </Link>
-        <span>/</span>
-        <span className="text-gray-900 dark:text-white">{company.name}</span>
-      </div>
-
-      {/* Header — two-row layout: title + meta on top, status + actions below */}
-      <div className="mb-6 space-y-3">
-        {/* Row 1: identity */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-4 min-w-0">
-            <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xl font-bold shrink-0">
-              {company.name.charAt(0)}
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white truncate">{company.name}</h1>
-              <div className="flex items-center gap-3 mt-1 text-sm text-gray-500 flex-wrap">
-                {company.city && <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{company.city}, {company.state}</span>}
-                {company.website && (
-                  <a href={company.website.startsWith("http") ? company.website : `https://${company.website}`}
-                    target="_blank" className="flex items-center gap-1 text-blue-600 hover:underline">
-                    <Globe className="w-3.5 h-3.5" />{company.domain || company.website}
-                  </a>
-                )}
-                <a href={`https://www.google.com/search?q=${encodeURIComponent(`${company.name} ${company.city || ""} ${company.state || ""}`.trim())}`}
-                  target="_blank"
-                  className={`flex items-center gap-1 hover:underline ${company.website ? "text-gray-400 hover:text-gray-600" : "text-blue-600 font-medium"}`}>
-                  <Search className="w-3.5 h-3.5" />{company.website ? "Google" : "Search Google"}
-                </a>
-              </div>
-            </div>
-          </div>
-          {/* Terminal-state shortcuts (Overjoy-style Won / Lost) + Edit.
-              Won → customer, Lost → not_interested. Both go through the
-              regular PATCH + progressCompanyStatus path so the
-              hub-and-spoke sync handles Instantly + PhoneBurner. */}
-          <div className="flex items-center gap-2 shrink-0">
-            {company.pipedrive?.orgUrl && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-green-700 dark:text-green-400"
-                render={<a href={company.pipedrive.orgUrl} target="_blank" rel="noreferrer" />}
+      {/* Identity ribbon. The old header gave Won and Lost — two one-way
+          doors — a shrink-0 cluster at top-right, which squeezed the company
+          name down to "T..". Terminal actions now live behind the overflow
+          menu, where a deliberate second tap is the friction they deserve. */}
+      <CompanyRibbon
+        name={company.name}
+        city={company.city}
+        state={company.state}
+        kind={gmapsKind}
+        backHref={`/prospects${navSuffix}`}
+        menu={
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button variant="ghost" size="icon-sm" className="size-9" aria-label="More actions">
+                  <MoreHorizontal />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={() => { setEditing(!editing); setEditFields({}); }}>
+                <Edit /> Edit details
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                render={
+                  <a
+                    href={`https://www.google.com/search?q=${encodeURIComponent(`${company.name} ${company.city || ""} ${company.state || ""}`.trim())}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  />
+                }
               >
-                <ExternalLink className="w-4 h-4 mr-1" /> View in Pipedrive
-              </Button>
-            )}
-            <Button variant="outline" size="sm" onClick={() => { setEditing(!editing); setEditFields({}); }}>
-              <Edit className="w-4 h-4 mr-1" /> Edit
-            </Button>
-            {(() => {
-              const isWon = company.status === "customer";
-              const isLost = company.status === "not_interested";
-              return (
-                <>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      if (isLost) return;
-                      if (!confirm(`Mark ${company.name} as Not Interested? This adds them to the Instantly blocklist so they stop receiving outreach.`)) return;
-                      changeStatus("not_interested");
-                    }}
-                    disabled={isLost || isWon}
-                    title={isWon ? "Already a customer" : isLost ? "Already marked Not Interested" : "Mark as Not Interested"}
-                    className="bg-red-600 hover:bg-red-700 text-white disabled:bg-red-200 disabled:text-red-400 disabled:cursor-not-allowed"
-                  >
-                    <XCircle className="w-4 h-4 mr-1" /> Lost
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      if (isWon) return;
-                      if (!confirm(`Mark ${company.name} as Customer? This closes the deal as won and stops further outreach.`)) return;
-                      changeStatus("customer");
-                    }}
-                    disabled={isWon || isLost}
-                    title={isWon ? "Already a customer" : isLost ? "Lead marked Not Interested" : "Mark as Customer"}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white disabled:bg-emerald-200 disabled:text-emerald-400 disabled:cursor-not-allowed"
-                  >
-                    <CheckCircle2 className="w-4 h-4 mr-1" /> Won
-                  </Button>
-                </>
-              );
-            })()}
-          </div>
-        </div>
+                <Search /> Search on Google
+              </DropdownMenuItem>
+              {company.pipedrive?.orgUrl && (
+                <DropdownMenuItem
+                  render={<a href={company.pipedrive.orgUrl} target="_blank" rel="noopener noreferrer" />}
+                >
+                  <ExternalLink /> View in Pipedrive
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                disabled={company.status === "customer" || company.status === "not_interested"}
+                onClick={() => setConfirmOutcome("customer")}
+              >
+                <CheckCircle2 /> Mark as Won
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={company.status === "customer" || company.status === "not_interested"}
+                onClick={() => setConfirmOutcome("not_interested")}
+              >
+                <XCircle /> Mark as Lost
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        }
+      />
 
+      {/* Chips + enrichment actions */}
+      <div className="mb-4">
         {/* Row 2: status pills (left) + action toolbar (right) */}
         <div className="flex items-center justify-between gap-3 flex-wrap"><div className="flex items-center gap-2 flex-wrap">
           {/* ICP — clickable badge that opens the inline editor */}
@@ -776,7 +795,7 @@ export default function CompanyDetailPage() {
                           setIcpEditorOpen(false);
                           // Refetch the company
                           const cr = await fetch(`/api/v1/sales/prospects/${id}`);
-                          if (cr.ok) setCompany(await cr.json());
+                          if (cr.ok) setCompany((await cr.json()).company);
                         }
                       } finally {
                         setIcpSaving(false);
@@ -796,7 +815,7 @@ export default function CompanyDetailPage() {
                         if (r.ok) {
                           setIcpEditorOpen(false);
                           const cr = await fetch(`/api/v1/sales/prospects/${id}`);
-                          if (cr.ok) setCompany(await cr.json());
+                          if (cr.ok) setCompany((await cr.json()).company);
                         }
                       } finally {
                         setReclassifying(false);
@@ -935,13 +954,42 @@ export default function CompanyDetailPage() {
 
           </div>{/* end right actions */}
         </div>{/* end row 2 */}
-      </div>{/* end header */}
+      </div>{/* end chips row */}
+
+      {/* The Brief — the first screenful, and the whole point of the page.
+          Four questions a rep needs before dialling: are they open, are they
+          worth it, what do I open with, what is the number. */}
+      <div className="mb-4">
+        <CompanyBrief
+          companyName={company.name}
+          phone={briefPhone}
+          email={briefEmail}
+          website={company.website || company.domain || null}
+          alerts={briefAlerts}
+          ajm={ajmHistory ? { revenue: ajmHistory.revenue ?? 0, orders: ajmHistory.orders } : null}
+          jaxy={orderSummary ? {
+            revenue: Number(orderSummary.total_revenue ?? 0),
+            orders: Number(orderSummary.order_count ?? 0),
+          } : null}
+          google={company.google_rating ? {
+            rating: Number(company.google_rating),
+            reviews: Number(company.google_review_count ?? 0),
+          } : null}
+          lastTouch={{
+            at: lastActivity?.created_at ?? null,
+            label: lastActivity
+              ? `${activityLabel(lastActivity.event_type)} · ${new Date(lastActivity.created_at).toLocaleDateString()}`
+              : null,
+          }}
+          talkingPoint={talkingPoint}
+        />
+      </div>
 
       {/* Edit mode */}
       {editing && (
         <Card className="mb-6 border-blue-200 bg-blue-50/50">
           <CardContent className="pt-4">
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3">
               {[
                 { key: "name", label: "Name", val: company.name },
                 { key: "email", label: "Email", val: company.email },
@@ -1019,26 +1067,21 @@ export default function CompanyDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main content */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Company Info Card */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Company Info</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {company.status === "rejected" && (
-                <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                  <p className="text-sm font-medium text-red-800 dark:text-red-300">⛔ Not Qualified</p>
-                  {company.disqualify_reason && (
-                    <p className="text-sm text-red-600 dark:text-red-400 mt-1">{company.disqualify_reason}</p>
-                  )}
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <InfoRow icon={<Mail className="w-4 h-4" />} label="Email" value={company.email} isNew={newlyEnrichedFields.includes("email")} />
-                <InfoRow icon={<Phone className="w-4 h-4" />} label="Phone" value={company.phone} isNew={newlyEnrichedFields.includes("phone")} />
+          {/* Admin — everything that is research and data hygiene rather than
+              "should I call". Collapsed at every width: nobody needs ICP
+              reasoning expanded by default, on a phone or a 27" monitor.
+              Email, phone and website are deliberately absent — they are the
+              Brief now, and rendering them twice is what made the original
+              page feel like it was repeating itself. */}
+          <Section
+            title="Admin"
+            icon={<Settings2 />}
+            summary={joinPlace([company.source, company.owner_name])}
+          >
+            <div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
                 <InfoRow icon={<MapPin className="w-4 h-4" />} label="Address"
-                  value={[company.address, company.city, company.state, company.zip].filter(Boolean).join(", ")} />
-                <InfoRow icon={<Globe className="w-4 h-4" />} label="Website" value={company.website} link isNew={newlyEnrichedFields.includes("website")} />
+                  value={joinPlace([company.address, company.city, company.state, company.zip])} />
                 {company.instagram_url && (
                   <InstagramRow url={company.instagram_url} isNew={newlyEnrichedFields.includes("instagram_url")} />
                 )}
@@ -1097,13 +1140,13 @@ export default function CompanyDetailPage() {
               )}
               {/* ICP reasoning */}
               {company.icp_reasoning && (
-                <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-sm text-gray-600 dark:text-gray-400">
-                  <span className="font-medium text-gray-800 dark:text-gray-200">ICP Analysis: </span>
+                <div className="mt-4 rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
+                  <span className="font-medium text-foreground">ICP Analysis: </span>
                   {company.icp_reasoning}
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </Section>
 
           {/* ─── Store Profile (StoreLeads firmographics) ─────────────────
               Surfaces every column the storeleads importer + live
@@ -1123,30 +1166,29 @@ export default function CompanyDetailPage() {
             company.tiktok_url || company.youtube_url ||
             company.storeleads_id || company.contact_form_url ||
             company.about_us_url || company.email_verification_status) && (
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Store className="w-4 h-4 text-blue-600" /> Store Profile
-                  </CardTitle>
-                  {company.storeleads_last_synced_at && (
-                    <span className="text-xs text-gray-400">
-                      synced {new Date(company.storeleads_last_synced_at).toLocaleDateString()}
-                    </span>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Site copy — useful as opener-source material */}
-                {(company.meta_description || company.description) && (
+            <Section
+              title="Store intel"
+              icon={<Store />}
+              summary={joinPlace([company.ecom_platform, company.employee_count ? pluralize(company.employee_count, "employee") : null])}
+              action={
+                company.storeleads_last_synced_at ? (
+                  <span className="text-xs text-muted-foreground">
+                    synced {new Date(company.storeleads_last_synced_at).toLocaleDateString()}
+                  </span>
+                ) : undefined
+              }
+            >
+              <div className="space-y-4">
+                {/* Site copy — useful as opener-source material. The meta
+                    description is dropped: it is almost always the same
+                    sentence as the description, and showing a sentence twice
+                    is not two facts. */}
+                {company.description && (
                   <div className="space-y-2">
-                    {company.meta_description && (
-                      <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                        <p className="text-xs font-medium text-gray-500 mb-1">Meta description</p>
-                        <p className="text-sm text-gray-700 dark:text-gray-300">{company.meta_description}</p>
-                      </div>
+                    {false && (
+                      <div />
                     )}
-                    {company.description && company.description !== company.meta_description && (
+                    {company.description && (
                       <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
                         <p className="text-xs font-medium text-gray-500 mb-1">About us</p>
                         <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{company.description}</p>
@@ -1156,7 +1198,7 @@ export default function CompanyDetailPage() {
                 )}
 
                 {/* Firmographic facts grid */}
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3 text-sm">
                   {company.industry && (
                     <div>
                       <p className="text-xs text-gray-500 mb-0.5">Industry</p>
@@ -1283,8 +1325,8 @@ export default function CompanyDetailPage() {
                     </div>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+            </Section>
           )}
 
           {/* ─── Tech Stack (Shopify apps installed)
@@ -1303,14 +1345,8 @@ export default function CompanyDetailPage() {
             const unique = Array.from(new Set(apps));
             if (unique.length === 0) return null;
             return (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Briefcase className="w-4 h-4 text-cyan-600" /> Tech Stack
-                    <span className="text-xs text-gray-400 font-normal">· {unique.length} apps</span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
+              <Section title="Tech Stack" icon={<Briefcase />} summary={pluralize(unique.length, "app")}>
+                <div>
                   <div className="flex flex-wrap gap-1.5">
                     {unique.map((app) => (
                       <Badge key={app} variant="outline" className="text-xs">
@@ -1318,12 +1354,8 @@ export default function CompanyDetailPage() {
                       </Badge>
                     ))}
                   </div>
-                  <p className="text-xs text-gray-400 italic mt-3">
-                    Useful as an opener anchor — e.g. "saw you're on Klaviyo" or
-                    "we work with a lot of Yotpo-powered boutiques."
-                  </p>
-                </CardContent>
-              </Card>
+                </div>
+              </Section>
             );
           })()}
 
@@ -1334,14 +1366,13 @@ export default function CompanyDetailPage() {
               carries eyewear (top_brand is the easiest signal). */}
           {(company.top_brand || company.eyewear_sku_count != null ||
             company.eyewear_sample_titles || company.eyewear_top_competitors) && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Eye className="w-4 h-4 text-purple-600" /> Eyewear Inventory
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+            <Section
+              title="Eyewear inventory"
+              icon={<Eye />}
+              summary={joinPlace([company.top_brand, company.eyewear_sku_count != null ? pluralize(company.eyewear_sku_count, "SKU") : null])}
+            >
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3 text-sm">
                   {company.top_brand && (
                     <div>
                       <p className="text-xs text-gray-500 mb-0.5">Top brand</p>
@@ -1465,8 +1496,8 @@ export default function CompanyDetailPage() {
                     </div>
                   );
                 })()}
-              </CardContent>
-            </Card>
+              </div>
+            </Section>
           )}
 
           {/* ─── AI Outreach Openers (from generate-eyewear-openers)
@@ -1476,21 +1507,15 @@ export default function CompanyDetailPage() {
               the copy before sending, and surfaces the model/timestamp
               so we know when to regenerate. */}
           {(company.ai_opener_email1 || company.ai_opener_email2) && (
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-amber-500" /> AI Outreach Openers
-                  </CardTitle>
-                  <div className="text-xs text-gray-400 flex items-center gap-3">
-                    {company.ai_opener_model && <span className="font-mono">{company.ai_opener_model}</span>}
-                    {company.ai_opener_generated_at && (
-                      <span>{new Date(company.ai_opener_generated_at).toLocaleDateString()}</span>
-                    )}
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
+            /* The first opener is promoted into the Brief as the talking
+               point, so the full card is reference material. */
+            <Section
+              title="AI outreach openers"
+              icon={<Sparkles />}
+              summary={company.ai_opener_generated_at
+                ? new Date(company.ai_opener_generated_at).toLocaleDateString() : undefined}
+            >
+              <div className="space-y-3">
                 {company.ai_opener_email1 && (
                   <div className="p-3 border-l-4 border-amber-300 bg-amber-50/50 dark:bg-amber-900/10 rounded-r-lg">
                     <p className="text-xs font-medium text-amber-700 dark:text-amber-400 mb-1">
@@ -1511,11 +1536,8 @@ export default function CompanyDetailPage() {
                     </p>
                   </div>
                 )}
-                <p className="text-xs text-gray-400 italic">
-                  Renders in Instantly as <code className="font-mono not-italic bg-gray-100 dark:bg-gray-800 px-1 rounded">{`{{ai_opener_email1}}`}</code> and <code className="font-mono not-italic bg-gray-100 dark:bg-gray-800 px-1 rounded">{`{{ai_opener_email2}}`}</code>.
-                </p>
-              </CardContent>
-            </Card>
+              </div>
+            </Section>
           )}
 
           {/* Stores & Contacts — hidden entirely when both lists are
@@ -1538,7 +1560,7 @@ export default function CompanyDetailPage() {
               ) : isSingleStore && primaryStore ? (
                 // Single store: merged view
                 <div>
-                  <div className="grid grid-cols-2 gap-3 text-sm mb-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm mb-4">
                     {primaryStore.address && <InfoRow icon={<MapPin className="w-4 h-4" />} label="Store Address"
                       value={[primaryStore.address, primaryStore.city, primaryStore.state, primaryStore.zip].filter(Boolean).join(", ")} />}
                     {primaryStore.phone && <InfoRow icon={<Phone className="w-4 h-4" />} label="Store Phone" value={primaryStore.phone} />}
@@ -1711,13 +1733,13 @@ export default function CompanyDetailPage() {
 
               {ajmHistory.topProducts.length > 0 && (
                 <div>
-                  <p className="text-xs font-medium text-gray-500 mb-1.5">What they bought</p>
+                  <p className="mb-1.5 text-xs font-medium text-muted-foreground">What they bought</p>
                   <div className="space-y-1">
                     {ajmHistory.topProducts.map((p) => (
-                      <div key={p.product} className="flex items-center justify-between gap-2 text-sm">
-                        <span className="truncate">{p.product}</span>
-                        <span className="whitespace-nowrap text-gray-500 text-xs">
-                          {p.units.toLocaleString()} units · ${Number(p.revenue).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      <div key={p.product} className="flex min-w-0 items-center justify-between gap-2 text-sm">
+                        <span className="min-w-0 truncate">{p.product}</span>
+                        <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground tabular-nums">
+                          {pluralize(p.units, "unit")} · ${Number(p.revenue).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                         </span>
                       </div>
                     ))}
@@ -1725,9 +1747,20 @@ export default function CompanyDetailPage() {
                 </div>
               )}
 
+              {/* Legacy lump-sum invoices. These used to render as a list of
+                  bare numbers — 324803, 299444 — because their "product name"
+                  is the invoice number. One honest line beats eight fake
+                  products. */}
+              {ajmHistory.noDetail && (
+                <p className="text-xs text-muted-foreground">
+                  Plus ${Number(ajmHistory.noDetail.revenue).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  {" "}across {pluralize(ajmHistory.noDetail.orders, "legacy order")} billed as a lump sum, with no line detail.
+                </p>
+              )}
+
               <details>
-                <summary className="text-xs font-medium text-gray-500 cursor-pointer hover:text-gray-700 dark:hover:text-gray-300">
-                  {ajmHistory.orderRows.length} order{ajmHistory.orderRows.length === 1 ? "" : "s"}
+                <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+                  {pluralize(ajmHistory.orderRows.length, "order")}
                   {ajmHistory.orderRows.length === 100 ? " (most recent 100)" : ""}
                 </summary>
                 <div className="mt-2 space-y-1 max-h-72 overflow-y-auto">
@@ -1739,7 +1772,7 @@ export default function CompanyDetailPage() {
                           <span className="ml-2 text-xs font-normal text-gray-500">{o.source?.replace(/_/g, " ")}</span>
                         </div>
                         <div className="text-xs text-gray-500">
-                          {o.order_date ?? "—"}{o.units ? ` · ${o.units} units` : ""}
+                          {o.order_date ?? "—"}{o.units ? ` · ${pluralize(o.units, "unit")}` : ""}
                         </div>
                       </div>
                       <div className="text-right font-medium whitespace-nowrap">
@@ -1757,7 +1790,18 @@ export default function CompanyDetailPage() {
           <PipedrivePanel companyId={company.id} companyName={company.name} />
 
           {/* Google Maps — what kind of store this is, before anyone calls it */}
-          <GmapsPanel companyId={company.id} />
+          <Section
+            title="Google listing"
+            icon={<MapPin />}
+            summary={gmapsListing
+              ? joinPlace([
+                  gmapsListing.rating ? `${gmapsListing.rating.toFixed(1)}★` : null,
+                  gmapsListing.categoryName,
+                ])
+              : "not captured"}
+          >
+            <GmapsPanel companyId={company.id} onListing={setGmapsListing} bare />
+          </Section>
         </div>
 
         {/* Right sidebar — Activity dominant on top, then Notes, then Lead Source. */}
@@ -1800,15 +1844,12 @@ export default function CompanyDetailPage() {
           </Card>
 
           {/* Campaigns — membership + per-channel push state. */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Megaphone className="w-4 h-4 text-blue-500" /> Campaigns
-                  {campaigns.length > 0 && (
-                    <Badge variant="secondary" className="ml-1">{campaigns.length}</Badge>
-                  )}
-                </CardTitle>
+          <Section
+            title="Outreach"
+            icon={<Megaphone />}
+            summary={campaigns.length > 0 ? pluralize(campaigns.length, "campaign") : "Not in any campaign"}
+            action={
+              <div className="flex items-center gap-2">
                 <Button
                   size="sm"
                   variant="outline"
@@ -1841,11 +1882,12 @@ export default function CompanyDetailPage() {
                   <Plus className="w-3.5 h-3.5 mr-1" /> Add
                 </Button>
               </div>
-            </CardHeader>
-            <CardContent>
+            }
+          >
+            <div>
               {campaigns.length === 0 ? (
-                <p className="text-xs text-gray-500 dark:text-gray-400 py-2">
-                  Not in any campaign yet. Click <strong>Add</strong> to enroll this prospect.
+                <p className="py-2 text-xs text-muted-foreground">
+                  Not in any campaign yet.
                 </p>
               ) : (
                 <div className="space-y-2.5">
@@ -1992,8 +2034,8 @@ export default function CompanyDetailPage() {
                   })()}
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </Section>
 
           {/* Notes — compact: single-line input grows on focus. */}
           <Card>
@@ -2017,19 +2059,14 @@ export default function CompanyDetailPage() {
                 <div className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-48 overflow-y-auto">
                   {company.notes}
                 </div>
-              ) : (
-                <p className="text-xs text-gray-400">No notes yet</p>
-              )}
+              ) : null}
             </CardContent>
           </Card>
 
           {/* Lead Source — compact 2-3 line summary. */}
           {(company.source_type || company.source || company.segment) && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Lead Source</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm">
+            <Section title="Lead source" icon={<Tag />} summary={company.source || company.source_type || undefined}>
+              <div className="space-y-2 text-sm">
                 {company.source_type && (
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <Link
@@ -2061,164 +2098,58 @@ export default function CompanyDetailPage() {
                     </Link>
                   </p>
                 )}
-              </CardContent>
-            </Card>
-          )}
-          {/* Legacy timeline preserved below for safety during cutover —
-              hidden by default. Remove once the new component proves out. */}
-          {false && (
-            <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Activity (legacy)</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {activities.length === 0 ? (
-                <p className="text-sm text-gray-400">No activity yet</p>
-              ) : (
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {activities.slice(0, 20).map(a => {
-                    let data: Record<string, unknown> = {};
-                    try { data = JSON.parse(a.data as string); } catch {}
-                    return (
-                      <div key={a.id} className="flex gap-3 text-sm">
-                        <div className="w-2 h-2 rounded-full bg-blue-400 mt-1.5 shrink-0" />
-                        <div>
-                          <p className="text-gray-700 dark:text-gray-300">
-                            {a.event_type === "change" && (
-                              <><span className="font-medium">{String(data.field)}</span> changed
-                                {data.old ? <> from <code className="text-xs bg-gray-100 px-1 rounded">{String(data.old).slice(0, 30)}</code></> : ""}
-                                {data.new ? <> to <code className="text-xs bg-gray-100 px-1 rounded">{String(data.new).slice(0, 30)}</code></> : ""}
-                              </>
-                            )}
-                            {a.event_type === "company_updated" && "Company updated"}
-                            {a.event_type === "contact_created" && "New contact added"}
-                            {a.event_type === "status_change" && `Status changed`}
-                            {a.event_type.startsWith("instantly_") && (() => {
-                              const campaign = (data.campaign_name as string) || "campaign";
-                              const subject = (data.email_subject as string) || "";
-                              const snippet = (data.reply_snippet as string) || "";
-                              const step = data.step != null ? ` (step ${data.step})` : "";
-                              switch (a.event_type) {
-                                case "instantly_email_sent":
-                                  return <>📧 Sent in <span className="font-medium">{campaign}</span>{step}</>;
-                                case "instantly_email_opened":
-                                  return <>👁 Opened {subject ? <em>“{subject}”</em> : <>email</>} in {campaign}</>;
-                                case "instantly_email_link_clicked":
-                                  return <>🔗 Clicked link in {campaign}</>;
-                                case "instantly_reply_received":
-                                  return (
-                                    <>📨 <span className="font-medium">Replied</span> in {campaign}
-                                      {snippet && (
-                                        <div className="mt-1 text-xs text-gray-600 bg-gray-50 border-l-2 border-gray-300 pl-2 py-1 italic">
-                                          {snippet.slice(0, 240)}{snippet.length > 240 ? "…" : ""}
-                                        </div>
-                                      )}
-                                    </>
-                                  );
-                                case "instantly_lead_no_show":
-                                  return <>📵 Meeting no-show ({campaign})</>;
-                                case "instantly_lead_neutral":
-                                  return <>↩️ Neutral reply ({campaign})</>;
-                                case "instantly_email_bounced":
-                                  return <>⚠️ Bounced in {campaign}</>;
-                                case "instantly_lead_unsubscribed":
-                                  return <>🚫 Unsubscribed from {campaign}</>;
-                                case "instantly_lead_interested":
-                                  return <>✅ <span className="font-medium">Marked Interested</span> in {campaign}</>;
-                                case "instantly_lead_not_interested":
-                                  return <>❌ Marked Not Interested in {campaign}</>;
-                                case "instantly_lead_out_of_office":
-                                  return <>🌴 Out of office ({campaign})</>;
-                                case "instantly_lead_wrong_person":
-                                  return <>🙅 Wrong person ({campaign})</>;
-                                case "instantly_lead_meeting_booked":
-                                  return <>📅 <span className="font-medium">Meeting booked</span> ({campaign})</>;
-                                case "instantly_lead_meeting_completed":
-                                  return <>🎉 Meeting completed ({campaign})</>;
-                                case "instantly_campaign_completed":
-                                  return <>🏁 Campaign completed: {campaign}</>;
-                                default:
-                                  return <>📨 {a.event_type.replace("instantly_", "")} ({campaign})</>;
-                              }
-                            })()}
-                            {a.event_type === "phoneburner_call_completed" && (() => {
-                              const disposition = (data.disposition as string) || "";
-                              const duration = data.duration_seconds as number | null | undefined;
-                              const agent = (data.agent_email as string) || (data.agent_id as string) || "";
-                              const recording = (data.recording_url as string) || "";
-                              const notes = (data.notes as string) || "";
-                              return (
-                                <>📞 <span className="font-medium">Called</span>
-                                  {agent && <> by {agent}</>}
-                                  {disposition && <> — <span className="font-medium">{disposition}</span></>}
-                                  {duration != null && <> ({duration}s)</>}
-                                  {recording && (
-                                    <> · <a href={recording} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">▶ Play</a></>
-                                  )}
-                                  {notes && (
-                                    <div className="mt-1 text-xs text-gray-600 bg-gray-50 border-l-2 border-gray-300 pl-2 py-1 italic">
-                                      {notes.slice(0, 240)}{notes.length > 240 ? "…" : ""}
-                                    </div>
-                                  )}
-                                </>
-                              );
-                            })()}
-                            {a.event_type !== "phoneburner_call_completed" && a.event_type.startsWith("phoneburner_") && (() => {
-                              const agent = (data.agent_email as string) || (data.agent_id as string) || "";
-                              const t = a.event_type;
-                              const agentSuffix = agent ? ` by ${agent}` : "";
-                              switch (t) {
-                                case "phoneburner_call_started":
-                                  return <>📞 Dialing…{agentSuffix}</>;
-                                case "phoneburner_contact_displayed":
-                                  return <>👁 Viewed in PhoneBurner{agentSuffix}</>;
-                                case "phoneburner_email_unsubscribed":
-                                  return <>🚫 Unsubscribed from PhoneBurner email</>;
-                                case "phoneburner_sms_opt_out":
-                                  return <>🚫 Replied STOP to SMS</>;
-                                case "phoneburner_email_sent":
-                                  return <>📧 PhoneBurner email sent{agentSuffix}</>;
-                                case "phoneburner_email_opened":
-                                  return <>👁 Opened PhoneBurner email</>;
-                                case "phoneburner_email_clicked":
-                                  return <>🔗 Clicked PhoneBurner email link</>;
-                                case "phoneburner_email_resubscribed":
-                                  return <>✅ Resubscribed to PhoneBurner email</>;
-                                case "phoneburner_link_pickup":
-                                case "phoneburner_document_pickup":
-                                case "phoneburner_image_pickup":
-                                case "phoneburner_smartpack_pickup":
-                                  return <>📎 Opened {t.replace("phoneburner_", "").replace("_", " ")}</>;
-                                case "phoneburner_appointment_scheduled":
-                                  return <>📅 <span className="font-medium">Appointment booked</span>{agentSuffix}</>;
-                                case "phoneburner_task_created":
-                                  return <>✅ Task created in PhoneBurner{agentSuffix}</>;
-                                case "phoneburner_call_transfer":
-                                  return <>↪️ Call transferred{agentSuffix}</>;
-                                case "phoneburner_manual_trigger":
-                                  return <>🔔 Manual webhook from PhoneBurner</>;
-                                default:
-                                  return <>📞 {t.replace("phoneburner_", "")}{agentSuffix}</>;
-                              }
-                            })()}
-                            {!["change", "company_updated", "contact_created", "status_change"].includes(a.event_type) && !a.event_type.startsWith("instantly_") && !a.event_type.startsWith("phoneburner_") && a.event_type}
-                          </p>
-                          <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {a.created_at ? new Date(a.created_at + "Z").toLocaleString() : "—"}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+              </div>
+            </Section>
           )}
         </div>
       </div>
     </div>
+
+      {/* Persistent reach. Before this, calling meant scrolling back to the
+          top of a 5,000px page. env(safe-area-inset-bottom) keeps it clear of
+          the iPhone home indicator; the shell carries pb-24 to match. */}
+      <CompanyActionBar
+        companyName={company.name}
+        phone={briefPhone}
+        email={briefEmail}
+        onLog={() => {
+          document.getElementById("company-activity")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }}
+      />
+
+      {/* Terminal outcomes. window.confirm is blocked in several in-app
+          browsers and renders as a system error on iOS. */}
+      <Dialog open={confirmOutcome !== null} onOpenChange={(o) => { if (!o) setConfirmOutcome(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {confirmOutcome === "customer" ? `Mark ${company.name} as Won?` : `Mark ${company.name} as Lost?`}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {confirmOutcome === "customer"
+              ? "This closes the deal as won and stops further outreach."
+              : "This adds them to the Instantly blocklist so they stop receiving outreach."}
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="outline" className="h-11 md:h-8" onClick={() => setConfirmOutcome(null)}>
+              Cancel
+            </Button>
+            <Button
+              className="h-11 md:h-8"
+              variant={confirmOutcome === "customer" ? "default" : "destructive"}
+              onClick={() => {
+                const next = confirmOutcome;
+                setConfirmOutcome(null);
+                if (next) changeStatus(next);
+              }}
+            >
+              {confirmOutcome === "customer" ? "Mark as Won" : "Mark as Lost"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -2295,9 +2226,9 @@ function InstagramRow({ url, isNew }: { url: string; isNew?: boolean }) {
 function InfoRow({ icon, label, value, link, isNew }: { icon: React.ReactNode; label: string; value: string | null; link?: boolean; isNew?: boolean }) {
   if (!value) return null;
   return (
-    <div className="flex items-start gap-2">
-      <span className="text-gray-400 mt-0.5">{icon}</span>
-      <div>
+    <div className="flex min-w-0 items-start gap-2">
+      <span className="text-gray-400 mt-0.5 shrink-0">{icon}</span>
+      <div className="min-w-0 flex-1">
         <p className="text-xs text-gray-500 flex items-center gap-1.5">
           {label}
           {isNew && (
@@ -2317,6 +2248,13 @@ function InfoRow({ icon, label, value, link, isNew }: { icon: React.ReactNode; l
       </div>
     </div>
   );
+}
+
+/** Initials from whatever identity we have — never a bare "?". */
+function contactInitials(c: { first_name?: string | null; last_name?: string | null; title?: string | null; email?: string | null }): string {
+  const { label } = contactLabel(c);
+  const parts = label.split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "?";
 }
 
 function ContactsList({
@@ -2383,26 +2321,41 @@ function ContactsList({
                 </div>
               </div>
             ) : (
-              <div className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-50 dark:hover:bg-gray-800 group">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs font-medium">
-                    {(c.first_name?.[0] || "?")}{(c.last_name?.[0] || "")}
+              <div className="group flex min-w-0 items-center gap-2 rounded px-2 py-1.5 hover:bg-muted/50">
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                  {contactInitials(c)}
+                </div>
+                {/* min-w-0 all the way down: without it the email refuses to
+                    shrink and pushes the edit button off the right edge. */}
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
+                    {(() => {
+                      const { label, synthesised } = contactLabel(c);
+                      return <span className={cn("truncate", synthesised && "italic text-muted-foreground")}>{label}</span>;
+                    })()}
+                    {c.is_primary && <Badge variant="secondary" className="shrink-0 px-1 text-[10px]">Primary</Badge>}
                   </div>
-                  <div>
-                    <div className="text-sm font-medium flex items-center gap-1.5">
-                      {[c.first_name, c.last_name].filter(Boolean).join(" ") || "Unknown"}
-                      {c.is_primary && <Badge variant="secondary" className="text-[10px] px-1">Primary</Badge>}
-                    </div>
-                    <div className="text-xs text-gray-500 flex items-center gap-3">
-                      {c.title && <span>{c.title}</span>}
-                      {c.email && <span className="flex items-center gap-0.5"><Mail className="w-3 h-3" />{c.email}</span>}
-                      {c.phone && <span className="flex items-center gap-0.5"><Phone className="w-3 h-3" />{c.phone}</span>}
-                    </div>
+                  {/* Stacked, not a single row: three facts side by side at
+                      390px is what produced the truncated phone number. */}
+                  <div className="min-w-0 space-y-0.5 text-xs text-muted-foreground">
+                    {c.title && <p className="truncate">{c.title}</p>}
+                    {c.email && (
+                      <a href={`mailto:${c.email}`} className="flex min-w-0 items-center gap-1 hover:text-foreground hover:underline">
+                        <Mail className="size-3 shrink-0" /><span className="truncate">{c.email}</span>
+                      </a>
+                    )}
+                    {c.phone && (
+                      <a href={telHref(c.phone) ?? undefined} className="flex min-w-0 items-center gap-1 hover:text-foreground hover:underline">
+                        <Phone className="size-3 shrink-0" /><span className="truncate tabular-nums">{formatPhone(c.phone)}</span>
+                      </a>
+                    )}
                   </div>
                 </div>
-                <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100 h-7 text-xs"
+                {/* Always visible. There is no hover on a phone, so the
+                    hover-gated version made contacts uneditable on mobile. */}
+                <Button variant="ghost" size="icon-sm" aria-label="Edit contact" className="size-9 shrink-0"
                   onClick={() => { setEditingContact(c.id); setContactForm("_reset", ""); }}>
-                  <Edit className="w-3 h-3" />
+                  <Edit className="size-3.5" />
                 </Button>
               </div>
             )}

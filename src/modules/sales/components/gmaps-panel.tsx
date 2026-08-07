@@ -69,7 +69,21 @@ function reviewBand(n: number | null): string | null {
   return "high traffic";
 }
 
-export function GmapsPanel({ companyId }: { companyId: string }) {
+/** Chrome-free stand-ins so the panel can live inside a Section. */
+const BareShell = ({ children }: { children?: React.ReactNode }) => <div>{children}</div>;
+const BareHead = ({ children, className }: { children?: React.ReactNode; className?: string }) => <div className={className}>{children}</div>;
+const BareBody = ({ children, className }: { children?: React.ReactNode; className?: string }) => <div className={className}>{children}</div>;
+
+export function GmapsPanel({
+  companyId, onListing, bare,
+}: {
+  companyId: string;
+  /** Skip the Card chrome when the caller already supplies it. */
+  bare?: boolean;
+  /** Reports the loaded listing upward — the page Brief needs the closure
+   *  flags and the rating, and a second fetch for the same row is waste. */
+  onListing?: (l: Listing | null) => void;
+}) {
   const [listing, setListing] = useState<Listing | null>(null);
   const [rejected, setRejected] = useState<RejectedListing | null>(null);
   const [busy, setBusy] = useState(false);
@@ -85,12 +99,13 @@ export function GmapsPanel({ companyId }: { companyId: string }) {
       setListing(j.listing ?? null);
       setRejected(j.rejected ?? null);
       setCanRefresh(j.canRefresh === true);
+      onListing?.(j.listing ?? null);
     } catch {
       setError("Could not load the Google Maps listing");
     } finally {
       setLoading(false);
     }
-  }, [companyId]);
+  }, [companyId, onListing]);
 
   useEffect(() => {
     void load();
@@ -106,7 +121,7 @@ export function GmapsPanel({ companyId }: { companyId: string }) {
         body: JSON.stringify({ companyId }),
       });
       const j = await r.json();
-      if (j.listing) { setListing(j.listing); setRejected(null); }
+      if (j.listing) { setListing(j.listing); setRejected(null); onListing?.(j.listing); }
       else if (j.result?.status === "no-match") {
         setError(j.result?.reason === "only previously-rejected listings matched"
           ? "Google only returned listings you already marked wrong"
@@ -139,6 +154,7 @@ export function GmapsPanel({ companyId }: { companyId: string }) {
       if (j.error) { setError(String(j.error)); return; }
       setListing(j.listing ?? null);
       setRejected(j.rejected ?? null);
+      onListing?.(j.listing ?? null);
     } catch {
       setError(action === "reject" ? "Could not mark this listing wrong" : "Undo failed");
     } finally {
@@ -166,14 +182,20 @@ export function GmapsPanel({ companyId }: { companyId: string }) {
     ? [...new Set([listing.categoryName, ...listing.subTypes, ...listing.categories].filter(Boolean))] as string[]
     : [];
 
+  const Shell = bare ? BareShell : Card;
+  const Head = bare ? BareHead : CardHeader;
+  const Body = bare ? BareBody : CardContent;
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-4">
-        <div>
-          <CardTitle className="text-base flex items-center gap-2">
-            <MapPin className="h-4 w-4 text-red-600" />
-            Google Maps
-          </CardTitle>
+    <Shell>
+      <Head className={bare ? "mb-3 flex flex-row items-start justify-between gap-4" : "flex flex-row items-start justify-between gap-4"}>
+        <div className="min-w-0">
+          {!bare && (
+            <CardTitle className="text-base flex items-center gap-2">
+              <MapPin className="h-4 w-4 text-muted-foreground" />
+              Google Maps
+            </CardTitle>
+          )}
           <CardDescription>
             {listing
               ? `What Google says this store is${age != null ? ` — captured ${age === 0 ? "today" : `${age}d ago`}` : ""}`
@@ -181,15 +203,15 @@ export function GmapsPanel({ companyId }: { companyId: string }) {
           </CardDescription>
         </div>
         {canRefresh && (
-          <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing}>
+          <Button variant="outline" size="sm" className="shrink-0" onClick={refresh} disabled={refreshing}>
             {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             <span className="ml-1.5">{listing ? "Refresh" : "Look up"}</span>
           </Button>
         )}
-      </CardHeader>
+      </Head>
 
-      <CardContent className="space-y-4">
-        {error && <p className="text-sm text-red-600">{error}</p>}
+      <Body className="space-y-4">
+        {error && <p className="text-sm text-destructive">{error}</p>}
 
         {rejected && (
           <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-3 py-2 text-sm">
@@ -352,7 +374,7 @@ export function GmapsPanel({ companyId }: { companyId: string }) {
             </div>
           </>
         )}
-      </CardContent>
-    </Card>
+      </Body>
+    </Shell>
   );
 }

@@ -256,6 +256,21 @@ const FALLBACK_SPEC: EventSpec = {
   render: () => ({ body: <span className="text-gray-500">event</span> }),
 };
 
+/**
+ * A plain-text label for an activity, for callers that need a one-line "last
+ * touch" summary and cannot render JSX — the catalogue's `render` returns a
+ * ReactNode, so it can't serve this. Falls back to humanising the event type,
+ * which is already readable ("instantly_email_opened" → "Email opened").
+ */
+export function activityLabel(eventType: string): string {
+  const known = EVENT_CATALOG[eventType];
+  const words = eventType
+    .replace(/^(instantly|phoneburner|pipedrive|meta|shopify|gmaps)_/, "")
+    .replace(/_/g, " ");
+  const text = words.charAt(0).toUpperCase() + words.slice(1);
+  return known ? text : text || "Activity";
+}
+
 function specFor(eventType: string): EventSpec {
   return EVENT_CATALOG[eventType] ?? FALLBACK_SPEC;
 }
