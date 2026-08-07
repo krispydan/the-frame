@@ -397,14 +397,16 @@ function domainOf(c: Company): string {
  * one contact used a personal telus.net address, so a domain signal was
  * chosen for one and a city signal for the other, and they never compared.
  */
-function signalsOf(c: Company, includeName: boolean, includeDomain: boolean): string[] {
+function signalsOf(c: Company, includeName: boolean, includeDomain: boolean, includeCityState: boolean): string[] {
   const sigs: string[] = [];
   const dom = includeDomain ? domainOf(c) : "";
   if (dom) sigs.push(`d:${dom}`);
   const zip = (c.zip ?? "").trim().slice(0, 5);
   if (zip.length === 5) sigs.push(`z:${zip}`);
-  const city = normalizeCity(c.city), state = normalizeState(c.state);
-  if (city && state) sigs.push(`c:${city}|${state}`);
+  if (includeCityState) {
+    const city = normalizeCity(c.city), state = normalizeState(c.state);
+    if (city && state) sigs.push(`c:${city}|${state}`);
+  }
   if (includeName) {
     const n = normalizeCompanyName(c.name);
     if (n.length >= 3) sigs.push(`n:${n}`);
@@ -426,8 +428,14 @@ function clusterByAnySignal(
    * includeDomain — off for email groups: members share the contact address by
    *                definition, so its domain would link everything and make
    *                the corroboration check vacuous.
+   * includeCityState — off for email groups. "Shared inbox + same city" is far
+   *                too weak on its own: it wanted to merge "Shell" into
+   *                "Timewise Car Wash" (both Houston TX) and to collapse Clean
+   *                Market's Midtown, FIDI and NoHo branches into one record.
+   *                Email groups must agree on a name or a zip; anything
+   *                resting on city alone goes to review instead.
    */
-  opts?: { includeName?: boolean; includeDomain?: boolean },
+  opts?: { includeName?: boolean; includeDomain?: boolean; includeCityState?: boolean },
 ): { linked: Company[][]; unlinked: Company[] } {
   const parent = items.map((_, i) => i);
   const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
@@ -435,7 +443,7 @@ function clusterByAnySignal(
 
   const bySignal = new Map<string, number[]>();
   items.forEach((c, i) => {
-    for (const s of signalsOf(c, opts?.includeName ?? false, opts?.includeDomain ?? true)) {
+    for (const s of signalsOf(c, opts?.includeName ?? false, opts?.includeDomain ?? true, opts?.includeCityState ?? true)) {
       (bySignal.get(s) ?? bySignal.set(s, []).get(s)!).push(i);
     }
   });
@@ -568,7 +576,7 @@ export function findDuplicateCompanies(opts?: { minEvidence?: "name" | "email" |
     }
 
     // (b) Corroborate on name or location, same standard as name groups.
-    const clusters = clusterByAnySignal(items, { includeName: true, includeDomain: false });
+    const clusters = clusterByAnySignal(items, { includeName: true, includeDomain: false, includeCityState: false });
     let n = 0;
     for (const cluster of clusters.linked) {
       if (looksLikeSiblingLocations(cluster)) {

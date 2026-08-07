@@ -157,17 +157,40 @@ describe("findDuplicateCompanies — refuses unsafe merges", () => {
 
     mergeCompanies({ apply: true });
     expect(survivors().size).toBe(2);
-    expect(getNeedsReview().some((r) => r.reason.includes("sibling stores"))).toBe(true);
+    expect(getNeedsReview().some((r) => r.key.includes("lockwoodshop"))).toBe(true);
   });
 
-  it("still merges a dba stub onto the trading record", () => {
-    // Same shape as above but only ONE side has history — a real duplicate.
+  it("does not merge an email group on city alone, even for a real dba", () => {
+    // "Water Bros, INC Dba: Quiet Storm" and "Quiet Storm Surf Shop" ARE the
+    // same shop, but the only thing linking them is a shared inbox and a
+    // shared city — and that same evidence wanted to merge "Shell" into
+    // "Timewise Car Wash" (both Houston TX) and to collapse Clean Market's
+    // Midtown, FIDI and NoHo branches into one record. We accept losing this
+    // merge to review rather than accept those. A matching zip or name still
+    // merges it.
     company("Water Bros, INC Dba: Quiet Storm", "rehoboth beach", "DE", { email: "info@quietstormsurf.com" });
     const real = company("Quiet Storm Surf Shop", "rehoboth beach", "DE", { email: "info@quietstormsurf.com" });
     db.prepare(`INSERT INTO ajm_orders (id, order_number, order_date, total, cancelled, company_id) VALUES ('a2','A2','2024-06-01',15654,0,?)`).run(real);
 
     mergeCompanies({ apply: true });
+    expect(survivors().size).toBe(2);
+    expect(getNeedsReview().some((r) => r.key.includes("quietstormsurf"))).toBe(true);
+  });
+
+  it("merges an email group when a zip corroborates it", () => {
+    company("Water Bros, INC Dba: Quiet Storm", "rehoboth beach", "DE", { zip: "19971", email: "info@quietstormsurf.com" });
+    const real = company("Quiet Storm Surf Shop", "rehoboth beach", "DE", { zip: "19971", email: "info@quietstormsurf.com" });
+    db.prepare(`INSERT INTO ajm_orders (id, order_number, order_date, total, cancelled, company_id) VALUES ('a8','A8','2024-06-01',15654,0,?)`).run(real);
+
+    mergeCompanies({ apply: true });
     expect(survivors().size).toBe(1);
+  });
+
+  it("does not merge unrelated shops that share an inbox and a city", () => {
+    company("Shell", "houston", "TX", { email: "ops@fuelpartners.com" });
+    company("Timewise Car Wash", "houston", "TX", { email: "ops@fuelpartners.com" });
+    mergeCompanies({ apply: true });
+    expect(survivors().size).toBe(2);
   });
 });
 
