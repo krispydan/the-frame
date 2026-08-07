@@ -36,6 +36,7 @@
     "drizzle-orm": "^0.45.1",
     "html-to-image": "^1.11.13",
     "jose": "^6.2.2",
+    "jszip": "^3.10.1",
     "leaflet": "^1.9.4",
     "leaflet.heat": "^0.2.0",
     "lucide-react": "^0.577.0",

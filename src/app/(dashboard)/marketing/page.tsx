@@ -13,6 +13,7 @@ import {
   Users,
   Sparkles,
   ArrowRight,
+  Megaphone,
 } from "lucide-react";
 
 /**
@@ -66,6 +67,14 @@ const MODULES: ModuleCard[] = [
     title: "Video Remix Studio",
     description:
       "TikTok + Instagram content engine — upload tagged clips, auto-mix unique videos from recipes, AI captions + posting checklist.",
+    status: "live",
+  },
+  {
+    href: "/marketing/ads",
+    icon: Megaphone,
+    title: "Ad Studio",
+    description:
+      "Meta ad creatives from clips + catalog images — product-card layout, every aspect ratio, tracking-ready naming.",
     status: "live",
   },
   {

@@ -25,6 +25,8 @@ export const AD_FONT = path.join(
 export interface ResolvedCardImage {
   /** Absolute path on the images volume. */
   absPath: string;
+  /** IMAGES_PATH-relative path (what catalogImageUrl serves). */
+  relPath: string;
   imageId: string;
   /** Which artifact won: pipeline cutout or the base photo. */
   source: "final" | "no_bg" | "base";
@@ -62,6 +64,7 @@ export function resolveCardImage(skuId: string, cardImageId?: string | null): Re
   const rel = artifact?.file_path ?? image.file_path;
   return {
     absPath: getFullPath(rel),
+    relPath: rel,
     imageId: image.id,
     source: artifact?.stage ?? "base",
   };

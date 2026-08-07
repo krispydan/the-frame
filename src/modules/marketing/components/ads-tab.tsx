@@ -62,7 +62,7 @@ export function AdsTab() {
     const params = new URLSearchParams();
     if (platformFilter !== "all") params.set("platform", platformFilter);
     if (statusFilter !== "all") params.set("status", statusFilter);
-    const res = await fetch(`/api/v1/marketing/ads?${params}`);
+    const res = await fetch(`/api/v1/marketing/ad-campaigns?${params}`);
     const json = await res.json();
     setCampaigns(json.data || []);
     setSummary(json.summary || { totalSpend: 0, totalBudget: 0, totalRevenue: 0, roas: 0 });
@@ -85,7 +85,7 @@ export function AdsTab() {
   };
 
   const handleSubmit = async () => {
-    const url = editingItem ? `/api/v1/marketing/ads/${editingItem.id}` : "/api/v1/marketing/ads";
+    const url = editingItem ? `/api/v1/marketing/ad-campaigns/${editingItem.id}` : "/api/v1/marketing/ad-campaigns";
     await fetch(url, {
       method: editingItem ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
@@ -95,7 +95,7 @@ export function AdsTab() {
   };
 
   const handleDelete = async (id: string) => {
-    await fetch(`/api/v1/marketing/ads/${id}`, { method: "DELETE" });
+    await fetch(`/api/v1/marketing/ad-campaigns/${id}`, { method: "DELETE" });
     setDeleteConfirm(null); fetchData();
   };
 

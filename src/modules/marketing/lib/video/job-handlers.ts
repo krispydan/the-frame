@@ -234,6 +234,20 @@ registerJobHandler("marketing.video.build-product-videos", async (input) => {
   return { total: ids.length, built, skipped, failed };
 });
 
+// Ad Studio: render one ad at one aspect ratio (crop + card overlay +
+// name text). One job per ratio so a slow 9x16 doesn't hold up the 1x1,
+// and a retry re-renders only the ratio that failed. Idempotent: output
+// key is deterministic and the render row is updated in place.
+registerJobHandler("marketing.ads.render", async (input) => {
+  const adId = input.adId;
+  const ratio = input.ratio;
+  if (!adId || typeof adId !== "string" || !ratio || typeof ratio !== "string") {
+    throw new Error("adId and ratio are required for marketing.ads.render jobs");
+  }
+  const { renderVideoAd } = await import("../ads/render-video");
+  return (await renderVideoAd(adId, ratio)) as unknown as Record<string, unknown>;
+});
+
 // Re-bake the on-screen hook after a hook edit or burn-toggle (no full
 // re-render needed — derives from the existing clean render).
 registerJobHandler("marketing.video.burn-hook", async (input) => {

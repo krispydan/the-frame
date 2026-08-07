@@ -5,8 +5,10 @@ import { createRequest, parseResponse } from "../api-helpers";
 // Route handler imports
 import { GET as getContent, POST as postContent } from "@/app/api/v1/marketing/content/route";
 import { GET as getContentDetail, PUT as putContent, DELETE as deleteContent } from "@/app/api/v1/marketing/content/[id]/route";
-import { GET as getAds, POST as postAd } from "@/app/api/v1/marketing/ads/route";
-import { GET as getAdDetail, PUT as putAd, DELETE as deleteAd } from "@/app/api/v1/marketing/ads/[id]/route";
+// Ad-campaign spend tracking moved to /ad-campaigns when the Ad Studio
+// took over /api/v1/marketing/ads.
+import { GET as getAds, POST as postAd } from "@/app/api/v1/marketing/ad-campaigns/route";
+import { GET as getAdDetail, PUT as putAd, DELETE as deleteAd } from "@/app/api/v1/marketing/ad-campaigns/[id]/route";
 import { GET as getInfluencers, POST as postInfluencer } from "@/app/api/v1/marketing/influencers/route";
 import { GET as getInfluencerDetail, PUT as putInfluencer, DELETE as deleteInfluencer } from "@/app/api/v1/marketing/influencers/[id]/route";
 import { GET as getSeo, POST as postSeo } from "@/app/api/v1/marketing/seo/route";
