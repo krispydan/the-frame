@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { CompanyRibbon, icpChipLabel } from "@/modules/companies/components/company-ribbon";
 import { Section } from "@/modules/companies/components/section";
-import { SpendByYear, CategoryMix, Stars } from "@/modules/companies/components/company-visuals";
+import { SpendByYear, CategoryMix } from "@/modules/companies/components/company-visuals";
 import {
   CompanyBrief, CompanyActionBar, ReachCard, resolveTalkingPoint, type BriefAlert,
 } from "@/modules/companies/components/company-brief";

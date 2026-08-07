@@ -21,13 +21,12 @@ import { cn } from "@/lib/utils";
  * two bars on a shared axis make you feel it, which is the point of putting
  * it at the top of a page whose job is to get someone to pick up the phone.
  */
-export function GapBar({
-  ajmRevenue, jaxyRevenue, className,
-}: { ajmRevenue: number; jaxyRevenue: number; className?: string }) {
-  const max = Math.max(ajmRevenue, jaxyRevenue, 1);
-  const captured = ajmRevenue > 0 ? Math.round((jaxyRevenue / ajmRevenue) * 100) : null;
-
-  const Row = ({ label, value, tone }: { label: string; value: number; tone: "ajm" | "jaxy" }) => (
+/** Hoisted: declaring this inside GapBar made it a new component type on
+ *  every render, which remounts the bars rather than updating them. */
+function GapRow({
+  label, value, max, tone,
+}: { label: string; value: number; max: number; tone: "ajm" | "jaxy" }) {
+  return (
     <div className="flex items-center gap-3">
       <span className="w-24 shrink-0 text-xs text-muted-foreground">{label}</span>
       <div className="h-6 min-w-0 flex-1 overflow-hidden rounded bg-muted">
@@ -44,11 +43,18 @@ export function GapBar({
       </span>
     </div>
   );
+}
+
+export function GapBar({
+  ajmRevenue, jaxyRevenue, className,
+}: { ajmRevenue: number; jaxyRevenue: number; className?: string }) {
+  const max = Math.max(ajmRevenue, jaxyRevenue, 1);
+  const captured = ajmRevenue > 0 ? Math.round((jaxyRevenue / ajmRevenue) * 100) : null;
 
   return (
     <div className={cn("space-y-2", className)}>
-      <Row label="A.J. Morgan" value={ajmRevenue} tone="ajm" />
-      <Row label="Jaxy" value={jaxyRevenue} tone="jaxy" />
+      <GapRow label="A.J. Morgan" value={ajmRevenue} max={max} tone="ajm" />
+      <GapRow label="Jaxy" value={jaxyRevenue} max={max} tone="jaxy" />
       {captured !== null && (
         <p className="text-xs text-muted-foreground">
           {captured === 0

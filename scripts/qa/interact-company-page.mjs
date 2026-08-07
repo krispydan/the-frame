@@ -144,6 +144,26 @@ await check("no '1 units'", async () =>
 await check("no ICP em-dash placeholder", async () =>
   !(await page.locator("body").innerText()).includes("ICP —"));
 
+// A screenshot showed the AJM product rows painting over each other. That
+// looked like a scroll repaint artefact rather than a duplicate render, but
+// "looked like" is not a test.
+await check("AJM product rows are unique", async () => {
+  const rows = await page.locator("text=/^\\d+ units? · \\$/").allInnerTexts();
+  if (!rows.length) return "n/a";
+  const names = await page.evaluate(() => {
+    const hdr = [...document.querySelectorAll("p")].find((p) => p.textContent.trim() === "What they bought");
+    if (!hdr) return [];
+    return [...(hdr.nextElementSibling?.children ?? [])]
+      .map((el) => el.firstElementChild?.textContent?.trim() ?? "");
+  });
+  return names.length > 0 && new Set(names).size === names.length;
+});
+
+await check("the sidebar renders each nav item once", async () => {
+  const n = await page.locator('a[href="/prospects"]').count();
+  return n <= 2;   // the nav entry, plus at most the page's own back link
+});
+
 await browser.close();
 
 for (const [state, name] of results) console.log(`${state}  ${name}`);
