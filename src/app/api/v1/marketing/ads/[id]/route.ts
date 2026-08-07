@@ -72,6 +72,19 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     }
   } else if (ad.background_type === "upload") {
     backgroundUrl = videoUrl(ad.background_ref as string);
+    // Uploads carry no DB row — probe the file for the canvas's crop
+    // math. Cheap (header sniff, not a decode) and detail isn't hot.
+    try {
+      const { materializeVideo } = await import("@/lib/storage/videos");
+      const sharp = (await import("sharp")).default;
+      const m = await materializeVideo(ad.background_ref as string);
+      try {
+        const meta = await sharp(m.path).metadata();
+        if (meta.width && meta.height) srcDims = { width: meta.width, height: meta.height };
+      } finally {
+        await m.cleanup();
+      }
+    } catch { /* preview falls back to a guess; render is unaffected */ }
   }
 
   const cardImage = resolveCardImage(ad.sku_id as string, ad.card_image_id as string | null);
