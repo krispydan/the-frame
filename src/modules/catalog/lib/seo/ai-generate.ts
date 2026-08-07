@@ -22,7 +22,9 @@ import {
  * this is one-shot copy that ships to a Google ads feed, slow + costly
  * is the right tradeoff vs. having to manually fix bad copy later.
  */
-const DEFAULT_MODEL = "claude-opus-4-1-20250805";
+// claude-opus-4-1 was retired and started 404ing (Aug 2026);
+// sonnet-4-6 is what the sales AI callers run on in production.
+const DEFAULT_MODEL = "claude-sonnet-4-6";
 
 export interface GenerateSeoResult {
   output: AiSeoOutput | null;

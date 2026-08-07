@@ -28,7 +28,9 @@ import {
 import { getShopifyImageUrls } from "./shopify-image-urls";
 import { amazonListingGroups } from "@/modules/catalog/schema";
 
-const DEFAULT_MODEL = "claude-opus-4-1-20250805";
+// claude-opus-4-1 was retired and started 404ing (Aug 2026);
+// sonnet-4-6 is what the sales AI callers run on in production.
+const DEFAULT_MODEL = "claude-sonnet-4-6";
 
 export interface GenerateAmazonResult {
   productId: string;
