@@ -3,12 +3,17 @@ export const maxDuration = 120;
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/get-session";
-import { getCompanyListing, captureOneListing, getGmapsProfile } from "@/modules/sales/lib/gmaps-profile";
+import {
+  getCompanyListing, captureOneListing, getGmapsProfile,
+  getRejectedListing, rejectCompanyListing, restoreCompanyListing,
+} from "@/modules/sales/lib/gmaps-profile";
 
 /**
- * GET ?companyId=…   → that store's Google Maps listing (customer detail page)
- * GET ?profile=1     → the aggregate customer profile (analytics page)
- * POST { companyId } → capture/refresh one listing on demand
+ * GET  ?companyId=…                     → that store's Google Maps listing
+ * GET  ?profile=1                       → aggregate customer profile (analytics)
+ * POST { companyId }                    → capture/refresh one listing on demand
+ * POST { companyId, action:"reject" }   → mark the listing as the wrong business
+ * POST { companyId, action:"restore" }  → undo a rejection
  *
  * Session-gated; refresh is limited to the roles that own the relationship.
  */
@@ -30,6 +35,9 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     listing: getCompanyListing(companyId),
+    // Present only when someone marked the match wrong, so the panel can offer
+    // an undo instead of silently showing nothing.
+    rejected: getRejectedListing(companyId),
     canRefresh: REFRESH_ROLES.includes(user.role),
   });
 }
@@ -43,6 +51,19 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const companyId = String(body.companyId || "");
   if (!companyId) return NextResponse.json({ error: "companyId required" }, { status: 400 });
+
+  const action = String(body.action || "refresh");
+  if (action === "reject") {
+    const out = rejectCompanyListing(companyId, {
+      by: user.email ?? user.name ?? null,
+      reason: body.reason ? String(body.reason).slice(0, 500) : null,
+    });
+    return NextResponse.json({ ok: true, ...out, rejected: getRejectedListing(companyId), listing: null });
+  }
+  if (action === "restore") {
+    const restored = restoreCompanyListing(companyId);
+    return NextResponse.json({ ok: true, restored, listing: getCompanyListing(companyId), rejected: null });
+  }
 
   const result = await captureOneListing(companyId, { force: true });
   // Keep Pipedrive in step with a manual refresh — otherwise the rep-facing

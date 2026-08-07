@@ -340,12 +340,27 @@ export async function captureOneListing(
   }
 
   try {
+    // Ask for several results, not one: if a human already rejected the top
+    // hit as the wrong business, returning it again would make the reject
+    // button useless.
+    const rejected = rejectedPlaceIds(companyId);
     const places = await apifyClient.runGoogleMapsScraper([searchStringFor(c)], {
-      maxPerSearch: 1,
+      maxPerSearch: rejected.size ? 5 : 1,
       fast: false,
     });
-    const place = places[0];
-    if (!place) return { companyId, status: "no-match" };
+    const place = places.find((p) => !p.placeId || !rejected.has(p.placeId));
+    if (!place) {
+      return {
+        companyId,
+        status: "no-match",
+        reason: rejected.size ? "only previously-rejected listings matched" : undefined,
+      };
+    }
+
+    // A fresh capture replaces whatever was there, including a rejected row —
+    // otherwise the unique index on company_id blocks the insert and the
+    // rejection would be permanent.
+    sqlite.prepare("DELETE FROM gmaps_listings WHERE company_id = ?").run(companyId);
 
     const subTypes = Array.isArray(place.subTypes) ? place.subTypes
       : Array.isArray(place.categories) ? place.categories : [];
@@ -400,7 +415,7 @@ export interface CompanyListing {
 
 export function getCompanyListing(companyId: string): CompanyListing | null {
   const r = sqlite
-    .prepare("SELECT * FROM gmaps_listings WHERE company_id = ?")
+    .prepare("SELECT * FROM gmaps_listings WHERE company_id = ? AND rejected_at IS NULL")
     .get(companyId) as Record<string, unknown> | undefined;
   if (!r) return null;
   const json = <T,>(v: unknown, fallback: T): T => {
@@ -635,3 +650,79 @@ export function getGmapsProfile(): GmapsProfile {
     },
   };
 }
+
+
+// ── Wrong match handling ───────────────────────────────────────────────────
+//
+// The scraper picks the top Google result for a name-and-city search, and it
+// is sometimes confidently wrong — a different business entirely. A rep who
+// spots that needs to say so without losing the ability to change their mind,
+// and a later refresh must not walk straight back into the same bad match.
+//
+// The row is kept and stamped rather than deleted: undo is then just clearing
+// the stamp, and the retained place_id is what lets a re-scrape reject the
+// same place again.
+
+export interface RejectedListing {
+  title: string | null;
+  address: string | null;
+  placeId: string | null;
+  rejectedAt: string;
+  rejectedBy: string | null;
+  rejectedReason: string | null;
+}
+
+/** The rejected listing for a company, if one was marked wrong. */
+export function getRejectedListing(companyId: string): RejectedListing | null {
+  const r = sqlite.prepare(
+    `SELECT title, address, place_id, rejected_at, rejected_by, rejected_reason
+       FROM gmaps_listings WHERE company_id = ? AND rejected_at IS NOT NULL`,
+  ).get(companyId) as Record<string, unknown> | undefined;
+  if (!r) return null;
+  return {
+    title: (r.title as string) ?? null,
+    address: (r.address as string) ?? null,
+    placeId: (r.place_id as string) ?? null,
+    rejectedAt: String(r.rejected_at),
+    rejectedBy: (r.rejected_by as string) ?? null,
+    rejectedReason: (r.rejected_reason as string) ?? null,
+  };
+}
+
+/** Mark this company's listing as the wrong business. Reversible. */
+export function rejectCompanyListing(
+  companyId: string,
+  opts: { by?: string | null; reason?: string | null } = {},
+): { rejected: boolean; placeId: string | null } {
+  const row = sqlite.prepare(
+    "SELECT place_id FROM gmaps_listings WHERE company_id = ? AND rejected_at IS NULL",
+  ).get(companyId) as { place_id: string | null } | undefined;
+  if (!row) return { rejected: false, placeId: null };
+  sqlite.prepare(
+    `UPDATE gmaps_listings
+        SET rejected_at = datetime('now'), rejected_by = ?, rejected_reason = ?
+      WHERE company_id = ? AND rejected_at IS NULL`,
+  ).run(opts.by ?? null, opts.reason ?? null, companyId);
+  return { rejected: true, placeId: row.place_id ?? null };
+}
+
+/** Undo a rejection — the listing becomes visible again as it was. */
+export function restoreCompanyListing(companyId: string): boolean {
+  const r = sqlite.prepare(
+    `UPDATE gmaps_listings
+        SET rejected_at = NULL, rejected_by = NULL, rejected_reason = NULL
+      WHERE company_id = ? AND rejected_at IS NOT NULL`,
+  ).run(companyId);
+  return r.changes > 0;
+}
+
+/** Place ids a human already rejected for this company. */
+function rejectedPlaceIds(companyId: string): Set<string> {
+  const rows = sqlite.prepare(
+    `SELECT place_id FROM gmaps_listings
+      WHERE company_id = ? AND rejected_at IS NOT NULL AND place_id IS NOT NULL`,
+  ).all(companyId) as Array<{ place_id: string }>;
+  return new Set(rows.map((r) => r.place_id));
+}
+
+export { rejectedPlaceIds };

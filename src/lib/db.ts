@@ -330,6 +330,12 @@ try {
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_gmaps_listings_place ON gmaps_listings(place_id)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_gmaps_listings_reviews ON gmaps_listings(review_count)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_gmaps_listings_category ON gmaps_listings(category_name)");
+  // A human said this listing is the wrong business. The row is kept (so the
+  // rejection can be undone, and so a re-scrape can avoid returning the same
+  // place again) but hidden everywhere the listing is read.
+  try { sqlite.exec("ALTER TABLE gmaps_listings ADD COLUMN rejected_at TEXT"); } catch { /* exists */ }
+  try { sqlite.exec("ALTER TABLE gmaps_listings ADD COLUMN rejected_by TEXT"); } catch { /* exists */ }
+  try { sqlite.exec("ALTER TABLE gmaps_listings ADD COLUMN rejected_reason TEXT"); } catch { /* exists */ }
 } catch (e) { console.error("[db] gmaps_listings table error:", e); }
 // Run-by-run history of Apify enrichment batches. The work runs
 // fire-and-forget for batches > 100, so the operator can't read the
@@ -767,6 +773,10 @@ try { sqlite.exec("CREATE INDEX idx_seq_msg_company ON sequence_messages (compan
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN latitude REAL"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN longitude REAL"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE companies ADD COLUMN geocoded_at TEXT"); } catch { /* exists */ }
+// A.J. Morgan's OMS customer number. Set when a company is enriched from the
+// OMS wholesale customer file, so re-running the enrichment matches directly
+// instead of re-guessing from the trading name.
+try { sqlite.exec("ALTER TABLE companies ADD COLUMN oms_customer_id TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_companies_pipedrive_org ON companies (pipedrive_org_id)"); } catch { /* exists */ }
 try { sqlite.exec("ALTER TABLE orders ADD COLUMN pipedrive_deal_id INTEGER"); } catch { /* exists */ }
 try { sqlite.exec("CREATE INDEX idx_orders_pipedrive_deal ON orders (pipedrive_deal_id)"); } catch { /* exists */ }

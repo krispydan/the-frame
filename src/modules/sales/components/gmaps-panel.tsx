@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, Globe, Loader2, MapPin, Phone, RefreshCw, Star } from "lucide-react";
+import { ExternalLink, Globe, Loader2, MapPin, Phone, RefreshCw, Star, ThumbsDown, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,6 +40,16 @@ interface Listing {
   scrapedAt: string | null;
 }
 
+/** Set when a human marked the captured listing as the wrong business. */
+interface RejectedListing {
+  title: string | null;
+  address: string | null;
+  placeId: string | null;
+  rejectedAt: string;
+  rejectedBy: string | null;
+  rejectedReason: string | null;
+}
+
 function daysAgo(iso: string | null): number | null {
   if (!iso) return null;
   const t = Date.parse(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z");
@@ -61,6 +71,8 @@ function reviewBand(n: number | null): string | null {
 
 export function GmapsPanel({ companyId }: { companyId: string }) {
   const [listing, setListing] = useState<Listing | null>(null);
+  const [rejected, setRejected] = useState<RejectedListing | null>(null);
+  const [busy, setBusy] = useState(false);
   const [canRefresh, setCanRefresh] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -71,6 +83,7 @@ export function GmapsPanel({ companyId }: { companyId: string }) {
       const r = await fetch(`/api/v1/customers/gmaps?companyId=${encodeURIComponent(companyId)}`);
       const j = await r.json();
       setListing(j.listing ?? null);
+      setRejected(j.rejected ?? null);
       setCanRefresh(j.canRefresh === true);
     } catch {
       setError("Could not load the Google Maps listing");
@@ -93,13 +106,43 @@ export function GmapsPanel({ companyId }: { companyId: string }) {
         body: JSON.stringify({ companyId }),
       });
       const j = await r.json();
-      if (j.listing) setListing(j.listing);
-      else if (j.result?.status === "no-match") setError("Google Maps has no confident match for this store");
+      if (j.listing) { setListing(j.listing); setRejected(null); }
+      else if (j.result?.status === "no-match") {
+        setError(j.result?.reason === "only previously-rejected listings matched"
+          ? "Google only returned listings you already marked wrong"
+          : "Google Maps has no confident match for this store");
+      }
       else if (j.error) setError(String(j.error));
     } catch {
       setError("Refresh failed");
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  /**
+   * The scraper takes Google's top hit for a name-and-city search and is
+   * sometimes confidently wrong. Rejecting hides the listing and stops a
+   * later refresh returning the same place — and is always reversible, so
+   * nobody has to be sure before clicking.
+   */
+  async function act(action: "reject" | "restore", reason?: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/v1/customers/gmaps", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyId, action, reason }),
+      });
+      const j = await r.json();
+      if (j.error) { setError(String(j.error)); return; }
+      setListing(j.listing ?? null);
+      setRejected(j.rejected ?? null);
+    } catch {
+      setError(action === "reject" ? "Could not mark this listing wrong" : "Undo failed");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -148,7 +191,33 @@ export function GmapsPanel({ companyId }: { companyId: string }) {
       <CardContent className="space-y-4">
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-        {!listing && !error && (
+        {rejected && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-3 py-2 text-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-medium text-amber-900 dark:text-amber-300">Marked as the wrong business</p>
+                <p className="text-amber-800 dark:text-amber-400 text-xs mt-0.5 truncate">
+                  Google returned “{rejected.title ?? "an unnamed listing"}”
+                  {rejected.address ? ` — ${rejected.address}` : ""}
+                </p>
+                <p className="text-amber-700 dark:text-amber-500 text-xs mt-0.5">
+                  {rejected.rejectedBy ? `${rejected.rejectedBy}, ` : ""}
+                  {rejected.rejectedAt.slice(0, 10)}
+                  {rejected.rejectedReason ? ` · ${rejected.rejectedReason}` : ""}
+                  {" · a new lookup will skip this listing"}
+                </p>
+              </div>
+              {canRefresh && (
+                <Button variant="outline" size="sm" onClick={() => act("restore")} disabled={busy}>
+                  {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Undo2 className="h-3.5 w-3.5" />}
+                  <span className="ml-1.5">Undo</span>
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {!listing && !error && !rejected && (
           <p className="text-sm text-gray-500">
             Listings are captured automatically when a lead becomes a customer, and refreshed nightly once
             they&apos;re over 120 days old.
@@ -248,16 +317,39 @@ export function GmapsPanel({ companyId }: { companyId: string }) {
               </details>
             )}
 
-            {listing.mapsUrl && (
-              <a
-                href={listing.mapsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:underline"
-              >
-                Open in Google Maps <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            )}
+            <div className="flex items-center justify-between gap-3 pt-1">
+              {listing.mapsUrl ? (
+                <a
+                  href={listing.mapsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:underline"
+                >
+                  Open in Google Maps <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              ) : <span />}
+
+              {/* Google's top hit is sometimes a different business entirely.
+                  Saying so is one click and always reversible. */}
+              {canRefresh && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-gray-500 hover:text-red-600"
+                  disabled={busy}
+                  onClick={() => {
+                    const reason = window.prompt(
+                      "Mark this Google listing as the wrong business?\n\nOptional: what is it actually? (leave blank to just reject)",
+                    );
+                    if (reason === null) return;   // cancelled
+                    void act("reject", reason.trim() || undefined);
+                  }}
+                >
+                  {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ThumbsDown className="h-3.5 w-3.5" />}
+                  <span className="ml-1.5">Wrong business</span>
+                </Button>
+              )}
+            </div>
           </>
         )}
       </CardContent>
