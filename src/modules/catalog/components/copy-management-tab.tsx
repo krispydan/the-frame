@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Wand2, Save, History, FileText, Copy, Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { ThinkingInline } from "@/components/ui/thinking";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -143,7 +144,11 @@ export function CopyManagementTab({
           </SelectContent>
         </Select>
         <Button size="sm" onClick={handleGenerate} disabled={generating}>
-          <Wand2 className="h-3 w-3 mr-1" /> {generating ? "Generating..." : "AI Generate"}
+          {generating ? (
+            <ThinkingInline state="composing" label="Writing…" />
+          ) : (
+            <><Wand2 className="h-3 w-3 mr-1" /> AI Generate</>
+          )}
         </Button>
         <Button size="sm" variant="outline" onClick={handleSave} disabled={saving}>
           <Save className="h-3 w-3 mr-1" /> Save

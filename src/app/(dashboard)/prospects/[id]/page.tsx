@@ -36,6 +36,7 @@ import {
 import { ProspectActivityTimeline } from "@/modules/sales/components/prospect-activity-timeline";
 import { PipedrivePanel } from "@/modules/sales/components/pipedrive-panel";
 import { GmapsPanel } from "@/modules/sales/components/gmaps-panel";
+import { ThinkingInline } from "@/components/ui/thinking";
 
 interface Company {
   id: string; name: string; type: string; website: string; domain: string;
@@ -892,7 +893,7 @@ export default function CompanyDetailPage() {
             }
           >
             {enriching || company.enrichment_status === "queued" ? (
-              <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Enriching...</>
+              <ThinkingInline state="searching" label="Searching Google Maps…" />
             ) : company.enrichment_status === "failed" ? (
               <><AlertCircle className="w-4 h-4 mr-1 text-red-500" /> Retry Google Maps</>
             ) : company.enrichment_status === "enriched" ? (
