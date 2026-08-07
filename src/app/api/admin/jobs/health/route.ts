@@ -3,6 +3,7 @@ export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from "next/server";
 import { sqlite } from "@/lib/db";
+import { requireOpsToken } from "@/lib/ops-auth";
 
 /**
  * GET  /api/admin/jobs/health  → job-queue health snapshot
@@ -41,17 +42,23 @@ function snapshot() {
   return { byStatus, runningDetail, pendingByType };
 }
 
+// This endpoint predates the ops-auth convention; it now accepts the
+// standard x-ops-key (preferred, see docs/ops-endpoints.md) alongside
+// its legacy header so existing callers keep working.
+function authorized(req: NextRequest, opts?: { mutation?: boolean }): NextResponse | null {
+  if (req.headers.get("x-admin-key") === "jaxy2026") return null;
+  return requireOpsToken(req, opts);
+}
+
 export async function GET(req: NextRequest) {
-  if (req.headers.get("x-admin-key") !== "jaxy2026") {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  const denied = authorized(req);
+  if (denied) return denied;
   return NextResponse.json({ ok: true, ...snapshot() });
 }
 
 export async function POST(req: NextRequest) {
-  if (req.headers.get("x-admin-key") !== "jaxy2026") {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  const denied = authorized(req, { mutation: true });
+  if (denied) return denied;
   let body: { staleMinutes?: number } = {};
   try { body = await req.json(); } catch { /* empty OK */ }
   const staleMinutes = body.staleMinutes ?? 10;
