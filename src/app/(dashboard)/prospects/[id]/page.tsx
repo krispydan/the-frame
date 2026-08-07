@@ -1737,7 +1737,7 @@ export default function CompanyDetailPage() {
                   <div className="space-y-1">
                     {ajmHistory.topProducts.map((p) => (
                       <div key={p.product} className="flex min-w-0 items-center justify-between gap-2 text-sm">
-                        <span className="min-w-0 truncate">{p.product}</span>
+                        <span className="min-w-0 truncate">{/^\d{4,}$/.test(p.product) ? `Style ${p.product}` : p.product}</span>
                         <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground tabular-nums">
                           {pluralize(p.units, "unit")} · ${Number(p.revenue).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                         </span>

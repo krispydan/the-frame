@@ -50,9 +50,24 @@ export function getAjmHistory(companyId: string): AjmHistory | null {
     ORDER BY order_date DESC LIMIT 100
   `).all(companyId) as AjmHistory["orderRows"];
 
-  // COALESCE the category: rows imported before categorisation ran are NULL,
-  // and a bare invoice number is recognisable by shape regardless.
-  const NOT_A_PRODUCT = `(COALESCE(i.category,'') = 'no_detail' OR i.product_name GLOB '[0-9]*' AND i.product_name NOT GLOB '*[^0-9]*')`;
+  /**
+   * A line that is not a product.
+   *
+   * Primary signal is the category the importer assigned. The second clause
+   * is only a FALLBACK for rows imported before categorisation ran
+   * (`category IS NULL`), and it mirrors `isNoDetailLine` in categorize.ts
+   * exactly — no SKU, quantity of one, and a name that opens with four or
+   * more digits. An earlier version tested the name shape alone, which would
+   * have swept up a genuine product that happens to be named by its style
+   * number and then described it as a lump-sum invoice, which is false.
+   */
+  const NOT_A_PRODUCT = `(
+    COALESCE(i.category,'') = 'no_detail'
+    OR (i.category IS NULL
+        AND COALESCE(TRIM(i.sku),'') = ''
+        AND COALESCE(i.quantity, 0) <= 1
+        AND i.product_name GLOB '[0-9][0-9][0-9][0-9]*')
+  )`;
 
   const topProducts = sqlite.prepare(`
     SELECT i.product_name AS product, SUM(i.quantity) AS units, ROUND(SUM(i.line_total), 2) AS revenue

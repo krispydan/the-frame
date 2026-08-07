@@ -72,7 +72,12 @@ for (const ddl of [
 ]) { try { sqlite.exec(ddl); } catch { /* exists */ } }
 
 // ── The company ──
-sqlite.prepare("DELETE FROM companies WHERE id = ?", COMPANY_ID);
+// Children first: a re-run otherwise trips the foreign key on companies.
+exec("DELETE FROM ajm_order_items WHERE order_id IN (SELECT id FROM ajm_orders WHERE company_id = ?)", COMPANY_ID);
+for (const t of ["ajm_orders", "orders", "contacts", "stores", "gmaps_listings", "company_phones"]) {
+  exec(`DELETE FROM ${t} WHERE company_id = ?`, COMPANY_ID);
+}
+exec("DELETE FROM companies WHERE id = ?", COMPANY_ID);
 insertRow("companies", {
   id: COMPANY_ID, name: "The Village Pharmacy", type: "independent", website: "", domain: "",
   address: "Wetherby, LS22 5AW", city: "Wetherby", state: "", zip: "LS22 5AW", country: "GB",
@@ -107,6 +112,10 @@ exec("DELETE FROM ajm_order_items WHERE order_id IN (SELECT id FROM ajm_orders W
 exec("DELETE FROM ajm_orders WHERE company_id = ?", COMPANY_ID);
 const styles = ["324803", "299444", "311473", "326667", "308383", "320615", "323349", "297143"];
 const totals = [2557, 1895, 1686, 1646, 1633, 1479, 1423, 1321];
+const realProducts: Array<[string, number, number]> = [
+  ["Alameda Tortoise", 12, 32], ["Bondi Matte Black", 8, 34],
+  ["Cassis Crystal", 6, 30], ["Delray Havana", 10, 33],
+];
 for (let i = 0; i < 38; i++) {
   const id = `qa-ajm-${i}`;
   const month = String((i % 12) + 1).padStart(2, "0");
@@ -117,11 +126,22 @@ for (let i = 0; i < 38; i++) {
      VALUES (?, 'shopify_wholesale', ?, ?, 'THE VILLAGE PHARMACY', 'Wetherby', '', 'GB', ?, 'fulfilled', 0, ?, ?)`,
     id, `AJM-${1000 + i}`, `${year}-${month}-15`, total, 3, COMPANY_ID,
   );
+  // Production has both kinds of line and the page must tell them apart:
+  // legacy lump-sum invoices (no SKU, qty 1, name is an invoice number,
+  // categorised no_detail) and real products with names.
   if (i < styles.length) {
     exec(
       `INSERT INTO ajm_order_items (id, order_id, sku, product_name, quantity, unit_price, line_total, category)
-       VALUES (?, ?, ?, ?, 1, ?, ?, 'sun')`,
-      `qa-ajmi-${i}`, id, styles[i], styles[i], totals[i], totals[i],
+       VALUES (?, ?, NULL, ?, 1, ?, ?, 'no_detail')`,
+      `qa-ajmi-${i}`, id, styles[i], totals[i], totals[i],
+    );
+  } else if (i < styles.length + realProducts.length) {
+    const [name, qty, price] = realProducts[i - styles.length];
+    exec(
+      `INSERT INTO ajm_order_items (id, order_id, sku, product_name, quantity, unit_price, line_total, category)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'sun')`,
+      `qa-ajmi-${i}`, id, `AJM-${name}`.replace(/\s+/g, "-"), name,
+      qty, price, (qty as number) * (price as number),
     );
   }
 }
