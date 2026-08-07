@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { HeaderSkeleton, KpiSkeleton, ChartSkeleton, TableCardSkeleton } from "@/components/ui/page-skeleton";
 import dynamic from "next/dynamic";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -160,7 +161,15 @@ export default function CustomerAnalyticsPage() {
   }, [load]);
 
   if (loading) {
-    return <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
+    // Shape matches the real page: 6 KPI cards, then the map, then tables.
+    return (
+      <div className="space-y-6 p-6">
+        <HeaderSkeleton />
+        <KpiSkeleton count={6} />
+        <ChartSkeleton height="h-[480px]" />
+        <TableCardSkeleton rows={6} cols={4} />
+      </div>
+    );
   }
   if (!data) return <div className="p-6 text-muted-foreground">No data.</div>;
 

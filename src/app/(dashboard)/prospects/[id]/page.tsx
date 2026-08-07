@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { DetailPageSkeleton } from "@/components/ui/page-skeleton";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import Link from "next/link";
@@ -492,12 +493,7 @@ export default function CompanyDetailPage() {
   };
 
   if (loading) return (
-    <div className="p-6">
-      <div className="animate-pulse space-y-4">
-        <div className="h-8 w-48 bg-muted rounded" />
-        <div className="h-64 bg-muted rounded-lg" />
-      </div>
-    </div>
+    <DetailPageSkeleton />
   );
   if (!company) return (
     <div className="p-6 text-center py-16">

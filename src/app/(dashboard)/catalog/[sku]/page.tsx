@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { DetailPageSkeleton } from "@/components/ui/page-skeleton";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -176,12 +177,7 @@ export default function ProductDetailPage() {
   };
 
   if (loading) return (
-    <div className="p-6">
-      <div className="animate-pulse space-y-4">
-        <div className="h-8 w-48 bg-muted rounded" />
-        <div className="h-64 bg-muted rounded-lg" />
-      </div>
-    </div>
+    <DetailPageSkeleton />
   );
   if (!product) return (
     <div className="p-6 text-center py-16">
