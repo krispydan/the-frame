@@ -85,6 +85,14 @@ export function CompanyRibbon({
  * because it fell back to an em-dash for the tier and then unconditionally
  * prefixed " · " to the score. A chip with no content renders nothing at all.
  */
+/** "ICP A · 65" / "ICP A" / "ICP 65" / nothing. Never "ICP — · 65". */
+export function icpChipLabel(tier?: string | null, score?: number | null): string | null {
+  const t = tier?.trim();
+  const hasScore = score != null && Number.isFinite(score);
+  if (!t && !hasScore) return null;
+  return t && hasScore ? `ICP ${t} · ${score}` : t ? `ICP ${t}` : `ICP ${score}`;
+}
+
 export function IcpChip({
   tier, score, onClick,
 }: { tier?: string | null; score?: number | null; onClick?: () => void }) {

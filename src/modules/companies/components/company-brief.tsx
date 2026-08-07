@@ -152,7 +152,7 @@ export function CompanyBrief(p: BriefProps) {
 
   return (
     <Card>
-      <CardContent className="space-y-3 py-4">
+      <CardContent className="space-y-3">
         {p.alerts.map((a, i) => (
           <div
             key={i}

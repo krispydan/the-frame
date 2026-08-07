@@ -41,7 +41,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { CompanyRibbon } from "@/modules/companies/components/company-ribbon";
+import { CompanyRibbon, icpChipLabel } from "@/modules/companies/components/company-ribbon";
 import { Section } from "@/modules/companies/components/section";
 import {
   CompanyBrief, CompanyActionBar, resolveTalkingPoint, type BriefAlert,
@@ -694,7 +694,7 @@ export default function CompanyDetailPage() {
         {/* Row 2: status pills (left) + action toolbar (right) */}
         <div className="flex items-center justify-between gap-3 flex-wrap"><div className="flex items-center gap-2 flex-wrap">
           {/* ICP — clickable badge that opens the inline editor */}
-          <div className="relative">
+          <div className={cn("relative", !company.icp_tier && company.icp_score == null && "hidden")}>
             <button
               onClick={() => {
                 setIcpDraft({
@@ -709,7 +709,7 @@ export default function CompanyDetailPage() {
               }`}
               title="Click to edit ICP tier and score"
             >
-              ICP {company.icp_tier || "—"}{company.icp_score != null ? ` · ${company.icp_score}` : ""}
+              {icpChipLabel(company.icp_tier, company.icp_score)}
               {company.icp_manual_override ? (
                 <span title={`Manually set${company.icp_updated_at ? " · " + new Date(company.icp_updated_at).toLocaleDateString() : ""}`}>✓</span>
               ) : null}

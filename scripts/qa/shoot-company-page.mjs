@@ -44,6 +44,7 @@ const cookies = (await api.storageState()).cookies.map((c) => ({ ...c, secure: f
 const report = [];
 for (const vp of VIEWPORTS) {
   const ctx = await browser.newContext({
+    colorScheme: process.env.QA_THEME === "dark" ? "dark" : "light",
     viewport: { width: vp.width, height: vp.height },
     deviceScaleFactor: 2,
     isMobile: vp.mobile,
@@ -56,6 +57,12 @@ for (const vp of VIEWPORTS) {
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text().slice(0, 200)); });
 
   await page.goto(BASE + path, { waitUntil: "networkidle", timeout: 60_000 });
+  if (process.env.QA_THEME === "dark") {
+    await page.evaluate(() => {
+      document.documentElement.classList.add("dark");
+      document.documentElement.setAttribute("data-theme", "dark");
+    });
+  }
   await page.waitForTimeout(1500);
 
   const metrics = await page.evaluate(() => {
