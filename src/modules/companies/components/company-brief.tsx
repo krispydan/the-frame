@@ -20,7 +20,7 @@
  */
 import { ReactNode, useEffect } from "react";
 import {
-  Phone, Mail, Globe, Copy, AlertTriangle, Star, ShoppingCart, Clock, History, PenLine,
+  Phone, Mail, Globe, Copy, AlertTriangle, Star, ShoppingCart, Clock, History, PenLine, MapPin,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import {
   money, moneyFull, timeAgo, telHref, formatPhone, prettyDomain, externalHref, pluralize,
 } from "@/modules/companies/lib/format";
+import { GapBar } from "@/modules/companies/components/company-visuals";
 
 export interface BriefAlert {
   tone: "danger" | "warning";
@@ -96,9 +97,13 @@ function ReachRow({
 
 function StatTile({
   icon, value, caption, tone,
-}: { icon: ReactNode; value: string; caption: string; tone?: "money" | "muted" }) {
+}: { icon: ReactNode; value: string; caption: string; tone?: "money" | "muted" | "warn" }) {
   return (
-    <div className="rounded-lg border px-3 py-2">
+    <div className={cn(
+      "rounded-lg border px-3 py-2",
+      tone === "money" && "border-emerald-500/25 bg-emerald-500/5",
+      tone === "warn" && "border-amber-500/25 bg-amber-500/5",
+    )}>
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <span className="[&_svg]:size-3.5">{icon}</span>
         <span className="truncate">{caption}</span>
@@ -106,6 +111,7 @@ function StatTile({
       <p className={cn(
         "mt-0.5 truncate text-lg font-semibold tabular-nums",
         tone === "money" && "text-emerald-600 dark:text-emerald-400",
+        tone === "warn" && "text-amber-700 dark:text-amber-400",
         tone === "muted" && "text-muted-foreground",
       )}>
         {value}
@@ -145,7 +151,7 @@ export function CompanyBrief(p: BriefProps) {
   if (p.lastTouch) {
     const ago = timeAgo(p.lastTouch.at);
     tiles.push(
-      <StatTile key="touch" icon={<Clock />} tone="muted"
+      <StatTile key="touch" icon={<Clock />} tone={ago ? "muted" : "warn"}
         value={ago ?? "Never"} caption={ago ? "Last touch" : "Not contacted"} />,
     );
   }
@@ -168,10 +174,11 @@ export function CompanyBrief(p: BriefProps) {
           </div>
         ))}
 
-        {/* Capped: a phone number stretched across 1500px is harder to read,
-            not easier. On a phone this is simply full width. */}
+        {/* Phone-only. On a desktop these live in the sticky rail as
+            <ReachCard>, where they stay on screen instead of being scrolled
+            past — and the width they were wasting goes to the gap chart. */}
         {(p.phone || p.email || domain) && (
-          <div className="space-y-2 lg:max-w-xl">
+          <div className="space-y-2 lg:hidden">
             <ReachRow
               icon={<Phone />} href={tel} value={formatPhone(p.phone) || ""} mono
               label={`Call ${p.companyName}`}
@@ -188,15 +195,41 @@ export function CompanyBrief(p: BriefProps) {
         )}
 
         {tiles.length > 0 && (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{tiles}</div>
+          <div
+            className={cn(
+              "grid grid-cols-2 gap-2",
+              tiles.length === 2 && "md:grid-cols-2",
+              tiles.length === 3 && "md:grid-cols-3",
+              tiles.length >= 4 && "md:grid-cols-4",
+            )}
+          >
+            {tiles}
+          </div>
         )}
 
         {p.talkingPoint && (
-          <div className="rounded-lg bg-muted/50 px-3 py-2 lg:max-w-3xl">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <div
+            className={cn(
+              "rounded-lg px-3 py-2.5",
+              p.talkingPoint.source === "The gap"
+                ? "border border-amber-500/30 bg-amber-500/10"
+                : "bg-muted/50",
+            )}
+          >
+            <p
+              className={cn(
+                "text-[11px] font-medium uppercase tracking-wide",
+                p.talkingPoint.source === "The gap"
+                  ? "text-amber-700 dark:text-amber-400"
+                  : "text-muted-foreground",
+              )}
+            >
               {p.talkingPoint.source}
             </p>
             <p className="mt-0.5 text-sm leading-snug">{p.talkingPoint.text}</p>
+            {p.ajm && p.jaxy && p.ajm.revenue > 0 && (
+              <GapBar className="mt-3" ajmRevenue={p.ajm.revenue} jaxyRevenue={p.jaxy.revenue} />
+            )}
           </div>
         )}
 
@@ -283,5 +316,63 @@ export function CompanyActionBar({
         </Button>
       </div>
     </div>
+  );
+}
+
+
+/**
+ * How to reach them, pinned in the desktop rail.
+ *
+ * The mobile Brief renders the same three rows inline; here they stay on
+ * screen while the centre column scrolls, so "call them" never requires
+ * finding your way back to the top. Below md the whole card is hidden and the
+ * fixed action bar does this job instead.
+ */
+export function ReachCard({
+  companyName, phone, email, website, address,
+}: {
+  companyName: string;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  address?: string | null;
+}) {
+  const tel = telHref(phone);
+  const domain = prettyDomain(website);
+  if (!phone && !email && !domain && !address) return null;
+
+  return (
+    <Card className="hidden lg:block">
+      <CardContent className="space-y-2">
+        {phone && (
+          <Button
+            className="h-11 w-full justify-start gap-3" variant="outline"
+            nativeButton={!tel}
+            render={tel ? <a href={tel} aria-label={`Call ${companyName}`} /> : <button type="button" />}
+          >
+            <Phone />
+            <span className="truncate text-base tabular-nums">{formatPhone(phone)}</span>
+          </Button>
+        )}
+        <ReachRow
+          icon={<Mail />} href={email ? `mailto:${email}` : null} value={email ?? ""}
+          label={`Email ${companyName}`} copy={email ?? undefined}
+        />
+        <ReachRow
+          icon={<Globe />} href={externalHref(website)} value={domain ?? ""}
+          label={`Open ${domain} in a new tab`} external
+        />
+        {address && (
+          <a
+            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`}
+            target="_blank" rel="noopener noreferrer"
+            className="flex items-start gap-3 rounded-lg border px-3 py-2 text-sm hover:bg-muted/50"
+          >
+            <MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1">{address}</span>
+          </a>
+        )}
+      </CardContent>
+    </Card>
   );
 }

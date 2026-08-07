@@ -42,8 +42,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { CompanyRibbon, icpChipLabel } from "@/modules/companies/components/company-ribbon";
 import { Section } from "@/modules/companies/components/section";
+import { SpendByYear, CategoryMix, Stars } from "@/modules/companies/components/company-visuals";
 import {
-  CompanyBrief, CompanyActionBar, resolveTalkingPoint, type BriefAlert,
+  CompanyBrief, CompanyActionBar, ReachCard, resolveTalkingPoint, type BriefAlert,
 } from "@/modules/companies/components/company-brief";
 import {
   joinPlace, pluralize, contactLabel, telHref, formatPhone,
@@ -180,6 +181,8 @@ interface AjmHistory {
   orderRows: Array<{ id: string; source: string; order_number: string; order_date: string | null; total: number; units: number; status: string | null }>;
   topProducts: Array<{ product: string; units: number; revenue: number }>;
   noDetail: { orders: number; revenue: number } | null;
+  byYear: Array<{ year: string; revenue: number; orders: number }>;
+  categoryMix: Array<{ category: string; revenue: number }>;
 }
 
 interface Activity {
@@ -1065,9 +1068,9 @@ export default function CompanyDetailPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main content */}
-        <div className="lg:col-span-2 space-y-6">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-6">
+        {/* Main column — the money story. */}
+        <div className="space-y-4 lg:col-span-8">
           {/* Admin — everything that is research and data hygiene rather than
               "should I call". Collapsed at every width: nobody needs ICP
               reasoning expanded by default, on a phone or a 27" monitor.
@@ -1707,36 +1710,58 @@ export default function CompanyDetailPage() {
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
-                  <p className="text-xs text-gray-500">Revenue</p>
-                  <p className="text-xl font-bold text-amber-700 dark:text-amber-500">
+                  <p className="text-xs text-muted-foreground">Revenue</p>
+                  <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
                     ${Number(ajmHistory.revenue || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500">Orders</p>
+                  <p className="text-xs text-muted-foreground">Orders</p>
                   <p className="text-xl font-bold">{ajmHistory.orders}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500">Units</p>
+                  <p className="text-xs text-muted-foreground">Units</p>
                   <p className="text-xl font-bold">{Number(ajmHistory.units || 0).toLocaleString()}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500">Bought</p>
+                  <p className="text-xs text-muted-foreground">Bought</p>
                   <p className="text-sm font-medium">
                     {ajmHistory.firstOrder?.slice(0, 7) ?? "—"} → {ajmHistory.lastOrder?.slice(0, 7) ?? "—"}
                   </p>
-                  <p className="text-xs text-gray-500">{ajmHistory.sources?.replace(/_/g, " ").replace(/,/g, ", ")}</p>
+                  <p className="text-xs text-muted-foreground">{ajmHistory.sources?.replace(/_/g, " ").replace(/,/g, ", ")}</p>
                 </div>
               </div>
+
+              {/* Two questions the numbers above cannot answer on their own:
+                  were they growing or fading when A.J. Morgan closed, and are
+                  they a sunglasses account or a readers account. */}
+              {(ajmHistory.byYear.length > 1 || ajmHistory.categoryMix.length > 0) && (
+                <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                  {ajmHistory.byYear.length > 1 && (
+                    <div>
+                      <p className="mb-2 text-xs font-medium text-muted-foreground">Spend by year</p>
+                      <SpendByYear data={ajmHistory.byYear} />
+                    </div>
+                  )}
+                  {ajmHistory.categoryMix.length > 0 && (
+                    <div>
+                      <p className="mb-2 text-xs font-medium text-muted-foreground">Category mix</p>
+                      <CategoryMix data={ajmHistory.categoryMix} />
+                    </div>
+                  )}
+                </div>
+              )}
 
               {ajmHistory.topProducts.length > 0 && (
                 <div>
                   <p className="mb-1.5 text-xs font-medium text-muted-foreground">What they bought</p>
-                  <div className="space-y-1">
+                  {/* Two columns from md: eight one-line rows down the left of
+                      a 700px card is most of the wasted space on this page. */}
+                  <div className="grid grid-cols-1 gap-x-6 gap-y-1 md:grid-cols-2">
                     {ajmHistory.topProducts.map((p) => (
-                      <div key={p.product} className="flex min-w-0 items-center justify-between gap-2 text-sm">
+                      <div key={p.product} className="flex min-w-0 items-baseline justify-between gap-2 text-sm">
                         <span className="min-w-0 truncate">{/^\d{4,}$/.test(p.product) ? `Style ${p.product}` : p.product}</span>
-                        <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground tabular-nums">
+                        <span className="shrink-0 whitespace-nowrap text-xs tabular-nums text-muted-foreground">
                           {pluralize(p.units, "unit")} · ${Number(p.revenue).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                         </span>
                       </div>
@@ -1788,6 +1813,26 @@ export default function CompanyDetailPage() {
           <PipedrivePanel companyId={company.id} companyName={company.name} />
 
           {/* Google Maps — what kind of store this is, before anyone calls it */}
+        </div>
+
+        {/* Sticky rail — how to reach them, what Google says, and where you
+            log the outcome. On a phone this stacks under the main column; on
+            a desktop it stays on screen while the centre scrolls, which is
+            what makes a 1,400px window worth having. */}
+        <div className="space-y-4 lg:col-span-4 lg:sticky lg:top-24 lg:self-start">
+          <ReachCard
+            companyName={company.name}
+            phone={briefPhone}
+            email={briefEmail}
+            website={company.website || company.domain || null}
+            address={joinPlace([
+              primaryStore?.address || company.address,
+              primaryStore?.city || company.city,
+              primaryStore?.state || company.state,
+              primaryStore?.zip || company.zip,
+            ]) || null}
+          />
+
           <Section
             title="Google listing"
             icon={<MapPin />}
@@ -1800,10 +1845,7 @@ export default function CompanyDetailPage() {
           >
             <GmapsPanel companyId={company.id} onListing={setGmapsListing} bare />
           </Section>
-        </div>
 
-        {/* Right sidebar — Activity dominant on top, then Notes, then Lead Source. */}
-        <div className="space-y-4">
           {/* Activity Timeline — primary right-column content. */}
           <Card id="company-activity" className="scroll-mt-24">
             <CardHeader className="pb-3">

@@ -32,6 +32,14 @@ export interface AjmHistory {
    * so they are excluded from topProducts and reported as one honest total.
    */
   noDetail: { orders: number; revenue: number } | null;
+  /** Spend per calendar year — the shape of the relationship over time. */
+  byYear: Array<{ year: string; revenue: number; orders: number }>;
+  /**
+   * Revenue split across product categories. Readers vs sunglasses is the
+   * question the reader launch turns on, so it belongs on the account page
+   * and not only in the aggregate report.
+   */
+  categoryMix: Array<{ category: string; revenue: number }>;
 }
 
 /** Null when this company has no AJM history, so callers can skip the section. */
@@ -87,10 +95,27 @@ export function getAjmHistory(companyId: string): AjmHistory | null {
     WHERE o.company_id = ? AND o.cancelled = 0 AND ${NOT_A_PRODUCT}
   `).get(companyId) as { orders: number; revenue: number | null };
 
+  const byYear = sqlite.prepare(`
+    SELECT substr(order_date, 1, 4) AS year, ROUND(SUM(total), 2) AS revenue, COUNT(*) AS orders
+    FROM ajm_orders
+    WHERE company_id = ? AND cancelled = 0 AND order_date IS NOT NULL
+    GROUP BY year ORDER BY year
+  `).all(companyId) as AjmHistory["byYear"];
+
+  const categoryMix = sqlite.prepare(`
+    SELECT COALESCE(NULLIF(i.category,''), 'unclassified') AS category,
+           ROUND(SUM(i.line_total), 2) AS revenue
+    FROM ajm_order_items i JOIN ajm_orders o ON o.id = i.order_id
+    WHERE o.company_id = ? AND o.cancelled = 0
+    GROUP BY category HAVING revenue > 0 ORDER BY revenue DESC
+  `).all(companyId) as AjmHistory["categoryMix"];
+
   return {
     ...summary,
     orderRows,
     topProducts,
+    byYear,
+    categoryMix,
     noDetail: nd && nd.orders > 0 ? { orders: nd.orders, revenue: nd.revenue ?? 0 } : null,
   };
 }
