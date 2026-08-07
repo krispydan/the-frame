@@ -170,8 +170,13 @@ export function QueueClient({ initialItems, initialCounts }: Props) {
           {draft !== item.body && (
             <p className="mt-1 text-xs text-amber-600">edited — your version is what gets recorded</p>
           )}
-          {item.attachmentKey && (
-            <p className="mt-2 text-xs text-muted-foreground">📎 attach: {item.attachmentKey}</p>
+          {(item.attachmentType || item.attachmentKey) && (
+            <div className="mt-2 rounded-md border border-dashed px-3 py-2 text-xs">
+              <span className="font-medium">Before sending, attach in Faire: </span>
+              {item.attachmentType === "product" ? `Add product → ${item.attachmentLabel || item.attachmentKey}`
+                : item.attachmentType === "collection" ? `Add collection → ${item.attachmentLabel || item.attachmentKey}`
+                : `Add image or file → ${item.attachmentLabel || item.attachmentKey}`}
+            </div>
           )}
         </div>
 

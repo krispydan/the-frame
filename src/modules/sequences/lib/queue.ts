@@ -26,6 +26,8 @@ export interface QueueItem {
   body: string;
   threadUrl: string | null;
   attachmentKey: string | null;
+  attachmentType: string | null;
+  attachmentLabel: string | null;
   queuedAt: string;
   edited: number;
   // context
@@ -75,7 +77,7 @@ export function getQueue(opts: { limit?: number; brand?: string; status?: string
   const rows = sqlite
     .prepare(
       `SELECT m.id, m.company_id, m.brand, m.channel, m.status, m.rendered_subject, m.rendered_body,
-              m.thread_url, m.attachment_key, m.queued_at, m.edited,
+              m.thread_url, m.attachment_key, m.attachment_type, m.attachment_label, m.queued_at, m.edited,
               c.name AS company_name, c.city, c.state,
               s.name AS sequence_name, st.step_no,
               ca.last_order_at, ca.total_orders, ca.tier,
@@ -106,6 +108,8 @@ export function getQueue(opts: { limit?: number; brand?: string; status?: string
     body: r.rendered_body as string,
     threadUrl: r.thread_url as string | null,
     attachmentKey: r.attachment_key as string | null,
+    attachmentType: r.attachment_type as string | null,
+    attachmentLabel: r.attachment_label as string | null,
     queuedAt: r.queued_at as string,
     edited: (r.edited as number) || 0,
     lastOrderAt: r.last_order_at as string | null,

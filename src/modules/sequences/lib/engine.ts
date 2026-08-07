@@ -53,7 +53,8 @@ interface StepRow {
   id: string; sequence_id: string; step_no: number; delay_days: number;
   delay_business_days: number; channel: string; send_mode: string;
   template_subject: string | null; template_body: string;
-  attachment_key: string | null; offer_code: string | null; task_note: string | null;
+  attachment_key: string | null; attachment_type: string | null; attachment_label: string | null;
+  offer_code: string | null; task_note: string | null;
 }
 
 /** Skip weekends when a step asks for business-day spacing. */
@@ -303,11 +304,13 @@ export function runTick(opts: { dryRun?: boolean } = {}): TickResult {
           .prepare(
             `INSERT OR IGNORE INTO sequence_messages
                (id, enrollment_id, step_id, sequence_id, company_id, brand, channel, status,
-                rendered_subject, rendered_body, attachment_key, thread_url, queued_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                rendered_subject, rendered_body, attachment_key, attachment_type, attachment_label,
+                thread_url, queued_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(randomUUID(), e.id, step.id, seq.id, e.company_id, seq.brand, step.channel, status,
-               step.template_subject, r.text, step.attachment_key, threadUrl, now());
+               step.template_subject, r.text, step.attachment_key, step.attachment_type ?? null,
+               step.attachment_label ?? null, threadUrl, now());
         // Park the enrollment: the NEXT step is scheduled when THIS one is
         // actually sent (queue.ts), because delays anchor on completion. If we
         // scheduled from queue time, a queue cleared a week late would fire

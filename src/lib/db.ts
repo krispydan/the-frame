@@ -699,6 +699,16 @@ try { sqlite.exec("CREATE UNIQUE INDEX idx_seq_steps_order ON sequence_steps (se
 // Stable identity for seeded sequences. Matching on name meant renaming one in
 // the UI made the next seed create a duplicate that competed for candidates.
 try { sqlite.exec("ALTER TABLE sequences ADD COLUMN seed_key TEXT"); } catch { /* exists */ }
+// Faire messenger accepts three kinds of attachment: an image/file, a product,
+// or a collection. Modelling the TYPE (rather than a free-text key) is what
+// lets the queue card tell Christina exactly what to attach and give her the
+// right link to do it.
+try { sqlite.exec("ALTER TABLE sequence_steps ADD COLUMN attachment_type TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE sequence_steps ADD COLUMN attachment_ref TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE sequence_steps ADD COLUMN attachment_label TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE sequence_messages ADD COLUMN attachment_type TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE sequence_messages ADD COLUMN attachment_ref TEXT"); } catch { /* exists */ }
+try { sqlite.exec("ALTER TABLE sequence_messages ADD COLUMN attachment_label TEXT"); } catch { /* exists */ }
 try { sqlite.exec("CREATE UNIQUE INDEX idx_sequences_seed_key ON sequences (seed_key) WHERE seed_key IS NOT NULL"); } catch { /* exists */ }
 
 try {

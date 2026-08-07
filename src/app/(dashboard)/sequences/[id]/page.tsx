@@ -4,30 +4,22 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { sqlite } from "@/lib/db";
 import { sequenceMetrics, sequenceEnrollments } from "@/modules/sequences/lib/metrics";
-import { lintTemplate } from "@/modules/sequences/lib/render";
+import { StepEditor, type EditorStep } from "@/modules/sequences/components/step-editor";
 
 interface Seq {
   id: string; name: string; brand: string; trigger: string; class: string; status: string;
   enrollment_mode: string; propose_only: number; priority: number; description: string | null;
 }
-interface Step {
-  id: string; step_no: number; delay_days: number; delay_business_days: number;
-  channel: string; send_mode: string; template_body: string; attachment_key: string | null;
-  offer_code: string | null; task_note: string | null;
-}
+
 
 export default async function SequenceDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const seq = sqlite.prepare("SELECT * FROM sequences WHERE id = ?").get(id) as Seq | undefined;
   if (!seq) notFound();
 
-  const steps = sqlite.prepare("SELECT * FROM sequence_steps WHERE sequence_id = ? ORDER BY step_no").all(id) as Step[];
+  const steps = sqlite.prepare("SELECT * FROM sequence_steps WHERE sequence_id = ? ORDER BY step_no").all(id) as EditorStep[];
   const m = sequenceMetrics(id);
   const enrollments = sequenceEnrollments(id, 50);
-
-  // Day numbers, the way the Pipedrive builder shows them: cumulative from day 1.
-  let day = 1;
-  const dayFor = steps.map((s, i) => { if (i > 0) day += s.delay_days; return day; });
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
@@ -64,36 +56,11 @@ export default async function SequenceDetail({ params }: { params: Promise<{ id:
       </div>
 
       <div>
-        <h2 className="mb-2 text-lg font-semibold">Steps</h2>
-        <div className="space-y-3">
-          {steps.map((s, i) => {
-            const warnings = lintTemplate(s.template_body);
-            return (
-              <div key={s.id} className="rounded-lg border">
-                <div className="flex flex-wrap items-center gap-2 border-b bg-muted/40 px-4 py-2 text-sm">
-                  <span className="font-medium">DAY {dayFor[i]}</span>
-                  <span className="text-muted-foreground">
-                    {i === 0 ? "on trigger" : `${s.delay_days} days after previous step completes`}
-                    {s.delay_business_days ? " (business days)" : ""}
-                  </span>
-                  <span className="ml-auto rounded bg-background px-2 py-0.5 text-xs">{s.channel}</span>
-                  <span className={`rounded px-2 py-0.5 text-xs ${
-                    s.send_mode === "auto" ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                    : s.send_mode === "task" ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-                    : "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200"}`}>
-                    {s.send_mode === "auto" ? "auto-send" : s.send_mode === "task" ? "task" : "review first"}
-                  </span>
-                </div>
-                <pre className="whitespace-pre-wrap px-4 py-3 font-sans text-sm leading-relaxed">{s.template_body}</pre>
-                <div className="flex flex-wrap gap-3 border-t px-4 py-2 text-xs text-muted-foreground">
-                  {s.attachment_key && <span>📎 {s.attachment_key}</span>}
-                  {s.offer_code && <span>offer: {s.offer_code}</span>}
-                  {warnings.length > 0 && <span className="text-amber-600">⚠ {warnings.join(" · ")}</span>}
-                </div>
-              </div>
-            );
-          })}
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Steps</h2>
+          <span className="text-xs text-muted-foreground">Day numbers are cumulative, as Faire shows them</span>
         </div>
+        <StepEditor sequenceId={id} steps={steps} />
       </div>
 
       <div>
