@@ -7,6 +7,7 @@ import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import { TIER_LABELS, TIER_COLORS, HEALTH_COLORS, type CustomerTier, type HealthStatus } from "@/modules/customers/schema";
 import { PipedrivePanel } from "@/modules/sales/components/pipedrive-panel";
 import { GmapsPanel } from "@/modules/sales/components/gmaps-panel";
+import { EmailPanel } from "@/modules/email/components/email-panel";
 
 interface AccountData {
   id: string;
@@ -542,6 +543,9 @@ export function CustomerDetail({
 
       {/* What Google says the store actually is — captured on conversion */}
       <GmapsPanel companyId={account.company_id} />
+
+      {/* Gmail correspondence + composer */}
+      <EmailPanel companyId={account.company_id} defaultTo={account.company_email} />
 
       {/* Reorder Prediction */}
       {reorderPrediction && reorderPrediction.avgDaysBetweenOrders && (

@@ -36,6 +36,7 @@ import {
 import { ProspectActivityTimeline, activityLabel } from "@/modules/sales/components/prospect-activity-timeline";
 import { PipedrivePanel } from "@/modules/sales/components/pipedrive-panel";
 import { GmapsPanel } from "@/modules/sales/components/gmaps-panel";
+import { EmailPanel } from "@/modules/email/components/email-panel";
 import { ThinkingInline } from "@/components/ui/thinking";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
