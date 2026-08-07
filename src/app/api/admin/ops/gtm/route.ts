@@ -240,8 +240,46 @@ export async function GET(req: NextRequest) {
     GROUP BY bucket
   `).all();
 
+  // ── Outbound machine: which of the seven steps is actually broken ──
+  const q = (sql: string) => { try { return sqlite.prepare(sql).all(); } catch { return null; } };
+  const q1 = (sql: string) => { try { return sqlite.prepare(sql).get(); } catch { return null; } };
+
+  const outbound = {
+    // Opens healthy but replies dead points at scoring/list breadth, not copy.
+    campaignFunnel: q1(`
+      SELECT COUNT(*) AS enrolled,
+             SUM(CASE WHEN sent_at IS NOT NULL THEN 1 ELSE 0 END) AS sent,
+             SUM(CASE WHEN opened_at IS NOT NULL THEN 1 ELSE 0 END) AS opened,
+             SUM(CASE WHEN replied_at IS NOT NULL THEN 1 ELSE 0 END) AS replied
+      FROM campaign_leads`),
+    replyClassification: q(`
+      SELECT COALESCE(NULLIF(reply_classification,''),'(unclassified)') AS label, COUNT(*) AS n
+      FROM campaign_leads WHERE replied_at IS NOT NULL GROUP BY label ORDER BY n DESC LIMIT 12`),
+    // Raw material for the reference files: what buyers actually said.
+    calls: q1(`
+      SELECT COUNT(*) AS calls,
+             SUM(CASE WHEN connected = 1 THEN 1 ELSE 0 END) AS connected,
+             SUM(CASE WHEN TRIM(COALESCE(notes,'')) != '' THEN 1 ELSE 0 END) AS withNotes,
+             SUM(CASE WHEN TRIM(COALESCE(recording_url,'')) != '' THEN 1 ELSE 0 END) AS withRecording,
+             COUNT(DISTINCT company_id) AS companies
+      FROM phoneburner_call_log`),
+    callDispositions: q(`
+      SELECT COALESCE(NULLIF(disposition_label,''),'(none)') AS label, COUNT(*) AS n
+      FROM phoneburner_call_log GROUP BY label ORDER BY n DESC LIMIT 12`),
+    // Lost-deal reasons, in the buyer's words if we ever captured them.
+    disqualifyReasons: q(`
+      SELECT disqualify_reason AS reason, COUNT(*) AS n FROM companies
+      WHERE TRIM(COALESCE(disqualify_reason,'')) != '' GROUP BY reason ORDER BY n DESC LIMIT 15`),
+    replyText: q1(`
+      SELECT COUNT(*) AS n FROM campaign_leads WHERE TRIM(COALESCE(reply_text,'')) != ''`),
+    aiOpeners: q1(`
+      SELECT COUNT(*) AS generated, COUNT(DISTINCT ai_opener_model) AS models
+      FROM companies WHERE TRIM(COALESCE(ai_opener_email1,'')) != ''`),
+  };
+
   return NextResponse.json({
     generatedFor: "GTM signal analysis",
+    outbound,
     targetPool,
     revenueShare,
     tierBySource,
