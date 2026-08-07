@@ -18,6 +18,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Sparkles, Save, RefreshCw, AlertTriangle, CheckCircle } from "lucide-react";
+import { ThinkingInline, ThinkingPanel } from "@/components/ui/thinking";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -202,6 +203,22 @@ export function AmazonListingTab({ productId }: { productId: string | null }) {
 
   // Empty state — no AI copy generated yet.
   if (!listing) {
+    // Nothing to read while it works, so give the wait the whole card and an
+    // elapsed counter. Everywhere else the inline orb is enough, because
+    // there's existing content on screen to look at.
+    if (regenerating) {
+      return (
+        <Card>
+          <CardContent className="pt-6">
+            <ThinkingPanel
+              state="composing"
+              title="Writing the Amazon listing"
+              hint="Claude is reading the product photos, tags and keyword research — usually 30–90s."
+            />
+          </CardContent>
+        </Card>
+      );
+    }
     return (
       <Card>
         <CardHeader>
@@ -216,8 +233,11 @@ export function AmazonListingTab({ productId }: { productId: string | null }) {
         </CardHeader>
         <CardContent>
           <Button size="sm" onClick={onRegenerate} disabled={regenerating}>
-            <Sparkles className={`h-3 w-3 mr-1 ${regenerating ? "animate-pulse" : ""}`} />
-            Generate now (30-90s)
+            {regenerating ? (
+              <ThinkingInline state="composing" label="Writing listing…" />
+            ) : (
+              <><Sparkles className="h-3 w-3 mr-1" /> Generate now (30-90s)</>
+            )}
           </Button>
         </CardContent>
       </Card>

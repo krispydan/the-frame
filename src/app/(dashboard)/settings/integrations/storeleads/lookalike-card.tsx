@@ -19,6 +19,7 @@
 import { useState } from "react";
 import { Users, Sparkles, Loader2, Eye, Wand2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ThinkingInline } from "@/components/ui/thinking";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
@@ -161,8 +162,11 @@ export function LookalikeCard() {
             2. Preview lookalikes
           </Button>
           <Button onClick={onGenerate} disabled={syncing || generating || previewing}>
-            {generating ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Wand2 className="h-4 w-4 mr-1" />}
-            3. Generate + import
+            {generating ? (
+              <ThinkingInline state="searching" label="Finding lookalikes…" />
+            ) : (
+              <><Wand2 className="h-4 w-4 mr-1" /> 3. Generate + import</>
+            )}
           </Button>
         </div>
 
