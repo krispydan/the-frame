@@ -60,13 +60,18 @@ export function getAjmHistory(companyId: string): AjmHistory | null {
    * more digits. An earlier version tested the name shape alone, which would
    * have swept up a genuine product that happens to be named by its style
    * number and then described it as a lump-sum invoice, which is false.
+   *
+   * COALESCE on product_name is load-bearing: `NULL GLOB '...'` is NULL, not
+   * false, so a nameless row satisfied neither `WHERE NOT (P)` nor
+   * `WHERE (P)` and its revenue disappeared from both aggregates while
+   * remaining inside the header total.
    */
   const NOT_A_PRODUCT = `(
     COALESCE(i.category,'') = 'no_detail'
     OR (i.category IS NULL
         AND COALESCE(TRIM(i.sku),'') = ''
         AND COALESCE(i.quantity, 0) <= 1
-        AND i.product_name GLOB '[0-9][0-9][0-9][0-9]*')
+        AND COALESCE(i.product_name,'') GLOB '[0-9][0-9][0-9][0-9]*')
   )`;
 
   const topProducts = sqlite.prepare(`

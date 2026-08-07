@@ -262,13 +262,16 @@ const FALLBACK_SPEC: EventSpec = {
  * ReactNode, so it can't serve this. Falls back to humanising the event type,
  * which is already readable ("instantly_email_opened" → "Email opened").
  */
-export function activityLabel(eventType: string): string {
-  const known = EVENT_CATALOG[eventType];
-  const words = eventType
+export function activityLabel(eventType: string | null | undefined): string {
+  // EventSpec carries a `render` that returns JSX, not a string label, so
+  // there is nothing in the catalogue to read here — humanising the event
+  // type is the whole implementation, not a fallback. An earlier version
+  // looked the catalogue up and then ignored the result.
+  const words = (eventType ?? "")
     .replace(/^(instantly|phoneburner|pipedrive|meta|shopify|gmaps)_/, "")
-    .replace(/_/g, " ");
-  const text = words.charAt(0).toUpperCase() + words.slice(1);
-  return known ? text : text || "Activity";
+    .replace(/_/g, " ")
+    .trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Activity";
 }
 
 function specFor(eventType: string): EventSpec {

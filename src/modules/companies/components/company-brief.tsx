@@ -18,7 +18,7 @@
  *     means unrated and is noise.
  *   - Reach rows are full width. Email and phone never share a row on mobile.
  */
-import { ReactNode } from "react";
+import { ReactNode, useEffect } from "react";
 import {
   Phone, Mail, Globe, Copy, AlertTriangle, Star, ShoppingCart, Clock, History, PenLine,
 } from "lucide-react";
@@ -74,14 +74,14 @@ function ReachRow({
           {content}
         </a>
       ) : (
-        <span className="min-w-0 flex-1 font-medium">{content}</span>
+        <span className="flex min-w-0 flex-1 items-center font-medium">{content}</span>
       )}
       {copy && (
         <Button
           variant="ghost"
           size="icon-sm"
           aria-label={`Copy ${label}`}
-          className="size-9 shrink-0"
+          className="size-11 shrink-0"
           onClick={() => {
             void navigator.clipboard?.writeText(copy);
             toast.success("Copied");
@@ -249,6 +249,15 @@ export function CompanyActionBar({
   phone, email, companyName, onLog,
 }: { phone: string | null; email: string | null; companyName: string; onLog: () => void }) {
   const tel = telHref(phone);
+
+  // Tell the rest of the app a fixed bar is occupying the bottom of the
+  // viewport, so the floating chat button can lift clear of it here and only
+  // here — it used to be lifted on every mobile route.
+  useEffect(() => {
+    document.body.dataset.hasActionBar = "true";
+    return () => { delete document.body.dataset.hasActionBar; };
+  }, []);
+
   return (
     <div
       className={cn(

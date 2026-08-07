@@ -133,7 +133,10 @@ export async function GET(
 
   const orderSummary = sqlite.prepare(`
     SELECT
-      COUNT(*) AS order_count,
+      -- Count and revenue must agree on what an order is. They did not:
+      -- a lone cancelled order rendered "$0 · 1 order" and, because the count
+      -- was non-zero, suppressed the "never ordered from Jaxy" talking point.
+      COUNT(CASE WHEN status != 'cancelled' THEN 1 END) AS order_count,
       COALESCE(SUM(CASE WHEN status != 'cancelled' THEN total ELSE 0 END), 0) AS total_revenue,
       MAX(COALESCE(placed_at, created_at)) AS last_order_at,
       MIN(COALESCE(placed_at, created_at)) AS first_order_at
@@ -164,10 +167,31 @@ export async function GET(
   // actionable thing on the page for anyone about to call them.
   const ajmHistory = getAjmHistory(id);
 
+  // The Brief shows a tap-to-call row and a fixed Call button on the first
+  // paint. "Permanently closed per Google" therefore has to arrive with it —
+  // sourcing it from the Google Maps panel's own fetch meant a rep could tap
+  // Call before the warning painted, which is the exact failure that panel
+  // exists to prevent.
+  const listing = sqlite.prepare(
+    `SELECT permanently_closed AS permanentlyClosed, temporarily_closed AS temporarilyClosed,
+            rating, review_count AS reviewCount, category_name AS categoryName
+       FROM gmaps_listings WHERE company_id = ? AND rejected_at IS NULL`,
+  ).get(id) as Record<string, unknown> | undefined;
+  const gmapsSummary = listing
+    ? {
+        permanentlyClosed: !!listing.permanentlyClosed,
+        temporarilyClosed: !!listing.temporarilyClosed,
+        rating: (listing.rating as number) ?? null,
+        reviewCount: (listing.reviewCount as number) ?? null,
+        categoryName: (listing.categoryName as string) ?? null,
+      }
+    : null;
+
   const pdStatus = getPipedriveConnectionStatus();
 
   return NextResponse.json({
     ajmHistory,
+    gmapsSummary,
     company: {
       ...company,
       tags: company.tags ? JSON.parse(company.tags as string) : [],

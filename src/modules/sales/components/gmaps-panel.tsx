@@ -163,13 +163,16 @@ export function GmapsPanel({
   }
 
   if (loading) {
+    // Honour `bare` here too, or expanding the section flashes a card inside
+    // a card with the heading repeated.
+    if (bare) return <Loader2 className="size-4 animate-spin text-muted-foreground" />;
     return (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Google Maps</CardTitle>
         </CardHeader>
         <CardContent>
-          <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
         </CardContent>
       </Card>
     );
@@ -214,7 +217,7 @@ export function GmapsPanel({
         {error && <p className="text-sm text-destructive">{error}</p>}
 
         {rejected && (
-          <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-3 py-2 text-sm">
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="font-medium text-amber-900 dark:text-amber-300">Marked as the wrong business</p>
@@ -240,7 +243,7 @@ export function GmapsPanel({
         )}
 
         {!listing && !error && !rejected && (
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted-foreground">
             Listings are captured automatically when a lead becomes a customer, and refreshed nightly once
             they&apos;re over 120 days old.
           </p>
@@ -249,12 +252,12 @@ export function GmapsPanel({
         {listing && (
           <>
             {listing.permanentlyClosed && (
-              <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-800 font-medium">
+              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive">
                 Permanently closed per Google — do not call.
               </div>
             )}
             {!listing.permanentlyClosed && listing.temporarilyClosed && (
-              <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
                 Temporarily closed per Google.
               </div>
             )}
@@ -267,22 +270,22 @@ export function GmapsPanel({
                 </span>
               )}
               {listing.reviewCount != null && (
-                <span className="text-gray-600">
+                <span className="text-muted-foreground">
                   {listing.reviewCount.toLocaleString()} reviews
                   {reviewBand(listing.reviewCount) && (
-                    <span className="text-gray-400"> · {reviewBand(listing.reviewCount)}</span>
+                    <span className="text-muted-foreground"> · {reviewBand(listing.reviewCount)}</span>
                   )}
                 </span>
               )}
-              {listing.price && <span className="text-gray-600">Price {listing.price}</span>}
+              {listing.price && <span className="text-muted-foreground">Price {listing.price}</span>}
               {listing.imageCount != null && (
-                <span className="text-gray-400">{listing.imageCount.toLocaleString()} photos</span>
+                <span className="text-muted-foreground">{listing.imageCount.toLocaleString()} photos</span>
               )}
             </div>
 
             {kinds.length > 0 && (
               <div>
-                <p className="text-xs uppercase tracking-wide text-gray-500 mb-1.5">Store type</p>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1.5">Store type</p>
                 <div className="flex flex-wrap gap-1.5">
                   {kinds.slice(0, 12).map((k) => (
                     <Badge key={k} variant="secondary" className="font-normal">
@@ -294,25 +297,25 @@ export function GmapsPanel({
             )}
 
             {listing.description && (
-              <p className="text-sm text-gray-700 italic">&ldquo;{listing.description}&rdquo;</p>
+              <p className="text-sm text-foreground italic">&ldquo;{listing.description}&rdquo;</p>
             )}
 
             <div className="grid gap-1.5 text-sm">
               {listing.address && (
-                <div className="flex items-start gap-2 text-gray-700">
-                  <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0 text-gray-400" />
+                <div className="flex items-start gap-2 text-foreground">
+                  <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
                   <span>{listing.address}</span>
                 </div>
               )}
               {listing.phone && (
-                <div className="flex items-center gap-2 text-gray-700">
-                  <Phone className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                <div className="flex items-center gap-2 text-foreground">
+                  <Phone className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <a href={`tel:${listing.phone}`} className="hover:underline">{listing.phone}</a>
                 </div>
               )}
               {listing.website && (
-                <div className="flex items-center gap-2 text-gray-700">
-                  <Globe className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                <div className="flex items-center gap-2 text-foreground">
+                  <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <a
                     href={listing.website}
                     target="_blank"
@@ -327,12 +330,12 @@ export function GmapsPanel({
 
             {listing.openingHours.length > 0 && (
               <details className="text-sm">
-                <summary className="cursor-pointer text-gray-500 hover:text-gray-700">Opening hours</summary>
+                <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Opening hours</summary>
                 <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
                   {listing.openingHours.map((h) => (
                     <div key={h.day} className="flex justify-between gap-4">
-                      <span className="text-gray-500">{h.day}</span>
-                      <span className="text-gray-800">{h.hours}</span>
+                      <span className="text-muted-foreground">{h.day}</span>
+                      <span className="text-foreground">{h.hours}</span>
                     </div>
                   ))}
                 </div>
@@ -357,7 +360,7 @@ export function GmapsPanel({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="text-gray-500 hover:text-red-600"
+                  className="text-muted-foreground hover:text-red-600"
                   disabled={busy}
                   onClick={() => {
                     const reason = window.prompt(

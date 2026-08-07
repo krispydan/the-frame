@@ -14,24 +14,21 @@
  */
 import { ReactNode } from "react";
 import Link from "next/link";
-import { ArrowLeft, MoreHorizontal } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { joinPlace } from "@/modules/companies/lib/format";
 
 export function CompanyRibbon({
-  name, city, state, kind, chips, backHref, menu, nav,
+  name, city, state, kind, backHref, menu,
 }: {
   name: string;
   city?: string | null;
   state?: string | null;
   /** e.g. the Google category — what kind of shop this is. */
   kind?: string | null;
-  chips?: ReactNode;
   backHref: string;
   menu?: ReactNode;
-  /** Prev/next walking — a desktop behaviour, hidden on phones. */
-  nav?: ReactNode;
 }) {
   const place = joinPlace([city, state]);
   const subtitle = [place, kind].filter(Boolean).join(" · ");
@@ -49,7 +46,7 @@ export function CompanyRibbon({
         <Button
           variant="ghost"
           size="icon-sm"
-          className="-ml-1 size-9 shrink-0"
+          className="-ml-1 size-11 shrink-0"
           nativeButton={false}
           render={<Link href={backHref} aria-label="Back to prospects" />}
         >
@@ -67,7 +64,6 @@ export function CompanyRibbon({
           )}
         </div>
 
-        {nav && <div className="hidden shrink-0 items-center gap-1 md:flex">{nav}</div>}
         {menu && (
           <div className="shrink-0">
             {menu}
@@ -75,7 +71,6 @@ export function CompanyRibbon({
         )}
       </div>
 
-      {chips && <div className="mt-2 flex flex-wrap items-center gap-1.5">{chips}</div>}
     </header>
   );
 }
@@ -91,32 +86,4 @@ export function icpChipLabel(tier?: string | null, score?: number | null): strin
   const hasScore = score != null && Number.isFinite(score);
   if (!t && !hasScore) return null;
   return t && hasScore ? `ICP ${t} · ${score}` : t ? `ICP ${t}` : `ICP ${score}`;
-}
-
-export function IcpChip({
-  tier, score, onClick,
-}: { tier?: string | null; score?: number | null; onClick?: () => void }) {
-  const t = tier?.trim();
-  const hasScore = score != null && Number.isFinite(score);
-  if (!t && !hasScore) return null;
-  const label = t && hasScore ? `ICP ${t} · ${score}` : t ? `ICP ${t}` : `ICP ${score}`;
-
-  const tone: Record<string, string> = {
-    A: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
-    B: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300",
-    C: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
-  };
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "rounded-full px-2 py-0.5 text-xs font-medium",
-        tone[t ?? ""] ?? "bg-muted text-muted-foreground",
-        onClick && "hover:opacity-80",
-      )}
-    >
-      {label}
-    </button>
-  );
 }

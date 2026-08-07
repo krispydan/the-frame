@@ -106,9 +106,11 @@ export function ChatPanel() {
       <Button
         onClick={() => setOpen(true)}
         size="icon"
-        // bottom-24 on phones clears the company page's fixed action bar;
-        // at md: that bar is gone and the button returns to the corner.
-        className="fixed bottom-24 right-6 z-50 h-14 w-14 rounded-full shadow-lg md:bottom-6"
+        // Pages that render a fixed bottom action bar set
+        // data-has-action-bar on <body>; only then does the button lift clear
+        // of it. Lifting unconditionally left it floating mid-screen on every
+        // other mobile route.
+        className="fixed bottom-6 right-6 z-50 h-14 w-14 rounded-full shadow-lg max-md:in-data-[has-action-bar]:bottom-24"
       >
         <MessageCircle className="h-6 w-6" />
       </Button>

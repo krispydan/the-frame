@@ -5,8 +5,8 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useBreadcrumbOverride } from "@/components/layout/breadcrumb-context";
 import Link from "next/link";
 import {
-  ArrowLeft, ArrowRight, Building2, Globe, Phone, Mail, MapPin, Tag, Star,
-  Edit, UserPlus, MessageSquare, Clock, ExternalLink, Plus, Save, X,
+  ArrowLeft, ArrowRight, Building2, Phone, Mail, MapPin, Tag, Star,
+  Edit, UserPlus, Clock, ExternalLink, Plus, Save, X,
   Briefcase, Sparkles, Loader2, CheckCircle2, XCircle, AlertCircle, Search, Store, Eye,
   Send, Megaphone, ShoppingCart, MoreHorizontal, Settings2,
 } from "lucide-react";
@@ -15,7 +15,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -366,6 +365,7 @@ export default function CompanyDetailPage() {
         setOrders(data.orders || []);
         setOrderSummary(data.orderSummary || null);
         setAjmHistory(data.ajmHistory || null);
+        setGmapsListing(data.gmapsSummary || null);
         setFaireMapping(data.faireMapping || null);
         setActivities(data.activities || []);
         setCampaigns(data.campaigns || []);
@@ -557,7 +557,9 @@ export default function CompanyDetailPage() {
     briefAlerts.push({ tone: "warning", text: "Anonymous Faire customer — needs a real email or website." });
   }
 
-  const lastActivity = activities[0];
+  // The feed is merged with synthetic "change" rows for every field edit, so
+  // saving an ICP tier would flip this tile from "Never contacted" to "today".
+  const lastActivity = activities.find((a) => a.event_type !== "change");
   const talkingPoint = company ? resolveTalkingPoint({
     ajmRevenue: ajmHistory?.revenue ?? null,
     jaxyOrders: Number(orderSummary?.order_count ?? 0),
@@ -570,7 +572,6 @@ export default function CompanyDetailPage() {
   const filterQs = searchParams.toString();
   const navSuffix = filterQs ? `?${filterQs}` : "";
 
-  // Source badge colors
 
   return (
     <>
@@ -644,7 +645,7 @@ export default function CompanyDetailPage() {
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <Button variant="ghost" size="icon-sm" className="size-9" aria-label="More actions">
+                <Button variant="ghost" size="icon-sm" className="size-11" aria-label="More actions">
                   <MoreHorizontal />
                 </Button>
               }
@@ -705,7 +706,7 @@ export default function CompanyDetailPage() {
                 setIcpEditorOpen((o) => !o);
               }}
               className={`px-2.5 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 border ${
-                company.icp_tier ? (tierColors[company.icp_tier] || "bg-gray-100") : "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
+                company.icp_tier ? (tierColors[company.icp_tier] || "bg-muted text-muted-foreground") : "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
               }`}
               title="Click to edit ICP tier and score"
             >
@@ -987,7 +988,7 @@ export default function CompanyDetailPage() {
 
       {/* Edit mode */}
       {editing && (
-        <Card className="mb-6 border-blue-200 bg-blue-50/50">
+        <Card className="mb-6 border-blue-200 bg-muted/40">
           <CardContent className="pt-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3">
               {[
@@ -1096,27 +1097,27 @@ export default function CompanyDetailPage() {
               {(company.facebook_url || company.instagram_url || company.twitter_url || company.linkedin_url || company.yelp_url) && (
                 <div className="mt-4 flex flex-wrap gap-2">
                   {company.facebook_url && (
-                    <a href={company.facebook_url} target="_blank" className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 ${newlyEnrichedFields.includes("facebook_url") ? "ring-2 ring-green-400" : ""}`}>
+                    <a href={company.facebook_url} target="_blank" className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900 ${newlyEnrichedFields.includes("facebook_url") ? "ring-2 ring-green-400" : ""}`}>
                       Facebook <ExternalLink className="w-3 h-3" />
                     </a>
                   )}
                   {company.instagram_url && (
-                    <a href={company.instagram_url} target="_blank" className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-pink-50 text-pink-700 hover:bg-pink-100 ${newlyEnrichedFields.includes("instagram_url") ? "ring-2 ring-green-400" : ""}`}>
+                    <a href={company.instagram_url} target="_blank" className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-pink-100 text-pink-800 hover:bg-pink-200 dark:bg-pink-950 dark:text-pink-300 dark:hover:bg-pink-900 ${newlyEnrichedFields.includes("instagram_url") ? "ring-2 ring-green-400" : ""}`}>
                       Instagram <ExternalLink className="w-3 h-3" />
                     </a>
                   )}
                   {company.twitter_url && (
-                    <a href={company.twitter_url} target="_blank" className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-sky-50 text-sky-700 hover:bg-sky-100 ${newlyEnrichedFields.includes("twitter_url") ? "ring-2 ring-green-400" : ""}`}>
+                    <a href={company.twitter_url} target="_blank" className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-sky-100 text-sky-800 hover:bg-sky-200 dark:bg-sky-950 dark:text-sky-300 dark:hover:bg-sky-900 ${newlyEnrichedFields.includes("twitter_url") ? "ring-2 ring-green-400" : ""}`}>
                       Twitter/X <ExternalLink className="w-3 h-3" />
                     </a>
                   )}
                   {company.linkedin_url && (
-                    <a href={company.linkedin_url} target="_blank" className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-blue-50 text-blue-800 hover:bg-blue-100 ${newlyEnrichedFields.includes("linkedin_url") ? "ring-2 ring-green-400" : ""}`}>
+                    <a href={company.linkedin_url} target="_blank" className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-blue-100 text-blue-900 hover:bg-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900 ${newlyEnrichedFields.includes("linkedin_url") ? "ring-2 ring-green-400" : ""}`}>
                       LinkedIn <ExternalLink className="w-3 h-3" />
                     </a>
                   )}
                   {company.yelp_url && (
-                    <a href={company.yelp_url} target="_blank" className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-red-50 text-red-700 hover:bg-red-100 ${newlyEnrichedFields.includes("yelp_url") ? "ring-2 ring-green-400" : ""}`}>
+                    <a href={company.yelp_url} target="_blank" className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200 dark:bg-red-950 dark:text-red-300 dark:hover:bg-red-900 ${newlyEnrichedFields.includes("yelp_url") ? "ring-2 ring-green-400" : ""}`}>
                       Yelp <ExternalLink className="w-3 h-3" />
                     </a>
                   )}
@@ -1155,7 +1156,7 @@ export default function CompanyDetailPage() {
               product price, social URLs with follower counts. Renders
               only when at least one field is present so non-storeleads
               rows don't show an empty card. */}
-          {(company.description || company.meta_description || company.industry ||
+          {(company.description || company.industry ||
             company.ecom_platform || company.employee_count != null ||
             company.estimated_yearly_sales_cents != null ||
             company.estimated_monthly_sales_cents != null ||
@@ -1185,9 +1186,6 @@ export default function CompanyDetailPage() {
                     is not two facts. */}
                 {company.description && (
                   <div className="space-y-2">
-                    {false && (
-                      <div />
-                    )}
                     {company.description && (
                       <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
                         <p className="text-xs font-medium text-gray-500 mb-1">About us</p>
@@ -1294,7 +1292,7 @@ export default function CompanyDetailPage() {
                     )}
                     {company.youtube_url && (
                       <a href={company.youtube_url} target="_blank" rel="noopener"
-                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-red-50 text-red-700 hover:bg-red-100">
+                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200 dark:bg-red-950 dark:text-red-300 dark:hover:bg-red-900">
                         YouTube
                         {company.youtube_followers != null && company.youtube_followers > 0 && (
                           <span className="text-red-500">· {fmtNumberShort(company.youtube_followers)}</span>
@@ -1304,7 +1302,7 @@ export default function CompanyDetailPage() {
                     )}
                     {company.contact_form_url && (
                       <a href={company.contact_form_url} target="_blank" rel="noopener"
-                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-50 text-emerald-700 hover:bg-emerald-100">
+                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:hover:bg-emerald-900">
                         Contact form <ExternalLink className="w-3 h-3" />
                       </a>
                     )}
@@ -1521,8 +1519,8 @@ export default function CompanyDetailPage() {
                     <p className="text-xs font-medium text-amber-700 dark:text-amber-400 mb-1">
                       Email 1 — first touch
                     </p>
-                    <p className="text-sm text-gray-800 dark:text-gray-200 italic">
-                      "{company.ai_opener_email1}"
+                    <p className="text-sm italic text-foreground">
+                      &ldquo;{company.ai_opener_email1}&rdquo;
                     </p>
                   </div>
                 )}
@@ -1531,8 +1529,8 @@ export default function CompanyDetailPage() {
                     <p className="text-xs font-medium text-amber-700 dark:text-amber-400 mb-1">
                       Email 2 — follow-up
                     </p>
-                    <p className="text-sm text-gray-800 dark:text-gray-200 italic">
-                      "{company.ai_opener_email2}"
+                    <p className="text-sm italic text-foreground">
+                      &ldquo;{company.ai_opener_email2}&rdquo;
                     </p>
                   </div>
                 )}
@@ -1753,8 +1751,8 @@ export default function CompanyDetailPage() {
                   products. */}
               {ajmHistory.noDetail && (
                 <p className="text-xs text-muted-foreground">
-                  Plus ${Number(ajmHistory.noDetail.revenue).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                  {" "}across {pluralize(ajmHistory.noDetail.orders, "legacy order")} billed as a lump sum, with no line detail.
+                  Of which ${Number(ajmHistory.noDetail.revenue).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  {" "}sits in {pluralize(ajmHistory.noDetail.orders, "legacy order")} billed as a lump sum, with no line detail.
                 </p>
               )}
 
@@ -1807,7 +1805,7 @@ export default function CompanyDetailPage() {
         {/* Right sidebar — Activity dominant on top, then Notes, then Lead Source. */}
         <div className="space-y-4">
           {/* Activity Timeline — primary right-column content. */}
-          <Card>
+          <Card id="company-activity" className="scroll-mt-24">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Activity</CardTitle>
             </CardHeader>
@@ -2190,7 +2188,7 @@ function InstagramRow({ url, isNew }: { url: string; isNew?: boolean }) {
         <p className="text-xs text-gray-500 flex items-center gap-1.5">
           Instagram
           {isNew && (
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-700 animate-pulse">NEW</span>
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 animate-pulse">NEW</span>
           )}
         </p>
         <div className="flex items-center gap-1.5">
@@ -2232,7 +2230,7 @@ function InfoRow({ icon, label, value, link, isNew }: { icon: React.ReactNode; l
         <p className="text-xs text-gray-500 flex items-center gap-1.5">
           {label}
           {isNew && (
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-700 animate-pulse">
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 animate-pulse">
               NEW
             </span>
           )}
@@ -2297,7 +2295,7 @@ function ContactsList({
         {contacts.map(c => (
           <div key={c.id}>
             {editingContact === c.id ? (
-              <div className="border rounded-lg p-3 bg-blue-50/50 space-y-2">
+              <div className="border rounded-lg p-3 bg-muted/40 space-y-2">
                 <div className="grid grid-cols-2 gap-2">
                   <input placeholder="First name" className="px-2 py-1 border rounded text-sm"
                     defaultValue={c.first_name || ""}
@@ -2353,7 +2351,7 @@ function ContactsList({
                 </div>
                 {/* Always visible. There is no hover on a phone, so the
                     hover-gated version made contacts uneditable on mobile. */}
-                <Button variant="ghost" size="icon-sm" aria-label="Edit contact" className="size-9 shrink-0"
+                <Button variant="ghost" size="icon-sm" aria-label="Edit contact" className="size-11 shrink-0"
                   onClick={() => { setEditingContact(c.id); setContactForm("_reset", ""); }}>
                   <Edit className="size-3.5" />
                 </Button>
@@ -2365,7 +2363,7 @@ function ContactsList({
 
       {/* Add contact form */}
       {showAddContact === formKey && (
-        <div className="border rounded-lg p-3 bg-green-50/50 mt-2 space-y-2">
+        <div className="border rounded-lg p-3 bg-muted/40 mt-2 space-y-2">
           <div className="grid grid-cols-2 gap-2">
             <input placeholder="First name" className="px-2 py-1 border rounded text-sm"
               onChange={e => setContactForm("first_name", e.target.value)} />
