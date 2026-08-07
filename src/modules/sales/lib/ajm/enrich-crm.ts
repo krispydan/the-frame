@@ -102,8 +102,16 @@ function parseCsv(text: string): string[][] {
   return rows;
 }
 
-/** Company columns we will fill when blank, and the CSV column feeding each. */
-const FILLABLE = ["email", "phone", "address", "city", "state", "zip", "country"] as const;
+/**
+ * Company columns we fill when blank.
+ *
+ * Deliberately no email or phone: both were dropped from `companies` on
+ * 2026-06-19 so that contacts.email and company_phones are the single source
+ * of truth. Those two values from the CRM go to their canonical tables below.
+ * The list is still filtered against the live schema before use, so a future
+ * column drop degrades instead of throwing.
+ */
+const FILLABLE_CANDIDATES = ["address", "city", "state", "zip", "country"] as const;
 
 export function enrichFromOmsCrm(csvText: string, opts?: { apply?: boolean }): CrmEnrichResult {
   const apply = opts?.apply === true;
@@ -164,6 +172,9 @@ export function enrichFromOmsCrm(csvText: string, opts?: { apply?: boolean }): C
     matchedBy: {}, fieldsFilled: {}, contactsCreated: 0, phonesAdded: 0,
     examples: [], unmatchedSample: [], ambiguousSample: [],
   };
+
+  const companyCols = new Set((sqlite.prepare("PRAGMA table_info(companies)").all() as Array<{ name: string }>).map((c) => c.name));
+  const FILLABLE = FILLABLE_CANDIDATES.filter((c) => companyCols.has(c));
 
   const setCol = new Map<string, (value: string, companyId: string) => number>();
   for (const c of FILLABLE) {
@@ -233,7 +244,7 @@ export function enrichFromOmsCrm(csvText: string, opts?: { apply?: boolean }): C
       const phone = normalizePhone(r[idx.phone] ?? "");
       const street = [clean(r[idx.address]), clean(r[idx.address2])].filter(Boolean).join(", ");
       const values: Record<string, string> = {
-        email, phone, address: street,
+        address: street,
         city: clean(r[idx.city]), state: clean(r[idx.state]),
         zip: clean(r[idx.zip]), country: clean(r[idx.country]),
       };
@@ -265,13 +276,19 @@ export function enrichFromOmsCrm(csvText: string, opts?: { apply?: boolean }): C
         res.contactsCreated++;
       }
 
-      if (hasPhonesTable && phone && apply) {
-        try {
-          const r2 = sqlite.prepare(
-            "INSERT OR IGNORE INTO company_phones (id, company_id, phone) VALUES (?, ?, ?)",
-          ).run(crypto.randomUUID(), companyId, phone);
-          if (r2.changes) res.phonesAdded++;
-        } catch { /* schema differs — the companies.phone fill still landed */ }
+      if (hasPhonesTable && phone) {
+        if (apply) {
+          try {
+            const r2 = sqlite.prepare(
+              "INSERT OR IGNORE INTO company_phones (id, company_id, phone, source) VALUES (?, ?, ?, 'ajm_oms_crm')",
+            ).run(crypto.randomUUID(), companyId, phone);
+            if (r2.changes) res.phonesAdded++;
+          } catch { /* schema differs — the address fill still landed */ }
+        } else if (!(sqlite.prepare(
+          "SELECT 1 FROM company_phones WHERE company_id = ? AND phone = ?",
+        ).get(companyId, phone))) {
+          res.phonesAdded++;
+        }
       }
 
       if (hasOmsCol && omsId && apply) {
