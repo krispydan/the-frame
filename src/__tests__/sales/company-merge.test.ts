@@ -171,6 +171,37 @@ describe("findDuplicateCompanies — refuses unsafe merges", () => {
   });
 });
 
+describe("findDuplicateCompanies — group integrity", () => {
+  it("never makes a company both a keeper and a loser", () => {
+    // The name pass and the email pass find overlapping sets. If each picks
+    // its own keeper, rows get repointed onto a record that is then deleted,
+    // and the whole apply dies on a foreign key. This invariant is what makes
+    // the merge safe to run in one transaction.
+    company("Hidden Treasures", "topanga", "CA", { email: "info@hiddentreasures.com" });
+    company("Hidden Treasures", "topanga", "CALIFORNIA", { email: "info@hiddentreasures.com" });
+    company("Hidden Treasures", "", "", { email: "info@hiddentreasures.com" });
+
+    const groups = findDuplicateCompanies();
+    const keepers = new Set(groups.map((g) => g.keepId));
+    const losers = new Set(groups.flatMap((g) => g.companies.filter((c) => c.id !== g.keepId).map((c) => c.id)));
+    expect([...keepers].filter((id) => losers.has(id))).toEqual([]);
+
+    // And each company appears in exactly one group.
+    const seen = new Set<string>();
+    for (const g of groups) for (const c of g.companies) {
+      expect(seen.has(c.id)).toBe(false);
+      seen.add(c.id);
+    }
+  });
+
+  it("fuses a name group and an email group into one survivor", () => {
+    company("Urban Dwell", "washington", "DC", { email: "tom@urbandwell.com" });
+    company("Urban Dwell", "washington", "DISTRICT OF COLUMBIA", { email: "tom@urbandwell.com" });
+    mergeCompanies({ apply: true });
+    expect(survivors().size).toBe(1);
+  });
+});
+
 describe("mergeCompanies", () => {
   it("dry-runs by default", () => {
     company("Show Pony", "seattle", "WA");

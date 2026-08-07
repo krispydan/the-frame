@@ -591,18 +591,61 @@ export function findDuplicateCompanies(opts?: { minEvidence?: "name" | "email" |
     }
   }
 
-  const out: DuplicateGroup[] = [];
-  const seen = new Set<string>();
+  // ── Fuse groups that share a company ──
+  //
+  // The name pass and the email pass run independently, so one company can sit
+  // in both — "Hidden Treasures" is found by name AND by its contact address.
+  // Each group then picks its own keeper, and a company can end up the KEEPER
+  // of one group and a LOSER of another. Applying that repoints rows onto a
+  // record which is itself deleted moments later, and the DELETE fails on a
+  // foreign key. 50 companies were in that state and it rolled back the whole
+  // apply. Overlapping groups are one cluster with one survivor.
+  const parent = new Map<string, string>();
+  const find = (id: string): string => {
+    const p = parent.get(id);
+    if (!p || p === id) return id;
+    const r = find(p); parent.set(id, r); return r;
+  };
+  const union = (a: string, b: string) => { const ra = find(a), rb = find(b); if (ra !== rb) parent.set(ra, rb); };
+  for (const { items } of groups.values()) {
+    for (const c of items) if (!parent.has(c.id)) parent.set(c.id, c.id);
+    for (let i = 1; i < items.length; i++) union(items[0].id, items[i].id);
+  }
+
+  const fused = new Map<string, { keys: string[]; reasons: Set<"name" | "email">; byId: Map<string, Company> }>();
   for (const [key, { reason, items }] of groups) {
-    // Don't emit a group whose members are already covered by another group.
-    const ids = items.map((i) => i.id).sort().join("|");
-    if (seen.has(ids)) continue;
-    seen.add(ids);
+    const root = find(items[0].id);
+    const f = fused.get(root) ?? fused.set(root, { keys: [], reasons: new Set(), byId: new Map() }).get(root)!;
+    f.keys.push(key);
+    f.reasons.add(reason);
+    for (const c of items) f.byId.set(c.id, c);
+  }
+
+  const out: DuplicateGroup[] = [];
+  for (const { keys, reasons, byId } of fused.values()) {
+    const items = [...byId.values()];
+    if (items.length < 2) continue;
+    const reason: "name" | "email" = reasons.has("name") ? "name" : "email";
     if (opts?.minEvidence === "email" && reason !== "email") continue;
     if (opts?.minEvidence === "name" && reason !== "name") continue;
+
+    // Re-check the guards on the FUSED cluster — fusing can push a cluster
+    // past the size cap, or bring together differently-named trading records
+    // that neither original group contained together.
+    if (items.length > MAX_AUTO_CLUSTER || looksLikeSiblingLocations(items)) {
+      needsReview.push({
+        key: keys.sort().join(" + "),
+        reason: items.length > MAX_AUTO_CLUSTER
+          ? `${items.length} records fused from ${keys.length} overlapping groups — too large to merge unreviewed`
+          : "differently-named records that each have their own order history — likely sibling stores of one chain, not duplicates",
+        companies: items.slice(0, 25),
+      });
+      continue;
+    }
+
     const keepId = pickKeeper(items);
     out.push({
-      key, reason, companies: items, keepId,
+      key: keys.sort().join(" + "), reason, companies: items, keepId,
       splitJaxyRevenue: Math.round(items.filter((i) => i.id !== keepId).reduce((s, i) => s + i.jaxyRevenue, 0) * 100) / 100,
       splitAjmRevenue: Math.round(items.filter((i) => i.id !== keepId).reduce((s, i) => s + i.ajmRevenue, 0) * 100) / 100,
     });
