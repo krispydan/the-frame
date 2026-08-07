@@ -18,7 +18,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { User, Users, Plug, Bell, Database, Info, Save, Trash2, Upload, Download, ExternalLink, Wifi, WifiOff, Loader2, CheckCircle2, XCircle, Link2, ChevronRight, KeyRound } from "lucide-react";
+import { User, Users, Plug, Bell, Database, Info, Save, Trash2, Upload, Download, ExternalLink, Wifi, WifiOff, Loader2, CheckCircle2, XCircle, Link2, ChevronRight, KeyRound, FileText } from "lucide-react";
 import Link from "next/link";
 
 // ── Helpers ──
@@ -320,6 +320,20 @@ export default function SettingsPage() {
                   <div>
                     <p className="font-medium">User Management</p>
                     <p className="text-sm text-muted-foreground">Invite team members, manage roles and access</p>
+                  </div>
+                </div>
+                <ChevronRight className="h-5 w-5 text-muted-foreground" />
+              </CardContent>
+            </Card>
+          </Link>
+          <Link href="/settings/templates" className="block mb-4">
+            <Card className="hover:bg-accent/50 transition-colors cursor-pointer">
+              <CardContent className="flex items-center justify-between py-4">
+                <div className="flex items-center gap-3">
+                  <FileText className="h-5 w-5 text-muted-foreground" />
+                  <div>
+                    <p className="font-medium">Saved Messages</p>
+                    <p className="text-sm text-muted-foreground">Reusable email templates, private or shared with the team</p>
                   </div>
                 </div>
                 <ChevronRight className="h-5 w-5 text-muted-foreground" />

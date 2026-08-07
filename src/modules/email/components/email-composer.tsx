@@ -16,12 +16,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Bold, CalendarClock, Italic, Link2, List, ListOrdered, Loader2,
+  BookmarkPlus, Bold, CalendarClock, Italic, Link2, List, ListOrdered, Loader2,
   Paperclip, Send, Trash2, Underline, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { TemplatePicker } from "./template-picker";
 
 interface Attachment { id: string; filename: string; size: number; mime: string }
 
@@ -125,6 +126,9 @@ export function EmailComposer({
   const editorRef = useRef<HTMLDivElement>(null);
   const dirtyRef = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Where a saved message lands. Opening the template picker steals focus and
+  // collapses the editor's selection, so the caret is remembered on blur.
+  const caretRef = useRef<Range | null>(null);
 
   useEffect(() => {
     if (editorRef.current && seed?.bodyHtml) editorRef.current.innerHTML = seed.bodyHtml;
@@ -172,6 +176,58 @@ export function EmailComposer({
     editorRef.current?.focus();
     document.execCommand(cmd, false, arg);
     markDirty();
+  };
+
+  const rememberCaret = () => {
+    const sel = window.getSelection();
+    const range = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+    if (range && editorRef.current?.contains(range.commonAncestorContainer)) {
+      caretRef.current = range.cloneRange();
+    }
+  };
+
+  /** Drop a saved message in at the caret (end of body if we never had one). */
+  const insertTemplate = ({ subject: s, bodyHtml }: { subject: string; bodyHtml: string }) => {
+    // Only fill an empty subject — a template picked mid-reply must not
+    // overwrite "Re: ..." that the thread depends on.
+    if (s && !subject.trim()) setSubject(s);
+
+    const el = editorRef.current;
+    if (el && bodyHtml) {
+      el.focus();
+      const range = caretRef.current;
+      if (range && el.contains(range.commonAncestorContainer)) {
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+      if (!document.execCommand("insertHTML", false, bodyHtml)) {
+        el.innerHTML += bodyHtml;
+      }
+      caretRef.current = null;
+    }
+    markDirty();
+  };
+
+  const saveAsTemplate = async () => {
+    const html = editorRef.current?.innerHTML ?? "";
+    if (!html.trim() && !subject.trim()) { toast.error("Nothing to save yet"); return; }
+    const name = window.prompt("Name this saved message");
+    if (!name?.trim()) return;
+    const share = window.confirm("Share it with the whole team?\n\nOK = everyone, Cancel = just you.");
+    const res = await fetch("/api/v1/email/templates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: name.trim(),
+        subject,
+        bodyHtml: html,
+        visibility: share ? "team" : "private",
+      }),
+    });
+    const j = await res.json();
+    if (!res.ok) toast.error("Not saved", { description: j.error });
+    else toast.success(share ? "Saved and shared with the team" : "Saved to your messages");
   };
 
   const addLink = () => {
@@ -259,6 +315,11 @@ export function EmailComposer({
           {busy === "attach" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
         </Button>
         <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => attach(e.target.files)} />
+        <div className="w-px h-4 bg-border mx-1" />
+        <TemplatePicker companyId={companyId} onInsert={insertTemplate} />
+        <Button variant="ghost" size="sm" className="h-7 px-2" onClick={saveAsTemplate} title="Save this as a reusable message">
+          <BookmarkPlus className="h-3.5 w-3.5" />
+        </Button>
         <div className="flex-1" />
         {savedAt ? <span className="text-[11px] text-muted-foreground pr-2">Draft saved</span> : null}
       </div>
@@ -269,6 +330,9 @@ export function EmailComposer({
         contentEditable
         suppressContentEditableWarning
         onInput={markDirty}
+        onBlur={rememberCaret}
+        onKeyUp={rememberCaret}
+        onMouseUp={rememberCaret}
         className="min-h-[180px] max-h-[420px] overflow-y-auto px-3 py-2 text-sm outline-none [&_a]:text-blue-600 [&_a]:underline"
         data-placeholder="Write your email…"
       />
