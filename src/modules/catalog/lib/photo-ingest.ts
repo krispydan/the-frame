@@ -78,7 +78,10 @@ export function routePhotoFileName(fileName: string): { target?: RoutedTarget; e
   return {
     target: {
       skuId: resolved.skuId,
-      sku: resolved.catalogSku,
+      // Photos are per COLOURWAY: report the power-collapsed root so a
+      // reader file reads as "the colourway", not one arbitrary power
+      // (storage still lands on the representative power row).
+      sku: photoColorwayRoot(resolved.catalogSku),
       kind: parsed.kind,
       angleSlug,
       productScope: false,
@@ -132,7 +135,7 @@ export async function ingestRoutedPhoto(input: IngestPhotoInput): Promise<Ingest
       if (!getPhotoKind(input.kind)) return { fileName, status: "failed", error: `Unknown kind '${input.kind}'` };
       target = {
         skuId: resolved.skuId,
-        sku: resolved.catalogSku,
+        sku: photoColorwayRoot(resolved.catalogSku),
         kind: input.kind,
         angleSlug: input.angle ? (ANGLE_TO_TYPE_SLUG[input.angle.toUpperCase()] ?? input.angle.toLowerCase()) : "front",
         productScope: getPhotoKind(input.kind)!.scope === "product",
@@ -154,9 +157,15 @@ export async function ingestRoutedPhoto(input: IngestPhotoInput): Promise<Ingest
     }
     const mime = `image/${meta.format === "jpg" ? "jpeg" : meta.format}`;
     const checksum = createHash("sha256").update(input.bytes).digest("hex");
-    const existing = sqlite.prepare(
-      "SELECT id, url FROM catalog_images WHERE sku_id = ? AND checksum = ?",
-    ).get(target.skuId, checksum) as { id: string; url: string | null } | undefined;
+    // Dedupe across the whole COLOURWAY, not just the exact SKU row —
+    // the same reader photo arriving named -100 and -200 is one photo.
+    const existing = sqlite.prepare(`
+      SELECT i.id, i.url FROM catalog_images i
+      JOIN catalog_skus s ON s.id = i.sku_id
+      WHERE i.checksum = ?
+        AND (i.sku_id = ? OR UPPER(s.sku) LIKE ?)
+      LIMIT 1
+    `).get(checksum, target.skuId, `${target.sku}-%`) as { id: string; url: string | null } | undefined;
     if (existing) {
       return { fileName, status: "deduped", sku: target.sku, kind: target.kind, angle: target.angleSlug, imageId: existing.id, url: existing.url };
     }
@@ -194,12 +203,26 @@ export async function ingestRoutedPhoto(input: IngestPhotoInput): Promise<Ingest
 
 // ── Coverage ──
 
+/**
+ * Reader SKUs carry a magnification power (JX1019-R-BLK-100 … -300) but
+ * the PHOTO is per colourway — same frames at every power. This strips
+ * the power so coverage (and anything else photo-shaped) treats the
+ * colourway root as one target instead of nagging once per power.
+ */
+export function photoColorwayRoot(sku: string): string {
+  return sku.toUpperCase().replace(/^(JX\d{4}-R-[A-Z][A-Z0-9]{1,5})-\d{3}$/, "$1");
+}
+
 export interface SkuCoverageRow {
+  /** Representative catalog_skus.id (lowest power for readers). */
   skuId: string;
+  /** Colourway root — powers collapsed (JX1019-R-BLK, not …-100). */
   sku: string;
   productId: string;
   productName: string;
   colorName: string | null;
+  /** How many catalog SKUs this row covers (reader powers); 1 otherwise. */
+  variantCount: number;
   /** kind slug → { count, url of newest } */
   kinds: Record<string, { count: number; url: string | null; imageId: string }>;
   missingRequired: string[];
@@ -238,13 +261,24 @@ export function photoCoverage(opts: { productId?: string; search?: string } = {}
     ORDER BY i.created_at ASC
   `).all(...skus.map((s) => s.skuId)) as Array<{ skuId: string; kind: string; imageId: string; url: string | null; file_path: string | null; created_at: string }>;
 
+  // One row per COLOURWAY: reader power variants collapse onto their
+  // root (first/lowest power is the representative), and an image
+  // attached to ANY power counts for the whole colourway.
   const bySku = new Map<string, SkuCoverageRow>();
+  const skuIdToRow = new Map<string, SkuCoverageRow>();
   for (const s of skus) {
-    bySku.set(s.skuId, { ...s, kinds: {}, missingRequired: [] });
+    const root = photoColorwayRoot(s.sku);
+    let row = bySku.get(`${s.productId}:${root}`);
+    if (!row) {
+      row = { ...s, sku: root, variantCount: 0, kinds: {}, missingRequired: [] };
+      bySku.set(`${s.productId}:${root}`, row);
+    }
+    row.variantCount++;
+    skuIdToRow.set(s.skuId, row);
   }
   const productKinds = new Map<string, Record<string, { count: number; url: string | null; imageId: string }>>();
   for (const img of images) {
-    const row = bySku.get(img.skuId);
+    const row = skuIdToRow.get(img.skuId);
     if (!row) continue;
     const kindDef = getPhotoKind(img.kind);
     const bucket = kindDef?.scope === "product"

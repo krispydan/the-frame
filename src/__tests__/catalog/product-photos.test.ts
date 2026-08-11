@@ -10,7 +10,7 @@ import path from "path";
 import sharp from "sharp";
 import { getTestDb, resetTestDb } from "../setup";
 import { parsePhotoFileName, PHOTO_KINDS } from "@/modules/catalog/lib/photo-kinds";
-import { routePhotoFileName, ingestRoutedPhoto, photoCoverage } from "@/modules/catalog/lib/photo-ingest";
+import { routePhotoFileName, ingestRoutedPhoto, photoCoverage, photoColorwayRoot } from "@/modules/catalog/lib/photo-ingest";
 
 beforeAll(() => {
   process.env.IMAGES_PATH = mkdtempSync(path.join(tmpdir(), "photos-"));
@@ -52,6 +52,22 @@ describe("parsePhotoFileName — real Drive names", () => {
     });
   }
 
+  it("swallows a reader power suffix into the SKU (files named per power still parse)", () => {
+    const got = parsePhotoFileName("JX1019-R-BLK-100_NO_BG.png");
+    expect(got).toMatchObject({ sku: "JX1019-R-BLK-100", kind: "no_bg" });
+    // Power + angle together, in the canonical order.
+    const both = parsePhotoFileName("JX1019-R-BLK-100-SIDE_SQUARE_F8F9FA.jpg");
+    expect(both).toMatchObject({ sku: "JX1019-R-BLK-100", kind: "square", angle: "SIDE" });
+  });
+
+  it("collapses reader powers to the colourway root — one photo per colourway", () => {
+    expect(photoColorwayRoot("JX1019-R-BLK-100")).toBe("JX1019-R-BLK");
+    expect(photoColorwayRoot("JX1019-R-BLK-300")).toBe("JX1019-R-BLK");
+    // Sunglasses and bare reader colourways pass through untouched.
+    expect(photoColorwayRoot("JX1016-S-BLK")).toBe("JX1016-S-BLK");
+    expect(photoColorwayRoot("JX1019-R-BLK")).toBe("JX1019-R-BLK");
+  });
+
   it("refuses names that don't follow the convention (manual bucket, not guesses)", () => {
     expect(parsePhotoFileName("IMG_5938.jpg")).toBeNull();
     expect(parsePhotoFileName("JX4009-BLK - FRONT - COLOR MOCKUP.jpg")).toBeNull();
@@ -69,6 +85,11 @@ function seed() {
   d.prepare(`INSERT INTO catalog_products (id, name, sku_prefix) VALUES ('p1', 'Windsor', 'JX1005')`).run();
   d.prepare(`INSERT INTO catalog_skus (id, product_id, sku, color_name) VALUES ('s1', 'p1', 'JX1005-S-TOR', 'Tortoise')`).run();
   d.prepare(`INSERT INTO catalog_skus (id, product_id, sku, color_name) VALUES ('s2', 'p1', 'JX1005-S-BLK', 'Black')`).run();
+  // A reader style: one colourway, three power SKUs (real catalog shape).
+  d.prepare(`INSERT INTO catalog_products (id, name, sku_prefix) VALUES ('p2', 'Circuit Readers', 'JX1019')`).run();
+  for (const power of ["100", "150", "200"]) {
+    d.prepare(`INSERT INTO catalog_skus (id, product_id, sku, color_name) VALUES ('r${power}', 'p2', 'JX1019-R-BLK-${power}', 'Black')`).run();
+  }
 }
 beforeEach(() => {
   resetTestDb();
@@ -129,6 +150,35 @@ describe("ingest + coverage", () => {
     expect(r.status).toBe("uploaded");
     expect(r.sku).toBe("JX1005-S-BLK");
     expect(r.kind).toBe("lifestyle");
+  });
+
+  it("reader powers are ONE coverage row and one photo serves all of them", async () => {
+    // File named per colourway (no power) routes via the representative.
+    const up = await ingestRoutedPhoto({ bytes: await png(), fileName: "JX1019-R-BLK_SQUARE_F8F9FA.jpg" });
+    expect(up.status).toBe("uploaded");
+    expect(up.sku).toBe("JX1019-R-BLK"); // reported at colourway level
+
+    const rows = photoCoverage({ search: "Circuit" });
+    expect(rows).toHaveLength(1); // NOT three rows for three powers
+    expect(rows[0].sku).toBe("JX1019-R-BLK");
+    expect(rows[0].variantCount).toBe(3);
+    expect(rows[0].kinds.square.count).toBe(1);
+    expect(rows[0].missingRequired).not.toContain("square");
+
+    // A file named with an explicit power lands on the same colourway.
+    const powered = await ingestRoutedPhoto({
+      bytes: await sharp({ create: { width: 40, height: 40, channels: 3, background: "#456" } }).png().toBuffer(),
+      fileName: "JX1019-R-BLK-200_NO_BG.png",
+    });
+    expect(powered.status).toBe("uploaded");
+    const after = photoCoverage({ search: "Circuit" });
+    expect(after).toHaveLength(1);
+    expect(after[0].kinds.no_bg.count).toBe(1);
+
+    // Same BYTES under a different power name → dedupe across the
+    // colourway, not a second copy.
+    const dupe = await ingestRoutedPhoto({ bytes: await png(), fileName: "JX1019-R-BLK-150_SQUARE_F8F9FA.jpg" });
+    expect(dupe.status).toBe("deduped");
   });
 
   it("coverage: per-SKU kinds, product-scope roll-up, missing required", async () => {

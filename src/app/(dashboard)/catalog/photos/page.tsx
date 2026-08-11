@@ -34,6 +34,8 @@ type SkuRow = {
   productId: string;
   productName: string;
   colorName: string | null;
+  /** Reader colourways cover several power SKUs — one photo serves all. */
+  variantCount: number;
   kinds: Record<string, CellData>;
   missingRequired: string[];
 };
@@ -254,6 +256,11 @@ export default function ProductPhotosPage() {
                       <div className="font-mono text-xs text-muted-foreground">
                         {s.sku}
                         {s.colorName ? ` · ${s.colorName}` : ""}
+                        {s.variantCount > 1 && (
+                          <span className="ml-1 rounded bg-muted px-1 text-[9px]" title="One photo set covers every power of this colourway">
+                            {s.variantCount} powers
+                          </span>
+                        )}
                       </div>
                     </td>
                     {kinds.map((k) => {

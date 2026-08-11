@@ -115,8 +115,12 @@ for (const [legacy, slug] of Object.entries(LEGACY_SUFFIXES)) {
 }
 
 // JX + 4 digits, then either the current -S-/-R- generation or the
-// legacy direct colour, colour = 2-6 alphanumerics.
-const SKU_RE = /^(JX\d{4})(-[SR])?-([A-Z0-9]{2,6})/i;
+// legacy direct colour, colour = 2-6 alphanumerics (letters required —
+// a purely numeric segment is a reader POWER, not a colour). The
+// optional trailing -### power is swallowed into the SKU so files named
+// with a full power SKU still parse; photos are per colourway, so the
+// ingest layer collapses powers back to the colourway root.
+const SKU_RE = /^(JX\d{4})(-[SR])?-([A-Z][A-Z0-9]{1,5})(-\d{3})?(?=[-_.\s]|$)/i;
 const STYLE_RE = /^(JX\d{4})(?![\d-])/i;
 
 /**
