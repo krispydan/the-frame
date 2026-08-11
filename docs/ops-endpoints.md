@@ -24,6 +24,9 @@ Code) instead of pasting `fetch()` snippets into the browser console.
 | POST | `/api/admin/ops/geocode?confirm=1` | Run one geocode batch `{ limit, force, retryFailed, customersOnly }` |
 | POST | `/api/admin/ops/backfill-addresses?confirm=1` | Fill blank company addresses from Shopify `{ stores, maxPages }` |
 | GET | `/api/admin/ops/order-lookup?number=&accountId=` | Where an order actually lives vs. the account |
+| GET | `/api/admin/ops/mcp-key` | List MCP API keys (metadata only, never the key) |
+| POST | `/api/admin/ops/mcp-key?confirm=1` | Mint an MCP key `{ name, expiresDays? }` — plaintext returned ONCE (see [`mcp.md`](mcp.md)) |
+| DELETE | `/api/admin/ops/mcp-key?confirm=1` | Revoke an MCP key `{ name }` or `{ id }` |
 | GET | `/api/admin/ops/three-pl` | List imported 3PL invoices + audit flag counts |
 | POST | `/api/admin/ops/three-pl?confirm=1` | Import a Big Sky invoice xlsx (multipart `file`) |
 | GET | `/api/admin/ops/amazon?view=status\|health\|month-end\|xero\|settlements` | Amazon channel diagnostics (read-only) |
