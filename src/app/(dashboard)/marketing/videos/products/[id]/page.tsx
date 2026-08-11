@@ -343,6 +343,8 @@ export default function ProductVideoEditor({ params }: { params: Promise<{ id: s
         <ClipPreviewDialog
           clip={watching.clip}
           onClose={() => setWatching(null)}
+          // Tag fixes change which clips belong to this product — refresh.
+          onTagsChanged={load}
           onAdd={watching.inVideo ? undefined : () => setSeq((prev) => [...prev, watching.clip])}
           onRemove={
             watching.inVideo && watching.index !== undefined
