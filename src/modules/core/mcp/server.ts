@@ -158,6 +158,7 @@ export function ensureAllToolsRegistered() {
   try { require("@/modules/sales/mcp/ajm-tools"); } catch {}
   try { require("@/modules/catalog/mcp/tools"); } catch {}
   try { require("@/modules/catalog/mcp/image-tools"); } catch {}
+  try { require("@/modules/catalog/mcp/photo-tools"); } catch {}
   try { require("@/modules/customers/mcp/tools"); } catch {}
   try { require("@/modules/orders/mcp/tools"); } catch {}
 }

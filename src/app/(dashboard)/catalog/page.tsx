@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import {
-  Search, Package, LayoutGrid, List, Filter, ChevronDown, Image as ImageIcon,
+  Search, Package, LayoutGrid, List, Filter, ChevronDown, Image as ImageIcon, Camera,
   CheckSquare, XSquare, Download, MoreHorizontal, Plus, Upload, Loader2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -187,6 +187,9 @@ export default function CatalogPage() {
         <div className="flex items-center gap-2">
           <Link href="/catalog/intake">
             <Button><Plus className="h-4 w-4 mr-2" />Add Product</Button>
+          </Link>
+          <Link href="/catalog/photos">
+            <Button variant="outline"><Camera className="h-4 w-4 mr-2" />Photos</Button>
           </Link>
           <Link href="/catalog/export">
             <Button variant="outline"><Download className="h-4 w-4 mr-2" />Export</Button>
