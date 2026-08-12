@@ -18,11 +18,18 @@
  * `list` is read-only. Only `apply --confirm` ever writes to Awin.
  *
  * Getting a JWT:
- *   Log in to Awin, open DevTools → Network, click Partnerships → Pending.
- *   Find a request to ui.awin.com/backend/... and copy its Authorization header
- *   value (the part after "Bearer "). Then:
+ *   Paste scripts/awin-capture-token.js into the DevTools console on
+ *   app.awin.com — it finds the token, checks it is a writable "nova" one, and
+ *   copies it to your clipboard. Then:
  *     export AWIN_SESSION_JWT='eyJ...'
- *   It is short-lived — expect to re-grab it each session.
+ *
+ *   By hand: DevTools → Network on app.awin.com, click Partnerships → Pending
+ *   partners, open any ui.awin.com/backend request, copy its Authorization
+ *   header. It must come from app.awin.com — tokens from Awin's older UI are
+ *   read-only and fail every write with a 403.
+ *
+ *   Tokens last about an hour, so expect to re-grab one each session. Running
+ *   this script on your own machine keeps the token off the network entirely.
  *
  * Caveats worth knowing: the ui.awin.com API is undocumented and unsupported,
  * so Awin can change it without notice and this script will break. Accepting an
