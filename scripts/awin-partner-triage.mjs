@@ -439,6 +439,31 @@ function jwt() {
   return t.replace(/^Bearer\s+/i, "");
 }
 
+/** Decode the JWT payload without verifying it — for diagnostics only. */
+function tokenClaims() {
+  try {
+    const payload = jwt().split(".")[1];
+    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/** Unix seconds, or null if the token is unreadable. */
+function tokenExpiry() {
+  const exp = tokenClaims()?.exp;
+  return typeof exp === "number" ? exp : null;
+}
+
+/**
+ * Which Awin frontend issued this token. "nova" is app.awin.com and can write;
+ * "darwin" is the older UI and its tokens carry read-only scopes, so they fail
+ * membership writes with a 403 while reads keep working.
+ */
+function tokenClient() {
+  return tokenClaims()?.["https://awin.com/client"] ?? null;
+}
+
 async function call(method, url, body) {
   const res = await fetch(url, {
     method,
@@ -450,17 +475,31 @@ async function call(method, url, body) {
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   const text = await res.text();
-  // An expired token shows up as 401 on the read endpoints but as a bare
-  // "403 []" on application/update, which reads like a permissions problem.
-  // Treat an empty-bodied 403 on a write as the expiry it almost always is.
-  const looksExpired =
-    res.status === 401 || (res.status === 403 && text.trim().replace(/\[\]|\{\}/, "") === "");
-  if (looksExpired) {
-    console.error(
-      `\nHTTP ${res.status} from ${url}\n` +
-        "The session JWT is missing, expired, or wrong — Awin's tokens last about an hour.\n" +
-        "Grab a fresh one from DevTools and re-run; nothing in this batch was applied.",
-    );
+  // 401 and 403 both mean "not allowed", but for opposite reasons, and telling
+  // them apart matters: one needs a fresh token, the other needs a token from a
+  // different place. Decide from the token's own exp claim rather than guessing
+  // from the status — a read-only token returns a bare "403 []" on a write while
+  // still being perfectly valid, which an earlier version reported as expiry.
+  if (res.status === 401 || res.status === 403) {
+    const expired = tokenExpiry() != null && tokenExpiry() <= Date.now() / 1000;
+    if (expired) {
+      console.error(
+        `\nHTTP ${res.status} from ${url}\n` +
+          "The session JWT has expired — Awin's tokens last about an hour.\n" +
+          "Grab a fresh one and re-run; nothing in this batch was applied.",
+      );
+    } else {
+      console.error(
+        `\nHTTP ${res.status} from ${url}\n` +
+          `The token is still valid${tokenClient() ? ` (client "${tokenClient()}")` : ""} but is not ` +
+          "allowed to do this.\n" +
+          (text.trim() ? `Server said: ${text.trim().slice(0, 300)}\n` : "") +
+          'Writes need a token from the "nova" client — the one app.awin.com itself uses.\n' +
+          "Open app.awin.com (not the older UI), go to Partnerships > Pending partners,\n" +
+          "and copy the Authorization header from a ui.awin.com/backend request there.\n" +
+          "Nothing in this batch was applied.",
+      );
+    }
     process.exit(1);
   }
   let json = null;
