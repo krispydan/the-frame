@@ -4,7 +4,7 @@
 import type { ExportProduct, ValidationIssue, ProductValidationResult } from "./types";
 import Papa from "papaparse";
 import { catalogImageUrl } from "@/lib/storage/image-url";
-import { wholesaleOrDefault, retailOrDefault, DEFAULT_WEIGHT_G_STR } from "@/modules/catalog/lib/pricing";
+import { wholesaleOrDefault, retailOrDefault, weightGramsStr, weightOzOrDefault } from "@/modules/catalog/lib/pricing";
 import { isReadingProduct, variantSkus } from "./types";
 import { strengthLabel } from "@/modules/catalog/lib/reading-glasses";
 
@@ -503,6 +503,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
         barcode: string;
         optionValue: string;
         option2Value: string;
+        weightGrams: string;
         price: string;
         compareAt: string;
         costPerItem: string;
@@ -564,7 +565,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       // 1.5 oz per pair (typical sunglasses weight) → 1.5 × 28.3495
       // ≈ 42.52 g. Admin UI shows this back as 1.5 oz via the display
       // unit below.
-      "Weight value (grams)": opts.sku ? DEFAULT_WEIGHT_G_STR : "",
+      "Weight value (grams)": opts.sku ? (opts.weightGrams ?? "") : "",
       "Weight unit for display": opts.sku ? "oz" : "",
       "Requires shipping": opts.sku ? "TRUE" : "",
       "Fulfillment service": opts.sku ? "manual" : "",
@@ -624,6 +625,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       barcode: firstSku?.upc || "",
       optionValue: firstSku?.colorName || "Default Title",
       option2Value: firstSku ? (strengthLabel(firstSku) ?? "") : "",
+      weightGrams: firstSku ? weightGramsStr(weightOzOrDefault(firstSku.weightOz)) : "",
       price: variantPrice,
       compareAt: compareAtPrice,
       costPerItem: landedCostFor(firstSku?.costPrice ?? null),
@@ -658,6 +660,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
         barcode: sku.upc || "",
         optionValue: sku.colorName || "",
         option2Value: strengthLabel(sku) ?? "",
+        weightGrams: weightGramsStr(weightOzOrDefault(sku.weightOz)),
         price: variantPrice,
         compareAt: compareAtPrice,
         costPerItem: landedCostFor(sku.costPrice ?? null),

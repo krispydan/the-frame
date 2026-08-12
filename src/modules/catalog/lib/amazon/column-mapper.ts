@@ -18,7 +18,7 @@
 import type { ExportProduct } from "@/modules/catalog/lib/export/types";
 import { isReadingProduct, variantSkus } from "@/modules/catalog/lib/export/types";
 import { strengthLabel, BLUE_LIGHT_POWER } from "@/modules/catalog/lib/reading-glasses";
-import { DEFAULT_WEIGHT_OZ_STR } from "@/modules/catalog/lib/pricing";
+import { weightOzStr, weightOzOrDefault } from "@/modules/catalog/lib/pricing";
 import { curatedAttrsFromTags } from "@/modules/catalog/lib/curated-attributes";
 import { mapAmazonColor } from "./color-map";
 import {
@@ -394,11 +394,9 @@ export function buildAmazonRows(input: MapInput): Record<string, string>[] {
     const listPrice = (product.msrp && product.msrp > 0)
       ? product.msrp.toFixed(2)
       : price;
-    const itemWeight = ozAsString(sku.id ? (
-      // Per-SKU weight from catalog_skus.weightOz — passed through via ExportProduct? It's not
-      // currently in the ExportProduct.skus shape, so fall back to a reasonable sunglasses default.
-      null
-    ) : null) || DEFAULT_WEIGHT_OZ_STR;
+    // Real bare-frame weight from catalog_skus.weight_oz (factory size
+    // sheet); falls back to the placeholder when a style isn't weighed yet.
+    const itemWeight = weightOzStr(weightOzOrDefault(sku.weightOz));
 
     const baseSku = sku.sku ?? "";
     // FBM child — operator-fulfilled (the default Jaxy flow via
@@ -722,7 +720,7 @@ export function buildAmazonGroupRows(input: MapGroupInput): Record<string, strin
         ? ep.retailPrice.toFixed(2)
         : (ep.msrp && ep.msrp > 0 ? ep.msrp.toFixed(2) : "");
       const listPrice = (ep.msrp && ep.msrp > 0) ? ep.msrp.toFixed(2) : price;
-      const itemWeight = DEFAULT_WEIGHT_OZ_STR;
+      const itemWeight = weightOzStr(weightOzOrDefault(sku.weightOz));
       const baseSku = sku.sku ?? "";
 
       const fbmChild: Record<string, string> = {

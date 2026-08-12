@@ -21,23 +21,35 @@ export const DEFAULT_WHOLESALE_PRICE_STR = DEFAULT_WHOLESALE_PRICE.toFixed(2);
 export const DEFAULT_RETAIL_PRICE_STR = DEFAULT_RETAIL_PRICE.toFixed(2);
 
 /**
- * Shipping weight per pair, in ounces. Every Jaxy frame is treated as
- * 2 oz — the channels previously disagreed (Faire 0.10 lb, Amazon
- * 1.60 oz, Shopify 42.52 g / 1.5 oz), which made shipping estimates
- * inconsistent between storefronts.
+ * FALLBACK product weight in ounces, used only when a SKU has no
+ * measured weight of its own.
+ *
+ * Real per-style bare-frame weights come from the factory size sheet
+ * and live on catalog_skus.weight_oz — measured frames run 0.64–1.44 oz
+ * (18–41 g). 1 oz is the measured median, so it's the least-wrong
+ * placeholder for a style we haven't weighed yet. Prefer supplying the
+ * real number over relying on this.
  */
-export const DEFAULT_WEIGHT_OZ = 2;
+export const DEFAULT_WEIGHT_OZ = 1;
 
-/** Same weight in pounds (Faire's item_weight unit). */
-export const DEFAULT_WEIGHT_LB_STR = (DEFAULT_WEIGHT_OZ / 16).toFixed(4).replace(/0+$/, "");
+const OZ_PER_GRAM = 28.3495;
 
-/** Same weight in grams (Shopify's "Weight value (grams)" column). */
-export const DEFAULT_WEIGHT_G_STR = (DEFAULT_WEIGHT_OZ * 28.3495).toFixed(2);
+/** oz → pounds string (Faire's item_weight unit). */
+export function weightLbStr(oz: number): string {
+  return (oz / 16).toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
 
-/** Same weight as an ounces string (Amazon's item_weight). */
-export const DEFAULT_WEIGHT_OZ_STR = DEFAULT_WEIGHT_OZ.toFixed(2);
+/** oz → grams string (Shopify's "Weight value (grams)" column). */
+export function weightGramsStr(oz: number): string {
+  return (oz * OZ_PER_GRAM).toFixed(2);
+}
 
-/** A stored weight in oz, falling back to the Jaxy standard. */
+/** oz → ounces string (Amazon's item_weight). */
+export function weightOzStr(oz: number): string {
+  return oz.toFixed(2);
+}
+
+/** A stored weight in oz, falling back to the placeholder above. */
 export function weightOzOrDefault(oz: number | null | undefined): number {
   return oz && oz > 0 ? oz : DEFAULT_WEIGHT_OZ;
 }

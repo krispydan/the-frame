@@ -59,6 +59,9 @@ export interface ExportProduct {
     size: string | null;
     upc: string | null;
     inStock: boolean | null;
+    /** Bare-frame weight in ounces (catalog_skus.weight_oz), from the
+     *  factory size sheet. Null until measured. */
+    weightOz: number | null;
     /** Reading-glasses diopter, e.g. 1.50. Null for sunglasses/optical. */
     readingPower: number | null;
     /** Reading-glasses blue-light coating flag. Null for sunglasses/optical. */
