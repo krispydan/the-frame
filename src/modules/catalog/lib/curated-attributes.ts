@@ -25,6 +25,9 @@ export interface CuratedAttrs {
   frameMaterial: string | null;
   gender: string | null;
   lensType: string | null;
+  /** Hinge construction: "spring" | "standard". Null when untagged —
+   *  callers must NOT claim spring hinges on a null. */
+  hinge: string | null;
 }
 
 /** Tag rows we accept (subset of the catalog_tags row). */
@@ -65,6 +68,7 @@ export function curatedAttrsFromTags(rows: TagRow[]): CuratedAttrs {
     ]),
     gender: pickFirst(rows, ["gender"]),
     lensType: pickFirst(rows, ["lens", "lenstype", "lens_type"]),
+    hinge: pickFirst(rows, ["hinge", "hingetype", "hinge_type"]),
   };
 }
 

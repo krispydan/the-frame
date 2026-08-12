@@ -30,4 +30,9 @@ export const TAG_PRESETS: Record<string, string[]> = {
     "hexagonal",
   ],
   materialFrame: ["acetate", "metal", "plastic", "wood"],
+  // Hinge construction. "spring" = flex hinges that pivot past 90°;
+  // "standard" = a fixed barrel hinge. Drives the SPRING HINGES feature
+  // card and the hinge claim in channel copy — only tag "spring" when
+  // the frame genuinely has them.
+  hinge: ["spring", "standard"],
 };

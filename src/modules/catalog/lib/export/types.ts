@@ -37,6 +37,8 @@ export interface ExportProduct {
     frameMaterial: string | null;
     gender: string | null;
     lensType: string | null;
+    /** "spring" | "standard" | null (untagged). */
+    hinge: string | null;
     // Physical frame dimensions in millimetres — see
     // src/modules/catalog/lib/frame-size.ts.
     lensWidth: number | null;
