@@ -35,6 +35,7 @@
  *   node scripts/awin-partner-triage.mjs list --raw            # dump raw API JSON
  *   node scripts/awin-partner-triage.mjs apply --confirm       # execute the plan
  *   node scripts/awin-partner-triage.mjs apply --confirm --only-rejects
+ *   node scripts/awin-partner-triage.mjs end --confirm    # suspend LIVE partners
  *
  * Flags: --advertiser <id>  --plan <path>  --enrich  --verbose
  *
@@ -733,6 +734,82 @@ async function cmdApply(opts) {
   }
 }
 
+/**
+ * End live partnerships listed in a plan file.
+ *
+ * Separate command from `apply` because this is a heavier action against a
+ * different endpoint. `apply` accepts or declines an *application*; this
+ * suspends an *existing* partner, which stops their tracking links and carries
+ * the program's notice period (7 days by default — see `isUnderNotice`).
+ *
+ * Payload shape is read from the webapp bundle:
+ *   POST membership-api/membership/suspend
+ *   { membership: { advertiserId, publisherId, suspensionTypeId,
+ *                   suspensionReason, isUnderNotice, status:"merchantSuspended" } }
+ * with advertiserId and publisherId sent as strings. suspensionTypeId 0 is what
+ * the UI sends for a provider-initiated close.
+ *
+ * Awin's own docs say partners cannot be bulk-removed through the interface and
+ * to contact support, so this covers something the UI does not offer. It has
+ * never been exercised against a live account — canary a single dormant partner
+ * and confirm before running a batch.
+ */
+async function cmdEnd(opts) {
+  if (!opts.confirm) {
+    console.error(
+      "Refusing to end partnerships without --confirm.\n" +
+        "This suspends LIVE partners and stops their tracking links — heavier than declining\n" +
+        "an application. Review the plan, then re-run with --confirm.",
+    );
+    process.exit(1);
+  }
+  const { readFileSync } = await import("node:fs");
+  let doc;
+  try {
+    doc = JSON.parse(readFileSync(opts.plan, "utf8"));
+  } catch {
+    console.error(`Could not read plan file ${opts.plan}.`);
+    process.exit(1);
+  }
+
+  const advertiserId = doc.advertiserId ?? opts.advertiser;
+  const targets = doc.plan.filter((p) => p.decision === "end");
+  if (targets.length === 0) {
+    console.log('Nothing marked "end" in the plan.');
+    return;
+  }
+  console.log(`Ending ${targets.length} partnership(s) for advertiser ${advertiserId}...\n`);
+
+  const url = `${UI}/membership-api/membership/suspend?source=partner%20profile%20nova`;
+  let okCount = 0;
+  const failures = [];
+  for (const p of targets) {
+    const { ok, status, text } = await call("POST", url, {
+      membership: {
+        advertiserId: String(advertiserId),
+        publisherId: String(p.publisherId),
+        suspensionTypeId: p.suspensionTypeId ?? 0,
+        suspensionReason: p.suspensionReason ?? "Inactive partner, no traffic in 12 months",
+        isUnderNotice: p.isUnderNotice ?? true,
+        status: "merchantSuspended",
+      },
+    });
+    if (ok) {
+      okCount += 1;
+      console.log(`  ✓ ended  ${p.companyName} (${p.publisherId})`);
+    } else {
+      failures.push({ ...p, status, body: text.slice(0, 200) });
+      console.log(`  ✗ failed ${p.companyName} (${p.publisherId}) — HTTP ${status}`);
+    }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  console.log(`\nDone: ${okCount} ended, ${failures.length} failed.`);
+  for (const f of failures) {
+    console.log(`  ${f.companyName} (${f.publisherId}) HTTP ${f.status}: ${f.body}`);
+  }
+  if (failures.length) process.exitCode = 1;
+}
+
 // ------------------------------------------------------------------- main ---
 
 function parseArgs(argv) {
@@ -761,8 +838,9 @@ if (isMain) {
   const opts = parseArgs(process.argv);
   if (opts.cmd === "list") await cmdList(opts);
   else if (opts.cmd === "apply") await cmdApply(opts);
+  else if (opts.cmd === "end") await cmdEnd(opts);
   else {
-    console.error(`Unknown command "${opts.cmd}". Use "list" or "apply".`);
+    console.error(`Unknown command "${opts.cmd}". Use "list", "apply" or "end".`);
     process.exit(1);
   }
 }
