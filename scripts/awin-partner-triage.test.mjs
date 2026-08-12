@@ -64,6 +64,9 @@ const cases = [
   // not let these slip past the full-host entry
   { want: "reject", raw: row(28, "Findies", "https://apps.apple.com/us/app/dealpump", 19) },
   { want: "reject", raw: row(29, "N7 Interactive Inc.", "https://apps.apple.com/us/app/viba-me", null) },
+  // singular "code" must fire, without re-breaking barcodelookup.com
+  { want: "reject", raw: row(30, "Faiza Taqi", "https://www.freeshippingcode.org", 20) },
+  { want: "reject", raw: row(31, "Muhammad Obaid", "https://Hotpayoffers.com", 20) },
 ];
 
 let pass = 0, fail = 0;

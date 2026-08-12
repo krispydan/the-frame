@@ -117,8 +117,11 @@ const COUPON_TOKENS = new RegExp(
   [
     // sav(e|ing) as a stem: "savings" alone missed saveonbest, savingheist,
     // savingpantry, savemypenny, savingupscale, savingarena, smartssaving
-    "sav(e|ing)", "coupon", "copon", "promo", "code[sz]", "voucher", "discount",
-    "deals?", "bargain", "cashback", "clearance", "freebie", "steal", "slash",
+    // "code" singular was excluded to stop barcodelookup.com matching, which
+    // then let freeshippingcode.org through. Exclude the "barcode" stem instead.
+    "sav(e|ing)", "coupon", "copon", "promo", "(?<!bar)code", "voucher",
+    "discount", "deals?", "bargain", "cashback", "clearance", "freebie",
+    "steal", "slash", "offers", "freeship",
     // es / pt / it
     "descuento", "cupon", "cupom", "promocion", "codigos", "sconto", "buono",
     // de / nl / nordics
