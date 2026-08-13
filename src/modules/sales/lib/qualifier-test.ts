@@ -128,48 +128,90 @@ export const QUALIFIED_AT = 70;
 
 // ── phase 1: start ──
 
+/**
+ * The Apify account has a ceiling on memory across all concurrent runs (16GB
+ * at time of writing, and this actor asks for 4GB), so only a handful of cells
+ * can be in flight at once. That is a CAPACITY signal, not a failure: a cell
+ * that cannot start yet goes back in the queue and starts when a slot frees.
+ * Treating it as a failure would mean a ten-cell bench silently became a
+ * four-cell one.
+ */
+function isCapacityError(msg: string): boolean {
+  return /memory-limit-exceeded|memory limit|402/i.test(msg);
+}
+
+/** Start as many queued cells as the account will accept right now. */
+function startQueued(batch: string, perCell: number): Promise<{ started: number; blocked: string | null }> {
+  const queued = sqlite
+    .prepare("SELECT * FROM apify_test_runs WHERE batch = ? AND status = 'queued' ORDER BY cell_id")
+    .all(batch) as Array<{ id: string; cell_id: string; sweep: string; term: string; location: string }>;
+
+  return (async () => {
+    let started = 0;
+    for (const row of queued) {
+      const cell: TestCell = {
+        cellId: row.cell_id, sweep: row.sweep as TestCell["sweep"],
+        term: row.term, location: row.location,
+      };
+      try {
+        const { runId, datasetId } = await apifyClient.startRun(actorInput(cell, perCell));
+        sqlite
+          .prepare("UPDATE apify_test_runs SET status='running', apify_run_id=?, dataset_id=?, error=NULL WHERE id=?")
+          .run(runId, datasetId, row.id);
+        started++;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (isCapacityError(msg)) {
+          // Account is full. Everything after this would hit the same wall, so
+          // stop asking and leave the rest queued for the next poll.
+          sqlite.prepare("UPDATE apify_test_runs SET error=? WHERE id=?").run("waiting for a free Apify slot", row.id);
+          return { started, blocked: "apify memory limit — remaining cells wait for a slot" };
+        }
+        sqlite.prepare("UPDATE apify_test_runs SET status='failed', error=? WHERE id=?").run(msg, row.id);
+      }
+    }
+    return { started, blocked: null };
+  })();
+}
+
 export async function startBatch(
   matrix: TestCell[] = DEFAULT_MATRIX,
   perCell = PLACES_PER_CELL,
-): Promise<{ batch: string; started: number; errors: string[] }> {
+): Promise<{ batch: string; started: number; queued: number; blocked: string | null }> {
   const batch = `batch_${new Date().toISOString().replace(/[:.]/g, "-")}`;
-  const errors: string[] = [];
-  let started = 0;
 
-  for (const cell of matrix) {
-    const id = randomUUID();
-    try {
-      const { runId, datasetId } = await apifyClient.startRun(actorInput(cell, perCell));
-      sqlite
-        .prepare(
-          `INSERT INTO apify_test_runs (id, batch, cell_id, sweep, term, location, apify_run_id, dataset_id, status)
-           VALUES (?,?,?,?,?,?,?,?,'running')`,
-        )
-        .run(id, batch, cell.cellId, cell.sweep, cell.term, cell.location, runId, datasetId);
-      started++;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      errors.push(`${cell.cellId}: ${msg}`);
-      sqlite
-        .prepare(
-          `INSERT INTO apify_test_runs (id, batch, cell_id, sweep, term, location, status, error)
-           VALUES (?,?,?,?,?,?,'failed',?)`,
-        )
-        .run(id, batch, cell.cellId, cell.sweep, cell.term, cell.location, msg);
-    }
-  }
-  return { batch, started, errors };
+  // Record the whole matrix up front, then start what fits. The batch is the
+  // ten cells whether or not Apify has room for them yet.
+  const insert = sqlite.prepare(
+    `INSERT INTO apify_test_runs (id, batch, cell_id, sweep, term, location, status)
+     VALUES (?,?,?,?,?,?,'queued')`,
+  );
+  sqlite.transaction(() => {
+    for (const c of matrix) insert.run(randomUUID(), batch, c.cellId, c.sweep, c.term, c.location);
+  })();
+
+  const { started, blocked } = await startQueued(batch, perCell);
+  return { batch, started, queued: matrix.length - started, blocked };
 }
 
 // ── phase 2: collect ──
 
-/** Check every still-running cell; ingest and score the ones that finished. */
-export async function pollBatch(batch: string): Promise<{ ingested: number; stillRunning: number }> {
+/**
+ * Check every still-running cell, ingest the finished ones, then fill the
+ * freed slots from the queue. Callers drive this until nothing is left.
+ */
+export async function pollBatch(
+  batch: string,
+  perCell = PLACES_PER_CELL,
+): Promise<{ ingested: number; stillRunning: number; started: number; queued: number; blocked: string | null }> {
+  // A cell that failed only because the account was full is not a failed cell.
+  sqlite
+    .prepare("UPDATE apify_test_runs SET status='queued' WHERE batch=? AND status='failed' AND error LIKE '%memory-limit%'")
+    .run(batch);
+
   const running = sqlite
     .prepare("SELECT * FROM apify_test_runs WHERE batch = ? AND status = 'running'")
     .all(batch) as Array<{ id: string; cell_id: string; apify_run_id: string; dataset_id: string }>;
-
-  if (running.length === 0) return { ingested: 0, stillRunning: 0 };
 
   const prof = buyerProfile();
   let ingested = 0;
@@ -244,7 +286,13 @@ export async function pollBatch(batch: string): Promise<{ ingested: number; stil
     ingested++;
   }
 
-  return { ingested, stillRunning };
+  // Slots may have just freed up — pull the next wave in.
+  const { started, blocked } = await startQueued(batch, perCell);
+  const queued = (sqlite
+    .prepare("SELECT COUNT(*) n FROM apify_test_runs WHERE batch=? AND status='queued'")
+    .get(batch) as { n: number }).n;
+
+  return { ingested, stillRunning: stillRunning + started, started, queued, blocked };
 }
 
 // ── reporting ──
