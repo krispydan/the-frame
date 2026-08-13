@@ -5,7 +5,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireOpsToken } from "@/lib/ops-auth";
 import {
   DEFAULT_MATRIX, PLACES_PER_CELL, batchSummary, exportLeads, listBatches,
-  batchCosts, pollBatch, rescoreBatch, retryFailedCells, startBatch, type TestCell,
+  allLeadsSummary, batchCosts, collectOrphanBatches, pollBatch, rescoreBatch,
+  retryFailedCells, startBatch, type TestCell,
 } from "@/modules/sales/lib/qualifier-test";
 import {
   emailReport, exportEmails, pollEmailProbe, startEmailProbe, verifySample,
@@ -73,9 +74,15 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json().catch(() => ({}))) as {
     matrix?: TestCell[]; perCell?: number;
-    action?: "scrape" | "emails" | "verify" | "rescore" | "retry";
+    action?: "scrape" | "emails" | "verify" | "rescore" | "retry" | "collect";
     batch?: string; limit?: number; minScore?: number; pagesPerSite?: number;
   };
+
+  // Recover results from runs already paid for. Cannot start anything.
+  if (body.action === "collect") {
+    const res = await collectOrphanBatches();
+    return NextResponse.json({ ok: true, ...res, leads: allLeadsSummary() });
+  }
 
   // Maintenance on an existing batch — neither spends Apify credit.
   if (body.action === "rescore" || body.action === "retry") {
@@ -102,8 +109,33 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // FAIL CLOSED on anything we do not recognise.
+  //
+  // This block used to be the fall-through: any body whose `action` the
+  // deployed code did not know about landed here and started a full ten-cell
+  // scrape. A polling loop sending {action:"rescore"} against a deploy that
+  // predated that action therefore started the whole matrix every 30 seconds —
+  // 7 batches, 7000 places, ~$35, before anyone noticed. The most expensive
+  // operation on the endpoint must never be what "I did not understand you"
+  // resolves to.
+  if (body.action !== undefined && body.action !== "scrape") {
+    return NextResponse.json(
+      { error: `unknown action '${body.action}' — this build supports: scrape, emails, verify, rescore, retry, collect` },
+      { status: 400 },
+    );
+  }
+
   const matrix = Array.isArray(body.matrix) && body.matrix.length ? body.matrix : DEFAULT_MATRIX;
   const perCell = Number(body.perCell) || PLACES_PER_CELL;
+
+  // Starting a scrape is now explicit. Defaulting to it means a malformed or
+  // truncated body spends money; requiring the word means it cannot.
+  if (body.action !== "scrape") {
+    return NextResponse.json(
+      { error: 'starting a scrape requires {"action":"scrape"} — refusing to spend on an unlabelled request' },
+      { status: 400 },
+    );
+  }
 
   const res = await startBatch(matrix, perCell);
   return NextResponse.json({
