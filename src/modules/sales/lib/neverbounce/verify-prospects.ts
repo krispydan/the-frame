@@ -70,11 +70,18 @@ export async function verifyProspectEmails(opts: {
   }
 
   const placeholders = opts.companyIds.map(() => "?").join(",");
+  // Email lives on contacts — companies.email was dropped 2026-06-19. This
+  // query still selected it and threw "no such column: email" on every call,
+  // so verification has been broken for any caller since that migration.
   const rows = sqlite
     .prepare(
-      `SELECT id, email, email_verification_status
-         FROM companies
-        WHERE id IN (${placeholders})`,
+      `SELECT c.id,
+              (SELECT ct.email FROM contacts ct
+                WHERE ct.company_id = c.id AND TRIM(COALESCE(ct.email,'')) <> ''
+                ORDER BY ct.is_primary DESC, ct.created_at ASC LIMIT 1) AS email,
+              c.email_verification_status
+         FROM companies c
+        WHERE c.id IN (${placeholders})`,
     )
     .all(...opts.companyIds) as Array<{
       id: string;
