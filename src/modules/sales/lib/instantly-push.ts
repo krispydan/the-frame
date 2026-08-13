@@ -38,7 +38,13 @@ export interface PushResult {
   requested: number;
   eligible: number;
   inserted: number;
-  rejected: { unverified: number; alreadyInCampaign: number; alreadyMailed: number; noEmail: number };
+  /**
+   * Why each requested company did NOT go out. `notDeliverable` covers
+   * addresses NeverBounce checked and returned unknown/invalid/disposable for —
+   * they are verified, just not safe to send to. It was previously called
+   * "unverified", which read as "we never checked" and understated the point.
+   */
+  rejected: { notDeliverable: number; neverChecked: number; alreadyInCampaign: number; alreadyMailed: number; noEmail: number };
   preview?: Array<{ id: string; name: string; email: string }>;
   instantly?: unknown;
   error?: string;
@@ -81,7 +87,7 @@ export async function pushCompaniesToCampaign(opts: {
       .all() as Array<{ e: string }>).map((r) => r.e),
   );
 
-  const rejected = { unverified: 0, alreadyInCampaign: 0, alreadyMailed: 0, noEmail: 0 };
+  const rejected = { notDeliverable: 0, neverChecked: 0, alreadyInCampaign: 0, alreadyMailed: 0, noEmail: 0 };
   const eligible: Array<{ id: string; name: string; email: string }> = [];
   const nameOf = new Map(
     (sqlite.prepare(`SELECT id, name FROM companies WHERE id IN (${ph})`).all(...ids) as Array<{ id: string; name: string }>)
@@ -91,7 +97,10 @@ export async function pushCompaniesToCampaign(opts: {
   for (const r of audit) {
     const email = (r.email || "").trim().toLowerCase();
     if (!email) { rejected.noEmail++; continue; }
-    if (!["valid", "catchall"].includes(String(r.ver))) { rejected.unverified++; continue; }
+    if (!["valid", "catchall"].includes(String(r.ver))) {
+      if (r.ver) rejected.notDeliverable++; else rejected.neverChecked++;
+      continue;
+    }
     if (r.inCamp) { rejected.alreadyInCampaign++; continue; }
     if (mailed.has(email)) { rejected.alreadyMailed++; continue; }
     eligible.push({ id: r.id, name: nameOf.get(r.id) ?? "", email });
