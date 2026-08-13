@@ -3328,6 +3328,9 @@ try {
   // Chain filter — added after the first batch had already been scored.
   try { sqlite.exec("ALTER TABLE apify_test_leads ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0"); } catch { /* exists */ }
   try { sqlite.exec("ALTER TABLE apify_test_leads ADD COLUMN exclude_reason TEXT"); } catch { /* exists */ }
+  // Closed status is now needed on the row: the actor's skipClosedPlaces filter
+  // was billed per place, so closed listings are filtered here instead.
+  try { sqlite.exec("ALTER TABLE apify_test_leads ADD COLUMN closed INTEGER NOT NULL DEFAULT 0"); } catch { /* exists */ }
 
   // Email discovery: Google Maps carries no email address, so a second crawl
   // over each lead's website is the only way to get one. One row per address
