@@ -53,9 +53,13 @@ export interface CohortRow {
  * Candidate pool: one row per company that has an email and has never been
  * pushed to Instantly.
  *
- * "Never pushed" means no campaign_leads row carrying an instantly_lead_id. A
- * queued row that never made it out is NOT a push — it is an earlier attempt
- * that failed, and those should be reconsidered rather than written off.
+ * "Never pushed" means NO campaign_leads row at all — not "no row carrying an
+ * instantly_lead_id", which is what this used to test and which was wrong.
+ * importLeadsFromInstantly() only pulls campaigns already registered here with
+ * an instantly_campaign_id, so campaigns run directly in Instantly leave no
+ * lead id behind. Keying on that id made 385 already-contacted shops look
+ * fresh. A campaign_leads row of any kind means they are spoken for; a lead id
+ * only means we happen to know Instantly's identifier for them.
  */
 const CANDIDATE_SQL = `
   SELECT
@@ -79,10 +83,16 @@ const CANDIDATE_SQL = `
    AND ct.email IS NOT NULL AND TRIM(ct.email) <> ''
   LEFT JOIN gmaps_listings g ON g.company_id = c.id
   WHERE COALESCE(c.do_not_contact, 0) = 0
-    -- Never pushed to Instantly.
+    -- Never pushed: no campaign_leads row of any kind for this company...
     AND NOT EXISTS (
-      SELECT 1 FROM campaign_leads cl
-       WHERE cl.company_id = c.id AND cl.instantly_lead_id IS NOT NULL
+      SELECT 1 FROM campaign_leads cl WHERE cl.company_id = c.id
+    )
+    -- ...and this address has not gone out under some OTHER company row.
+    -- Duplicate company records for one shop are common after imports, and a
+    -- mailbox does not care which row we mailed it from.
+    AND NOT EXISTS (
+      SELECT 1 FROM campaign_leads cl2
+       WHERE LOWER(TRIM(cl2.email)) = LOWER(TRIM(ct.email))
     )
     -- Existing customers are not cold-outreach targets.
     AND NOT EXISTS (
