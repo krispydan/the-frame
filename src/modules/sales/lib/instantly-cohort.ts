@@ -108,19 +108,29 @@ const CANDIDATE_SQL = `
     AND NOT EXISTS (
       SELECT 1 FROM campaign_leads cl WHERE cl.company_id = c.id
     )
-    -- ...and this address has not gone out under some OTHER company row.
-    -- Duplicate company records for one shop are common after imports, and a
-    -- mailbox does not care which row we mailed it from.
-    AND NOT EXISTS (
-      SELECT 1 FROM campaign_leads cl2
-       WHERE LOWER(TRIM(cl2.email)) = LOWER(TRIM(ct.email))
-    )
+    -- NOTE: the "has this ADDRESS been mailed under another company row" check
+    -- is deliberately NOT here. Expressed in SQL it needs
+    -- LOWER(TRIM(cl.email)) = LOWER(TRIM(ct.email)), which no index can serve,
+    -- so it degrades to a full scan of campaign_leads per candidate row and
+    -- took two minutes even asking for five results. It is applied in JS below
+    -- against a set loaded once.
     -- Existing customers are not cold-outreach targets.
     AND NOT EXISTS (
       SELECT 1 FROM orders o
        WHERE o.company_id = c.id AND o.status NOT IN ('cancelled','returned')
     )
     AND c.status NOT IN ('customer','not_interested','ghosted','disqualified')
+    -- Only consider rows carrying SOME evidence. A company with no AJM history,
+    -- no tier, no review count and no Google category cannot reach the score
+    -- floor however long we look at it, and there are ~130k of them. Excluding
+    -- them here is the difference between reading the whole table and reading
+    -- the part that matters.
+    AND (
+      aj.n > 0
+      OR c.icp_tier IN ('A','B')
+      OR COALESCE(g.review_count, c.google_review_count) > 0
+      OR g.category_name IS NOT NULL
+    )
   GROUP BY c.id
   -- Cheap pre-rank in SQL so the JS side never sees the whole pool. This
   -- mirrors the scoring weights closely enough to pick the right candidates;
@@ -248,7 +258,7 @@ export interface CohortResult {
     byEvidence: Array<{ evidence: string; n: number }>;
     scoreBands: Array<{ band: string; n: number }>;
   };
-  excluded: { suppressed: number; invalidEmail: number; chainByReviews: number; closed: number; lowRated: number };
+  excluded: { suppressed: number; invalidEmail: number; chainByReviews: number; closed: number; lowRated: number; alreadyMailed: number };
 }
 
 /**
@@ -271,6 +281,15 @@ export function buildCohort(limit = 1000, minScore = 0): CohortResult {
 
   // Suppression in ONE query rather than one per row. checkSuppression() is
   // still the authority on the rule; this just asks it about the rows we kept.
+  // Every address that has ever been in a campaign, loaded once. Duplicate
+  // company rows for one shop are common after imports, and a mailbox does not
+  // care which row we mailed it from.
+  const mailedEmails = new Set(
+    (sqlite
+      .prepare("SELECT DISTINCT LOWER(TRIM(email)) AS e FROM campaign_leads WHERE email IS NOT NULL AND TRIM(email) <> ''")
+      .all() as Array<{ e: string }>).map((r) => r.e),
+  );
+
   const suppressedIds = new Set(
     (sqlite
       .prepare(
@@ -282,7 +301,7 @@ export function buildCohort(limit = 1000, minScore = 0): CohortResult {
       .filter((x): x is string => !!x),
   );
 
-  const excluded = { suppressed: 0, invalidEmail: 0, chainByReviews: 0, closed: 0, lowRated: 0 };
+  const excluded = { suppressed: 0, invalidEmail: 0, chainByReviews: 0, closed: 0, lowRated: 0, alreadyMailed: 0 };
   const seenEmail = new Set<string>();
   const scored: CohortRow[] = [];
 
@@ -291,6 +310,7 @@ export function buildCohort(limit = 1000, minScore = 0): CohortResult {
     // The same address can sit on several companies (shared owner, bad import).
     // Sending twice to one mailbox is what makes a campaign look like spam.
     if (seenEmail.has(r.email)) continue;
+    if (mailedEmails.has(r.email)) { excluded.alreadyMailed++; continue; }
 
     // Cheap set test first; checkSuppression() is then consulted only for the
     // rows that survive, so the authoritative rule still decides but is not
