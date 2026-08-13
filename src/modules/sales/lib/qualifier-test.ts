@@ -58,13 +58,17 @@ function actorInput(cell: TestCell, perCell: number): Record<string, unknown> {
     searchStringsArray: [cell.term],
     locationQuery: cell.location,
     maxCrawledPlacesPerSearch: perCell,
-    // The rating floor is a REAL qualifier we would ship, so it belongs in the
-    // actor input. That also means every result comes back >= 4 stars, which
-    // is why rating is reported below but carries no scoring weight — a
-    // component that is always true measures nothing.
-    placeMinimumStars: "four",
+    // No server-side filters. The first batch ran with placeMinimumStars and
+    // skipClosedPlaces set here and was billed 1660 `filter-applied` events on
+    // 850 places — $1.66 of a $5.06 bench, a third of the cost, for two rules
+    // we can evaluate ourselves. Rating and closed-status both arrive on the
+    // returned row, so scoreLead applies them for nothing.
+    //
+    // Worth recording what this did NOT cost, since it is the intuitive fear:
+    // billed places exactly equalled kept places (850/850), so filtering at the
+    // actor did not make it scrape-and-discard. The waste was the filter charge
+    // alone, not hidden over-scraping.
     website: "allPlaces",
-    skipClosedPlaces: true,
     language: "en",
     countryCode: "us",
     // List-level fields carry everything the scoring needs. The detail-page
@@ -114,6 +118,9 @@ export function buyerProfile(): BuyerProfile {
  */
 export const CHAIN_REVIEW_CEILING = 150;
 
+/** Buyer P10 rating. Applied here rather than at the actor — see actorInput(). */
+export const MIN_RATING = 4.0;
+
 export interface LeadScore {
   score: number; catHit: number; subHit: number; inBand: number; hasSite: number;
   excluded: number; excludeReason: string | null;
@@ -141,15 +148,24 @@ export function scoreLead(p: GoogleMapsPlace, prof: BuyerProfile): LeadScore {
   const subHit = subs.some((s) => prof.subTypes.has(s)) ? 1 : 0;
   const inBand = reviews >= prof.p25 && reviews <= prof.p75 ? 1 : 0;
   const hasSite = p.website ? 1 : 0;
-  const open = !p.permanentlyClosed && !p.temporarilyClosed ? 1 : 0;
+  const closed = p.permanentlyClosed || p.temporarilyClosed ? 1 : 0;
+  const open = closed ? 0 : 1;
+  const rating = Number(p.totalScore ?? 0);
 
-  const excluded = reviews > CHAIN_REVIEW_CEILING ? 1 : 0;
+  // Exclusions, all evaluated from fields already on the row so they cost
+  // nothing. These used to be split between here and the actor input; asking
+  // Apify to apply the rating and closed-status rules was billed per filter and
+  // told us nothing our own data could not.
+  let excludeReason: string | null = null;
+  if (reviews > CHAIN_REVIEW_CEILING) excludeReason = `${reviews} reviews (chain ceiling ${CHAIN_REVIEW_CEILING})`;
+  else if (closed) excludeReason = "permanently or temporarily closed";
+  else if (rating > 0 && rating < MIN_RATING) excludeReason = `${rating} stars (floor ${MIN_RATING})`;
 
   return {
     score: catHit * 40 + subHit * 15 + inBand * 30 + hasSite * 10 + open * 5,
     catHit, subHit, inBand, hasSite,
-    excluded,
-    excludeReason: excluded ? `${reviews} reviews (chain ceiling ${CHAIN_REVIEW_CEILING})` : null,
+    excluded: excludeReason ? 1 : 0,
+    excludeReason,
   };
 }
 
@@ -281,8 +297,8 @@ export async function pollBatch(
       `INSERT INTO apify_test_leads
          (id, run_id, batch, place_id, title, category, sub_types_json, address, city, state,
           postal_code, phone, website, maps_url, rating, review_count, score, cat_hit, sub_hit, in_band,
-          has_site, excluded, exclude_reason)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          has_site, excluded, exclude_reason, closed)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     );
 
     let qualified = 0;
@@ -304,6 +320,7 @@ export async function pollBatch(
           p.state ?? null, p.postalCode ?? null, p.phone ?? null, p.website ?? null, p.url ?? null,
           Number(p.totalScore ?? 0) || null, Number(p.reviewsCount ?? 0) || 0,
           s.score, s.catHit, s.subHit, s.inBand, s.hasSite, s.excluded, s.excludeReason,
+          p.permanentlyClosed || p.temporarilyClosed ? 1 : 0,
         );
       }
     })();
@@ -342,12 +359,13 @@ export function rescoreBatch(batch: string): { rescored: number; changed: number
   const prof = buyerProfile();
   const rows = sqlite
     .prepare(
-      `SELECT id, category, sub_types_json, review_count, website, score
+      `SELECT id, category, sub_types_json, review_count, website, score, rating, closed
          FROM apify_test_leads WHERE batch = ?`,
     )
     .all(batch) as Array<{
       id: string; category: string | null; sub_types_json: string | null;
       review_count: number; website: string | null; score: number;
+      rating: number | null; closed: number;
     }>;
 
   const upd = sqlite.prepare(
@@ -367,6 +385,8 @@ export function rescoreBatch(batch: string): { rescored: number; changed: number
           subTypes: subs,
           reviewsCount: r.review_count,
           website: r.website ?? undefined,
+          totalScore: r.rating ?? undefined,
+          permanentlyClosed: !!r.closed,
         } as GoogleMapsPlace,
         prof,
       );
@@ -407,8 +427,11 @@ export function applyChainFilter(batch: string): { excluded: number } {
       .run(batch);
     sqlite
       .prepare(
+        // Scoped to chain-ceiling exclusions only — clearing every excluded row
+        // would silently readmit the closed and low-rated ones.
         `UPDATE apify_test_leads SET excluded = 0, exclude_reason = NULL
-          WHERE batch = ? AND review_count <= ${CHAIN_REVIEW_CEILING} AND excluded = 1`,
+          WHERE batch = ? AND review_count <= ${CHAIN_REVIEW_CEILING} AND excluded = 1
+            AND exclude_reason LIKE '%chain ceiling%'`,
       )
       .run(batch);
     sqlite
