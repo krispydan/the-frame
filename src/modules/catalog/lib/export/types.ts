@@ -119,6 +119,44 @@ export function isReadingProduct(ep: ExportProduct): boolean {
  * Everything else (sunglasses, optical) is returned untouched, so those
  * exports are byte-identical to before.
  */
+/**
+ * One representative SKU per colorway — the row whose images stand for
+ * the whole colorway.
+ *
+ * Reading glasses look identical across diopters, so every power SKU of a
+ * colorway carries the same photos (currently duplicated on each row).
+ * Emitting them per power would ship the same picture 7x to Shopify and
+ * Faire, so channels resolve a colorway's imagery through this instead.
+ * Non-readers are already one SKU per colorway, so this is a no-op there.
+ */
+export function colorwayRepresentatives(ep: ExportProduct): ExportProduct["skus"] {
+  const seen = new Set<string>();
+  const out: ExportProduct["skus"] = [];
+  const hasImage = new Set(ep.images.map((i) => i.skuId));
+  for (const s of variantSkus(ep)) {
+    const key = s.colorName ?? s.id;
+    if (seen.has(key)) continue;
+    // Prefer a row that actually has images; fall back to the first row.
+    const withImg = variantSkus(ep).find(
+      (o) => (o.colorName ?? o.id) === key && hasImage.has(o.id),
+    );
+    seen.add(key);
+    out.push(withImg ?? s);
+  }
+  return out;
+}
+
+/**
+ * The SKU whose images represent `sku`'s colorway. For a reader power row
+ * that's its colorway sibling; for anything else it's the SKU itself.
+ */
+export function imageSkuIdFor(ep: ExportProduct, sku: ExportProduct["skus"][number]): string {
+  if (sku.readingPower == null) return sku.id;
+  const key = sku.colorName ?? sku.id;
+  const rep = colorwayRepresentatives(ep).find((r) => (r.colorName ?? r.id) === key);
+  return rep?.id ?? sku.id;
+}
+
 export function variantSkus(ep: ExportProduct): ExportProduct["skus"] {
   if (!isReadingProduct(ep)) return ep.skus;
   const powered = ep.skus.filter((s) => s.readingPower != null);

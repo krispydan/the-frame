@@ -143,8 +143,18 @@ export async function POST(request: NextRequest) {
           ? ((ep.retailPrice && ep.retailPrice > 0) ? ep.retailPrice.toFixed(2) : undefined)
           : ((ep.msrp && ep.msrp > 0) ? ep.msrp.toFixed(2) : undefined);
 
+        // Readers duplicate the same photos across all 7 power SKUs, so
+        // dedupe by file before uploading — otherwise Shopify receives the
+        // identical image once per diopter.
+        const seenImageFiles = new Set<string>();
         const approvedImages = ep.images
           .filter((i) => i.status === "approved" && i.filePath)
+          .filter((i) => {
+            const key = i.url || i.filePath || "";
+            if (!key || seenImageFiles.has(key)) return false;
+            seenImageFiles.add(key);
+            return true;
+          })
           .sort((a, b) => {
             // Prefer square images (purpose-built for Shopify), then cropped
             const sourceRank = (s: string | null) => s === "square" ? 0 : s === "cropped" ? 1 : 2;

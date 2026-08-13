@@ -25,7 +25,7 @@
 import type { ExportProduct, ProductValidationResult, ValidationIssue } from "./types";
 import { catalogImageUrl } from "@/lib/storage/image-url";
 import { DEFAULT_WHOLESALE_PRICE_STR, DEFAULT_RETAIL_PRICE_STR, weightLbStr, weightOzOrDefault } from "@/modules/catalog/lib/pricing";
-import { isReadingProduct, variantSkus } from "./types";
+import { isReadingProduct, variantSkus, imageSkuIdFor } from "./types";
 import { strengthLabel } from "@/modules/catalog/lib/reading-glasses";
 import * as XLSX from "xlsx";
 
@@ -539,17 +539,10 @@ export function generateFaireCsv(exportProducts: ExportProduct[]): string {
     const faireProductImages = buildFaireImageList(ep);
     const productImagesStr = faireProductImages.join(" ");
 
-    // Reading-glasses power SKUs carry no images of their own — the
-    // photos live on the power-less colorway row — so resolve a power
-    // SKU's image via its colorway sibling.
-    const imageSkuIdFor = (s: ExportProduct["skus"][number]) =>
-      s.readingPower == null
-        ? s.id
-        : (ep.skus.find((o) => o.colorName === s.colorName && o.readingPower == null)?.id ?? s.id);
 
     for (const sku of variantSkus(ep)) {
       // Best image for this specific variant — prefer cropped, then square, then any
-      const variantImg = pickVariantImage(ep.images, imageSkuIdFor(sku));
+      const variantImg = pickVariantImage(ep.images, imageSkuIdFor(ep, sku));
       const optionImageUrl = absoluteImageUrl(variantImg ?? null);
 
       const row = blankRow();
@@ -614,14 +607,9 @@ export function generateFaireXlsx(exportProducts: ExportProduct[]): Buffer {
     const faireProductImages = buildFaireImageList(ep);
     const productImagesStr = faireProductImages.join(" ");
 
-    // Same colorway-image resolution as the CSV path above.
-    const imageSkuIdFor = (s: ExportProduct["skus"][number]) =>
-      s.readingPower == null
-        ? s.id
-        : (ep.skus.find((o) => o.colorName === s.colorName && o.readingPower == null)?.id ?? s.id);
 
     for (const sku of variantSkus(ep)) {
-      const variantImg = pickVariantImage(ep.images, imageSkuIdFor(sku));
+      const variantImg = pickVariantImage(ep.images, imageSkuIdFor(ep, sku));
       const optionImageUrl = absoluteImageUrl(variantImg ?? null);
 
       const row = blankRow();

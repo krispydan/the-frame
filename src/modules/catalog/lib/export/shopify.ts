@@ -5,7 +5,7 @@ import type { ExportProduct, ValidationIssue, ProductValidationResult } from "./
 import Papa from "papaparse";
 import { catalogImageUrl } from "@/lib/storage/image-url";
 import { wholesaleOrDefault, retailOrDefault, weightGramsStr, weightOzOrDefault } from "@/modules/catalog/lib/pricing";
-import { isReadingProduct, variantSkus } from "./types";
+import { isReadingProduct, variantSkus, colorwayRepresentatives, imageSkuIdFor } from "./types";
 import { strengthLabel } from "@/modules/catalog/lib/reading-glasses";
 
 function absUrl(img: { filePath: string | null; url?: string | null } | null | undefined): string {
@@ -335,20 +335,24 @@ export function buildShopifyImageList(
 
   // Build per-SKU front map once — used for both channel branches and
   // for the CSV's "Variant Image" column.
+  // Reading glasses repeat the same photos on all 7 power SKUs, so only
+  // one row per colorway contributes imagery — otherwise the product
+  // would ship 7 identical fronts per colour.
+  const imageSkus = colorwayRepresentatives(ep);
   const frontBySkuId = new Map<string, ExportImage>();
-  for (const sku of ep.skus) {
+  for (const sku of imageSkus) {
     const front = approved.find(
       (i) => i.skuId === sku.id && i.source === "square" && i.imageTypeSlug === "front",
     );
     if (front) frontBySkuId.set(sku.id, front);
   }
-  const firstSkuFront = ep.skus[0] ? frontBySkuId.get(ep.skus[0].id) : undefined;
+  const firstSkuFront = imageSkus[0] ? frontBySkuId.get(imageSkus[0].id) : undefined;
 
   if (channel === "wholesale") {
     // 1. Collection first (Faire-style hero)
     if (collection) productImages.push(collection);
-    // 2. Per-SKU fronts
-    for (const sku of ep.skus) {
+    // 2. One front per colorway
+    for (const sku of imageSkus) {
       const f = frontBySkuId.get(sku.id);
       if (f) productImages.push(f);
     }
@@ -356,8 +360,8 @@ export function buildShopifyImageList(
     // RETAIL — collection composite is intentionally skipped
     // 1. First SKU's front as hero
     if (firstSkuFront) productImages.push(firstSkuFront);
-    // 2. Remaining SKU fronts
-    for (const sku of ep.skus) {
+    // 2. Remaining colorway fronts
+    for (const sku of imageSkus) {
       const f = frontBySkuId.get(sku.id);
       if (f && !productImages.includes(f)) productImages.push(f);
     }
@@ -426,16 +430,9 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
     // it — not ep.skus — is what the CSV iterates.
     const isReader = isReadingProduct(ep);
     const variantRows = variantSkus(ep);
-    // Power SKUs carry no images of their own; photos live on the
-    // colorway row, so resolve a variant image via the colorway sibling.
-    const imageSkuIdFor = (sk: ExportProduct["skus"][number]) =>
-      sk.readingPower == null
-        ? sk.id
-        : (ep.skus.find((o) => o.colorName === sk.colorName && o.readingPower == null)?.id ?? sk.id);
-
     const firstSku = variantRows[0];
     const firstImage = productImages[0];
-    const firstVariantImage = firstSku ? frontBySkuId.get(imageSkuIdFor(firstSku)) : undefined;
+    const firstVariantImage = firstSku ? frontBySkuId.get(imageSkuIdFor(ep, firstSku)) : undefined;
 
     // Build SEO + alt context now that firstSku is known.
     const seoCtx = buildSeoContext(
@@ -654,7 +651,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
     //    Shopify groups variants by URL handle.
     for (let i = 1; i < variantRows.length; i++) {
       const sku = variantRows[i];
-      const variantImage = frontBySkuId.get(imageSkuIdFor(sku));
+      const variantImage = frontBySkuId.get(imageSkuIdFor(ep, sku));
       rows.push(makeRow({
         sku: sku.sku || "",
         barcode: sku.upc || "",
