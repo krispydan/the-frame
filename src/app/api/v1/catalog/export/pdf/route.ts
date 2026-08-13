@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { loadExportProducts } from "@/modules/catalog/lib/export/load-products";
 import type { ExportProduct } from "@/modules/catalog/lib/export/types";
+import { imageSkuIdFor } from "@/modules/catalog/lib/export/types";
 import { getShopifyImagesForSkusMultiStore, type MultiStoreLookupStats } from "@/modules/orders/lib/shopify-images";
 
 /**
@@ -163,7 +164,9 @@ function toCatalogProducts(
         : ep.skus;
       if (inStockSkus.length === 0) return null;
 
-      // Pick one local image URL per variant (prefer approved, isBest)
+      // Pick one local image URL per variant (prefer approved, isBest).
+      // Reader power SKUs share their colorway's photo, so the lookup is
+      // keyed through imageSkuIdFor rather than the variant's own id.
       const localImageBySkuId = new Map<string, string>();
       for (const img of ep.images) {
         // Prefer R2 URL (public CDN) when present, fall back to filePath
@@ -191,7 +194,7 @@ function toCatalogProducts(
         imageUrls: inStockSkus.map(s => {
           const shopify = s.sku ? shopifyImagesBySku.get(s.sku) : undefined;
           if (shopify) return shopify;
-          return localImageBySkuId.get(s.id) || "";
+          return localImageBySkuId.get(imageSkuIdFor(ep, s)) || "";
         }),
       };
     })
