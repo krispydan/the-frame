@@ -335,6 +335,53 @@ class ApifyClient {
     };
   }
 
+  /**
+   * Every actor run on the account, newest first, with what each one cost.
+   *
+   * This is the ledger. Per-batch costs only see runs we started and recorded,
+   * so they cannot answer "what else spent money" — and when a bill is
+   * surprising, the spend you did not record is exactly the spend you need to
+   * find. Reads run history rather than starting anything, so it works while
+   * the account is locked out.
+   */
+  async listRecentRuns(limit = 200): Promise<Array<{
+    id: string; actId: string; status: string; startedAt: string | null;
+    finishedAt: string | null; usageTotalUsd: number | null;
+    chargedEventCounts: Record<string, number> | null;
+  }>> {
+    const token = this.resolveApiKey();
+    if (!token) throw new Error("Apify not configured");
+    const res = await fetch(
+      `${APIFY_BASE}/actor-runs?token=${token}&desc=1&limit=${limit}`,
+      { signal: AbortSignal.timeout(60_000) },
+    );
+    if (!res.ok) throw new Error(`Apify runs list HTTP ${res.status}`);
+    const items = ((await res.json()).data?.items ?? []) as Array<Record<string, unknown>>;
+    return items.map((r) => ({
+      id: String(r.id),
+      actId: String(r.actId ?? ""),
+      status: String(r.status ?? ""),
+      startedAt: (r.startedAt as string) ?? null,
+      finishedAt: (r.finishedAt as string) ?? null,
+      usageTotalUsd: typeof r.usageTotalUsd === "number" ? r.usageTotalUsd : null,
+      chargedEventCounts: (r.chargedEventCounts as Record<string, number>) ?? null,
+    }));
+  }
+
+  /** Resolve actor ids to readable names, so a ledger names its spenders. */
+  async getActorName(actId: string): Promise<string> {
+    const token = this.resolveApiKey();
+    if (!token) return actId;
+    try {
+      const res = await fetch(`${APIFY_BASE}/acts/${actId}?token=${token}`, {
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!res.ok) return actId;
+      const d = (await res.json()).data as { username?: string; name?: string };
+      return d.username && d.name ? `${d.username}/${d.name}` : actId;
+    } catch { return actId; }
+  }
+
   async getDatasetItems(datasetId: string, limit = 1000): Promise<GoogleMapsPlace[]> {
     const token = this.resolveApiKey();
     if (!token) throw new Error("Apify not configured");
