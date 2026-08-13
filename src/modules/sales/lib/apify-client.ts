@@ -260,6 +260,36 @@ class ApifyClient {
     return { status: j.data.status, stats: j.data.stats ?? null };
   }
 
+  /**
+   * What a run actually cost. These actors bill per event, so the only honest
+   * cost figure comes from the run record itself rather than from multiplying
+   * rows by a list price. Reading a run is a plain API call, not an actor run,
+   * so this still answers after the account has hit its usage limit — which is
+   * exactly when you need it.
+   */
+  async getRunCost(runId: string): Promise<{
+    status: string; usageTotalUsd: number | null;
+    chargedEventCounts: Record<string, number> | null;
+    usageUsd: Record<string, number> | null;
+    startedAt: string | null; finishedAt: string | null;
+  }> {
+    const token = this.resolveApiKey();
+    if (!token) throw new Error("Apify not configured");
+    const res = await fetch(`${APIFY_BASE}/actor-runs/${runId}?token=${token}`, {
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) throw new Error(`Apify run info HTTP ${res.status}`);
+    const d = (await res.json()).data as Record<string, unknown>;
+    return {
+      status: String(d.status),
+      usageTotalUsd: typeof d.usageTotalUsd === "number" ? d.usageTotalUsd : null,
+      chargedEventCounts: (d.chargedEventCounts as Record<string, number>) ?? null,
+      usageUsd: (d.usageUsd as Record<string, number>) ?? null,
+      startedAt: (d.startedAt as string) ?? null,
+      finishedAt: (d.finishedAt as string) ?? null,
+    };
+  }
+
   async getDatasetItems(datasetId: string, limit = 1000): Promise<GoogleMapsPlace[]> {
     const token = this.resolveApiKey();
     if (!token) throw new Error("Apify not configured");

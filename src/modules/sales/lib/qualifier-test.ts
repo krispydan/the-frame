@@ -539,6 +539,62 @@ export function batchSummary(batch: string) {
   };
 }
 
+/**
+ * What the bench actually cost, per cell, straight from Apify's run records.
+ *
+ * Worth knowing what the event names mean when reading this: `place-scraped`
+ * bills EVERY place the crawler looked at, not just the ones it returned, and
+ * `filter-applied` bills the filtering itself. So a server-side filter is paid
+ * for twice over — once for the places it discards, once for the discarding —
+ * and any filter we can evaluate ourselves from the returned row is cheaper
+ * applied here than asked of the actor.
+ */
+export async function batchCosts(batch: string) {
+  const runs = sqlite
+    .prepare(
+      `SELECT cell_id, term, location, apify_run_id, scraped FROM apify_test_runs
+        WHERE batch = ? AND apify_run_id IS NOT NULL ORDER BY cell_id`,
+    )
+    .all(batch) as Array<{ cell_id: string; term: string; location: string; apify_run_id: string; scraped: number | null }>;
+
+  const cells: Array<Record<string, unknown>> = [];
+  let total = 0;
+  const eventTotals: Record<string, number> = {};
+
+  for (const r of runs) {
+    try {
+      const c = await apifyClient.getRunCost(r.apify_run_id);
+      total += c.usageTotalUsd ?? 0;
+      for (const [k, v] of Object.entries(c.chargedEventCounts ?? {})) {
+        eventTotals[k] = (eventTotals[k] ?? 0) + Number(v);
+      }
+      cells.push({
+        cellId: r.cell_id, term: r.term, location: r.location,
+        status: c.status, kept: r.scraped ?? 0,
+        usd: c.usageTotalUsd,
+        events: c.chargedEventCounts,
+        costPerKeptLead: r.scraped ? Math.round(((c.usageTotalUsd ?? 0) / r.scraped) * 10000) / 10000 : null,
+      });
+    } catch (e) {
+      cells.push({ cellId: r.cell_id, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  const placesBilled = eventTotals["place-scraped"] ?? 0;
+  const kept = runs.reduce((a, r) => a + (r.scraped ?? 0), 0);
+
+  return {
+    batch,
+    totalUsd: Math.round(total * 100) / 100,
+    eventTotals,
+    placesBilled,
+    placesKept: kept,
+    // The number that explains a surprising bill: how many places we paid to
+    // look at for each one we actually got back.
+    billedPerKept: kept ? Math.round((placesBilled / kept) * 100) / 100 : null,
+  };
+}
+
 export function listBatches(): Array<Record<string, unknown>> {
   return sqlite
     .prepare(
