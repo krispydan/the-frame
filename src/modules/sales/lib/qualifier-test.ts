@@ -248,6 +248,7 @@ export async function startBatch(
 export async function pollBatch(
   batch: string,
   perCell = PLACES_PER_CELL,
+  opts: { startQueued?: boolean } = {},
 ): Promise<{ ingested: number; stillRunning: number; started: number; queued: number; blocked: string | null }> {
   // A cell that failed only because the account was full is not a failed cell.
   sqlite
@@ -335,8 +336,12 @@ export async function pollBatch(
     ingested++;
   }
 
-  // Slots may have just freed up — pull the next wave in.
-  const { started, blocked } = await startQueued(batch, perCell);
+  // Slots may have just freed up — pull the next wave in. Collection-only
+  // callers skip this: recovering data we already paid for must never be able
+  // to start new work as a side effect.
+  const { started, blocked } = opts.startQueued === false
+    ? { started: 0, blocked: null as string | null }
+    : await startQueued(batch, perCell);
   const queued = (sqlite
     .prepare("SELECT COUNT(*) n FROM apify_test_runs WHERE batch=? AND status='queued'")
     .get(batch) as { n: number }).n;
@@ -627,6 +632,52 @@ export async function batchCosts(batch: string) {
     // look at for each one we actually got back.
     billedPerKept: kept ? Math.round((placesBilled / kept) * 100) / 100 : null,
   };
+}
+
+/**
+ * Collect every batch that has finished runs whose results were never ingested.
+ *
+ * Exists because a bug started seven unintended batches: the scrapes ran and
+ * were billed, but nothing ever read their datasets back. The money is spent
+ * either way, so the only question left is whether we get the leads for it.
+ * Reading a dataset costs essentially nothing, and this explicitly cannot
+ * start new runs.
+ */
+export async function collectOrphanBatches(): Promise<{
+  batches: Array<{ batch: string; ingested: number; stillRunning: number }>;
+  totalIngested: number;
+}> {
+  const rows = sqlite
+    .prepare("SELECT DISTINCT batch FROM apify_test_runs WHERE status IN ('running','queued') ORDER BY batch")
+    .all() as Array<{ batch: string }>;
+
+  const out: Array<{ batch: string; ingested: number; stillRunning: number }> = [];
+  let totalIngested = 0;
+  for (const r of rows) {
+    const res = await pollBatch(r.batch, PLACES_PER_CELL, { startQueued: false });
+    out.push({ batch: r.batch, ingested: res.ingested, stillRunning: res.stillRunning });
+    totalIngested += res.ingested;
+  }
+  return { batches: out, totalIngested };
+}
+
+/** Leads across every batch, deduplicated on Google place id. */
+export function allLeadsSummary() {
+  const t = sqlite
+    .prepare(
+      `SELECT COUNT(*) rows, COUNT(DISTINCT place_id) uniquePlaces,
+              SUM(excluded) chainsExcluded,
+              SUM(excluded = 0 AND score >= ${QUALIFIED_AT}) qualified
+         FROM apify_test_leads`,
+    )
+    .get() as Record<string, number>;
+  const byBatch = sqlite
+    .prepare(
+      `SELECT batch, COUNT(*) leads, COUNT(DISTINCT place_id) uniquePlaces
+         FROM apify_test_leads GROUP BY batch ORDER BY batch`,
+    )
+    .all() as Array<Record<string, unknown>>;
+  return { ...t, byBatch };
 }
 
 export function listBatches(): Array<Record<string, unknown>> {
