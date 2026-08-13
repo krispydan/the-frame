@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireOpsToken } from "@/lib/ops-auth";
 import {
   DEFAULT_MATRIX, PLACES_PER_CELL, batchSummary, exportLeads, listBatches,
-  pollBatch, startBatch, type TestCell,
+  pollBatch, rescoreBatch, retryFailedCells, startBatch, type TestCell,
 } from "@/modules/sales/lib/qualifier-test";
 import {
   emailReport, exportEmails, pollEmailProbe, startEmailProbe, verifySample,
@@ -68,9 +68,16 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json().catch(() => ({}))) as {
     matrix?: TestCell[]; perCell?: number;
-    action?: "scrape" | "emails" | "verify";
+    action?: "scrape" | "emails" | "verify" | "rescore" | "retry";
     batch?: string; limit?: number; minScore?: number; pagesPerSite?: number;
   };
+
+  // Maintenance on an existing batch — neither spends Apify credit.
+  if (body.action === "rescore" || body.action === "retry") {
+    if (!body.batch) return NextResponse.json({ error: "batch required" }, { status: 400 });
+    const res = body.action === "rescore" ? rescoreBatch(body.batch) : retryFailedCells(body.batch);
+    return NextResponse.json({ ok: true, action: body.action, ...res });
+  }
 
   // Email discovery runs against an existing batch, so it needs one named.
   if (body.action === "emails" || body.action === "verify") {
