@@ -270,8 +270,12 @@ export async function pollBatch(
       ({ status, stats } = await apifyClient.getRunStatus(r.apify_run_id));
     } catch (e) {
       // A status check that fails is not a run that failed — leave it running
-      // and try again on the next poll.
+      // and try again on the next poll. But RECORD why: a silent catch here
+      // meant a batch could sit at "still running" forever with the reason
+      // visible only in logs nobody was reading.
+      const msg = e instanceof Error ? e.message : String(e);
       console.error(`[qualifier-test] status check ${r.cell_id}:`, e);
+      sqlite.prepare("UPDATE apify_test_runs SET error=? WHERE id=?").run(`status check: ${msg}`, r.id);
       stillRunning++;
       continue;
     }
@@ -287,9 +291,12 @@ export async function pollBatch(
 
     let items: GoogleMapsPlace[];
     try {
+      if (!r.dataset_id) throw new Error("no dataset_id recorded for this run");
       items = await apifyClient.getDatasetItems(r.dataset_id, PLACES_PER_CELL * 2);
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
       console.error(`[qualifier-test] dataset ${r.cell_id}:`, e);
+      sqlite.prepare("UPDATE apify_test_runs SET error=? WHERE id=?").run(`dataset fetch: ${msg}`, r.id);
       stillRunning++;
       continue;
     }
@@ -644,18 +651,24 @@ export async function batchCosts(batch: string) {
  * start new runs.
  */
 export async function collectOrphanBatches(): Promise<{
-  batches: Array<{ batch: string; ingested: number; stillRunning: number }>;
+  batches: Array<{ batch: string; ingested: number; stillRunning: number; errors: string[] }>;
   totalIngested: number;
 }> {
   const rows = sqlite
     .prepare("SELECT DISTINCT batch FROM apify_test_runs WHERE status IN ('running','queued') ORDER BY batch")
     .all() as Array<{ batch: string }>;
 
-  const out: Array<{ batch: string; ingested: number; stillRunning: number }> = [];
+  const out: Array<{ batch: string; ingested: number; stillRunning: number; errors: string[] }> = [];
   let totalIngested = 0;
   for (const r of rows) {
     const res = await pollBatch(r.batch, PLACES_PER_CELL, { startQueued: false });
-    out.push({ batch: r.batch, ingested: res.ingested, stillRunning: res.stillRunning });
+    const errs = sqlite
+      .prepare("SELECT DISTINCT error FROM apify_test_runs WHERE batch=? AND error IS NOT NULL LIMIT 3")
+      .all(r.batch) as Array<{ error: string }>;
+    out.push({
+      batch: r.batch, ingested: res.ingested, stillRunning: res.stillRunning,
+      errors: errs.map((e) => e.error),
+    });
     totalIngested += res.ingested;
   }
   return { batches: out, totalIngested };
