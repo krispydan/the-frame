@@ -583,9 +583,20 @@ export async function batchCosts(batch: string) {
   const placesBilled = eventTotals["place-scraped"] ?? 0;
   const kept = runs.reduce((a, r) => a + (r.scraped ?? 0), 0);
 
+  // Account-level context: without it a batch cost is unreadable, because it
+  // cannot say whether this work spent the month or arrived at the end of one.
+  let account: Record<string, unknown> | null = null;
+  try { account = await apifyClient.getAccountUsage(); }
+  catch (e) { account = { error: e instanceof Error ? e.message : String(e) }; }
+
   return {
     batch,
+    account,
     totalUsd: Math.round(total * 100) / 100,
+    batchShareOfMonthPct:
+      account && typeof account.monthlyUsageUsd === "number" && account.monthlyUsageUsd > 0
+        ? Math.round((total / account.monthlyUsageUsd) * 1000) / 10
+        : null,
     eventTotals,
     placesBilled,
     placesKept: kept,
