@@ -223,6 +223,54 @@ class ApifyClient {
     }
     throw new Error("Apify request failed after rate-limit retries");
   }
+
+  // ── Async run API ──
+  //
+  // run-sync-get-dataset-items (above) is right for the enrichment path: small
+  // batches, answer needed on the call. It is WRONG for a wide crawl — it has
+  // a hard 300-second ceiling, and a crawl that exceeds it loses the whole run
+  // (the lesson from the customer backfill). These three methods start a run,
+  // check on it, and collect it afterwards, so wall-clock stops mattering.
+
+  /** Kick off a run and return immediately. */
+  async startRun(input: Record<string, unknown>, actorId = ACTOR_GMAPS): Promise<{ runId: string; datasetId: string }> {
+    const token = this.resolveApiKey();
+    if (!token) throw new Error("Apify not configured — set APIFY_API_TOKEN env or settings.apify_api_token");
+
+    const res = await fetch(`${APIFY_BASE}/acts/${actorId}/runs?token=${token}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) throw new Error(`Apify start HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 300)}`);
+    const j = (await res.json()) as { data: { id: string; defaultDatasetId: string } };
+    return { runId: j.data.id, datasetId: j.data.defaultDatasetId };
+  }
+
+  /** READY | RUNNING | SUCCEEDED | FAILED | ABORTED | TIMED-OUT */
+  async getRunStatus(runId: string): Promise<{ status: string; stats: Record<string, unknown> | null }> {
+    const token = this.resolveApiKey();
+    if (!token) throw new Error("Apify not configured");
+    const res = await fetch(`${APIFY_BASE}/actor-runs/${runId}?token=${token}`, {
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) throw new Error(`Apify run status HTTP ${res.status}`);
+    const j = (await res.json()) as { data: { status: string; stats?: Record<string, unknown> } };
+    return { status: j.data.status, stats: j.data.stats ?? null };
+  }
+
+  async getDatasetItems(datasetId: string, limit = 1000): Promise<GoogleMapsPlace[]> {
+    const token = this.resolveApiKey();
+    if (!token) throw new Error("Apify not configured");
+    const res = await fetch(
+      `${APIFY_BASE}/datasets/${datasetId}/items?token=${token}&clean=true&format=json&limit=${limit}`,
+      { signal: AbortSignal.timeout(120_000) },
+    );
+    if (!res.ok) throw new Error(`Apify dataset HTTP ${res.status}`);
+    const data = (await res.json()) as GoogleMapsPlace[];
+    return Array.isArray(data) ? data : [];
+  }
 }
 
 export const apifyClient = new ApifyClient();

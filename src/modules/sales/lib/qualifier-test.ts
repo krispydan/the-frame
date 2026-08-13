@@ -1,0 +1,343 @@
+/**
+ * Apify qualifier bench.
+ *
+ * Question it answers: if we point the Google Maps actor at a market, which
+ * search term and which geography give us the highest share of leads that look
+ * like the boutiques who actually buy?
+ *
+ * Design: ten cells, ONE variable changed per cell, sharing an anchor so both
+ * sweeps are comparable against the same baseline.
+ *
+ *   cells 1-5   qualifier sweep — market pinned to the largest proven market
+ *   cells 1,6-10 market sweep   — qualifier pinned to the strongest term
+ *
+ * Execution is deliberately two-phase (start, then collect on a later call)
+ * rather than a synchronous run. Apify's run-sync endpoint has a hard
+ * 300-second ceiling that a 100-place crawl can blow through, and the Railway
+ * proxy hangs up on an idle request at ~60s regardless. Starting runs and
+ * collecting them on subsequent polls means neither limit can lose a run.
+ *
+ * The buyer profile is read LIVE from getGmapsProfile() rather than pinned, so
+ * as the customer backfill fills in, the bench scores against a better picture
+ * of who buys without anyone editing this file.
+ */
+
+import { randomUUID } from "crypto";
+import { sqlite } from "@/lib/db";
+import { apifyClient } from "./apify-client";
+import { getGmapsProfile } from "./gmaps-profile";
+import type { GoogleMapsPlace } from "./apify-client";
+
+export interface TestCell {
+  cellId: string;
+  sweep: "qualifier" | "market";
+  term: string;
+  location: string;
+}
+
+/** The default experiment. Overridable per-batch from the ops endpoint. */
+export const DEFAULT_MATRIX: TestCell[] = [
+  // qualifier sweep · market held at New York
+  { cellId: "q1-giftshop-ny", sweep: "qualifier", term: "Gift shop", location: "New York, New York" },
+  { cellId: "q2-boutique-ny", sweep: "qualifier", term: "Boutique", location: "New York, New York" },
+  { cellId: "q3-womens-ny", sweep: "qualifier", term: "Women's clothing store", location: "New York, New York" },
+  { cellId: "q4-vintage-ny", sweep: "qualifier", term: "Vintage clothing store", location: "New York, New York" },
+  { cellId: "q5-jewelry-ny", sweep: "qualifier", term: "Jewelry store", location: "New York, New York" },
+  // market sweep · qualifier held at "Gift shop" (cell 1 is the shared anchor)
+  { cellId: "m6-giftshop-seattle", sweep: "market", term: "Gift shop", location: "Seattle, Washington" },
+  { cellId: "m7-giftshop-la", sweep: "market", term: "Gift shop", location: "Los Angeles, California" },
+  { cellId: "m8-giftshop-austin", sweep: "market", term: "Gift shop", location: "Austin, Texas" },
+  { cellId: "m9-giftshop-nashville", sweep: "market", term: "Gift shop", location: "Nashville, Tennessee" },
+  { cellId: "m10-giftshop-denver", sweep: "market", term: "Gift shop", location: "Denver, Colorado" },
+];
+
+export const PLACES_PER_CELL = 100;
+
+function actorInput(cell: TestCell, perCell: number): Record<string, unknown> {
+  return {
+    searchStringsArray: [cell.term],
+    locationQuery: cell.location,
+    maxCrawledPlacesPerSearch: perCell,
+    // The rating floor is a REAL qualifier we would ship, so it belongs in the
+    // actor input. That also means every result comes back >= 4 stars, which
+    // is why rating is reported below but carries no scoring weight — a
+    // component that is always true measures nothing.
+    placeMinimumStars: "four",
+    website: "allPlaces",
+    skipClosedPlaces: true,
+    language: "en",
+    countryCode: "us",
+    // List-level fields carry everything the scoring needs. The detail-page
+    // crawl is the expensive half of this actor and buys us nothing here.
+    scrapePlaceDetailPage: false,
+    includeReviews: false,
+    includeImages: false,
+    includeOpeningHours: false,
+    includePeopleAlsoSearch: false,
+    includeWebResults: false,
+  };
+}
+
+interface BuyerProfile {
+  categories: Set<string>;
+  subTypes: Set<string>;
+  p25: number;
+  p75: number;
+  basis: { customerListings: number; controlListings: number };
+}
+
+/** Who buys, according to the listings we have captured so far. */
+export function buyerProfile(): BuyerProfile {
+  const p = getGmapsProfile();
+  return {
+    categories: new Set(p.categories.filter((c) => c.customers >= 2).map((c) => c.value)),
+    subTypes: new Set(p.subTypes.filter((s) => s.customers >= 2).map((s) => s.value)),
+    p25: p.reviews.customerP25 ?? 0,
+    p75: p.reviews.customerP75 ?? Number.MAX_SAFE_INTEGER,
+    basis: { customerListings: p.customerListings, controlListings: p.controlListings },
+  };
+}
+
+export interface LeadScore {
+  score: number; catHit: number; subHit: number; inBand: number; hasSite: number;
+}
+
+/**
+ * 0-100 against the buyer profile. Weights say what we believe: what a shop
+ * IS matters most, how big it is matters nearly as much (buyers cluster in a
+ * narrow review band), and having a website is table stakes rather than a
+ * differentiator.
+ */
+export function scoreLead(p: GoogleMapsPlace, prof: BuyerProfile): LeadScore {
+  const subs = p.subTypes ?? p.categories ?? [];
+  const reviews = Number(p.reviewsCount ?? 0);
+
+  const catHit = p.categoryName && prof.categories.has(p.categoryName) ? 1 : 0;
+  const subHit = subs.some((s) => prof.subTypes.has(s)) ? 1 : 0;
+  const inBand = reviews >= prof.p25 && reviews <= prof.p75 ? 1 : 0;
+  const hasSite = p.website ? 1 : 0;
+  const open = !p.permanentlyClosed && !p.temporarilyClosed ? 1 : 0;
+
+  return {
+    score: catHit * 40 + subHit * 15 + inBand * 30 + hasSite * 10 + open * 5,
+    catHit, subHit, inBand, hasSite,
+  };
+}
+
+export const QUALIFIED_AT = 70;
+
+// ── phase 1: start ──
+
+export async function startBatch(
+  matrix: TestCell[] = DEFAULT_MATRIX,
+  perCell = PLACES_PER_CELL,
+): Promise<{ batch: string; started: number; errors: string[] }> {
+  const batch = `batch_${new Date().toISOString().replace(/[:.]/g, "-")}`;
+  const errors: string[] = [];
+  let started = 0;
+
+  for (const cell of matrix) {
+    const id = randomUUID();
+    try {
+      const { runId, datasetId } = await apifyClient.startRun(actorInput(cell, perCell));
+      sqlite
+        .prepare(
+          `INSERT INTO apify_test_runs (id, batch, cell_id, sweep, term, location, apify_run_id, dataset_id, status)
+           VALUES (?,?,?,?,?,?,?,?,'running')`,
+        )
+        .run(id, batch, cell.cellId, cell.sweep, cell.term, cell.location, runId, datasetId);
+      started++;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      errors.push(`${cell.cellId}: ${msg}`);
+      sqlite
+        .prepare(
+          `INSERT INTO apify_test_runs (id, batch, cell_id, sweep, term, location, status, error)
+           VALUES (?,?,?,?,?,?,'failed',?)`,
+        )
+        .run(id, batch, cell.cellId, cell.sweep, cell.term, cell.location, msg);
+    }
+  }
+  return { batch, started, errors };
+}
+
+// ── phase 2: collect ──
+
+/** Check every still-running cell; ingest and score the ones that finished. */
+export async function pollBatch(batch: string): Promise<{ ingested: number; stillRunning: number }> {
+  const running = sqlite
+    .prepare("SELECT * FROM apify_test_runs WHERE batch = ? AND status = 'running'")
+    .all(batch) as Array<{ id: string; cell_id: string; apify_run_id: string; dataset_id: string }>;
+
+  if (running.length === 0) return { ingested: 0, stillRunning: 0 };
+
+  const prof = buyerProfile();
+  let ingested = 0;
+  let stillRunning = 0;
+
+  for (const r of running) {
+    let status: string;
+    let stats: Record<string, unknown> | null = null;
+    try {
+      ({ status, stats } = await apifyClient.getRunStatus(r.apify_run_id));
+    } catch (e) {
+      // A status check that fails is not a run that failed — leave it running
+      // and try again on the next poll.
+      console.error(`[qualifier-test] status check ${r.cell_id}:`, e);
+      stillRunning++;
+      continue;
+    }
+
+    if (status === "READY" || status === "RUNNING") { stillRunning++; continue; }
+
+    if (status !== "SUCCEEDED") {
+      sqlite
+        .prepare("UPDATE apify_test_runs SET status='failed', error=?, finished_at=datetime('now') WHERE id=?")
+        .run(status, r.id);
+      continue;
+    }
+
+    let items: GoogleMapsPlace[];
+    try {
+      items = await apifyClient.getDatasetItems(r.dataset_id, PLACES_PER_CELL * 2);
+    } catch (e) {
+      console.error(`[qualifier-test] dataset ${r.cell_id}:`, e);
+      stillRunning++;
+      continue;
+    }
+
+    const insert = sqlite.prepare(
+      `INSERT INTO apify_test_leads
+         (id, run_id, batch, place_id, title, category, sub_types_json, address, city, state,
+          postal_code, phone, website, maps_url, rating, review_count, score, cat_hit, sub_hit, in_band, has_site)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    );
+
+    let qualified = 0;
+    let totalScore = 0;
+    // One transaction per cell: 100 synchronous inserts, and better-sqlite3
+    // blocks the event loop for the duration either way — batching keeps that
+    // window as short as possible. No network calls inside.
+    sqlite.transaction(() => {
+      sqlite.prepare("DELETE FROM apify_test_leads WHERE run_id = ?").run(r.id);
+      for (const p of items) {
+        const s = scoreLead(p, prof);
+        totalScore += s.score;
+        if (s.score >= QUALIFIED_AT) qualified++;
+        insert.run(
+          randomUUID(), r.id, batch, p.placeId ?? null, p.title ?? null, p.categoryName ?? null,
+          JSON.stringify(p.subTypes ?? p.categories ?? []), p.address ?? null, p.city ?? null,
+          p.state ?? null, p.postalCode ?? null, p.phone ?? null, p.website ?? null, p.url ?? null,
+          Number(p.totalScore ?? 0) || null, Number(p.reviewsCount ?? 0) || 0,
+          s.score, s.catHit, s.subHit, s.inBand, s.hasSite,
+        );
+      }
+    })();
+
+    sqlite
+      .prepare(
+        `UPDATE apify_test_runs
+            SET status='done', scraped=?, qualified=?, avg_score=?, stats_json=?, finished_at=datetime('now')
+          WHERE id=?`,
+      )
+      .run(items.length, qualified, items.length ? totalScore / items.length : 0, JSON.stringify(stats), r.id);
+    ingested++;
+  }
+
+  return { ingested, stillRunning };
+}
+
+// ── reporting ──
+
+export function batchSummary(batch: string) {
+  const runs = sqlite
+    .prepare("SELECT * FROM apify_test_runs WHERE batch = ? ORDER BY cell_id")
+    .all(batch) as Array<Record<string, unknown>>;
+
+  const cells = runs.map((r) => {
+    const runId = String(r.id);
+    const agg = sqlite
+      .prepare(
+        `SELECT COUNT(*) n,
+                AVG(cat_hit)*100 catPct, AVG(sub_hit)*100 subPct,
+                AVG(in_band)*100 bandPct, AVG(has_site)*100 sitePct,
+                AVG(review_count) avgReviews, AVG(rating) avgRating
+           FROM apify_test_leads WHERE run_id = ?`,
+      )
+      .get(runId) as Record<string, number>;
+    const medRow = sqlite
+      .prepare(
+        `SELECT review_count FROM apify_test_leads WHERE run_id = ?
+          ORDER BY review_count LIMIT 1 OFFSET (SELECT COUNT(*)/2 FROM apify_test_leads WHERE run_id = ?)`,
+      )
+      .get(runId, runId) as { review_count: number } | undefined;
+
+    const round = (x: number | null | undefined, d = 1) =>
+      x == null ? null : Math.round(x * 10 ** d) / 10 ** d;
+
+    return {
+      cellId: r.cell_id, sweep: r.sweep, term: r.term, location: r.location,
+      status: r.status, error: r.error,
+      scraped: r.scraped ?? 0,
+      qualified: r.qualified ?? 0,
+      qualifiedPct: r.scraped ? round((Number(r.qualified) / Number(r.scraped)) * 100) : null,
+      avgScore: round(Number(r.avg_score)),
+      categoryMatchPct: round(agg?.catPct),
+      subTypeMatchPct: round(agg?.subPct),
+      reviewBandPct: round(agg?.bandPct),
+      hasWebsitePct: round(agg?.sitePct),
+      medianReviews: medRow?.review_count ?? null,
+      avgRating: round(agg?.avgRating, 2),
+    };
+  });
+
+  const totals = sqlite
+    .prepare(
+      `SELECT COUNT(*) leads, SUM(score >= ${QUALIFIED_AT}) qualified, AVG(score) avgScore
+         FROM apify_test_leads WHERE batch = ?`,
+    )
+    .get(batch) as { leads: number; qualified: number; avgScore: number };
+
+  const prof = buyerProfile();
+  return {
+    batch,
+    cells,
+    totals: {
+      leads: totals?.leads ?? 0,
+      qualified: totals?.qualified ?? 0,
+      qualifiedPct: totals?.leads ? Math.round((totals.qualified / totals.leads) * 1000) / 10 : 0,
+      avgScore: totals?.avgScore ? Math.round(totals.avgScore * 10) / 10 : 0,
+    },
+    scoredAgainst: {
+      categories: [...prof.categories],
+      reviewBand: [prof.p25, prof.p75],
+      ...prof.basis,
+      caveat:
+        prof.basis.controlListings < 30
+          ? `Only ${prof.basis.controlListings} control listings captured, so this scores against what buyers look like, not against what separates buyers from non-buyers.`
+          : null,
+    },
+  };
+}
+
+export function listBatches(): Array<Record<string, unknown>> {
+  return sqlite
+    .prepare(
+      `SELECT batch, COUNT(*) cells, SUM(status='done') done, SUM(status='running') running,
+              SUM(status='failed') failed, MIN(created_at) started
+         FROM apify_test_runs GROUP BY batch ORDER BY started DESC LIMIT 20`,
+    )
+    .all() as Array<Record<string, unknown>>;
+}
+
+export function exportLeads(batch: string, minScore = 0): Array<Record<string, unknown>> {
+  return sqlite
+    .prepare(
+      `SELECT r.cell_id, r.term, r.location, l.title, l.category, l.address, l.city, l.state,
+              l.postal_code, l.phone, l.website, l.maps_url, l.rating, l.review_count, l.score
+         FROM apify_test_leads l JOIN apify_test_runs r ON r.id = l.run_id
+        WHERE l.batch = ? AND l.score >= ?
+        ORDER BY l.score DESC, l.review_count DESC`,
+    )
+    .all(batch, minScore) as Array<Record<string, unknown>>;
+}
