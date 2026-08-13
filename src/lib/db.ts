@@ -3328,6 +3328,38 @@ try {
   // Chain filter — added after the first batch had already been scored.
   try { sqlite.exec("ALTER TABLE apify_test_leads ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0"); } catch { /* exists */ }
   try { sqlite.exec("ALTER TABLE apify_test_leads ADD COLUMN exclude_reason TEXT"); } catch { /* exists */ }
+
+  // Email discovery: Google Maps carries no email address, so a second crawl
+  // over each lead's website is the only way to get one. One row per address
+  // found (a site often lists several).
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS apify_test_emails (
+    id TEXT PRIMARY KEY,
+    batch TEXT NOT NULL,
+    lead_id TEXT NOT NULL,
+    website TEXT,
+    email TEXT NOT NULL,
+    kind TEXT,                    -- role | personal | freemail
+    domain_match INTEGER NOT NULL DEFAULT 0,
+    verify_result TEXT,           -- neverbounce: valid|invalid|catchall|unknown|disposable
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_apify_test_emails_batch ON apify_test_emails(batch)");
+  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_apify_test_emails_uniq ON apify_test_emails(lead_id, email)");
+
+  // The probe's own run bookkeeping, mirroring apify_test_runs.
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS apify_test_email_runs (
+    id TEXT PRIMARY KEY,
+    batch TEXT NOT NULL,
+    apify_run_id TEXT,
+    dataset_id TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    sites_requested INTEGER,
+    sites_with_email INTEGER,
+    emails_found INTEGER,
+    error TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    finished_at TEXT
+  )`);
 } catch (e) { console.error("[db] apify test tables error:", e); }
 
 }  // end if (!IS_BUILD_PHASE)
