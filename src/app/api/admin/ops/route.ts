@@ -38,6 +38,7 @@ export async function GET(req: NextRequest) {
       "POST /api/admin/ops/instantly-contacted?confirm=1": "record leads already contacted in Instantly from a CSV export { rows[], dryRun? }",
       "GET  /api/admin/ops/campaigns": "campaigns with lead counts and Instantly links (read-only)",
       "POST /api/admin/ops/campaigns?confirm=1": "create/link a campaign { action:'create', name, instantlyCampaignId }",
+      "POST /api/admin/ops/instantly-push?confirm=1": "verify or push an explicit list { action:'verify'|'push', campaignId?, companyIds[], dryRun? }",
     },
     auth: "x-ops-key: <OPS_TOKEN>  (mutations also require ?confirm=1)",
   });
