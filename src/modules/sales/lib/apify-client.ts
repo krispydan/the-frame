@@ -290,6 +290,51 @@ class ApifyClient {
     };
   }
 
+  /**
+   * The account's month-to-date usage and plan limit.
+   *
+   * Answers "where did the credit go" at the account level, which a per-run
+   * cost cannot: it shows whether a given piece of work consumed the month or
+   * merely finished off a month that was already nearly spent. Like the run
+   * endpoints this is a plain read, so it works while the account is locked out.
+   */
+  async getAccountUsage(): Promise<{
+    monthlyUsageUsd: number | null;
+    limitUsd: number | null;
+    plan: string | null;
+    periodStart: string | null;
+    byService: Record<string, number> | null;
+  }> {
+    const token = this.resolveApiKey();
+    if (!token) throw new Error("Apify not configured");
+
+    const [usageRes, userRes] = await Promise.all([
+      fetch(`${APIFY_BASE}/users/me/usage/monthly?token=${token}`, { signal: AbortSignal.timeout(30_000) }),
+      fetch(`${APIFY_BASE}/users/me?token=${token}`, { signal: AbortSignal.timeout(30_000) }),
+    ]);
+    if (!usageRes.ok) throw new Error(`Apify usage HTTP ${usageRes.status}`);
+
+    const usage = (await usageRes.json()).data as Record<string, unknown>;
+    const user = userRes.ok ? ((await userRes.json()).data as Record<string, unknown>) : {};
+    const plan = (user.plan ?? {}) as Record<string, unknown>;
+
+    const byService: Record<string, number> = {};
+    for (const [k, v] of Object.entries((usage.monthlyServiceUsage ?? {}) as Record<string, { totalUsageCreditsUsdAfterVolumeDiscount?: number }>)) {
+      const amount = v?.totalUsageCreditsUsdAfterVolumeDiscount;
+      if (typeof amount === "number" && amount > 0) byService[k] = Math.round(amount * 100) / 100;
+    }
+
+    return {
+      monthlyUsageUsd: typeof usage.totalUsageCreditsUsdAfterVolumeDiscount === "number"
+        ? Math.round(usage.totalUsageCreditsUsdAfterVolumeDiscount * 100) / 100
+        : null,
+      limitUsd: typeof plan.maxMonthlyUsageUsd === "number" ? plan.maxMonthlyUsageUsd : null,
+      plan: (plan.id as string) ?? null,
+      periodStart: (usage.usageCycleStartAt as string) ?? null,
+      byService: Object.keys(byService).length ? byService : null,
+    };
+  }
+
   async getDatasetItems(datasetId: string, limit = 1000): Promise<GoogleMapsPlace[]> {
     const token = this.resolveApiKey();
     if (!token) throw new Error("Apify not configured");
