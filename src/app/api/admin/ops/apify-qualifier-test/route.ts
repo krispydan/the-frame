@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireOpsToken } from "@/lib/ops-auth";
 import {
   DEFAULT_MATRIX, PLACES_PER_CELL, batchSummary, exportLeads, listBatches,
-  pollBatch, rescoreBatch, retryFailedCells, startBatch, type TestCell,
+  batchCosts, pollBatch, rescoreBatch, retryFailedCells, startBatch, type TestCell,
 } from "@/modules/sales/lib/qualifier-test";
 import {
   emailReport, exportEmails, pollEmailProbe, startEmailProbe, verifySample,
@@ -22,6 +22,7 @@ import {
  * GET  ?batch=<id>&export=1[&minScore=]     → the scored leads themselves
  * GET  ?batch=<id>&emails=1                 → poll the email probe, then its report
  * GET  ?batch=<id>&exportEmails=1           → the addresses found
+ * GET  ?batch=<id>&costs=1                  → what each cell actually cost, per Apify
  *
  * GET polls as a side effect on purpose. The runs are async on Apify's side,
  * so *someone* has to check on them, and making that the read path means no
@@ -45,6 +46,10 @@ export async function GET(req: NextRequest) {
   if (p.get("emails") === "1") {
     const poll = await pollEmailProbe(batch);
     return NextResponse.json({ ok: true, poll, ...emailReport(batch) });
+  }
+
+  if (p.get("costs") === "1") {
+    return NextResponse.json({ ok: true, ...(await batchCosts(batch)) });
   }
 
   if (p.get("exportEmails") === "1") {
