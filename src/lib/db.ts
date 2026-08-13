@@ -3325,6 +3325,9 @@ try {
   )`);
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_apify_test_leads_run ON apify_test_leads(run_id, score)");
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_apify_test_leads_batch ON apify_test_leads(batch, score)");
+  // Chain filter — added after the first batch had already been scored.
+  try { sqlite.exec("ALTER TABLE apify_test_leads ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0"); } catch { /* exists */ }
+  try { sqlite.exec("ALTER TABLE apify_test_leads ADD COLUMN exclude_reason TEXT"); } catch { /* exists */ }
 } catch (e) { console.error("[db] apify test tables error:", e); }
 
 }  // end if (!IS_BUILD_PHASE)

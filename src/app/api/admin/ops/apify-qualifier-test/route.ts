@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
   if (!batch) return NextResponse.json({ ok: true, batches: listBatches() });
 
   if (p.get("export") === "1") {
-    const rows = exportLeads(batch, Number(p.get("minScore")) || 0);
+    const rows = exportLeads(batch, Number(p.get("minScore")) || 0, p.get("includeExcluded") === "1");
     return NextResponse.json({ ok: true, batch, count: rows.length, leads: rows });
   }
 
