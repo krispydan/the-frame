@@ -47,6 +47,14 @@ export interface CohortRow {
   ajmRevenue: number;
   score: number;
   reasons: string[];
+  recommendation: Recommendation;
+  recReason: string;
+  coType: string | null; website: string | null; domain: string | null;
+  source: string | null; sourceType: string | null; sourceQuery: string | null;
+  leadSourceDetail: string | null; industry: string | null; category: string | null;
+  segment: string | null; tags: string | null; icpReasoning: string | null;
+  createdAt: string | null; placeId: string | null; address: string | null;
+  phone: string | null; notes: string | null; enrichmentText: string | null;
 }
 
 /**
@@ -65,7 +73,13 @@ const CANDIDATE_SQL = `
   SELECT
     c.id                         AS companyId,
     c.name                       AS name,
-    c.city, c.state, c.status,
+    c.city, c.state, c.status, c.type AS coType, c.website, c.domain,
+    c.source, c.source_type AS sourceType, c.source_query AS sourceQuery,
+    c.lead_source_detail AS leadSourceDetail, c.industry, c.category, c.segment,
+    c.tags, c.icp_reasoning AS icpReasoning, c.created_at AS createdAt,
+    c.google_place_id AS placeId, c.address, ct.phone AS phone,
+    substr(COALESCE(c.notes,''),1,180) AS notes,
+    substr(COALESCE(c.enrichment_text,''),1,220) AS enrichmentText,
     c.icp_tier                   AS icpTier,
     c.email_verification_status  AS verification,
     ct.id                        AS contactId,
@@ -111,6 +125,51 @@ interface RawRow {
   gmapsCategory: string | null; gmapsSubTypes: string | null;
   reviewCount: number | null; rating: number | null; closed: number;
   ajmOrders: number; ajmRevenue: number;
+  coType: string | null; website: string | null; domain: string | null;
+  source: string | null; sourceType: string | null; sourceQuery: string | null;
+  leadSourceDetail: string | null; industry: string | null; category: string | null;
+  segment: string | null; tags: string | null; icpReasoning: string | null;
+  createdAt: string | null; placeId: string | null; address: string | null;
+  phone: string | null; notes: string | null; enrichmentText: string | null;
+}
+
+/**
+ * A per-store call, so a human reviewing thousands of rows starts from a
+ * position rather than a blank.
+ *
+ * The load-bearing question for this pool is PHYSICAL SHOP OR NOT. We sell
+ * eyewear into retail; a one-person design studio selling its own goods online
+ * is not a wholesale account however tidy its website. The strongest available
+ * evidence of a real shop is a Google listing — a place id, a review count, a
+ * street address — because those exist for premises and not for a home office.
+ */
+const MAKER_PATTERN =
+  /\b(designs?|studio|creations?|handmade|crafts?|jewell?ery by|art by|by [a-z]+$|printing|print shop|photography|consult|marketing|agency|LLC$)\b/i;
+const PERSON_NAME_PATTERN = /^[A-Z][a-z]+ ?[A-Z]?[a-z]* (Designs?|Studio|Art|Jewell?ery|Creations?)$/;
+
+export type Recommendation = "push" | "review" | "skip";
+
+function recommend(r: RawRow, score: number): { recommendation: Recommendation; recReason: string } {
+  const hasGooglePresence = !!(r.placeId || Number(r.reviewCount ?? 0) > 0);
+  const hasPremises = !!(r.address || (r.city && r.state));
+  const looksLikeMaker = MAKER_PATTERN.test(r.name) || PERSON_NAME_PATTERN.test(r.name);
+
+  if (r.coType === "online" && !hasGooglePresence) {
+    return { recommendation: "skip", recReason: "flagged online-only with no Google listing" };
+  }
+  if (looksLikeMaker && !hasGooglePresence) {
+    return { recommendation: "skip", recReason: "reads as a maker/service business and has no Google listing" };
+  }
+  if (!hasGooglePresence && !hasPremises) {
+    return { recommendation: "skip", recReason: "no Google listing and no address — cannot confirm a physical shop" };
+  }
+  if (hasGooglePresence && score >= 25) {
+    return { recommendation: "push", recReason: "Google listing plus review-band or tier evidence" };
+  }
+  if (hasGooglePresence) {
+    return { recommendation: "review", recReason: "has a Google listing but thin supporting evidence" };
+  }
+  return { recommendation: "review", recReason: "has an address but no Google listing to confirm retail" };
 }
 
 /** Free-mail hosts are fine for a boutique owner — this is not a penalty. */
@@ -202,7 +261,14 @@ export function buildCohort(limit = 1000, minScore = 0): CohortResult {
 
     seenEmail.add(r.email);
     const { score, reasons } = scoreRow(r, prof);
+    const rec = recommend(r, score);
     scored.push({
+      ...rec,
+      coType: r.coType, website: r.website, domain: r.domain, source: r.source,
+      sourceType: r.sourceType, sourceQuery: r.sourceQuery, leadSourceDetail: r.leadSourceDetail,
+      industry: r.industry, category: r.category, segment: r.segment, tags: r.tags,
+      icpReasoning: r.icpReasoning, createdAt: r.createdAt, placeId: r.placeId,
+      address: r.address, phone: r.phone, notes: r.notes, enrichmentText: r.enrichmentText,
       companyId: r.companyId, name: r.name, email: r.email, contactId: r.contactId,
       city: r.city, state: r.state, status: r.status, icpTier: r.icpTier,
       verification: r.verification, gmapsCategory: r.gmapsCategory,
