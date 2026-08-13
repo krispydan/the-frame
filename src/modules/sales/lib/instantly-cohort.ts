@@ -89,13 +89,20 @@ const CANDIDATE_SQL = `
     COALESCE(g.review_count, c.google_review_count) AS reviewCount,
     COALESCE(g.rating, c.google_rating)             AS rating,
     COALESCE(g.permanently_closed, 0)               AS closed,
-    (SELECT COUNT(*)          FROM ajm_orders a WHERE a.company_id = c.id) AS ajmOrders,
-    (SELECT COALESCE(SUM(a.total),0) FROM ajm_orders a WHERE a.company_id = c.id) AS ajmRevenue
+    COALESCE(aj.n, 0)     AS ajmOrders,
+    COALESCE(aj.total, 0) AS ajmRevenue
   FROM companies c
   JOIN contacts ct
     ON ct.company_id = c.id
    AND ct.email IS NOT NULL AND TRIM(ct.email) <> ''
   LEFT JOIN gmaps_listings g ON g.company_id = c.id
+  -- Aggregated ONCE over the whole table rather than as two correlated
+  -- subqueries per row. At 135k candidates the correlated form was 270k extra
+  -- queries per request, all synchronous.
+  LEFT JOIN (
+    SELECT company_id, COUNT(*) n, COALESCE(SUM(total),0) total
+      FROM ajm_orders GROUP BY company_id
+  ) aj ON aj.company_id = c.id
   WHERE COALESCE(c.do_not_contact, 0) = 0
     -- Never pushed: no campaign_leads row of any kind for this company...
     AND NOT EXISTS (
@@ -115,7 +122,17 @@ const CANDIDATE_SQL = `
     )
     AND c.status NOT IN ('customer','not_interested','ghosted','disqualified')
   GROUP BY c.id
-  ORDER BY ct.is_primary DESC, ct.created_at ASC
+  -- Cheap pre-rank in SQL so the JS side never sees the whole pool. This
+  -- mirrors the scoring weights closely enough to pick the right candidates;
+  -- exact scores are still computed below on the survivors.
+  ORDER BY
+    (CASE WHEN COALESCE(aj.n,0) > 0 THEN 40 ELSE 0 END) +
+    (CASE WHEN c.icp_tier = 'A' THEN 15 WHEN c.icp_tier = 'B' THEN 8 ELSE 0 END) +
+    (CASE WHEN COALESCE(g.review_count, c.google_review_count) > 0 THEN 20 ELSE 0 END) +
+    (CASE WHEN g.category_name IS NOT NULL THEN 25 ELSE 0 END) DESC,
+    COALESCE(aj.total,0) DESC,
+    ct.is_primary DESC
+  LIMIT ?
 `;
 
 interface RawRow {
@@ -234,9 +251,36 @@ export interface CohortResult {
   excluded: { suppressed: number; invalidEmail: number; chainByReviews: number; closed: number; lowRated: number };
 }
 
+/**
+ * How many candidates to pull before scoring. Deliberately bounded.
+ *
+ * This function used to load EVERY candidate — 135,000 rows — score them all in
+ * JS, then return the top 1,000. With better-sqlite3 being fully synchronous
+ * that blocked the event loop for minutes per call, and polling the endpoint
+ * pegged a core for 45 minutes and took production down. Nothing about the job
+ * needed the whole pool in memory: SQL can rank cheaply and hand back a
+ * shortlist.
+ */
+const SCAN_MULTIPLIER = 8;
+const MAX_SCAN = 20_000;
+
 export function buildCohort(limit = 1000, minScore = 0): CohortResult {
   const prof = buyerProfile();
-  const raw = sqlite.prepare(CANDIDATE_SQL).all() as RawRow[];
+  const scan = Math.min(MAX_SCAN, Math.max(limit * SCAN_MULTIPLIER, 2_000));
+  const raw = sqlite.prepare(CANDIDATE_SQL).all(scan) as RawRow[];
+
+  // Suppression in ONE query rather than one per row. checkSuppression() is
+  // still the authority on the rule; this just asks it about the rows we kept.
+  const suppressedIds = new Set(
+    (sqlite
+      .prepare(
+        `SELECT DISTINCT company_id FROM campaign_leads WHERE status = 'unsubscribed'
+          UNION SELECT id FROM companies WHERE COALESCE(do_not_contact,0) = 1`,
+      )
+      .all() as Array<{ company_id?: string; id?: string }>)
+      .map((r) => r.company_id ?? r.id)
+      .filter((x): x is string => !!x),
+  );
 
   const excluded = { suppressed: 0, invalidEmail: 0, chainByReviews: 0, closed: 0, lowRated: 0 };
   const seenEmail = new Set<string>();
@@ -248,9 +292,12 @@ export function buildCohort(limit = 1000, minScore = 0): CohortResult {
     // Sending twice to one mailbox is what makes a campaign look like spam.
     if (seenEmail.has(r.email)) continue;
 
-    // Suppression goes through the shared module rather than being
-    // reimplemented in SQL — one authority on "may we message this company".
-    if (checkSuppression(r.companyId).suppressed) { excluded.suppressed++; continue; }
+    // Cheap set test first; checkSuppression() is then consulted only for the
+    // rows that survive, so the authoritative rule still decides but is not
+    // run 135,000 times.
+    if (suppressedIds.has(r.companyId) || checkSuppression(r.companyId).suppressed) {
+      excluded.suppressed++; continue;
+    }
 
     // Hard disqualifiers, mirroring the qualifier bench so both pipelines mean
     // the same thing by "not a prospect".
@@ -297,6 +344,8 @@ export function buildCohort(limit = 1000, minScore = 0): CohortResult {
   return {
     funnel: {
       candidateRows: raw.length,
+      scanCap: scan,
+      scanCapHit: raw.length >= scan ? 1 : 0,
       afterDedupeAndGates: scored.length,
       selected: selected.length,
       needVerification: selected.filter((s) => !s.verification || s.verification === "error").length,
