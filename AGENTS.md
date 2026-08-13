@@ -96,3 +96,93 @@ branch is not reachable no matter what URL you use.
 Always route curl through the agent proxy's CA bundle:
 `curl --cacert /root/.ccr/ca-bundle.crt -H "x-ops-key: $OPS_TOKEN" <url>`.
 Verify access with `GET /api/admin/ops` → `{ ok: true, ... }`.
+
+## Never poll a POST endpoint to find out whether a deploy has landed
+
+**This rule was written in blood: it cost $35 of Apify credit in 3½ minutes and
+blew a monthly plan limit.** Read it before you write any waiting loop.
+
+A Railway deploy takes ~5 minutes. During that window **production is running
+OLDER code than the file you just edited** — so a new `action`, parameter, or
+route you just wrote does not exist there yet. That version skew is the trap.
+
+What went wrong: a loop polled `POST .../apify-qualifier-test?confirm=1` with
+`{"action":"rescore"}` every 30s to detect when `rescore` had deployed. The
+build then live did not know that action, and the handler's fall-through was
+"start a full ten-cell scrape". Seven waves of ten runs fired before the deploy
+landed. Two independent mistakes had to line up, so there are two rules:
+
+1. **Readiness checks go on GET, always.** Probe for a marker in a read
+   response (`| grep -q '<new field>'`). Never send a mutating request to find
+   out whether the mutation exists.
+2. **Mutating handlers fail CLOSED on anything unrecognised.** An unknown
+   `action` returns 400. The expensive path requires its own explicit name
+   (`{"action":"scrape"}`) and is never what an unlabelled, malformed, or
+   truncated body falls through to. *The most expensive operation on an endpoint
+   must never be what "I did not understand you" resolves to.*
+
+Also: `?confirm=1` did not help here. It guards against an accidental single
+call, not against a loop that includes it in every request. Treat `confirm` as
+a speed bump, never as the budget control.
+
+## Spending money from an ops endpoint
+
+Any endpoint that calls a metered third-party API (Apify, NeverBounce,
+Outscraper, an LLM) is a spending endpoint. For those:
+
+- **Read the vendor's pricing model before the first call**, not after the
+  bill. Apify's actors are pay-per-event, and the events are not obvious:
+  `place-scraped` bills per result AND `filter-applied` bills per filter per
+  place. Fetch it from the API rather than assuming:
+  `GET https://api.apify.com/v2/acts/<user>~<actor>` → `pricingInfos`.
+- **Do not ask the vendor to filter on data it already returns to you.** Rating
+  and closed-status arrive on every Google Maps row, so `placeMinimumStars` and
+  `skipClosedPlaces` in the actor input were billed 1660 `filter-applied`
+  events — a third of that batch's cost — for two rules the scorer applies for
+  free. Filter locally whenever the field is in the response.
+- **Your own cost bookkeeping cannot explain a surprising bill**, because the
+  spend you failed to account for is by definition the spend you did not
+  record. Go to the account ledger:
+  `GET /api/admin/ops/apify-usage?since=YYYY-MM-DD` — every run on the account
+  by actor and by day, read-only, and it still answers while the account is
+  locked out on its usage limit.
+- **Check the plan headroom before starting a batch.** The Apify account is a
+  **$29/month Starter plan**; at ~$0.004/place that is ~7,000 places a month
+  total, shared with the customer backfill and prospect enrichment. Assume
+  there is less room than you think.
+- **Collect what you already paid for before spending again.** Runs bill
+  whether or not anything reads their dataset back, so an uncollected batch is
+  money spent for nothing. `{"action":"collect"}` on the bench ingests every
+  uncollected batch and is deliberately incapable of starting a run
+  (`pollBatch(..., { startQueued: false })`).
+- **A 402'd account cannot read its own datasets.** Exceeding the monthly limit
+  locks the whole account, not just actor starts: `GET /datasets/<id>/items`
+  returns **HTTP 402** as well. So results you have already paid for become
+  unreachable until the limit is raised — collect BEFORE you are near the
+  ceiling, never after. What *does* still work at 402 is run and account
+  metadata (`/actor-runs`, `/actor-runs/<id>`, `/users/me/usage/monthly`),
+  which is why the spend ledger can still diagnose a locked-out account.
+
+## Never swallow an error in a catch
+
+Both failure paths in the bench's poll loop did `catch { console.error(...);
+continue; }`. Seven batches then sat at "still running" with no way to see why,
+because the reason existed only in logs nobody reads. That turned a
+diagnosable problem into guesswork at the exact moment accuracy mattered.
+
+**Record the reason where the caller will see it** — on the row, in the
+response — not only in a log line. If a loop can silently make no progress,
+it must be able to say why it made no progress.
+
+## When you are wrong about production, get evidence
+
+Three explanations for the Apify bill were offered from reasoning, and the
+first two were wrong: "over-scraping from server-side filters" (billed places
+exactly equalled kept places, 850/850) and "the month was already spent before
+this ran" (the account had used $0.23 all month). The account ledger settled it
+in one call.
+
+When a production number is surprising: **build the read that answers it, then
+answer.** Plain API reads (run history, usage, run records) keep working when
+the account is rate-limited or locked out, so there is rarely an excuse to
+theorise instead.
