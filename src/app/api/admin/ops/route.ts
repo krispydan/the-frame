@@ -33,6 +33,8 @@ export async function GET(req: NextRequest) {
       "POST /api/admin/ops/apify-qualifier-test?confirm=1": "start an ICP qualifier/market bench on Apify { matrix?, perCell? }",
       "GET  /api/admin/ops/apify-qualifier-test[?batch=&export=1&minScore=]": "poll + scorecard, or export the scored leads",
       "GET  /api/admin/ops/apify-usage[?since=YYYY-MM-DD&limit=]": "Apify spend ledger — every run by actor and day (read-only)",
+      "GET  /api/admin/ops/instantly-cohort[?limit=&minScore=&full=1]": "next Instantly cohort — ranked, with funnel + exclusions (read-only)",
+      "POST /api/admin/ops/instantly-cohort?confirm=1": "NeverBounce-verify that cohort { action:'verify', limit, minScore }",
     },
     auth: "x-ops-key: <OPS_TOKEN>  (mutations also require ?confirm=1)",
   });
