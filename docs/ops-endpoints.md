@@ -37,10 +37,49 @@ Code) instead of pasting `fetch()` snippets into the browser console.
 | GET | `/api/admin/ops/ajm/gap` | AJM vs Jaxy gap decomposition |
 | GET | `/api/admin/ops/cogs` | COGS / FIFO coverage diagnostics |
 | GET | `/api/admin/ops/purchase-orders` | Open purchase-order commitments (cash flow) |
+| GET | `/api/admin/ops/apify-usage?since=YYYY-MM-DD&limit=` | **Apify spend ledger** — every run by actor and day (read-only) |
+| GET | `/api/admin/ops/apify-qualifier-test` | List qualifier-bench batches |
+| GET | `/api/admin/ops/apify-qualifier-test?batch=` | Poll + scorecard for one batch |
+| GET | `/api/admin/ops/apify-qualifier-test?batch=&export=1[&minScore=]` | The scored leads |
+| GET | `/api/admin/ops/apify-qualifier-test?batch=&costs=1` | What that batch cost, per Apify's run records |
+| GET | `/api/admin/ops/apify-qualifier-test?batch=&emails=1` | Email-probe report |
+| POST | `/api/admin/ops/apify-qualifier-test?confirm=1` | Bench actions — **`action` is REQUIRED**, see below |
 
 The shared logic behind these lives in libs (`address-backfill.ts`,
 `geocoding.ts`, `order-lookup.ts`) and is also used by the session-guarded
 `/api/v1/*` equivalents the UI calls — one implementation, two front doors.
+
+## Apify qualifier bench — spending rules
+
+`POST /api/admin/ops/apify-qualifier-test?confirm=1` takes an explicit
+`action` and **rejects anything it does not recognise with a 400**:
+
+| action | spends? | what it does |
+| --- | --- | --- |
+| `scrape` | **YES** | Start a batch of Google Maps cells |
+| `emails` | **YES** | Crawl scraped leads' websites for addresses |
+| `verify` | **YES** (NeverBounce) | Verify a sample of found addresses |
+| `rescore` | no | Recompute scores from stored rows |
+| `retry` | no | Requeue failed cells |
+| `collect` | no | Ingest datasets from runs already paid for |
+
+`action` is mandatory precisely because it used to be optional. When the
+handler defaulted to `scrape`, a readiness loop sending an action that the
+*deployed* build did not yet know fell through to it and started seven full
+batches in 3½ minutes — ~$35, on a $29/month plan. See the "Never poll a POST
+endpoint" section in [`AGENTS.md`](../AGENTS.md).
+
+Before starting anything that spends, check `GET /api/admin/ops/apify-usage`
+for the month-to-date figure against the plan limit. And prefer `collect`
+first: runs bill whether or not their results are ever read back, so an
+uncollected batch is money spent for nothing.
+
+**Collect before you hit the ceiling, not after.** Going over the monthly limit
+locks the entire account — `GET /datasets/<id>/items` returns **402** just like
+an actor start does, so results you have already paid for become unreachable
+until the limit is raised. Run and account metadata (`/actor-runs`,
+`/users/me/usage/monthly`) keeps working at 402, which is the only reason the
+spend ledger can diagnose a locked-out account.
 
 ## Company merge
 
