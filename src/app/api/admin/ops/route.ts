@@ -30,6 +30,8 @@ export async function GET(req: NextRequest) {
       "GET  /api/admin/ops/three-pl": "3PL invoice import + audit operations",
       "GET  /api/admin/ops/purchase-orders": "open purchase-order commitments (cash-flow)",
       "GET  /api/admin/ops/faire-outreach": "Faire outreach diagnostics",
+      "POST /api/admin/ops/apify-qualifier-test?confirm=1": "start an ICP qualifier/market bench on Apify { matrix?, perCell? }",
+      "GET  /api/admin/ops/apify-qualifier-test[?batch=&export=1&minScore=]": "poll + scorecard, or export the scored leads",
     },
     auth: "x-ops-key: <OPS_TOKEN>  (mutations also require ?confirm=1)",
   });

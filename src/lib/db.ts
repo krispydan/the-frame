@@ -3272,4 +3272,59 @@ try {
   sqlite.exec("CREATE INDEX IF NOT EXISTS idx_email_templates_owner ON email_templates(owner_id, archived_at)");
 } catch (e) { console.error("[db] gmail tables error:", e); }
 
+
+// ── Apify qualifier test (prospecting research) ──
+// A bench, not a feature: run the Google Maps actor against different ICP
+// qualifiers and different markets, score every result against the buyer
+// profile, and compare hit rates. Kept as tables rather than a scratch file so
+// the 1000-lead sample survives a container restart and can be exported.
+try {
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS apify_test_runs (
+    id TEXT PRIMARY KEY,
+    batch TEXT NOT NULL,            -- groups the cells of one experiment
+    cell_id TEXT NOT NULL,
+    sweep TEXT,                     -- qualifier | market
+    term TEXT,
+    location TEXT,
+    apify_run_id TEXT,
+    dataset_id TEXT,
+    status TEXT NOT NULL DEFAULT 'starting',
+    scraped INTEGER,
+    qualified INTEGER,
+    avg_score REAL,
+    stats_json TEXT,
+    error TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    finished_at TEXT
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_apify_test_runs_batch ON apify_test_runs(batch, status)");
+
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS apify_test_leads (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    batch TEXT NOT NULL,
+    place_id TEXT,
+    title TEXT,
+    category TEXT,
+    sub_types_json TEXT,
+    address TEXT,
+    city TEXT,
+    state TEXT,
+    postal_code TEXT,
+    phone TEXT,
+    website TEXT,
+    maps_url TEXT,
+    rating REAL,
+    review_count INTEGER,
+    score INTEGER,
+    cat_hit INTEGER,
+    sub_hit INTEGER,
+    in_band INTEGER,
+    has_site INTEGER,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_apify_test_leads_run ON apify_test_leads(run_id, score)");
+  sqlite.exec("CREATE INDEX IF NOT EXISTS idx_apify_test_leads_batch ON apify_test_leads(batch, score)");
+} catch (e) { console.error("[db] apify test tables error:", e); }
+
 }  // end if (!IS_BUILD_PHASE)
