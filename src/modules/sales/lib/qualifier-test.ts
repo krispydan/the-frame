@@ -98,8 +98,25 @@ export function buyerProfile(): BuyerProfile {
   };
 }
 
+/**
+ * Hard ceiling on review count. Above this a Google listing is usually a chain
+ * store or a tourist-volume destination, neither of which buys wholesale the
+ * way an owner-operated boutique does.
+ *
+ * This is an EXCLUSION, not a score penalty: a chain is not a weak lead, it is
+ * the wrong lead, and letting it score partial credit only pushes a real
+ * prospect off the bottom of the list.
+ *
+ * Known limit, worth stating rather than burying: a review ceiling catches
+ * high-traffic independents more reliably than it catches chains. A mall
+ * location of a national brand often sits comfortably inside the band on its
+ * own listing. `chainSuspects()` covers that gap by name repetition.
+ */
+export const CHAIN_REVIEW_CEILING = 150;
+
 export interface LeadScore {
   score: number; catHit: number; subHit: number; inBand: number; hasSite: number;
+  excluded: number; excludeReason: string | null;
 }
 
 /**
@@ -118,9 +135,13 @@ export function scoreLead(p: GoogleMapsPlace, prof: BuyerProfile): LeadScore {
   const hasSite = p.website ? 1 : 0;
   const open = !p.permanentlyClosed && !p.temporarilyClosed ? 1 : 0;
 
+  const excluded = reviews > CHAIN_REVIEW_CEILING ? 1 : 0;
+
   return {
     score: catHit * 40 + subHit * 15 + inBand * 30 + hasSite * 10 + open * 5,
     catHit, subHit, inBand, hasSite,
+    excluded,
+    excludeReason: excluded ? `${reviews} reviews (chain ceiling ${CHAIN_REVIEW_CEILING})` : null,
   };
 }
 
@@ -251,12 +272,14 @@ export async function pollBatch(
     const insert = sqlite.prepare(
       `INSERT INTO apify_test_leads
          (id, run_id, batch, place_id, title, category, sub_types_json, address, city, state,
-          postal_code, phone, website, maps_url, rating, review_count, score, cat_hit, sub_hit, in_band, has_site)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          postal_code, phone, website, maps_url, rating, review_count, score, cat_hit, sub_hit, in_band,
+          has_site, excluded, exclude_reason)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     );
 
     let qualified = 0;
     let totalScore = 0;
+    let eligible = 0;
     // One transaction per cell: 100 synchronous inserts, and better-sqlite3
     // blocks the event loop for the duration either way — batching keeps that
     // window as short as possible. No network calls inside.
@@ -264,14 +287,15 @@ export async function pollBatch(
       sqlite.prepare("DELETE FROM apify_test_leads WHERE run_id = ?").run(r.id);
       for (const p of items) {
         const s = scoreLead(p, prof);
-        totalScore += s.score;
-        if (s.score >= QUALIFIED_AT) qualified++;
+        // Excluded rows are kept, not dropped — being able to see what the
+        // chain filter removed is how you tell a good ceiling from a greedy one.
+        if (!s.excluded) { totalScore += s.score; eligible++; if (s.score >= QUALIFIED_AT) qualified++; }
         insert.run(
           randomUUID(), r.id, batch, p.placeId ?? null, p.title ?? null, p.categoryName ?? null,
           JSON.stringify(p.subTypes ?? p.categories ?? []), p.address ?? null, p.city ?? null,
           p.state ?? null, p.postalCode ?? null, p.phone ?? null, p.website ?? null, p.url ?? null,
           Number(p.totalScore ?? 0) || null, Number(p.reviewsCount ?? 0) || 0,
-          s.score, s.catHit, s.subHit, s.inBand, s.hasSite,
+          s.score, s.catHit, s.subHit, s.inBand, s.hasSite, s.excluded, s.excludeReason,
         );
       }
     })();
@@ -282,7 +306,7 @@ export async function pollBatch(
             SET status='done', scraped=?, qualified=?, avg_score=?, stats_json=?, finished_at=datetime('now')
           WHERE id=?`,
       )
-      .run(items.length, qualified, items.length ? totalScore / items.length : 0, JSON.stringify(stats), r.id);
+      .run(items.length, qualified, eligible ? totalScore / eligible : 0, JSON.stringify(stats), r.id);
     ingested++;
   }
 
@@ -297,26 +321,90 @@ export async function pollBatch(
 
 // ── reporting ──
 
+/**
+ * Re-apply the chain ceiling to leads already stored, and refresh each cell's
+ * qualified count. Cheap, idempotent, and safe to call on every read — it is
+ * how a rule change reaches a batch that was scored under the old one, without
+ * paying Apify to scrape it again.
+ */
+export function applyChainFilter(batch: string): { excluded: number } {
+  sqlite.transaction(() => {
+    sqlite
+      .prepare(
+        `UPDATE apify_test_leads
+            SET excluded = 1, exclude_reason = review_count || ' reviews (chain ceiling ${CHAIN_REVIEW_CEILING})'
+          WHERE batch = ? AND review_count > ${CHAIN_REVIEW_CEILING} AND excluded = 0`,
+      )
+      .run(batch);
+    sqlite
+      .prepare(
+        `UPDATE apify_test_leads SET excluded = 0, exclude_reason = NULL
+          WHERE batch = ? AND review_count <= ${CHAIN_REVIEW_CEILING} AND excluded = 1`,
+      )
+      .run(batch);
+    sqlite
+      .prepare(
+        `UPDATE apify_test_runs SET
+           qualified = (SELECT COUNT(*) FROM apify_test_leads l
+                         WHERE l.run_id = apify_test_runs.id AND l.excluded = 0 AND l.score >= ${QUALIFIED_AT}),
+           avg_score = (SELECT AVG(score) FROM apify_test_leads l
+                         WHERE l.run_id = apify_test_runs.id AND l.excluded = 0)
+         WHERE batch = ? AND status = 'done'`,
+      )
+      .run(batch);
+  })();
+
+  const n = sqlite
+    .prepare("SELECT COUNT(*) n FROM apify_test_leads WHERE batch = ? AND excluded = 1")
+    .get(batch) as { n: number };
+  return { excluded: n.n };
+}
+
+/**
+ * Chains the review ceiling cannot see: the same business name at more than one
+ * address. A mall location of a national brand often has a perfectly ordinary
+ * review count on its own listing, so name repetition catches what volume misses.
+ */
+export function chainSuspects(batch: string): Array<{ title: string; locations: number; maxReviews: number }> {
+  return sqlite
+    .prepare(
+      `SELECT title, COUNT(DISTINCT COALESCE(address, place_id)) locations, MAX(review_count) maxReviews
+         FROM apify_test_leads
+        WHERE batch = ? AND excluded = 0 AND title IS NOT NULL
+        GROUP BY LOWER(title) HAVING locations > 1
+        ORDER BY locations DESC, maxReviews DESC LIMIT 25`,
+    )
+    .all(batch) as Array<{ title: string; locations: number; maxReviews: number }>;
+}
+
 export function batchSummary(batch: string) {
+  applyChainFilter(batch);
   const runs = sqlite
     .prepare("SELECT * FROM apify_test_runs WHERE batch = ? ORDER BY cell_id")
     .all(batch) as Array<Record<string, unknown>>;
 
   const cells = runs.map((r) => {
     const runId = String(r.id);
+    // Every rate below is over ELIGIBLE leads (chains removed). Reporting them
+    // over the raw scrape would flatter whichever term pulled in the most
+    // chain stores.
     const agg = sqlite
       .prepare(
         `SELECT COUNT(*) n,
                 AVG(cat_hit)*100 catPct, AVG(sub_hit)*100 subPct,
                 AVG(in_band)*100 bandPct, AVG(has_site)*100 sitePct,
                 AVG(review_count) avgReviews, AVG(rating) avgRating
-           FROM apify_test_leads WHERE run_id = ?`,
+           FROM apify_test_leads WHERE run_id = ? AND excluded = 0`,
       )
       .get(runId) as Record<string, number>;
+    const excluded = (sqlite
+      .prepare("SELECT COUNT(*) n FROM apify_test_leads WHERE run_id = ? AND excluded = 1")
+      .get(runId) as { n: number }).n;
     const medRow = sqlite
       .prepare(
-        `SELECT review_count FROM apify_test_leads WHERE run_id = ?
-          ORDER BY review_count LIMIT 1 OFFSET (SELECT COUNT(*)/2 FROM apify_test_leads WHERE run_id = ?)`,
+        `SELECT review_count FROM apify_test_leads WHERE run_id = ? AND excluded = 0
+          ORDER BY review_count LIMIT 1
+         OFFSET (SELECT COUNT(*)/2 FROM apify_test_leads WHERE run_id = ? AND excluded = 0)`,
       )
       .get(runId, runId) as { review_count: number } | undefined;
 
@@ -327,8 +415,10 @@ export function batchSummary(batch: string) {
       cellId: r.cell_id, sweep: r.sweep, term: r.term, location: r.location,
       status: r.status, error: r.error,
       scraped: r.scraped ?? 0,
+      chainsExcluded: excluded,
+      eligible: agg?.n ?? 0,
       qualified: r.qualified ?? 0,
-      qualifiedPct: r.scraped ? round((Number(r.qualified) / Number(r.scraped)) * 100) : null,
+      qualifiedPct: agg?.n ? round((Number(r.qualified) / agg.n) * 100) : null,
       avgScore: round(Number(r.avg_score)),
       categoryMatchPct: round(agg?.catPct),
       subTypeMatchPct: round(agg?.subPct),
@@ -341,20 +431,32 @@ export function batchSummary(batch: string) {
 
   const totals = sqlite
     .prepare(
-      `SELECT COUNT(*) leads, SUM(score >= ${QUALIFIED_AT}) qualified, AVG(score) avgScore
+      `SELECT COUNT(*) scraped,
+              SUM(excluded) chainsExcluded,
+              SUM(excluded = 0) eligible,
+              SUM(excluded = 0 AND score >= ${QUALIFIED_AT}) qualified,
+              AVG(CASE WHEN excluded = 0 THEN score END) avgScore
          FROM apify_test_leads WHERE batch = ?`,
     )
-    .get(batch) as { leads: number; qualified: number; avgScore: number };
+    .get(batch) as Record<string, number>;
 
   const prof = buyerProfile();
   return {
     batch,
     cells,
     totals: {
-      leads: totals?.leads ?? 0,
+      scraped: totals?.scraped ?? 0,
+      chainsExcluded: totals?.chainsExcluded ?? 0,
+      eligible: totals?.eligible ?? 0,
       qualified: totals?.qualified ?? 0,
-      qualifiedPct: totals?.leads ? Math.round((totals.qualified / totals.leads) * 1000) / 10 : 0,
+      qualifiedPct: totals?.eligible ? Math.round((totals.qualified / totals.eligible) * 1000) / 10 : 0,
       avgScore: totals?.avgScore ? Math.round(totals.avgScore * 10) / 10 : 0,
+    },
+    chainFilter: {
+      reviewCeiling: CHAIN_REVIEW_CEILING,
+      suspectsByName: chainSuspects(batch),
+      note:
+        "The ceiling removes high-volume listings. Multi-location names below it are listed as suspectsByName — a chain's individual store often has an ordinary review count.",
     },
     scoredAgainst: {
       categories: [...prof.categories],
@@ -378,13 +480,20 @@ export function listBatches(): Array<Record<string, unknown>> {
     .all() as Array<Record<string, unknown>>;
 }
 
-export function exportLeads(batch: string, minScore = 0): Array<Record<string, unknown>> {
+/** Excluded chains are omitted unless explicitly asked for. */
+export function exportLeads(
+  batch: string,
+  minScore = 0,
+  includeExcluded = false,
+): Array<Record<string, unknown>> {
+  applyChainFilter(batch);
   return sqlite
     .prepare(
       `SELECT r.cell_id, r.term, r.location, l.title, l.category, l.address, l.city, l.state,
-              l.postal_code, l.phone, l.website, l.maps_url, l.rating, l.review_count, l.score
+              l.postal_code, l.phone, l.website, l.maps_url, l.rating, l.review_count, l.score,
+              l.excluded, l.exclude_reason
          FROM apify_test_leads l JOIN apify_test_runs r ON r.id = l.run_id
-        WHERE l.batch = ? AND l.score >= ?
+        WHERE l.batch = ? AND l.score >= ? ${includeExcluded ? "" : "AND l.excluded = 0"}
         ORDER BY l.score DESC, l.review_count DESC`,
     )
     .all(batch, minScore) as Array<Record<string, unknown>>;
