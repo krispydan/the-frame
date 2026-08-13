@@ -35,6 +35,7 @@ export async function GET(req: NextRequest) {
       "GET  /api/admin/ops/apify-usage[?since=YYYY-MM-DD&limit=]": "Apify spend ledger — every run by actor and day (read-only)",
       "GET  /api/admin/ops/instantly-cohort[?limit=&minScore=&full=1]": "next Instantly cohort — ranked, with funnel + exclusions (read-only)",
       "POST /api/admin/ops/instantly-cohort?confirm=1": "NeverBounce-verify that cohort { action:'verify', limit, minScore }",
+      "POST /api/admin/ops/instantly-contacted?confirm=1": "record leads already contacted in Instantly from a CSV export { rows[], dryRun? }",
     },
     auth: "x-ops-key: <OPS_TOKEN>  (mutations also require ?confirm=1)",
   });
