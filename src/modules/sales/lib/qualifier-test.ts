@@ -129,7 +129,15 @@ export function scoreLead(p: GoogleMapsPlace, prof: BuyerProfile): LeadScore {
   const subs = p.subTypes ?? p.categories ?? [];
   const reviews = Number(p.reviewsCount ?? 0);
 
-  const catHit = p.categoryName && prof.categories.has(p.categoryName) ? 1 : 0;
+  // The primary category is checked against the buyer's PRIMARY categories and
+  // their SUB-TYPES together. Checking only the former was a real bug: a shop
+  // whose Google primary is "Jewelry store" scored zero category credit and so
+  // could never clear the qualified bar, even though jewellery is a sub-type on
+  // 14% of our buyers. Which of the two lists a label happens to land in is an
+  // artefact of how Google files a business, not a statement about whether that
+  // kind of shop buys from us.
+  const catHit =
+    p.categoryName && (prof.categories.has(p.categoryName) || prof.subTypes.has(p.categoryName)) ? 1 : 0;
   const subHit = subs.some((s) => prof.subTypes.has(s)) ? 1 : 0;
   const inBand = reviews >= prof.p25 && reviews <= prof.p75 ? 1 : 0;
   const hasSite = p.website ? 1 : 0;
@@ -320,6 +328,67 @@ export async function pollBatch(
 }
 
 // ── reporting ──
+
+/**
+ * Recompute every stored lead's score against the current rules.
+ *
+ * Everything scoring reads — category, sub-types, review count, website — is
+ * stored on the row, so a scoring change can be applied to a finished batch for
+ * free. Without this, fixing a scoring bug would mean re-scraping to see the
+ * corrected numbers, and the cost of that would be a standing argument against
+ * fixing scoring bugs.
+ */
+export function rescoreBatch(batch: string): { rescored: number; changed: number } {
+  const prof = buyerProfile();
+  const rows = sqlite
+    .prepare(
+      `SELECT id, category, sub_types_json, review_count, website, score
+         FROM apify_test_leads WHERE batch = ?`,
+    )
+    .all(batch) as Array<{
+      id: string; category: string | null; sub_types_json: string | null;
+      review_count: number; website: string | null; score: number;
+    }>;
+
+  const upd = sqlite.prepare(
+    `UPDATE apify_test_leads
+        SET score=?, cat_hit=?, sub_hit=?, in_band=?, has_site=?, excluded=?, exclude_reason=?
+      WHERE id=?`,
+  );
+
+  let changed = 0;
+  sqlite.transaction(() => {
+    for (const r of rows) {
+      let subs: string[] = [];
+      try { subs = r.sub_types_json ? (JSON.parse(r.sub_types_json) as string[]) : []; } catch { /* keep [] */ }
+      const s = scoreLead(
+        {
+          categoryName: r.category ?? undefined,
+          subTypes: subs,
+          reviewsCount: r.review_count,
+          website: r.website ?? undefined,
+        } as GoogleMapsPlace,
+        prof,
+      );
+      if (s.score !== r.score) changed++;
+      upd.run(s.score, s.catHit, s.subHit, s.inBand, s.hasSite, s.excluded, s.excludeReason, r.id);
+    }
+  })();
+
+  applyChainFilter(batch);
+  return { rescored: rows.length, changed };
+}
+
+/** Put failed cells back in the queue — an ABORTED Apify run is worth one retry. */
+export function retryFailedCells(batch: string): { requeued: number } {
+  const res = sqlite
+    .prepare(
+      `UPDATE apify_test_runs SET status='queued', error=NULL, apify_run_id=NULL, dataset_id=NULL
+        WHERE batch=? AND status='failed'`,
+    )
+    .run(batch);
+  return { requeued: res.changes };
+}
 
 /**
  * Re-apply the chain ceiling to leads already stored, and refresh each cell's
