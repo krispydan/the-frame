@@ -57,25 +57,39 @@ export default function ExportPage() {
 
   // Get pre-selected IDs from URL
   const [selectedIds, setSelectedIds] = useState<string>("");
+  // Channel listing status + "only products added in this window" filter.
+  // Draft is the default so a new batch is reviewed before it goes live.
+  const [listingStatus, setListingStatus] = useState<"draft" | "active">("draft");
+  const [createdAfter, setCreatedAfter] = useState<string>("");
+  const [createdBefore, setCreatedBefore] = useState<string>("");
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setSelectedIds(params.get("ids") || "");
   }, []);
 
+  /** Params shared by validate + export so both see the same product set. */
+  const exportParams = () => {
+    const p = new URLSearchParams();
+    if (selectedIds) p.set("ids", selectedIds);
+    if (platform === "shopify") p.set("channel", channel);
+    p.set("status", listingStatus);
+    if (createdAfter) p.set("createdAfter", createdAfter);
+    if (createdBefore) p.set("createdBefore", createdBefore);
+    return p;
+  };
+
   const handleValidate = async () => {
     setLoading(true);
-    const idsParam = selectedIds ? `&ids=${selectedIds}` : "";
-    const channelParam = platform === "shopify" ? `&channel=${channel}` : "";
-    const res = await fetch(`/api/v1/catalog/export/${platform}?validate=true${idsParam}${channelParam}`);
+    const p = exportParams();
+    p.set("validate", "true");
+    const res = await fetch(`/api/v1/catalog/export/${platform}?${p}`);
     const data = await res.json();
     setValidations(data.validations || []);
     setLoading(false);
   };
 
   const handleExport = async () => {
-    const idsParam = selectedIds ? `?ids=${selectedIds}` : "?";
-    const channelParam = platform === "shopify" ? `&channel=${channel}` : "";
-    window.open(`/api/v1/catalog/export/${platform}${idsParam}${channelParam}`, "_blank");
+    window.open(`/api/v1/catalog/export/${platform}?${exportParams()}`, "_blank");
   };
 
   const handlePdfExport = () => {
@@ -146,6 +160,51 @@ export default function ExportPage() {
               <FileSpreadsheet className="h-4 w-4 mr-1" /> Export {platform === "amazon" ? "TSV" : "CSV"}
             </Button>
           </div>
+
+          {/* Listing status + date-added window. Amazon's TSV carries its
+              own status/feed handling, so these apply to Shopify + Faire. */}
+          {platform !== "amazon" && (
+            <div className="flex flex-wrap items-end gap-4 mt-3 pt-3 border-t">
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">Listing status</label>
+                <Select value={listingStatus} onValueChange={(v) => v && setListingStatus(v as "draft" | "active")}>
+                  <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="draft">Draft (review first)</SelectItem>
+                    <SelectItem value="active">Active (live)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">Added on/after</label>
+                <input
+                  type="date"
+                  value={createdAfter}
+                  onChange={(e) => setCreatedAfter(e.target.value)}
+                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-muted-foreground mb-1">Added on/before</label>
+                <input
+                  type="date"
+                  value={createdBefore}
+                  onChange={(e) => setCreatedBefore(e.target.value)}
+                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                />
+              </div>
+              {(createdAfter || createdBefore) && (
+                <Button variant="ghost" size="sm" onClick={() => { setCreatedAfter(""); setCreatedBefore(""); }}>
+                  Clear dates
+                </Button>
+              )}
+              <p className="text-xs text-muted-foreground pb-2">
+                {createdAfter || createdBefore
+                  ? "Exporting only products added in this window."
+                  : "All products \u2014 set a date to export just a new batch."}
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 

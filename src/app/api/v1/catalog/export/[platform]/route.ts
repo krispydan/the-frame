@@ -1,11 +1,12 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, sqlite } from "@/lib/db";
 import { exports_ } from "@/modules/catalog/schema";
 import { loadExportProducts } from "@/modules/catalog/lib/export/load-products";
 import { generateShopifyCSV, validateProductsForShopify, buildShopifyImageList } from "@/modules/catalog/lib/export/shopify";
 import { generateFaireCsv, generateFaireXlsx, validateForFaire } from "@/modules/catalog/lib/export/faire";
 import { generateAmazonTsv, validateForAmazon } from "@/modules/catalog/lib/export/amazon";
+import type { ExportStatus } from "@/modules/catalog/lib/export/types";
 import {
   findProductsMissingApprovedImages,
   findProductsWithMissingImageFiles,
@@ -22,8 +23,37 @@ export async function GET(
   const validateOnly = searchParams.get("validate") === "true";
   const channel = (searchParams.get("channel") as "retail" | "wholesale") || "retail";
 
-  const productIds = idsParam ? idsParam.split(",").filter(Boolean) : undefined;
   const force = searchParams.get("force") === "true";
+
+  // Channel listing status. Drafts are the default so a new batch can be
+  // reviewed on the platform before it goes live.
+  const status: ExportStatus = searchParams.get("status") === "active" ? "active" : "draft";
+
+  // Optional "only products added in this window" filter, so a batch of
+  // newly-intaken products can be exported without re-sending the whole
+  // catalog. Dates are inclusive, YYYY-MM-DD, against catalog_products.created_at.
+  const createdAfter = searchParams.get("createdAfter");
+  const createdBefore = searchParams.get("createdBefore");
+
+  let productIds = idsParam ? idsParam.split(",").filter(Boolean) : undefined;
+  if (createdAfter || createdBefore) {
+    const clauses: string[] = [];
+    const params: string[] = [];
+    if (createdAfter) { clauses.push("date(created_at) >= date(?)"); params.push(createdAfter); }
+    if (createdBefore) { clauses.push("date(created_at) <= date(?)"); params.push(createdBefore); }
+    const rows = sqlite
+      .prepare(`SELECT id FROM catalog_products WHERE ${clauses.join(" AND ")}`)
+      .all(...params) as Array<{ id: string }>;
+    const inWindow = new Set(rows.map((r) => r.id));
+    productIds = productIds ? productIds.filter((id) => inWindow.has(id)) : [...inWindow];
+    if (productIds.length === 0) {
+      return NextResponse.json(
+        { error: "No products in that date range", createdAfter, createdBefore },
+        { status: 404 },
+      );
+    }
+  }
+
   const exportProducts = await loadExportProducts(productIds);
 
   const imageBlockers = findProductsMissingApprovedImages(exportProducts);
@@ -101,7 +131,7 @@ export async function GET(
 
   switch (platform) {
     case "shopify": {
-      const csv = generateShopifyCSV(exportProducts, channel);
+      const csv = generateShopifyCSV(exportProducts, channel, status);
       await db.insert(exports_).values({
         id: exportId, platform: platform as any,
         filePath: `exports/shopify_${Date.now()}.csv`,
@@ -117,7 +147,7 @@ export async function GET(
     }
     case "faire": {
       // Faire only accepts XLSX uploads — generate Excel workbook
-      const xlsxBuf = generateFaireXlsx(exportProducts);
+      const xlsxBuf = generateFaireXlsx(exportProducts, status);
       await db.insert(exports_).values({
         id: exportId, platform: platform as any,
         filePath: `exports/faire_${Date.now()}.xlsx`,

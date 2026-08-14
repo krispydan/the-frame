@@ -1,5 +1,11 @@
 import { compareStrength, hasReadingPowerSkus } from "@/modules/catalog/lib/reading-glasses";
 
+/**
+ * Whether an export should land live on the channel or as a reviewable
+ * draft. Drafts are the safe default for a new batch.
+ */
+export type ExportStatus = "active" | "draft";
+
 export type ValidationSeverity = "ready" | "blocked" | "warning";
 
 export interface ValidationIssue {

@@ -7,8 +7,9 @@
  *   callout, then keyword block for Faire search matching
  * - All images must be absolute URLs (1:1 ratio enforced upstream)
  * - Prices: $8 wholesale / $28 retail
- * - Selling method: "By the case", case size 3, MOQ 3
- * - Launch as Draft so we can review in Faire before publishing
+ * - Selling method: "By the case", case size 4, MOQ 4
+ * - Status is caller-controlled (draft by default) so a batch can be
+ *   reviewed in Faire before it goes live
  *
  * CSV structure: Faire's template has THREE header rows:
  *   1. Human-readable column labels
@@ -25,7 +26,7 @@
 import type { ExportProduct, ProductValidationResult, ValidationIssue } from "./types";
 import { catalogImageUrl } from "@/lib/storage/image-url";
 import { DEFAULT_WHOLESALE_PRICE_STR, DEFAULT_RETAIL_PRICE_STR, weightLbStr, weightOzOrDefault } from "@/modules/catalog/lib/pricing";
-import { isReadingProduct, variantSkus, imageSkuIdFor } from "./types";
+import { isReadingProduct, variantSkus, imageSkuIdFor, type ExportStatus } from "./types";
 import { strengthLabel } from "@/modules/catalog/lib/reading-glasses";
 import * as XLSX from "xlsx";
 
@@ -34,8 +35,11 @@ import * as XLSX from "xlsx";
 // Jaxy standard pricing — single source of truth in lib/pricing.ts
 const JAXY_WHOLESALE_PRICE = DEFAULT_WHOLESALE_PRICE_STR;
 const JAXY_RETAIL_PRICE = DEFAULT_RETAIL_PRICE_STR;
-const JAXY_CASE_SIZE = "3";
-const JAXY_MOQ = "3";
+// Jaxy ships readers/sunglasses 4 to a case. MOQ tracks the case size —
+// selling_method is "By the case", so a minimum below case_quantity would
+// be an order Faire can't actually fulfil.
+const JAXY_CASE_SIZE = "4";
+const JAXY_MOQ = "4";
 const JAXY_WEIGHT_UNIT = "lb";
 const JAXY_MADE_IN = "China";
 const JAXY_HS6 = "900410"; // HS6 code for sunglasses
@@ -517,7 +521,7 @@ function rowToValues(row: FaireRow): string[] {
   return FAIRE_FIELD_KEYS.map((k) => (row as unknown as Record<string, string>)[k] ?? "");
 }
 
-export function generateFaireCsv(exportProducts: ExportProduct[]): string {
+export function generateFaireCsv(exportProducts: ExportProduct[], status: ExportStatus = "draft"): string {
   const lines: string[] = [];
 
   // Three header rows verbatim
@@ -547,7 +551,7 @@ export function generateFaireCsv(exportProducts: ExportProduct[]): string {
 
       const row = blankRow();
       row.product_name_english = title;
-      row.info_status_v2 = "Draft"; // launch as Draft, publish after review
+      row.info_status_v2 = status === "active" ? "Published" : "Draft";
       row.info_product_token = ""; // blank for new products
       row.info_product_type = productType;
       row.product_description_english = description;
@@ -556,7 +560,7 @@ export function generateFaireCsv(exportProducts: ExportProduct[]): string {
       row.minimum_order_quantity = JAXY_MOQ;
       row.item_weight = weightLbStr(weightOzOrDefault(sku.weightOz));
       row.item_weight_unit = JAXY_WEIGHT_UNIT;
-      row.option_status = "Published";
+      row.option_status = status === "active" ? "Published" : "Draft";
       row.sku = sku.sku || "";
       row.gtin = validGtin(sku.upc);
       row.option_1_name = "Color";
@@ -588,7 +592,7 @@ export function generateFaireCsv(exportProducts: ExportProduct[]): string {
  * Generate Faire import as XLSX (Faire only accepts .xlsx/.xls, not CSV).
  * Matches the official Faire bulk upload template: 3 header rows + data.
  */
-export function generateFaireXlsx(exportProducts: ExportProduct[]): Buffer {
+export function generateFaireXlsx(exportProducts: ExportProduct[], status: ExportStatus = "draft"): Buffer {
   const wb = XLSX.utils.book_new();
 
   // Build rows: 3 headers + data
@@ -623,7 +627,7 @@ export function generateFaireXlsx(exportProducts: ExportProduct[]): Buffer {
       row.minimum_order_quantity = JAXY_MOQ;
       row.item_weight = weightLbStr(weightOzOrDefault(sku.weightOz));
       row.item_weight_unit = JAXY_WEIGHT_UNIT;
-      row.option_status = "Published";
+      row.option_status = status === "active" ? "Published" : "Draft";
       row.sku = sku.sku || "";
       row.gtin = validGtin(sku.upc);
       row.option_1_name = "Color";

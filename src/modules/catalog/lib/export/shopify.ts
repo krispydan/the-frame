@@ -5,7 +5,7 @@ import type { ExportProduct, ValidationIssue, ProductValidationResult } from "./
 import Papa from "papaparse";
 import { catalogImageUrl } from "@/lib/storage/image-url";
 import { wholesaleOrDefault, retailOrDefault, weightGramsStr, weightOzOrDefault } from "@/modules/catalog/lib/pricing";
-import { isReadingProduct, variantSkus, colorwayRepresentatives, imageSkuIdFor } from "./types";
+import { isReadingProduct, variantSkus, colorwayRepresentatives, imageSkuIdFor, type ExportStatus } from "./types";
 import { strengthLabel } from "@/modules/catalog/lib/reading-glasses";
 
 function absUrl(img: { filePath: string | null; url?: string | null } | null | undefined): string {
@@ -388,7 +388,11 @@ export function buildShopifyImageList(
   return { productImages, frontBySkuId };
 }
 
-export function generateShopifyCSV(exportProducts: ExportProduct[], channel: ShopifyChannel = "retail"): string {
+export function generateShopifyCSV(
+  exportProducts: ExportProduct[],
+  channel: ShopifyChannel = "retail",
+  status: ExportStatus = "draft",
+): string {
   const rows: Record<string, string>[] = [];
 
   for (const ep of exportProducts) {
@@ -617,7 +621,7 @@ export function generateShopifyCSV(exportProducts: ExportProduct[], channel: Sho
       productCategory: JAXY_CONSTANTS.productCategory,
       type: ep.product.category || "Sunglasses",
       tags: tagString,
-      status: "active",
+      status,
       sku: firstSku?.sku || "",
       barcode: firstSku?.upc || "",
       optionValue: firstSku?.colorName || "Default Title",
