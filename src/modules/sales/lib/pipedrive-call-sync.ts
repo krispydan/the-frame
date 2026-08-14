@@ -281,32 +281,48 @@ export async function buildDailyCallFolders(opts: { dryRun?: boolean; through?: 
     res.queued = target.size;
 
     if (!dryRun) {
-      // Add / refresh
       const upsert = sqlite.prepare(
         `INSERT INTO pb_call_queue (id, company_id, pb_contact_id, rep_user_id, folder_id, activity_id, activity_due, original_folder_id, added_at, updated_at)
          VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
          ON CONFLICT(pb_contact_id, folder_id) DO UPDATE SET activity_id=excluded.activity_id, activity_due=excluded.activity_due, updated_at=datetime('now')`,
       );
+      // What's already in this folder (per our queue) — so we skip re-moving
+      // contacts that are already placed (a PB API call each) and only move
+      // genuinely new additions. Keeps each run inside the timeout.
+      const current = sqlite
+        .prepare("SELECT id, pb_contact_id, original_folder_id FROM pb_call_queue WHERE folder_id = ?")
+        .all(repFolder) as Array<{ id: string; pb_contact_id: string; original_folder_id: string | null }>;
+      const alreadyIn = new Set(current.map((c) => c.pb_contact_id));
+
+      // Add / refresh
       for (const [contactId, t] of target) {
         try {
-          await moveContact(contactId, repFolder, t.activityId, repOwnerId);
+          if (!alreadyIn.has(contactId)) {
+            await moveContact(contactId, repFolder, t.activityId, repOwnerId);
+          }
           upsert.run(t.companyId, contactId, userId, repFolder, t.activityId, t.due ?? null, t.originalFolder);
         } catch (e) {
           res.errors.push(`move ${contactId}: ${e instanceof Error ? e.message : e}`);
         }
       }
-      // Remove stale (in folder queue but no longer targeted) → restore home folder.
-      const current = sqlite
-        .prepare("SELECT id, pb_contact_id, original_folder_id FROM pb_call_queue WHERE folder_id = ?")
-        .all(repFolder) as Array<{ id: string; pb_contact_id: string; original_folder_id: string | null }>;
+
+      // Remove stale (in folder queue but no longer targeted) → restore home
+      // folder. Bounded to `cap` per run so a large backlog drains over a few
+      // runs instead of blowing the timeout.
       const del = sqlite.prepare("DELETE FROM pb_call_queue WHERE id = ?");
+      let removedThisRun = 0;
       for (const c of current) {
         if (target.has(c.pb_contact_id)) continue;
+        if (removedThisRun >= cap) { res.errors.push(`removal capped at ${cap} — re-run to drain the rest`); break; }
         try {
           await moveContact(c.pb_contact_id, c.original_folder_id || poolId);
           del.run(c.id);
           res.removed++;
+          removedThisRun++;
         } catch (e) {
+          // Contact may live in Christina's now-closed OAuth account — drop the
+          // stale row so it stops blocking convergence.
+          del.run(c.id);
           res.errors.push(`remove ${c.pb_contact_id}: ${e instanceof Error ? e.message : e}`);
         }
       }
