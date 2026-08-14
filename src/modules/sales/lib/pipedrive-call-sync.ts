@@ -29,9 +29,13 @@ import { postSlack, type SlackBlock } from "@/modules/integrations/lib/slack/cli
 // rep's folder can be re-pointed without a deploy. Each rep's contacts are
 // created owned by that rep's owner_id (Sandra = phoneburner_owner_id, Christina
 // = phoneburner_owner_christina) so leads show up as theirs, not the account's.
+// Sandra left the company (2026-07) and her separate account was closed —
+// Christina now uses the account Sandra was on (the main account, repKey
+// "sandra" = phoneburner_api_key / phoneburner_owner_id). Her Pipedrive call
+// activities build into folder 66251718 (which lives in that account).
+// Christina's old folder 66251717 was in her now-closed OAuth account.
 const REP_FOLDERS: Record<string, { folder: string; name: string; repKey: PbRep }> = {
-  "25572381": { folder: "66251717", name: "Christina", repKey: "christina" },
-  "25572392": { folder: "66251718", name: "Sandra", repKey: "sandra" },
+  "25572381": { folder: "66251718", name: "Christina", repKey: "sandra" },
 };
 const ACTIVITY_FIELD = "Pipedrive Activity ID";
 

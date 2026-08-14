@@ -26,7 +26,6 @@ import { syncShipHeroInventory, isDuringBusinessHours } from "@/modules/operatio
 import { geocodeCompanies } from "@/modules/customers/lib/geocoding";
 import { refreshIfExpiringSoon as refreshShipHeroToken } from "@/modules/operations/lib/shiphero/auth";
 import { pullPhoneBurnerCallResults } from "@/modules/sales/lib/phoneburner-sync";
-import { ensureFreshPhoneBurnerToken } from "@/modules/sales/lib/phoneburner-oauth";
 import { reconcileContactEdits } from "@/modules/sales/lib/phoneburner-contact-sync";
 import { enrichCatalogChunk } from "@/modules/sales/lib/catalog-mail";
 import { postPhoneBurnerCallDigest } from "@/modules/integrations/lib/slack/phoneburner-digest";
@@ -577,23 +576,9 @@ export const CRON_JOBS: CronJob[] = [
     description: "Safety-net poll for PhoneBurner calls (webhooks are primary). Re-ingestion is idempotent on call_id PK.",
     handler: () => pullPhoneBurnerCallResults({ sinceMinutes: 60 }),
   },
-  // Keep Christina's OAuth access token fresh. PhoneBurner tokens expire (they
-  // arrive with a refresh_token); the hourly daily-folder builder and the call
-  // poller read the stored token, so without renewal her account goes dark when
-  // the token lapses. Refreshes only when within ~5 min of expiry — a no-op
-  // otherwise, and a no-op entirely if she hasn't connected via OAuth. Sandra's
-  // account uses a long-lived env key and isn't touched here.
-  {
-    id: "phoneburner-token-refresh-christina",
-    schedule: "*/20 * * * *",  // every 20 min — well inside a 1h token life
-    description: "Refresh Christina's PhoneBurner OAuth access token before it expires (no-op until she connects / until near expiry)",
-    handler: async () => {
-      const token = await ensureFreshPhoneBurnerToken("christina").catch((e) => {
-        throw e instanceof Error ? e : new Error(String(e));
-      });
-      return { refreshed: !!token, hasToken: !!token };
-    },
-  },
+  // (Removed the Christina OAuth token-refresh job — her separate PhoneBurner
+  //  account was closed 2026-07 and she now uses the main account. Nothing
+  //  reads the christina OAuth token anymore, so refreshing it just errored.)
   // Drain the catalog direct-mail cohort's missing street addresses via Apify
   // Google Maps, in small restart-safe chunks. Self-stops once every
   // Catalog-Interested lead is either addressed or tagged no-result. fire-and-
