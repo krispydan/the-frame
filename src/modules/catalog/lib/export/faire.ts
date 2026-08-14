@@ -2,7 +2,7 @@
  * Faire CSV Export — matches Faire's official product import template.
  *
  * Key design decisions (from FAIRE-CRUSHBOOK / FAIRE-GROWTH-PLAYBOOK):
- * - Product titles are keyword-first then product name, 35–60 chars (Faire SEO rule)
+ * - Product titles are name-first then keywords, 35–60 chars
  * - Descriptions lead with retailer margin callout, then specs, then target-customer
  *   callout, then keyword block for Faire search matching
  * - All images must be absolute URLs (1:1 ratio enforced upstream)
@@ -249,22 +249,26 @@ export function buildFaireTitle(ep: ExportProduct): string {
   if (shape) keywordParts.push(formatShape(shape));
   keywordParts.push(reader ? "Reading Glasses" : "Sunglasses");
 
+  // Name leads, keywords follow — the style name is what buyers recognise
+  // on a line sheet, so it reads "Monroe - Vintage Round Sunglasses for
+  // Women & Men" rather than burying the name at the end.
   // Try full version first
-  let title = `${keywordParts.join(" ")} ${gPhrase} - ${name}`;
+  let title = `${name} - ${keywordParts.join(" ")} ${gPhrase}`.trim();
   if (title.length <= TITLE_MAX) return title.length < TITLE_MIN ? padTitle(title, name) : title;
 
   // Drop gender phrase
-  title = `${keywordParts.join(" ")} - ${name}`;
+  title = `${name} - ${keywordParts.join(" ")}`;
   if (title.length <= TITLE_MAX) return title;
 
   // Drop style adjective
   const noStyle = keywordParts.filter((p) => p !== capitalize(style || ""));
-  title = `${noStyle.join(" ")} - ${name}`;
+  title = `${name} - ${noStyle.join(" ")}`;
   if (title.length <= TITLE_MAX) return title;
 
-  // Last resort: truncate name
-  const budget = TITLE_MAX - (noStyle.join(" ").length + 3);
-  return `${noStyle.join(" ")} - ${name.slice(0, Math.max(1, budget))}`;
+  // Last resort: truncate the keyword tail, never the name — the name is
+  // the part that has to survive.
+  const budget = TITLE_MAX - (name.length + 3);
+  return `${name} - ${noStyle.join(" ").slice(0, Math.max(1, budget))}`.trim();
 }
 
 function padTitle(title: string, name: string): string {
