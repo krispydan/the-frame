@@ -235,7 +235,7 @@ export async function buildDailyCallFolders(opts: { dryRun?: boolean; through?: 
   const through = opts.through || new Date().toISOString().slice(0, 10);
   // Cap the daily list per rep so it's workable AND the run completes inside
   // the function timeout. Override via body { limit } or settings pb_daily_call_cap.
-  const cap = Math.max(1, opts.limit ?? Number(getSetting("pb_daily_call_cap")) || 60);
+  const cap = Math.max(1, opts.limit ?? (Number(getSetting("pb_daily_call_cap")) || 60));
   const ownerId = await resolveOwnerId();
   const poolId = dryRun ? (getSetting("pipedrive_pb_pool_folder") || "POOL") : await ensurePoolFolder(ownerId);
 
