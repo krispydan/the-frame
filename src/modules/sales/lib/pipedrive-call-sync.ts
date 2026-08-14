@@ -224,14 +224,18 @@ export interface RepSyncResult {
 
 /** Build/refresh each rep's daily call folder from their open Pipedrive
  *  call activities. dryRun = compute only, no PB writes. */
-export async function buildDailyCallFolders(opts: { dryRun?: boolean; through?: string } = {}): Promise<{
+export async function buildDailyCallFolders(opts: { dryRun?: boolean; through?: string; limit?: number } = {}): Promise<{
   ok: boolean;
   dry_run: boolean;
   through: string;
+  cap: number;
   reps: RepSyncResult[];
 }> {
   const dryRun = opts.dryRun === true;
   const through = opts.through || new Date().toISOString().slice(0, 10);
+  // Cap the daily list per rep so it's workable AND the run completes inside
+  // the function timeout. Override via body { limit } or settings pb_daily_call_cap.
+  const cap = Math.max(1, opts.limit ?? Number(getSetting("pb_daily_call_cap")) || 60);
   const ownerId = await resolveOwnerId();
   const poolId = dryRun ? (getSetting("pipedrive_pb_pool_folder") || "POOL") : await ensurePoolFolder(ownerId);
 
@@ -254,9 +258,12 @@ export async function buildDailyCallFolders(opts: { dryRun?: boolean; through?: 
       continue;
     }
     res.activities = acts.length;
+    // Most-overdue first, then fill up to the cap.
+    acts.sort((x, y) => String(x.due_date ?? "").localeCompare(String(y.due_date ?? "")));
 
     const target = new Map<string, { activityId: string; companyId: string; due?: string; originalFolder: string }>();
     for (const a of acts) {
+      if (target.size >= cap) break;
       const pid = personId(a);
       const co = pid ? resolveCompanyByPerson(pid) : undefined;
       if (!co) { res.unresolved_company++; continue; }
@@ -314,7 +321,7 @@ export async function buildDailyCallFolders(opts: { dryRun?: boolean; through?: 
     }
   }
 
-  return { ok: true, dry_run: dryRun, through, reps };
+  return { ok: true, dry_run: dryRun, through, cap, reps };
 }
 
 /**

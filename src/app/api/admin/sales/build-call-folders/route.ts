@@ -19,12 +19,12 @@ export async function POST(req: NextRequest) {
   if (req.headers.get("x-admin-key") !== "jaxy2026") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  let body: { dryRun?: boolean; through?: string } = {};
+  let body: { dryRun?: boolean; through?: string; limit?: number } = {};
   try { body = await req.json(); } catch { /* empty */ }
   // Default to dryRun unless explicitly false, so a bare call never moves contacts.
   const dryRun = body.dryRun !== false;
   try {
-    const result = await buildDailyCallFolders({ dryRun, through: body.through });
+    const result = await buildDailyCallFolders({ dryRun, through: body.through, limit: body.limit });
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
